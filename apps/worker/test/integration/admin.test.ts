@@ -126,19 +126,33 @@ describe("AdminApplicationService user and role management", () => {
   });
 
   it("creates and updates a custom role", async () => {
-    // This test exercised `user.read`, `role.read`, `analytics.read` — all
-    // three are deferred past M1 (M5 / #26, M9 / #30). After the M1 seed trim
-    // by 0010_mvp_minimum_seed.sql those keys are not present in the
-    // `permissions` table, so the `role_permissions` insert fails the FK
-    // constraint. Re-arm this assertion once M5 ships.
+    // Originally exercised `user.read` / `role.read` / `analytics.read`,
+    // which are deferred past M1 (M5 #26, M9 #30). After 0010_mvp_minimum_seed
+    // trimmed the catalog to the 5 MVP keys, we use those keys to keep real
+    // coverage on AdminApplicationService.createRole + updateRole. When M5
+    // re-introduces `user.read` / `role.read`, expand this back to the
+    // 3-permission round-trip.
     const admin = service();
-    await expect(
-      admin.createRole(administrator, {
-        name: `Auditor-${crypto.randomUUID()}`,
-        description: "Read-only auditor",
-        permissions: ["user.read", "role.read"],
-      }),
-    ).rejects.toThrow();
+    const role = await admin.createRole(administrator, {
+      name: `Auditor-${crypto.randomUUID()}`,
+      description: "MVP read-only auditor",
+      permissions: ["message.read", "settings.read"],
+    });
+    const updated = await admin.updateRole(administrator, role.id, {
+      description: "MVP auditor with send-side room",
+      permissions: ["message.send", "settings.manage"],
+    });
+    expect(updated.permissions).toEqual([
+      "message.send",
+      "settings.manage",
+    ]);
+    const all = await env.DB.prepare(
+      "SELECT id, name, is_system FROM roles ORDER BY id",
+    ).all<{ id: string; name: string; is_system: number }>();
+    const found = all.results.filter((row) => row.id === role.id);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.is_system).toBe(0);
+    await env.DB.prepare("DELETE FROM roles WHERE id = ?").bind(role.id).run();
   });
 
   it("rejects invalid permissions when creating a role", async () => {

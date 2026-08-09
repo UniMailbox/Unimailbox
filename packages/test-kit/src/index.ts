@@ -7,13 +7,15 @@ import {
 /**
  * Test-only superset of every permission the worker currently understands.
  *
- * `ADMINISTRATOR_PERMISSIONS` in the contracts package is the MVP-runtime
- * grant (only 5 keys per issue #14 / blueprint §3.3). Production admin
- * principals receive those five; integration tests however exercise admin
- * code paths beyond the MVP surface (e.g. `user.manage`, `message.read_all`),
- * which require the full key set. Use this constant in tests so each one
- * stays explicit about wanting full powers, rather than re-deriving it via
- * `new Set([...PERMISSION_KEYS])` everywhere.
+ * Production admin principals receive the 5-key MVP grant (see issue #14,
+ * blueprint section 7.2 — verification gates — and PR #31). Once PR #31
+ * lands, `ADMINISTRATOR_PERMISSIONS` will be exactly that set; today it
+ * still aliases `PERMISSION_KEYS`. Either way, integration tests exercise
+ * admin code paths beyond the MVP surface (e.g. `user.manage`,
+ * `message.read_all`, `attachment.read`) and need the full key set. Use
+ * this constant in tests so each one stays explicit about wanting full
+ * powers, rather than re-deriving it via `new Set([...PERMISSION_KEYS])`
+ * everywhere.
  */
 export const TEST_ADMIN_PERMISSIONS: readonly PermissionKey[] = PERMISSION_KEYS;
 
