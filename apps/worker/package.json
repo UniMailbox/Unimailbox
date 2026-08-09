@@ -18,10 +18,10 @@
     "@unimailbox/contracts": "workspace:*",
     "@unimailbox/email-core": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.6.14",
+    "hono": "^4.13.0",
     "postal-mime": "^2.4.3",
     "svix": "^1.99.1",
-    "zod": "^3.24.1"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.6.4",
