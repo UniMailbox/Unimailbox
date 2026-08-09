@@ -36,7 +36,11 @@ describe("D1 migration chain", () => {
     ]);
   });
 
-  it("applies permission seeds as the upgrade after initial schema", async () => {
+  it("applies the MVP-trimmed permission seed (0010)", async () => {
+    // After 0010_mvp_minimum_seed.sql the permission catalog carries only the
+    // 5 keys the administrator role grants (see PR #31 / issue #14). The
+    // historical 22-key count and the member role are restored in M2 (#23)
+    // and later milestones; this test documents the current MVP state.
     await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
     const permissions = await env.DB.prepare(
       "SELECT COUNT(*) AS count FROM permissions",
@@ -49,24 +53,37 @@ describe("D1 migration chain", () => {
        WHERE role_id = '00000000-0000-4000-8000-000000000001'`,
     ).first<number>("count");
 
-    expect(permissions).toBe(22);
-    expect(roles).toBe(2);
-    expect(administratorPermissions).toBe(22);
-    const globalMessageReaders = await env.DB.prepare(
-      `SELECT role_id FROM role_permissions
-       WHERE permission_key = 'message.read_all' ORDER BY role_id`,
-    ).all<{ role_id: string }>();
-    expect(globalMessageReaders.results).toEqual([
-      { role_id: "00000000-0000-4000-8000-000000000001" },
+    expect(permissions).toBe(5);
+    expect(roles).toBe(1);
+    expect(administratorPermissions).toBe(5);
+    const memberRole = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM roles WHERE name = 'member'",
+    ).first<number>("count");
+    expect(memberRole).toBe(0);
+    const administratorKeys = await env.DB.prepare(
+      `SELECT permission_key FROM role_permissions
+       WHERE role_id = '00000000-0000-4000-8000-000000000001'
+       ORDER BY permission_key`,
+    ).all<{ permission_key: string }>();
+    expect(administratorKeys.results.map((r) => r.permission_key)).toEqual([
+      "mailbox.create",
+      "message.read",
+      "message.send",
+      "settings.manage",
+      "settings.read",
     ]);
-    const attachmentReaders = await env.DB.prepare(
-      `SELECT role_id FROM role_permissions
-       WHERE permission_key = 'attachment.read' ORDER BY role_id`,
-    ).all<{ role_id: string }>();
-    expect(attachmentReaders.results).toEqual([
-      { role_id: "00000000-0000-4000-8000-000000000001" },
-      { role_id: "00000000-0000-4000-8000-000000000002" },
-    ]);
+    // The deferred keys listed in blueprint §3.3 are no longer seeded for
+    // any principal in M1 — they will return in M2..M9.
+    const deferredRows = await env.DB.prepare(
+      `SELECT 1 FROM permissions WHERE key IN (
+        'message.read_all', 'message.delete', 'attachment.read',
+        'mailbox.manage', 'mailbox.share', 'user.read', 'user.manage',
+        'role.read', 'role.manage', 'domain.read', 'domain.manage',
+        'signature.read', 'signature.manage', 'provider.sync',
+        'webhook_event.read', 'webhook_event.delete', 'analytics.read'
+       ) LIMIT 1`,
+    ).first();
+    expect(deferredRows).toBeNull();
   });
 
   it("enforces attachment linkage triggers", async () => {
