@@ -301,7 +301,10 @@ describe("MessageApplicationService", () => {
     ).resolves.toMatchObject({
       md5: "5289df737df57326fcdd22597afb1fac",
       object_key: upload.objectKey,
-      status: "consumed",
+      // 0011_mvp_minimum.sql drops the consume_attachment_upload trigger
+      // (M6 / issue #27 will reintroduce it). Until then the upload row
+      // keeps its `uploaded` status after the message_attachments insert.
+      status: "uploaded",
     });
   });
 
@@ -390,6 +393,16 @@ describe("DraftApplicationService", () => {
   });
 
   it("keeps deduplicated bytes until the final draft reference is deleted", async () => {
+    // Originally exercised the M6-deferred dedup lifecycle:
+    // - same-content uploads share one attachment_files row,
+    // - drafts.remove cascades to message_attachments,
+    // - the `consume_attachment_upload` trigger flips status to 'consumed',
+    // - deleteAttachmentFileIfUnreferenced wipes the dedup row when no
+    //   upload still references it.
+    // 0011_mvp_minimum.sql drops the trigger so `status` stays 'uploaded'
+    // and the dedup cleanup doesn't fire. The lifecycle is restored in
+    // M6 (issue #27). For M1 we only assert that the schema stays
+    // consistent after the cascade.
     const attachmentService = attachmentsService();
     const uploads = [];
     for (const filename of ["first.bin", "second.bin"]) {
@@ -432,45 +445,20 @@ describe("DraftApplicationService", () => {
         }),
       );
     }
-    const objectKey = await env.DB.prepare(
-      `SELECT af.object_key
-       FROM attachment_files af
-       JOIN message_attachments ma ON ma.file_id = af.id
-       WHERE ma.message_id = ?`,
-    )
-      .bind(created[0]?.id)
-      .first<string>("object_key");
 
     await drafts.remove(principal, created[0]!.id);
-    expect(
-      await createAttachmentStore(fullEnv()).head(objectKey ?? ""),
-    ).not.toBeNull();
     await drafts.remove(principal, created[1]!.id);
-    expect(
-      await env.DB.prepare(
-        `SELECT status FROM attachment_uploads ORDER BY filename`,
-      ).all(),
-    ).toMatchObject({
-      results: [{ status: "consumed" }, { status: "consumed" }],
-    });
-    expect(
-      await env.DB.prepare(
-        `SELECT COUNT(*) AS count FROM message_attachments WHERE file_id = (
-           SELECT id FROM attachment_files WHERE object_key = ?
-         )`,
-      )
-        .bind(objectKey)
-        .first<number>("count"),
-    ).toBe(0);
-    expect(
-      await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM attachment_files WHERE object_key = ?",
-      )
-        .bind(objectKey)
-        .first<number>("count"),
-    ).toBe(0);
-    expect(
-      await createAttachmentStore(fullEnv()).head(objectKey ?? ""),
-    ).toBeNull();
+
+    // After both drafts are removed, the messages and message_attachments
+    // rows are gone (CASCADE). The attachment_files rows and R2 bytes
+    // are intentionally left untouched in M1 — M6 introduces the
+    // cleanup that reuses the consume_attachment_upload trigger.
+    const remaining = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM message_attachments
+       WHERE message_id IN (?, ?)`,
+    )
+      .bind(created[0]!.id, created[1]!.id)
+      .first<{ n: number }>();
+    expect(remaining?.n).toBe(0);
   });
 });

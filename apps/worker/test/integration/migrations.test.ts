@@ -69,43 +69,19 @@ describe("D1 migration chain", () => {
     ]);
   });
 
-  it("enforces attachment linkage triggers", async () => {
+  it("strips the attachment validation triggers (M1 cut)", async () => {
+    // 0011_mvp_minimum.sql drops the two attachment triggers from 0001 so
+    // the M1 baseline matches blueprint §3 (attachments 🟡: schema kept,
+    // routes inactive). The corresponding enforcement test moves to the
+    // M6 resurrection — see issue #27. Here we just assert the absence.
     await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
-    await env.DB.prepare(
-      `INSERT INTO users (
-         id, email, password_hash, password_salt, password_iterations,
-         display_name
-       ) VALUES (?, ?, 'hash', 'salt', 1, 'One')`,
-    )
-      .bind("11111111-1111-4111-8111-111111111111", "one@example.com")
-      .run();
-    await env.DB.prepare(
-      `INSERT INTO attachment_uploads (
-         id, user_id, object_key, filename, mime_type, size_bytes,
-         disposition, status, expires_at
-       ) VALUES (?, ?, 'attachments/a', 'a.txt', 'text/plain', 1,
-                 'attachment', 'uploaded', datetime('now', '+1 hour'))`,
-    )
-      .bind(
-        "22222222-2222-4222-8222-222222222222",
-        "11111111-1111-4111-8111-111111111111",
-      )
-      .run();
-
-    await expect(
-      env.DB.prepare(
-        `INSERT INTO message_attachments (
-           id, upload_id, object_key, filename, mime_type, size_bytes,
-           disposition
-         ) VALUES (?, ?, 'attachments/a', 'a.txt', 'text/plain', 1,
-                   'attachment')`,
-      )
-        .bind(
-          "33333333-3333-4333-8333-333333333333",
-          "22222222-2222-4222-8222-222222222222",
-        )
-        .run(),
-    ).rejects.toThrow();
+    const row = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM sqlite_schema
+       WHERE type = 'trigger' AND name IN (
+         'validate_attachment_upload', 'consume_attachment_upload'
+       )`,
+    ).first<{ n: number }>();
+    expect(row?.n).toBe(0);
   });
 
   it("upgrades the previous release fixture without losing existing data", async () => {
@@ -142,51 +118,21 @@ describe("D1 migration chain", () => {
     ).resolves.toMatchObject({ results: [] });
   });
 
-  it("catalogs legacy attachment objects for scheduled MD5 backfill", async () => {
-    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS.slice(0, 6));
-    await env.DB.prepare(
-      `INSERT INTO users (
-         id, email, password_hash, password_salt, password_iterations,
-         display_name
-       ) VALUES (?, 'legacy@example.com', 'hash', 'salt', 1, 'Legacy')`,
-    )
-      .bind("11111111-1111-4111-8111-111111111111")
-      .run();
-    await env.DB.prepare(
-      `INSERT INTO attachment_uploads (
-         id, user_id, object_key, filename, mime_type, size_bytes,
-         disposition, status, expires_at
-       ) VALUES (?, ?, 'attachments/legacy', 'legacy.txt', 'text/plain', 6,
-                 'attachment', 'uploaded', datetime('now', '+1 hour'))`,
-    )
-      .bind(
-        "22222222-2222-4222-8222-222222222222",
-        "11111111-1111-4111-8111-111111111111",
-      )
-      .run();
-
-    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS.slice(6));
-
-    await expect(
-      env.DB.prepare(
-        `SELECT au.file_id, au.md5, af.object_key, af.md5 AS file_md5
-         FROM attachment_uploads au
-         JOIN attachment_files af ON af.id = au.file_id
-         WHERE au.id = ?`,
-      )
-        .bind("22222222-2222-4222-8222-222222222222")
-        .first(),
-    ).resolves.toEqual({
-      file_id: "legacy:attachments/legacy",
-      md5: null,
-      object_key: "attachments/legacy",
-      file_md5: null,
-    });
-    await expect(
-      env.DB.prepare(
-        `SELECT status FROM maintenance_jobs
-         WHERE job_key = 'attachment-md5-backfill'`,
-      ).first(),
-    ).resolves.toEqual({ status: "pending" });
+  it("clears the 0007 attachment-files catalog after 0011", async () => {
+    // The legacy MD5 backfill enqueued by 0007 is removed by 0011. The
+    // `attachment_files` catalog still exists (🟡 per blueprint §3.1) but
+    // carries zero rows in M1. This test pins that state. M6
+    // (issue #27) re-runs 0007-equivalent logic and re-enqueues the
+    // backfill; re-arm this assertion then.
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    const fileCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM attachment_files",
+    ).first<{ n: number }>();
+    expect(fileCount?.n).toBe(0);
+    const backfill = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM maintenance_jobs
+       WHERE job_key = 'attachment-md5-backfill'`,
+    ).first<{ n: number }>();
+    expect(backfill?.n).toBe(0);
   });
 });
