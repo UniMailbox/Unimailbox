@@ -39,6 +39,18 @@ function settingsService() {
 describe("authenticated Cloudflare settings", () => {
   beforeEach(async () => {
     await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    // M1 cut (issue #17): the configuration_checkpoints seed was removed
+    // from 0004_zero_touch_bootstrap.sql. The Cloudflare settings service
+    // still queries the table for the two checkpoint keys these tests
+    // assert against, so the tests pre-seed them. When M5 (issue #26)
+    // reintroduces the seed via 0014_resume_signatures.sql + a dedicated
+    // checkpoint backfill, this beforeEach can drop the manual inserts.
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO configuration_checkpoints (checkpoint_key)
+         VALUES ('cloudflare_mail'), ('r2_storage')`,
+      ),
+    ]);
   });
 
   it("requires settings.manage for configuration state", async () => {

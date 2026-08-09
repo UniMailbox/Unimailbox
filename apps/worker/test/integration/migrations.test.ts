@@ -27,13 +27,11 @@ describe("D1 migration chain", () => {
     const checkpoints = await env.DB.prepare(
       "SELECT checkpoint_key FROM configuration_checkpoints ORDER BY checkpoint_key",
     ).all<{ checkpoint_key: string }>();
-    expect(checkpoints.results.map((row) => row.checkpoint_key)).toEqual([
-      "brevo",
-      "cloudflare_mail",
-      "inbound_smoke_test",
-      "outbound_smoke_test",
-      "r2_storage",
-    ]);
+    // M1 cut (issue #17): the configuration_checkpoints table is created by
+    // 0004 but no seed rows are inserted. The MCP/observability surface that
+    // reads them comes back in M5 (issue #26). The table exists but is empty
+    // until the smoke-test surface is wired up.
+    expect(checkpoints.results).toEqual([]);
   });
 
   it("applies permission seeds as the upgrade after initial schema", async () => {
