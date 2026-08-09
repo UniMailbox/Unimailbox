@@ -20,11 +20,11 @@ describe("authenticated navigation model", () => {
       "settings",
       "administration",
     ]);
+    // M1 surface (issue #21): drafts + starred are hidden from the
+    // workspace nav; admin only exposes domains / settings / audit-events.
     expect(groups[0]?.children.map((item) => item.id)).toEqual([
       "inbox",
       "sent",
-      "drafts",
-      "starred",
       "archive",
       "trash",
     ]);
@@ -33,22 +33,19 @@ describe("authenticated navigation model", () => {
       "mailboxes",
       "preferences",
     ]);
-    expect(groups[2]?.children.map((item) => item.id)).toContain("users");
+    expect(groups[2]?.children.map((item) => item.id)).toEqual([
+      "domains",
+      "settings",
+      "audit-events",
+    ]);
     expect(isNavigationGroupActive(groups[1]!, "/settings/preferences")).toBe(
       true,
     );
   });
 
   it("prunes administration resources by their read permissions", () => {
-    const groups = getNavigationModel({
-      pathname: "/admin/users",
-      permissions: ["user.read"],
-    });
-    const administration = groups.find(
-      (group) => group.id === "administration",
-    );
-
-    expect(administration?.children.map((item) => item.id)).toEqual(["users"]);
+    // M1 surface (issue #21): an administrator without any of the M1
+    // admin permissions ends up with an empty administration group.
     expect(
       getNavigationModel({
         pathname: "/inbox",

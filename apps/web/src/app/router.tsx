@@ -179,12 +179,24 @@ const messageRoute = createRoute({
   path: "messages/$messageId",
   component: MessageRoute,
 });
+// M1 admin surface (issue #21): only domains / settings / audit-events
+// are reachable; any other resource 404s so deep links don't render a
+// dormant admin tab. The complete resource map stays defined in
+// `ADMIN_RESOURCE_PERMISSIONS` so a future milestone can flip them back
+// on by extending this set.
+const MVP_ADMIN_RESOURCES = new Set<keyof typeof ADMIN_RESOURCE_PERMISSIONS>([
+  "domains",
+  "settings",
+  "audit-events",
+]);
+
 const adminRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "admin/$resource",
   beforeLoad: ({ context, params }) => {
     if (!(params.resource in ADMIN_RESOURCE_PERMISSIONS)) throw notFound();
     const resource = params.resource as keyof typeof ADMIN_RESOURCE_PERMISSIONS;
+    if (!MVP_ADMIN_RESOURCES.has(resource)) throw notFound();
     const permission = ADMIN_RESOURCE_PERMISSIONS[resource];
     if (!context.session.permissions.includes(permission))
       throw new ForbiddenRouteError(permission);

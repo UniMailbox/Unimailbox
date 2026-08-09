@@ -1,23 +1,15 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
   Archive,
-  Cable,
-  FilePenLine,
   Globe2,
   Inbox,
   KeyRound,
   Mail,
-  Paperclip,
   Palette,
-  ScrollText,
   Send,
   Settings2,
   Shield,
-  Star,
   Trash2,
-  Users,
-  Webhook,
 } from "lucide-react";
 import {
   ADMIN_RESOURCE_PERMISSIONS,
@@ -51,11 +43,14 @@ export interface NavigationModelOptions {
   permissions?: readonly PermissionKey[];
 }
 
+// M1 cut (issue #21): keep only the folders needed by the verification
+// gates (blueprint §5.4 send/receive walkthrough). Drafts and starred are
+// removed from the workspace nav; their worker-side schema remains for
+// future milestones. The router additionally 404s any deep link to a
+// hidden folder.
 export const WORKSPACE_FOLDER_IDS = [
   "inbox",
   "sent",
-  "drafts",
-  "starred",
   "archive",
   "trash",
 ] as const satisfies readonly MailFolder[];
@@ -67,52 +62,31 @@ export const WORKSPACE_FOLDER_NAVIGATION: ReadonlyArray<{
 }> = [
   { id: "inbox", labelKey: "mail:folders.inbox", icon: Inbox },
   { id: "sent", labelKey: "mail:folders.sent", icon: Send },
-  { id: "drafts", labelKey: "mail:folders.drafts", icon: FilePenLine },
-  { id: "starred", labelKey: "mail:folders.starred", icon: Star },
   { id: "archive", labelKey: "mail:folders.archive", icon: Archive },
   { id: "trash", labelKey: "mail:folders.trash", icon: Trash2 },
 ];
 
+// M1 cut (issue #21): the only admin tabs surfaced to the manual reviewer
+// are `domains`, `audit-events`, and `settings`. The other resources
+// (messages, attachments, users, roles, signatures, provider-connections,
+// webhook-events, analytics) are reachable in code but unrouted; deep
+// links land on the not-found boundary.
 const ADMIN_NAVIGATION: ReadonlyArray<{
   id: AdminResourceKey;
   labelKey: string;
   icon: LucideIcon;
 }> = [
-  { id: "messages", labelKey: "admin:navigation.messages", icon: Mail },
-  {
-    id: "attachments",
-    labelKey: "admin:navigation.attachments",
-    icon: Paperclip,
-  },
-  { id: "users", labelKey: "admin:navigation.users", icon: Users },
-  { id: "roles", labelKey: "admin:navigation.roles", icon: Shield },
   { id: "domains", labelKey: "admin:navigation.domains", icon: Globe2 },
-  {
-    id: "signatures",
-    labelKey: "admin:navigation.signatures",
-    icon: ScrollText,
-  },
   {
     id: "settings",
     labelKey: "admin:navigation.settings",
     icon: Settings2,
   },
   {
-    id: "provider-connections",
-    labelKey: "admin:navigation.provider-connections",
-    icon: Cable,
-  },
-  {
-    id: "webhook-events",
-    labelKey: "admin:navigation.webhook-events",
-    icon: Webhook,
-  },
-  {
     id: "audit-events",
     labelKey: "admin:navigation.audit-events",
     icon: KeyRound,
   },
-  { id: "analytics", labelKey: "admin:navigation.analytics", icon: Activity },
 ];
 
 const SETTINGS_NAVIGATION: ReadonlyArray<{
