@@ -147,7 +147,9 @@ describe("authenticated settings", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("shows localized validation before sharing a mailbox with an invalid member ID", async () => {
+  it.skip(
+    "shows localized validation before sharing a mailbox with an invalid member ID (M2+ — MailboxMembers UI is hidden in M1, issue #21)",
+    async () => {
     const fetchMock = vi.spyOn(window, "fetch").mockResolvedValue(
       Response.json({
         data: [
@@ -196,7 +198,9 @@ describe("authenticated settings", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("submits a whitespace-padded member UUID normalized by the endpoint schema", async () => {
+  it.skip(
+    "submits a whitespace-padded member UUID normalized by the endpoint schema (M2+ — MailboxMembers UI is hidden in M1, issue #21)",
+    async () => {
     setAccessToken("access-token");
     const mailboxId = "11111111-1111-4111-8111-111111111111";
     const userId = "33333333-3333-4333-8333-333333333333";

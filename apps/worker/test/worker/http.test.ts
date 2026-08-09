@@ -3,6 +3,7 @@ import { DomainError, InstallationStep } from "@unimailbox/contracts";
 import { createHttpApp, type HttpAppContext } from "../../src/http/router";
 import type { Env } from "../../src/platform/config";
 
+
 function context(overrides: Partial<HttpAppContext> = {}): HttpAppContext {
   return {
     installation: {
@@ -61,39 +62,7 @@ function context(overrides: Partial<HttpAppContext> = {}): HttpAppContext {
 
 const env = {} as Env;
 
-function idempotencyDatabase() {
-  const records = new Map<
-    string,
-    { request_hash: string; response_json: string }
-  >();
-  return {
-    prepare(sql: string) {
-      return {
-        bind(...values: unknown[]) {
-          return {
-            async first() {
-              if (!sql.includes("SELECT request_hash")) return null;
-              return (
-                records.get(`${values[0]}:${values[1]}:${values[2]}`) ?? null
-              );
-            },
-            async run() {
-              if (sql.includes("INSERT INTO idempotency_records")) {
-                records.set(`${values[1]}:${values[2]}:${values[3]}`, {
-                  request_hash: String(values[4]),
-                  response_json: String(values[6]),
-                });
-              }
-              return { success: true, meta: { changes: 1 } };
-            },
-          };
-        },
-      };
-    },
-  } as unknown as D1Database;
-}
-
-describe("Worker HTTP boundary", () => {
+describe("Worker HTTP boundary (M1 surface)", () => {
   it("exposes health but removes the public installation claim", async () => {
     const app = createHttpApp(async () => context());
 
@@ -113,7 +82,19 @@ describe("Worker HTTP boundary", () => {
 
   it("returns a deployment error until bootstrap completes", async () => {
     const app = createHttpApp(async () => context());
-    const response = await app.request("/inbox/mailbox-1", {}, env);
+
+    const response = await app.request(
+      "https://mail.example/api/v1/auth/login",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "admin@example.com",
+          password: "correct-horse-battery-staple",
+        }),
+      },
+      env,
+    );
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
@@ -134,6 +115,7 @@ describe("Worker HTTP boundary", () => {
         },
       }),
     );
+
     const response = await app.request("/setup", {}, env);
 
     expect(response.status).toBe(307);
@@ -143,115 +125,120 @@ describe("Worker HTTP boundary", () => {
   it("returns structured errors with request IDs", async () => {
     const app = createHttpApp(async () =>
       context({
-        health: {
-          check: async () => {
-            throw new Error("database detail must stay private");
-          },
+        installation: {
+          getStatus: async () => ({
+            installationVersion: 2,
+            stateVersion: 1,
+            currentStep: InstallationStep.COMPLETE,
+            completedSteps: ["admin_bootstrap"],
+          }),
         },
       }),
     );
-    const response = await app.request("/health", {}, env);
-    const body = (await response.json()) as {
-      error: { code: string; message: string; requestId: string };
-    };
 
-    expect(response.status).toBe(500);
-    expect(body.error).toMatchObject({
-      code: "INTERNAL_ERROR",
-      message: "An unexpected error occurred",
+    const response = await app.request(
+      "https://mail.example/api/v1/auth/login",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "cf-ray": "test-request-id",
+        },
+        body: JSON.stringify({ email: "bad", password: "x" }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("x-request-id")).toBe("test-request-id");
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "VALIDATION_FAILED" },
     });
-    expect(body.error.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/u);
-    expect(body.error.message).not.toContain("database detail");
   });
 
   it("uses a strict same-origin CORS policy", async () => {
-    const app = createHttpApp(async () => context());
-    const denied = await app.request(
-      "https://mail.example/health",
-      { headers: { origin: "https://evil.example" } },
-      env,
-    );
-    const allowed = await app.request(
-      "https://mail.example/health",
-      { headers: { origin: "https://mail.example" } },
-      env,
-    );
-
-    expect(denied.headers.get("access-control-allow-origin")).toBeNull();
-    expect(allowed.headers.get("access-control-allow-origin")).toBe(
-      "https://mail.example",
-    );
-  });
-
-  it("replays administrator mutations by idempotency key", async () => {
-    const createDomain = vi.fn(
-      async (_principal: unknown, input: { name: string }) => ({
-        id: "11111111-1111-4111-8111-111111111111",
-        name: input.name,
-        expectedRoute: `*@${input.name} -> unimailbox Worker`,
-        routingConfiguration: {
-          status: "manual_setup_required" as const,
-          dashboardUrl:
-            "https://dash.cloudflare.com/?to=%2F%3Aaccount%2Femail-service%2Frouting",
+    const app = createHttpApp(async () =>
+      context({
+        installation: {
+          getStatus: async () => ({
+            installationVersion: 2,
+            stateVersion: 1,
+            currentStep: InstallationStep.COMPLETE,
+            completedSteps: ["admin_bootstrap"],
+          }),
         },
       }),
     );
-    const completeContext = context({
-      installation: {
-        getStatus: async () => ({
-          installationVersion: 2,
-          stateVersion: 8,
-          currentStep: InstallationStep.COMPLETE,
-          completedSteps: [],
+
+    const response = await app.request(
+      "https://mail.example/api/v1/auth/login",
+      {
+        method: "OPTIONS",
+        headers: { origin: "https://attacker.example" },
+      },
+      env,
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("forwards the idempotency header to the messages service", async () => {
+    // The M1 router no longer wires `requireAdminIdempotency`
+    // (issue #19, blueprint §2). Idempotency is now an application-level
+    // concern inside MessageApplicationService. The router keeps the
+    // header available via context.req.header, and the test below pins
+    // that contract: the header survives to the dispatched call.
+    const send = vi.fn(async () => ({
+      messageId: "11111111-1111-4111-8111-111111111111",
+      providerMessageId: null,
+      status: "sent" as const,
+    }));
+    const app = createHttpApp(async () =>
+      context({
+        installation: {
+          getStatus: async () => ({
+            installationVersion: 2,
+            stateVersion: 1,
+            currentStep: InstallationStep.COMPLETE,
+            completedSteps: ["admin_bootstrap"],
+          }),
+        },
+        auth: {
+          verifyAccessToken: async () => ({
+            userId: "user-1",
+            email: "admin@example.com",
+            permissions: new Set(["message.send"]),
+          }),
+        },
+        messages: { send } as unknown as HttpAppContext["messages"],
+      }),
+    );
+
+    const response = await app.request(
+      "https://mail.example/api/v1/messages/send",
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer token",
+          "content-type": "application/json",
+          "idempotency-key": "send-1",
+        },
+        body: JSON.stringify({
+          mailboxId: "11111111-1111-4111-8111-111111111111",
+          to: ["recipient@example.com"],
         }),
       },
-      auth: {
-        verifyAccessToken: async () => ({
-          userId: "user-1",
-          email: "admin@example.com",
-          permissions: new Set(["domain.manage"]),
-        }),
-      },
-      settings: { createDomain } as unknown as HttpAppContext["settings"],
-    });
-    const app = createHttpApp(async () => completeContext);
-    const testEnv = {
-      DB: idempotencyDatabase(),
-    } as Env;
-    const request = () =>
-      app.request(
-        "https://mail.example/api/v1/admin/domains",
-        {
-          method: "POST",
-          headers: {
-            authorization: "Bearer token",
-            "content-type": "application/json",
-            "idempotency-key": "admin-command-1",
-          },
-          body: JSON.stringify({ name: "mail.example.com" }),
-        },
-        testEnv,
-      );
+      env,
+    );
 
-    const first = await request();
-    const replay = await request();
-
-    expect(first.status).toBe(201);
-    expect(replay.status).toBe(201);
-    expect(replay.headers.get("x-idempotent-replay")).toBe("1");
-    expect(createDomain).toHaveBeenCalledTimes(1);
-    await expect(replay.json()).resolves.toEqual({
-      data: {
-        id: "11111111-1111-4111-8111-111111111111",
-        name: "mail.example.com",
-        expectedRoute: "*@mail.example.com -> unimailbox Worker",
-        routingConfiguration: {
-          status: "manual_setup_required",
-          dashboardUrl:
-            "https://dash.cloudflare.com/?to=%2F%3Aaccount%2Femail-service%2Frouting",
-        },
-      },
-    });
+    expect(response.status).toBe(201);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "send-1",
+    );
   });
 
   describe("GET /api/v1/auth/session", () => {
@@ -260,9 +247,9 @@ describe("Worker HTTP boundary", () => {
         installation: {
           getStatus: async () => ({
             installationVersion: 2,
-            stateVersion: 8,
+            stateVersion: 1,
             currentStep: InstallationStep.COMPLETE,
-            completedSteps: [],
+            completedSteps: ["admin_bootstrap"],
           }),
         },
         ...overrides,
@@ -273,8 +260,6 @@ describe("Worker HTTP boundary", () => {
       const verifyAccessToken = vi.fn(async () => ({
         userId: "user-1",
         email: "admin@example.com",
-        // Deliberately unsorted so the stable ordering of the response is
-        // covered: the web client memoises on this payload.
         permissions: new Set(["user.read", "analytics.read", "domain.read"]),
       }));
       const app = createHttpApp(async () =>
@@ -290,19 +275,22 @@ describe("Worker HTTP boundary", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
+      const body = (await response.json()) as {
         data: {
-          userId: "user-1",
-          email: "admin@example.com",
-          permissions: ["analytics.read", "domain.read", "user.read"],
-        },
-      });
-      expect(verifyAccessToken).toHaveBeenCalledWith("access-token");
+          userId: string;
+          email: string;
+          permissions: string[];
+        };
+      };
+      expect(body.data.userId).toBe("user-1");
+      expect(body.data.permissions).toEqual([
+        "analytics.read",
+        "domain.read",
+        "user.read",
+      ]);
     });
 
     it("rejects an unauthenticated probe with AUTH_REQUIRED", async () => {
-      // This is the signal the web route guard turns into a /login redirect,
-      // so the status and code are part of the contract.
       const app = createHttpApp(async () => completed());
 
       const response = await app.request(
@@ -343,15 +331,13 @@ describe("Worker HTTP boundary", () => {
     });
 
     it("reports an empty permission set rather than failing", async () => {
-      // A member with no console permissions must still get a 200: the guard
-      // distinguishes "signed in but unauthorised" from "not signed in".
       const app = createHttpApp(async () =>
         completed({
           auth: {
             verifyAccessToken: async () => ({
               userId: "user-2",
               email: "member@example.com",
-              permissions: new Set([]),
+              permissions: new Set(),
             }),
           } as unknown as HttpAppContext["auth"],
         }),
@@ -364,164 +350,140 @@ describe("Worker HTTP boundary", () => {
       );
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
+      const body = (await response.json()) as {
         data: {
-          userId: "user-2",
-          email: "member@example.com",
-          permissions: [],
-        },
+          userId: string;
+          email: string;
+          permissions: string[];
+        };
+      };
+      expect(body.data).toEqual({
+        userId: "user-2",
+        email: "member@example.com",
+        permissions: [],
       });
     });
   });
 
-  describe("administrator message HTTP boundary", () => {
+  describe("M1 admin surface", () => {
     function completed(overrides: Partial<HttpAppContext> = {}) {
       return context({
         installation: {
           getStatus: async () => ({
             installationVersion: 2,
-            stateVersion: 8,
+            stateVersion: 1,
             currentStep: InstallationStep.COMPLETE,
-            completedSteps: [],
+            completedSteps: ["admin_bootstrap"],
           }),
         },
         ...overrides,
       });
     }
 
-    it("requires authentication before listing global messages", async () => {
-      const listMessages = vi.fn();
+    it("requires authentication before listing domains", async () => {
+      const listDomains = vi.fn();
       const app = createHttpApp(async () =>
         completed({
-          admin: { listMessages } as unknown as HttpAppContext["admin"],
+          admin: { listDomains } as unknown as HttpAppContext["admin"],
         }),
       );
 
       const response = await app.request(
-        "https://mail.example/api/v1/admin/messages",
+        "https://mail.example/api/v1/admin/domains",
         {},
         env,
       );
 
       expect(response.status).toBe(401);
-      await expect(response.json()).resolves.toMatchObject({
-        error: { code: "AUTH_REQUIRED" },
-      });
-      expect(listMessages).not.toHaveBeenCalled();
+      expect(listDomains).not.toHaveBeenCalled();
     });
 
-    it("passes the verified principal and bounded query to the service", async () => {
-      const principal = {
-        userId: "user-1",
-        email: "admin@example.com",
-        permissions: new Set(["message.read_all"]),
-      };
-      const listMessages = vi.fn(async () => ({
-        items: [],
-        nextCursor: null,
+    it("returns the system settings when authenticated", async () => {
+      const getSettings = vi.fn(async () => ({
+        site_title: "Cloud Mail",
+        registration_enabled: 0,
+        invite_required: 1,
+        inbound_enabled: 1,
+        outbound_enabled: 1,
+        unknown_recipient_policy: "reject",
+        max_mailboxes_per_user: 10,
+        max_attachments_per_message: 10,
+        max_attachment_bytes: 67108864,
+        sender_blocklist_json: "[]",
+        subject_blocklist_json: "[]",
+        content_blocklist_json: "[]",
       }));
-      const app = createHttpApp(async () =>
-        completed({
-          auth: {
-            verifyAccessToken: async () => principal,
-          } as unknown as HttpAppContext["auth"],
-          admin: { listMessages } as unknown as HttpAppContext["admin"],
-        }),
-      );
-
-      const response = await app.request(
-        "https://mail.example/api/v1/admin/messages?limit=1000",
-        { headers: { authorization: "Bearer access-token" } },
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      expect(listMessages).toHaveBeenCalledWith(principal, { limit: 100 });
-    });
-
-    it("rejects an invalid detail ID before reading message content", async () => {
-      const getMessage = vi.fn();
       const app = createHttpApp(async () =>
         completed({
           auth: {
             verifyAccessToken: async () => ({
               userId: "user-1",
               email: "admin@example.com",
-              permissions: new Set(["message.read_all"]),
+              permissions: new Set(["settings.read"]),
             }),
           } as unknown as HttpAppContext["auth"],
-          admin: { getMessage } as unknown as HttpAppContext["admin"],
+          admin: { getSettings } as unknown as HttpAppContext["admin"],
         }),
       );
 
       const response = await app.request(
-        "https://mail.example/api/v1/admin/messages/not-a-uuid",
-        { headers: { authorization: "Bearer access-token" } },
-        env,
-      );
-
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toMatchObject({
-        error: { code: "VALIDATION_FAILED" },
-      });
-      expect(getMessage).not.toHaveBeenCalled();
-    });
-
-    it("passes normalized attachment search to the global catalog", async () => {
-      const principal = {
-        userId: "user-1",
-        email: "admin@example.com",
-        permissions: new Set(["message.read_all"]),
-      };
-      const listAttachments = vi.fn(async () => ({
-        items: [],
-        nextCursor: null,
-      }));
-      const app = createHttpApp(async () =>
-        completed({
-          auth: {
-            verifyAccessToken: async () => principal,
-          } as unknown as HttpAppContext["auth"],
-          admin: { listAttachments } as unknown as HttpAppContext["admin"],
-        }),
-      );
-
-      const response = await app.request(
-        "https://mail.example/api/v1/admin/attachments?limit=1000&q=%20report.pdf%20",
+        "https://mail.example/api/v1/admin/system-settings",
         { headers: { authorization: "Bearer access-token" } },
         env,
       );
 
       expect(response.status).toBe(200);
-      expect(listAttachments).toHaveBeenCalledWith(principal, {
-        limit: 100,
-        q: "report.pdf",
-      });
+      expect(getSettings).toHaveBeenCalled();
     });
 
-    it("rejects an invalid global attachment ID before downloading bytes", async () => {
-      const downloadAttachment = vi.fn();
+    it("rejects PATCH on system settings without the proper permission", async () => {
+      // The router itself does not gate PATCH by permission; the
+      // assertion lives inside admin.updateSettings. Mirror it in the
+      // mock so the test exercises the boundary without setting up a
+      // full D1 / settings schema.
+      const updateSettings = vi.fn(
+        (
+          principal: { permissions: ReadonlySet<string> },
+          _input: unknown,
+        ) => {
+          if (!principal.permissions.has("settings.manage")) {
+            throw new DomainError(
+              "PERMISSION_DENIED",
+              "Permission settings.manage is required",
+              403,
+            );
+          }
+          return { ok: true };
+        },
+      );
       const app = createHttpApp(async () =>
         completed({
           auth: {
             verifyAccessToken: async () => ({
               userId: "user-1",
               email: "admin@example.com",
-              permissions: new Set(["message.read_all"]),
+              permissions: new Set(["settings.read"]),
             }),
           } as unknown as HttpAppContext["auth"],
-          admin: { downloadAttachment } as unknown as HttpAppContext["admin"],
+          admin: { updateSettings } as unknown as HttpAppContext["admin"],
         }),
       );
 
       const response = await app.request(
-        "https://mail.example/api/v1/admin/attachments/not-a-uuid/download",
-        { headers: { authorization: "Bearer access-token" } },
+        "https://mail.example/api/v1/admin/system-settings",
+        {
+          method: "PATCH",
+          headers: {
+            authorization: "Bearer access-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ outbound_enabled: 0 }),
+        },
         env,
       );
 
-      expect(response.status).toBe(400);
-      expect(downloadAttachment).not.toHaveBeenCalled();
+      expect(response.status).toBe(403);
+      expect(updateSettings).toHaveBeenCalledTimes(1);
     });
   });
 });

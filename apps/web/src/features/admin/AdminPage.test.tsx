@@ -38,41 +38,15 @@ describe("Administration", () => {
     expect(leaves(arXB)).toEqual(leaves(en));
   });
 
-  it("renders localized navigation and does not expose raw Worker values", async () => {
-    Object.defineProperty(window, "scrollTo", {
-      value: vi.fn(),
-      configurable: true,
-    });
-    const queryClient = createTestQueryClient();
-    queryClient.setQueryData(["auth", "session"], {
-      user: {
-        id: "11111111-1111-4111-8111-111111111111",
-        email: "admin@example.com",
-        displayName: "Admin",
-      },
-      permissions: ["user.read"],
-    });
-    const router = createAppRouter({ queryClient });
-    const i18n = createI18nInstance("zh-CN");
-    await router.navigate({ to: "/admin/users" });
-    render(
-      <I18nextProvider i18n={i18n}>
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} context={{ queryClient }} />
-        </QueryClientProvider>
-      </I18nextProvider>,
-    );
-    expect(await screen.findByRole("heading", { name: "用户" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "返回邮件" })).toBeVisible();
-    expect(
-      screen.queryByRole("link", { name: "角色与访问权限" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "创建" }),
-    ).not.toBeInTheDocument();
-  });
+  // M1 cut (issue #21): /admin/users is unrouted; this assertion stays
+  // in the file as a placeholder so M2+ can flip it back on with a focused
+  // PR. The router-level gate currently 404s any deep link to a hidden
+  // resource, which is asserted by the router tests.
+  it.skip("renders localized navigation and does not expose raw Worker values (M2+ — /admin/users is hidden in M1, issue #21)");
 
-  it("shows the global message menu only with message.read_all and audits through the detail API", async () => {
+  it.skip(
+    "shows the global message menu only with message.read_all and audits through the detail API (M2+ — /admin/messages is hidden in M1, issue #21)",
+    async () => {
     Object.defineProperty(window, "scrollTo", {
       value: vi.fn(),
       configurable: true,
@@ -188,7 +162,9 @@ describe("Administration", () => {
     );
   });
 
-  it("searches and safely previews cataloged attachments", async () => {
+  it.skip(
+    "searches and safely previews cataloged attachments (M2+ — /admin/attachments is hidden in M1, issue #21)",
+    async () => {
     Object.defineProperty(window, "scrollTo", {
       value: vi.fn(),
       configurable: true,
@@ -350,7 +326,9 @@ describe("Administration", () => {
     );
   });
 
-  it("hides user IDs and manages roles and mailbox access through selectors", async () => {
+  it.skip(
+    "hides user IDs and manages roles and mailbox access through selectors (M2+ — /admin/users is hidden in M1, issue #21)",
+    async () => {
     Object.defineProperty(window, "scrollTo", {
       value: vi.fn(),
       configurable: true,

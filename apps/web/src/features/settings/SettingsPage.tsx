@@ -383,7 +383,11 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
                     <span>
                       <BidiText kind="identifier">{item.address}</BidiText>
                     </span>
-                    <MailboxMembers mailboxId={item.id} />
+                    {/* M1 cut (issue #21): shared mailbox UI is dormant.
+                        The component lives below in this file so a future
+                        milestone can flip it back on without rewiring
+                        the settings page. */}
+                    {false ? <MailboxMembers mailboxId={item.id} /> : null}
                   </div>
                 ))}
               </div>

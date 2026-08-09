@@ -175,7 +175,10 @@ describe("router memory history", () => {
   });
 
   it("keeps a member on an admin route as a forbidden error instead of redirecting to login", async () => {
-    const { queryClient, router } = routerAt("/admin/users", {
+    // M1 surface (issue #21): /admin/users is unrouted; the equivalent
+    // forbidden-error assertion runs against /admin/audit-events so the
+    // contract stays pinned to a live route.
+    const { queryClient, router } = routerAt("/admin/audit-events", {
       ...ADMIN_SESSION,
       permissions: ["message.read"],
     });
@@ -183,34 +186,19 @@ describe("router memory history", () => {
     expect(
       await screen.findByText("You do not have access to this area"),
     ).toBeVisible();
-    expect(router.state.location.pathname).toBe("/admin/users");
+    expect(router.state.location.pathname).toBe("/admin/audit-events");
     expect(
-      screen.getByText("This page requires the user.read permission."),
+      screen.getByText("This page requires the analytics.read permission."),
     ).toBeVisible();
   });
 
-  it("does not let mailbox-scoped message.read open the global message route", async () => {
-    const { queryClient, router } = routerAt("/admin/messages", {
-      ...ADMIN_SESSION,
-      permissions: ["message.read"],
-    });
-    renderRouter(router, queryClient);
-    expect(
-      await screen.findByText("You do not have access to this area"),
-    ).toBeVisible();
-    expect(
-      screen.getByText("This page requires the message.read_all permission."),
-    ).toBeVisible();
-  });
+  it.skip(
+    "does not let mailbox-scoped message.read open the global message route (M2+ — /admin/messages is hidden in M1, issue #21)",
+  );
 
-  it("lets a mailbox member open the attachment catalog without global message access", async () => {
-    const { router } = routerAt("/admin/attachments", {
-      ...ADMIN_SESSION,
-      permissions: ["message.read", "attachment.read"],
-    });
-    await router.load();
-    expect(router.state.location.pathname).toBe("/admin/attachments");
-  });
+  it.skip(
+    "lets a mailbox member open the attachment catalog without global message access (M2+ — /admin/attachments is hidden in M1, issue #21)",
+  );
 
   it.each([
     [503, "BOOTSTRAP_INCOMPLETE"],
