@@ -54,3 +54,10 @@ pnpm-debug.log*
 #     is the deployable artifact per data-model.md §Migration authority) ---
 /migrations/drizzle/
 /migrations/drizzle/**
+
+# --- deploy script outputs (CAP-005) ---
+/apps/worker/.wrangler.resolved.jsonc
+/.cloudflare-resources.json
+
+# --- test temp files ---
+**/.tmp-*

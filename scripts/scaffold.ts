@@ -38,9 +38,25 @@ if (SUBCOMMAND === 'db:migrate' || SUBCOMMAND === 'db:reset') {
   process.exit(result.status ?? 1);
 }
 
+if (SUBCOMMAND === 'deploy') {
+  // CAP-005: Deploy to Cloudflare with automatic resource provisioning.
+  // Forwards all args (--force-secrets, --dry-run, --skip-migrate) to deploy.ts.
+  const forwarded = [process.argv[3], ...process.argv.slice(4)].filter(
+    (v): v is string => typeof v === 'string' && v !== '',
+  );
+  const result = spawnSync(
+    process.execPath,
+    ['--experimental-strip-types', '--no-warnings=ExperimentalWarning',
+     fileURLToPath(new URL('./deploy.ts', import.meta.url)), ...forwarded],
+    { stdio: 'inherit' },
+  );
+  process.exit(result.status ?? 1);
+}
+
 console.error(`Unknown subcommand: ${SUBCOMMAND ?? '(none)'}`);
 console.error('Usage: pnpm scaffold <subcommand>');
 console.error('Subcommands:');
 console.error('  doctor              — 10 structural checks');
 console.error('  db:migrate [--verify|--reset]');
+console.error('  deploy [--force-secrets|--dry-run|--skip-migrate]');
 process.exit(1);

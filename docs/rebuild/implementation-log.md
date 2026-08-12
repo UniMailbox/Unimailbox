@@ -23,6 +23,42 @@ Format:
 
 ---
 
+## 2026-08-12 — CAP-005 Deploy automation  |  Implemented
+
+**Changed:** An operator can now deploy the worker to a fresh Cloudflare account with
+`ENVIRONMENT=preview pnpm scaffold deploy`. The script provisions all 6 Cloudflare
+resources (D1, R2, 2× KV, Queue, Secrets Store) idempotently, generates
+`INSTALLATION_TOKEN` and `CREDENTIAL_ENCRYPTION_KEY` (32 random bytes hex, ADR-007) via
+stdin (not the insecure `--value` CLI flag), resolves placeholder IDs into a gitignored
+`wrangler.resolved.jsonc`, runs remote migrations, deploys the worker, and attempts a
+healthz check. The committed `apps/worker/wrangler.jsonc` stays as a template — never
+modified by the deploy script. `--force-secrets` requires interactive confirmation and
+warns about CREDENTIAL_ENCRYPTION_KEY data loss. `--dry-run` previews without persisting
+state or creating resources.
+
+**Files:** `scripts/deploy.ts` (733 lines) · `scripts/deploy.test.ts` (228 lines) ·
+`scripts/scaffold.ts` (deploy subcommand) · `scripts/vitest.config.ts` (new scripts test
+project) · `vitest.config.ts` (project added) · `.gitignore` (resolved config + resource
+state + test temp files) · `docs/operations/deploy.md` (runbook).
+
+**Rules:** ADR-007 (secret generation + storage) · R-SECRET-003 (secrets never logged).
+
+**Decisions:** Template + generated resolved config approach (committed `wrangler.jsonc`
+untouched, `.wrangler.resolved.jsonc` gitignored) → deploy.ts header comment. Secrets via
+stdin pipe instead of `--value` flag → fix-up-2.md F2. D1 create text output parsing
+instead of undocumented `--json` → fix-up-2.md F3.
+
+**Deferred:** D-CAP-005-A (wrangler `--json` shapes — E2E), D-CAP-005-B (stdin secret
+approach — E2E), D-CAP-005-C (`secret update` verb — E2E), D-CAP-005-D (healthz under
+`workers_dev:false`), D-CAP-005-E (stale-state ID validation).
+
+**Notes:** This is an operator-action capability — `Implemented` means the automation +
+tests + runbook are complete and reviewed. `Verified` requires a real cloud deploy by an
+operator. Every HIGH finding from code/architecture reviews traces to unverified wrangler
+CLI output shapes that cannot be tested without cloud credentials. Parse failures now warn
+to stderr instead of being silently swallowed, so the first real deploy will surface shape
+mismatches visibly.
+
 ## 2026-08-12 — CAP-004 Initial D1 schema + migration runner  |  Implemented
 
 **Changed:** Every Phase 0 capability can now persist to D1. The 11 tables the
