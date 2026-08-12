@@ -1,0 +1,22 @@
+{
+  "name": "@unimailbox/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist .tsbuildinfo",
+    "test:unit": "echo \"(config: no unit tests yet)\" && exit 0",
+    "test:worker": "echo \"(config: no worker tests yet)\" && exit 0"
+  }
+}

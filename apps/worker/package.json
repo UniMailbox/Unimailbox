@@ -1,0 +1,30 @@
+{
+  "name": "@unimailbox/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "tsc --build && wrangler deploy --dry-run --outdir=dist",
+    "clean": "rm -rf dist .wrangler .tsbuildinfo",
+    "test:unit": "echo \"(worker: no unit tests yet — see CAP-002)\" && exit 0",
+    "test:worker": "echo \"(worker: no worker tests yet — see CAP-002)\" && exit 0"
+  },
+  "dependencies": {
+    "@unimailbox/config": "workspace:*",
+    "@unimailbox/contracts": "workspace:*",
+    "@unimailbox/email-core": "workspace:*",
+    "hono": "4.6.20"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.10.4",
+    "@cloudflare/workers-types": "4.20251223.0",
+    "@types/node": "22.10.5",
+    "@vitest/runner": "4.1.10",
+    "@vitest/snapshot": "4.1.10",
+    "typescript": "5.5.4",
+    "vitest": "4.1.10",
+    "wrangler": "4.39.0"
+  }
+}

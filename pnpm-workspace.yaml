@@ -1,0 +1,12 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 11 ignores postinstall scripts by default. Approve the ones we need
+# so the install actually completes a usable tree. esbuild + workerd are
+# required by vitest-pool-workers; sharp is not used but appears in our
+# transitive graph via vite.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false

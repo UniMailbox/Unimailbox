@@ -1,0 +1,27 @@
+{
+  "name": "@unimailbox/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --build && vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist .tsbuildinfo",
+    "test:unit": "echo \"(web: no unit tests yet — see CAP-002)\" && exit 0",
+    "test:worker": "echo \"(web: no worker tests yet)\" && exit 0"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.62.16",
+    "@tanstack/react-router": "1.135.2",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.5.4",
+    "vite": "6.0.7"
+  }
+}

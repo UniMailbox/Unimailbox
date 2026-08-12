@@ -1,0 +1,122 @@
+/*
+ * Design tokens — shadcn/ui-style CSS variables.
+ * CAP-001 ships a minimal palette so primitives can reference tokens from day one.
+ * See phase-0-foundation.md §Scope "design tokens (matches DESIGN.md of the legacy repo)".
+ */
+
+:root {
+  /* Surface */
+  --unimailbox-background: 0 0% 100%;
+  --unimailbox-foreground: 222.2 84% 4.9%;
+  --unimailbox-card: 0 0% 100%;
+  --unimailbox-card-foreground: 222.2 84% 4.9%;
+  --unimailbox-border: 214.3 31.8% 91.4%;
+  --unimailbox-input: 214.3 31.8% 91.4%;
+
+  /* Primary */
+  --unimailbox-primary: 222.2 47.4% 11.2%;
+  --unimailbox-primary-foreground: 210 40% 98%;
+
+  /* Muted */
+  --unimailbox-muted: 210 40% 96.1%;
+  --unimailbox-muted-foreground: 215.4 16.3% 46.9%;
+
+  /* Radii */
+  --unimailbox-radius: 0.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --unimailbox-background: 222.2 84% 4.9%;
+    --unimailbox-foreground: 210 40% 98%;
+    --unimailbox-card: 222.2 84% 4.9%;
+    --unimailbox-card-foreground: 210 40% 98%;
+    --unimailbox-border: 217.2 32.6% 17.5%;
+    --unimailbox-input: 217.2 32.6% 17.5%;
+    --unimailbox-primary: 210 40% 98%;
+    --unimailbox-primary-foreground: 222.2 47.4% 11.2%;
+    --unimailbox-muted: 217.2 32.6% 17.5%;
+    --unimailbox-muted-foreground: 215 20.2% 65.1%;
+  }
+}
+
+body {
+  background-color: hsl(var(--unimailbox-background));
+  color: hsl(var(--unimailbox-foreground));
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.unimailbox-stub {
+  max-width: 640px;
+  margin: 4rem auto;
+  padding: 1.5rem 2rem;
+  border: 1px solid hsl(var(--unimailbox-border));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-card));
+  color: hsl(var(--unimailbox-card-foreground));
+}
+
+.unimailbox-stub h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+.unimailbox-stub p {
+  margin: 0;
+  color: hsl(var(--unimailbox-muted-foreground));
+  line-height: 1.6;
+}
+
+/* ---- Button primitive (shadcn/ui-style) ----
+ * Visual states for the CAP-001 Button primitive. The component renders
+ * only `className="btn"`; everything else (hover, focus, disabled, active)
+ * is token-driven so future callers do not need to think about it.
+ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: hsl(var(--unimailbox-primary));
+  color: hsl(var(--unimailbox-primary-foreground));
+  border: 1px solid transparent;
+  border-radius: var(--unimailbox-radius);
+  padding: 0.5rem 1rem;
+  font-weight: 500;
+  font-family: inherit;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn:focus-visible {
+  outline: 2px solid hsl(var(--unimailbox-primary));
+  outline-offset: 2px;
+}
+
+.btn:active:not(:disabled) {
+  opacity: 0.8;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ---- 404 / error recovery ---- */
+.unimailbox-stub a {
+  color: hsl(var(--unimailbox-primary));
+  text-decoration: underline;
+}

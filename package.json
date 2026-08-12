@@ -1,0 +1,37 @@
+{
+  "name": "unimailbox",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Unimailbox rebuild — modular monolith on Cloudflare Workers",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@11.20.0",
+  "scripts": {
+    "build": "pnpm --filter @unimailbox/worker run build && pnpm --filter @unimailbox/web run build",
+    "build:worker": "pnpm --filter @unimailbox/worker run build",
+    "build:web": "pnpm --filter @unimailbox/web run build",
+    "lint": "eslint .",
+    "typecheck": "tsc --build",
+    "clean": "pnpm --filter @unimailbox/worker run clean && pnpm --filter @unimailbox/web run clean",
+    "dev:worker": "pnpm --filter @unimailbox/worker run dev",
+    "dev:web": "pnpm --filter @unimailbox/web run dev",
+    "test": "pnpm run test:unit && pnpm run test:worker",
+    "test:unit": "pnpm -r --workspace-concurrency=1 --if-present run test:unit",
+    "test:worker": "pnpm -r --workspace-concurrency=1 --if-present run test:worker",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "22.10.5",
+    "eslint": "9.39.5",
+    "eslint-import-resolver-typescript": "3.6.3",
+    "eslint-plugin-import": "2.32.0",
+    "prettier": "3.6.2",
+    "typescript": "5.5.4",
+    "typescript-eslint": "8.46.4"
+  }
+}
