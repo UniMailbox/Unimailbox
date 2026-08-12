@@ -26,17 +26,17 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 
 | | |
 |---|---|
-| **Phase** | 0 — Foundation |
+| **Phase** | 0 — Foundation (Audit Complete) |
 | **Active capability** | none |
 | **Next capability** | CAP-010 |
 | **Blocked** | none |
-| **Repository state** | scaffold only — `src/index.ts` is a placeholder; no `apps/`, `packages/`, or `migrations/` yet |
+| **Repository state** | Phase 0 code complete; awaiting operator verification of deploy criterion |
 
 ## Phase progress
 
 | Phase | Title | Status | Exit criteria | Audit |
 |---|---|---|---|---|
-| 0 | Foundation | Not started | 11 boxes — `docs/rebuild/08-roadmap/phase-0-foundation.md` | — |
+| 0 | Foundation | Conditional Pass | 10/11 MET — criterion #6 (deploy) requires operator verification | `docs/rebuild/phase-0-audit.md` |
 | 1 | Minimal Business Closed Loop | Not started | 29 boxes — `docs/rebuild/F-minimal-business-closed-loop.md` §F.4 | — |
 | 2 | Reliable Business Loop | Not started | 7 boxes — `docs/rebuild/08-roadmap/phase-2-core-loop.md` | — |
 | 3 | Complete Core Business | Not started | drafts + attachments | — |
