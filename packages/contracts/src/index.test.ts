@@ -8,6 +8,7 @@ import {
   installationStepSchema,
   installationStateInfoSchema,
   setupClaimRequestSchema,
+  setupPreflightResponseSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -99,6 +100,57 @@ describe('setupClaimRequestSchema', () => {
 
   it('rejects empty token via safeParse', () => {
     const result = setupClaimRequestSchema.safeParse({ token: '' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('setupPreflightResponseSchema', () => {
+  it('accepts a valid preflight response', () => {
+    const result = setupPreflightResponseSchema.parse({
+      bindings: {
+        DB: true,
+        ATTACHMENTS: true,
+        SETUP_SESSION: true,
+        CACHE: true,
+        OUTBOUND: true,
+        INSTALLATION_TOKEN: true,
+        CREDENTIAL_ENCRYPTION_KEY: true,
+      },
+      schemaVersion: '0001',
+    });
+    expect(result).toEqual({
+      bindings: {
+        DB: true,
+        ATTACHMENTS: true,
+        SETUP_SESSION: true,
+        CACHE: true,
+        OUTBOUND: true,
+        INSTALLATION_TOKEN: true,
+        CREDENTIAL_ENCRYPTION_KEY: true,
+      },
+      schemaVersion: '0001',
+    });
+  });
+
+  it('rejects non-boolean bindings via safeParse', () => {
+    const result = setupPreflightResponseSchema.safeParse({
+      bindings: { DB: 'true' },
+      schemaVersion: '0001',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects non-string schemaVersion via safeParse', () => {
+    const result = setupPreflightResponseSchema.safeParse({
+      bindings: { DB: true },
+      schemaVersion: 1,
+    });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues.length).toBeGreaterThan(0);

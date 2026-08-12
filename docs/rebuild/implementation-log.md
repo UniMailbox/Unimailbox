@@ -23,6 +23,24 @@ Format:
 
 ---
 
+## 2026-08-12 — CAP-009 Setup preflight endpoint  |  Implemented
+
+**Changed:** `POST /api/v1/setup/preflight` — session-protected endpoint that reports each of the 7 Cloudflare bindings as present/accessible and the database schema version from `d1_migrations`. Introduces the setup-session middleware that validates `Authorization: Bearer <sessionToken>` against KV — the gate for all post-claim setup endpoints.
+
+**Files:** `apps/worker/src/http/middleware/setup-session.ts` (new — session validation) · `apps/worker/src/modules/onboarding/preflight.ts` (new — runPreflight use case) · `apps/worker/src/modules/onboarding/index.ts` (export runPreflight) · `apps/worker/src/http/routes/setup.ts` (added POST /preflight with session middleware) · `packages/contracts/src/index.ts` (setupPreflightResponseSchema) · `apps/worker/src/http/routes/preflight.worker.test.ts` (new — 14 worker-pool tests) · `apps/worker/src/http/middleware/setup-gate.worker.test.ts` (updated: preflight now 401 not 404)
+
+**Rules:** R-AUTH-001 (session required after claim), R-SETUP-003 (setup routes exempt from gate)
+
+**Decisions:**
+- Session middleware applied inline on `/preflight` only (`routes.post('/preflight', setupSession, handler)`). `/status` and `/claim` remain public. Future session-protected routes add `setupSession` inline until Rule of Three justifies a route group.
+- Binding checks are existence-only: `!!env.BINDING` for D1/R2/KV/Queue, `readSecret` try/catch for Secrets Store. Deep health checks (actual queries, puts) are a future concern.
+- Schema version from `d1_migrations` table (`ORDER BY id DESC LIMIT 1`) — reflects what the database was actually migrated to, not what the code expects.
+- `checkSecret` logs at `warn` on failure — this is a diagnostic endpoint; swallowing errors defeats its purpose.
+
+**Deferred:** D-CAP-009-A (SecretLike type for checkSecret — code review L3), D-CAP-009-B (redundant db param — L4).
+
+**Notes:** Code review ACCEPT WITH NOTES (M1: checkSecret error logging — fixed; L1: ORDER BY id — fixed; L2: empty-token test — added). Architecture review pending. HTTP trims trailing whitespace from header values, so `'Bearer '` becomes `'Bearer'` → SETUP_SESSION_REQUIRED (documented in test).
+
 ## 2026-08-12 — CAP-008 Setup claim endpoint  |  Implemented
 
 **Changed:** `POST /api/v1/setup/claim` validates the `INSTALLATION_TOKEN` with constant-time comparison, creates a 30-minute KV setup session, and seeds `installation_state` to `current_step='preflight'`. Wrong token → 401, missing/empty token → 400, already complete → 409. Error middleware replaced — DomainError → httpStatus, ZodError → 400, SyntaxError → 400, unknown → 500 with log.

@@ -156,3 +156,18 @@ export const setupClaimRequestSchema = z.object({
 });
 
 export type SetupClaimRequest = z.infer<typeof setupClaimRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Setup preflight response — CAP-009
+// ---------------------------------------------------------------------------
+
+/**
+ * Response body for POST /api/v1/setup/preflight. Reports each binding's
+ * presence and the current database schema version.
+ */
+export const setupPreflightResponseSchema = z.object({
+  bindings: z.record(z.boolean()),
+  schemaVersion: z.string(),
+});
+
+export type SetupPreflightResponse = z.infer<typeof setupPreflightResponseSchema>;

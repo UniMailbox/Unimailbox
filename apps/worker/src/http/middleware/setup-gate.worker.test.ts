@@ -145,9 +145,11 @@ describe('setup-gate middleware', () => {
       expect(response.headers.get('Location')).toBeNull();
     });
 
-    it('/api/v1/setup/preflight is exempt', async () => {
+    it('/api/v1/setup/preflight is exempt (401, not 302)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', { method: 'POST' });
-      expect(response.status).toBe(404);
+      // The endpoint exists but requires session auth (401), not a 302 redirect.
+      // A 302 would mean the setup gate redirected it.
+      expect(response.status).toBe(401);
       expect(response.headers.get('Location')).toBeNull();
     });
 

@@ -1,0 +1,61 @@
+// preflight use case — POST /api/v1/setup/preflight.
+// Owner: onboarding module. Private file — export through modules/onboarding/index.ts.
+//
+// Verifies every Cloudflare binding is present and the database schema is migrated.
+// Returns a report of each binding's existence and the current schema version.
+// This is the operator's "is the deployment healthy?" check during setup.
+
+import type { Database } from '../../platform/database';
+import type { Env } from '../../platform/env';
+import { readSecret } from '../../platform/secrets';
+
+export interface PreflightResult {
+  readonly bindings: Readonly<Record<string, boolean>>;
+  readonly schemaVersion: string;
+}
+
+/**
+ * Checks a secret binding's accessibility. Returns true if the secret can be read,
+ * false otherwise. Used for INSTALLATION_TOKEN and CREDENTIAL_ENCRYPTION_KEY.
+ */
+async function checkSecret(secret: SecretsStoreSecret): Promise<boolean> {
+  try {
+    await readSecret(secret);
+    return true;
+  } catch (err) {
+    // Log the reason — this is a diagnostic endpoint; swallowing the error
+    // would leave the operator with no context. Matches setup-gate.ts pattern.
+    // TODO: replace with structured logger (D-CAP-006-B).
+    console.warn('[preflight] secret read failed', err);
+    return false;
+  }
+}
+
+/**
+ * Runs preflight checks: verifies all bindings exist and reads the schema version
+ * from the d1_migrations table.
+ *
+ * @returns A report with binding presence and schema version.
+ */
+export async function runPreflight(db: Database, env: Env): Promise<PreflightResult> {
+  // Check each binding's existence
+  const bindings: Record<string, boolean> = {
+    DB: !!env.DB,
+    ATTACHMENTS: !!env.ATTACHMENTS,
+    SETUP_SESSION: !!env.SETUP_SESSION,
+    CACHE: !!env.CACHE,
+    OUTBOUND: !!env.OUTBOUND,
+    // For secrets, check the value is accessible
+    INSTALLATION_TOKEN: await checkSecret(env.INSTALLATION_TOKEN),
+    CREDENTIAL_ENCRYPTION_KEY: await checkSecret(env.CREDENTIAL_ENCRYPTION_KEY),
+  };
+
+  // Read schema version from d1_migrations
+  const row = await db
+    .prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1')
+    .first<{ name: string }>();
+  // Extract the numeric prefix (e.g., '0001_initial.sql' → '0001')
+  const schemaVersion = row?.name?.replace(/\.sql$/, '').split('_')[0] ?? 'unknown';
+
+  return { bindings, schemaVersion };
+}
