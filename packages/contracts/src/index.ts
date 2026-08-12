@@ -106,3 +106,39 @@ export interface OutboundProviderAdapter {
     msg: SendProviderMessage,
   ): Promise<ProviderSendResult>;
 }
+
+// ---------------------------------------------------------------------------
+// Installation state — see docs/rebuild/05-target-architecture/api-design.md
+// ---------------------------------------------------------------------------
+
+/**
+ * InstallationStep — each step in the setup wizard.
+ * Ordered: claim → preflight → administrator → domain → cloudflare-verify
+ * → inbound-smoke → brevo → outbound-smoke → complete.
+ */
+export const installationStepSchema = z.enum([
+  'claim',
+  'preflight',
+  'administrator',
+  'domain',
+  'cloudflare-verify',
+  'inbound-smoke',
+  'brevo',
+  'outbound-smoke',
+  'complete',
+]);
+
+export type InstallationStep = z.infer<typeof installationStepSchema>;
+
+/**
+ * InstallationStateInfo — the single-row installation_state table shape.
+ *
+ * The `installation_state` table has CHECK (id = 1) — at most one row.
+ * When the row is absent (fresh DB), the setup gate treats it as incomplete.
+ */
+export const installationStateInfoSchema = z.object({
+  status: z.enum(['setup', 'complete']),
+  currentStep: installationStepSchema,
+});
+
+export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;

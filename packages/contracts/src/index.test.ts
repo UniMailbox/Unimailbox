@@ -2,7 +2,12 @@
 // Proves the harness can round-trip a schema, surface a safeParse failure,
 // and that the failed parse shape is stable for callers.
 import { describe, expect, it } from 'vitest';
-import { emailAddressSchema, uuidSchema } from './index';
+import {
+  emailAddressSchema,
+  uuidSchema,
+  installationStepSchema,
+  installationStateInfoSchema,
+} from './index';
 
 describe('emailAddressSchema', () => {
   it('accepts a plain address', () => {
@@ -43,6 +48,36 @@ describe('uuidSchema', () => {
 
   it('rejects a non-uuid string', () => {
     const result = uuidSchema.safeParse('not-a-uuid');
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('installationStepSchema', () => {
+  it('accepts a valid step', () => {
+    const result = installationStepSchema.parse('claim');
+    expect(result).toBe('claim');
+  });
+
+  it('rejects an invalid step', () => {
+    const result = installationStepSchema.safeParse('not-a-step');
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('installationStateInfoSchema', () => {
+  it('accepts a valid state', () => {
+    const result = installationStateInfoSchema.parse({
+      status: 'setup',
+      currentStep: 'claim',
+    });
+    expect(result).toEqual({ status: 'setup', currentStep: 'claim' });
+  });
+
+  it('rejects an invalid status', () => {
+    const result = installationStateInfoSchema.safeParse({
+      status: 'unknown',
+      currentStep: 'claim',
+    });
     expect(result.success).toBe(false);
   });
 });

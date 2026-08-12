@@ -1,4 +1,4 @@
-// modules/onboarding — CAP-001 stub.
-// Owner of: installation_state, registration_keys.
-// Real state machine lands with CAP-006+.
-export {};
+// modules/onboarding — owner of installation_state, registration_keys.
+// Exports: getInstallationState — reads the single installation_state row.
+
+export { getInstallationState } from './installation-state-repository';

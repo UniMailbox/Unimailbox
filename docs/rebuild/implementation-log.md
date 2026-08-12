@@ -23,6 +23,27 @@ Format:
 
 ---
 
+## 2026-08-12 — CAP-006 Setup gate  |  Implemented
+
+**Changed:** While `installation_state.status !== 'complete'` (or the row is absent on a fresh DB), every non-setup HTTP route now 302-redirects to `/setup`. Exempt paths: `/healthz`, `/setup`, `/setup/*`, `/api/v1/setup/*`. This is the gate that forces the operator through the setup wizard before any other route is reachable.
+
+**Files:** `apps/worker/src/http/middleware/setup-gate.ts` (new) · `apps/worker/src/modules/onboarding/installation-state-repository.ts` (new) · `apps/worker/src/modules/onboarding/index.ts` (exports `getInstallationState`) · `apps/worker/src/http/router.ts` (mounts middleware after `requestId`) · `packages/contracts/src/index.ts` (`installationStepSchema`, `installationStateInfoSchema`) · `packages/contracts/src/index.test.ts` (schema parse/safeParse tests) · `apps/worker/src/http/middleware/setup-gate.worker.test.ts` (new, 20 cases)
+
+**Rules:** R-SETUP-001 (incomplete → 302), R-SETUP-002 (fresh DB treated as incomplete), R-SETUP-003 (/healthz always reachable), R-SETUP-004 (DB failure → fail-closed redirect with warn log)
+
+**Decisions:**
+- Fail-closed on DB error: the middleware catches `getInstallationState` failures and redirects to `/setup`. A broken DB must not expose the app. Logged via `console.warn` (TODO: structured logger — D-CAP-006-B).
+- `{ redirect: 'manual' }` in worker-pool tests: `SELF.fetch` follows redirects by default — tests asserting 302 must use `{ redirect: 'manual' }` to observe the redirect response, not the followed target. This is a testing pattern for all future redirect tests.
+- Middleware order: `requestId` → `setupGate` → routes. Infrastructure first, then gates.
+- Zod schemas in contracts: `installationStepSchema` and `installationStateInfoSchema` are zod schemas (not just types). The repository uses `.parse()` instead of `as` casts. Satisfies the doctor's `tests-cover-contracts` check.
+- `Database` type alias: repository uses `Database` from `platform/database.ts`, not raw `D1Database`. Sets the convention for future repositories.
+
+**Deferred:** D-CAP-006-A (test-kit `InstallationStateRowShape` full-row → CAP-007), D-CAP-006-B (structured logger → CAP-007+), D-CAP-006-C (onboarding module evolves to use-case-level exports → CAP-007+)
+
+**Notes:** The implementer's initial tests failed because `SELF.fetch` auto-follows the 302 redirect to `/setup` (exempt → 404), making the redirect invisible. Root cause was purely in the tests, not the middleware. Two reviewers ran (architecture + code, both ACCEPT WITH NOTES). QA reviewer spawned but did not report after three requests — acceptance criteria verified by orchestrator via quality gates. All review findings addressed: zod parse for casts, log on catch, DB-failure test (R-SETUP-004), `Database` type alias, deterministic timestamps, contract schema tests.
+
+---
+
 ## 2026-08-12 — CAP-005 Deploy automation  |  Implemented
 
 **Changed:** An operator can now deploy the worker to a fresh Cloudflare account with
