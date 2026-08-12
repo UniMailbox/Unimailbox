@@ -86,9 +86,11 @@ describe('setup-gate middleware', () => {
       expect(response.headers.get('Location')).toBeNull();
     });
 
-    it('/api/v1/setup/claim is exempt — returns 404', async () => {
+    it('/api/v1/setup/claim is exempt — returns 400 (validation error, not 404)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', { method: 'POST' });
-      expect(response.status).toBe(404);
+      // Route exists now (added in CAP-008), so returns 400 for missing body
+      // rather than 404. The important part is it's NOT 302 (exempt from gate).
+      expect(response.status).toBe(400);
       expect(response.headers.get('Location')).toBeNull();
     });
   });

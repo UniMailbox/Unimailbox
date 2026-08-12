@@ -7,6 +7,7 @@ import {
   uuidSchema,
   installationStepSchema,
   installationStateInfoSchema,
+  setupClaimRequestSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -79,5 +80,28 @@ describe('installationStateInfoSchema', () => {
       currentStep: 'claim',
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('setupClaimRequestSchema', () => {
+  it('accepts a valid token', () => {
+    const result = setupClaimRequestSchema.parse({ token: 'my-token' });
+    expect(result).toEqual({ token: 'my-token' });
+  });
+
+  it('rejects missing token via safeParse', () => {
+    const result = setupClaimRequestSchema.safeParse({});
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects empty token via safeParse', () => {
+    const result = setupClaimRequestSchema.safeParse({ token: '' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
   });
 });

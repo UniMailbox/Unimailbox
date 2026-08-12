@@ -142,3 +142,17 @@ export const installationStateInfoSchema = z.object({
 });
 
 export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
+
+// ---------------------------------------------------------------------------
+// Setup claim request — CAP-008
+// ---------------------------------------------------------------------------
+
+/**
+ * Request body for POST /api/v1/setup/claim. The operator provides their
+ * INSTALLATION_TOKEN to prove they hold the deploy-time secret.
+ */
+export const setupClaimRequestSchema = z.object({
+  token: z.string().min(1),
+});
+
+export type SetupClaimRequest = z.infer<typeof setupClaimRequestSchema>;

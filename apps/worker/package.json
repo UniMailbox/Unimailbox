@@ -14,15 +14,16 @@
     "@unimailbox/contracts": "workspace:*",
     "@unimailbox/email-core": "workspace:*",
     "drizzle-orm": "0.44.5",
-    "hono": "4.6.20"
+    "hono": "4.6.20",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.21.1",
     "@cloudflare/workers-types": "5.20260812.1",
     "@types/node": "22.10.5",
+    "@unimailbox/test-kit": "workspace:*",
     "@vitest/runner": "4.1.10",
     "@vitest/snapshot": "4.1.10",
-    "@unimailbox/test-kit": "workspace:*",
     "typescript": "5.5.4",
     "vitest": "4.1.10",
     "wrangler": "4.121.0"

@@ -1,8 +1,12 @@
 // http/routes/setup — setup API routes.
-// Hono sub-app for /api/v1/setup/* endpoints. GET /status is the first endpoint.
+// Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim.
 
 import { Hono } from 'hono';
-import { getSetupStatus } from '../../modules/onboarding';
+import { setupClaimRequestSchema } from '@unimailbox/contracts';
+import { claimSetup, getSetupStatus } from '../../modules/onboarding';
+import { systemClock } from '../../platform/clock';
+import { systemIds } from '../../platform/ids';
+import { readSecret } from '../../platform/secrets';
 import type { AppEnv } from '../../platform/env';
 
 export function setupRoutes(): Hono<AppEnv> {
@@ -11,6 +15,21 @@ export function setupRoutes(): Hono<AppEnv> {
   routes.get('/status', async (c) => {
     const status = await getSetupStatus(c.env.DB);
     return c.json({ data: status });
+  });
+
+  routes.post('/claim', async (c) => {
+    const body = setupClaimRequestSchema.parse(await c.req.json());
+    const expectedToken = await readSecret(c.env.INSTALLATION_TOKEN);
+    const result = await claimSetup(
+      {
+        db: c.env.DB,
+        setupSessionStore: c.env.SETUP_SESSION,
+        expectedToken,
+        providedToken: body.token,
+      },
+      { clock: systemClock, ids: systemIds },
+    );
+    return c.json({ data: result });
   });
 
   return routes;

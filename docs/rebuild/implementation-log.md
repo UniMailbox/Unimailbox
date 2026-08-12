@@ -23,6 +23,27 @@ Format:
 
 ---
 
+## 2026-08-12 — CAP-008 Setup claim endpoint  |  Implemented
+
+**Changed:** `POST /api/v1/setup/claim` validates the `INSTALLATION_TOKEN` with constant-time comparison, creates a 30-minute KV setup session, and seeds `installation_state` to `current_step='preflight'`. Wrong token → 401, missing/empty token → 400, already complete → 409. Error middleware replaced — DomainError → httpStatus, ZodError → 400, SyntaxError → 400, unknown → 500 with log.
+
+**Files:** `apps/worker/src/modules/onboarding/claim-setup.ts` (new — claimSetup use case) · `apps/worker/src/modules/onboarding/installation-state-repository.ts` (added seedInstallationState) · `apps/worker/src/modules/onboarding/index.ts` (export claimSetup) · `apps/worker/src/http/routes/setup.ts` (added POST /claim) · `apps/worker/src/http/middleware/error.ts` (real error mapping) · `apps/worker/src/platform/crypto.ts` (constantTimeCompare) · `apps/worker/src/platform/secrets.ts` (new — readSecret helper) · `apps/worker/wrangler.test.jsonc` (new — test wrangler config) · `packages/contracts/src/index.ts` (setupClaimRequestSchema) · `apps/worker/src/http/routes/claim.worker.test.ts` (new — 13 worker-pool tests) · `apps/worker/src/http/middleware/error.test.ts` (new — 6 unit tests) · `apps/worker/src/platform/crypto.test.ts` (new — 7 unit tests) · `apps/worker/src/platform/secrets.test.ts` (new — 3 unit tests)
+
+**Rules:** Constant-time compare per security.md §Passwords / ADR-006. Secrets never logged per R-SECRET-003.
+
+**Decisions:**
+- `readSecret` helper bridges `SecretsStoreSecret` (prod: `.get()`) and `string` (test: miniflare vars). Keeps Cloudflare types out of the use case.
+- `wrangler.test.jsonc` — miniflare cannot populate `secrets_store_secrets` values. Test config uses `vars` instead. Cross-reference comments added to both wrangler files. Drift risk tracked as D-CAP-008-A.
+- Error middleware: `DomainError` → httpStatus, `ZodError` → 400 VALIDATION_ERROR, `SyntaxError` → 400 (JSON parse failures), unknown → 500 INTERNAL with `console.error` log. Uses `Response.json()` (Web API static) not `c.json()`.
+- `ON CONFLICT DO NOTHING` seed — idempotent. Re-claiming after session expiry preserves existing `current_step`.
+- Timestamps use SQLite `datetime()` format (`YYYY-MM-DD HH:MM:SS`) to match the DDL default and test-kit convention.
+- Idempotency-Key deferred to CAP-027 (D-CAP-008-B). Phase 0 has no idempotency infrastructure.
+- requestId in error envelope deferred (D-CAP-008-C / D-CAP-006-B).
+
+**Deferred:** D-CAP-008-A (doctor check for wrangler.test.jsonc drift), D-CAP-008-B (idempotency on /claim → CAP-027), D-CAP-008-C (requestId in error envelope → D-CAP-006-B).
+
+**Notes:** Two reviewers ran (architecture ACCEPT WITH NOTES, code ACCEPT WITH NOTES). Architecture MEDIUM on wrong rule citations (R-AUTH-006, R-SECRET-001 were incorrect — fixed to cite security.md §Passwords / ADR-006 / R-SECRET-003). Code HIGH on missing error middleware unit tests (AC #7 unmet — added error.test.ts with 6 cases). Implementer's original test/setup.ts monkey-patching was broken (ran in Node.js, not workerd) — replaced with wrangler.test.jsonc approach.
+
 ## 2026-08-12 — CAP-007 Setup status endpoint  |  Implemented
 
 **Changed:** `GET /api/v1/setup/status` returns the current installation state in the success envelope `{ "data": { "status", "currentStep" } }`. On a fresh DB (no `installation_state` row), defaults to `{ "status": "setup", "currentStep": "claim" }`. This is the first real API route and establishes the route-handler + sub-app pattern for all future setup endpoints.

@@ -1,6 +1,10 @@
 // CAP-001 — wrangler config skeleton.
 // Auto-provisions every binding the system will eventually use.
 // Real handler bodies land with later capabilities (CAP-006+).
+//
+// NOTE: wrangler.test.jsonc mirrors the binding topology for worker-pool tests
+// (replacing secrets_store_secrets with vars). When you add a binding here,
+// add it there too — the two files must stay in lockstep.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unimailbox-worker",

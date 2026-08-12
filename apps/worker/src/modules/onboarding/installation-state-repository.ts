@@ -5,7 +5,7 @@
 // so there is at most one row. A missing row means the database is fresh and the
 // setup wizard has not been claimed yet — callers receive null.
 
-import { installationStateInfoSchema, type InstallationStateInfo } from '@unimailbox/contracts';
+import { installationStateInfoSchema, type InstallationStateInfo, type InstallationStep } from '@unimailbox/contracts';
 import type { Database } from '../../platform/database';
 
 /**
@@ -36,4 +36,25 @@ export async function getInstallationState(
     status: result.status,
     currentStep: result.current_step,
   });
+}
+
+/**
+ * Seeds the installation_state row (id = 1) if it does not exist.
+ * Uses ON CONFLICT DO NOTHING for idempotency — does not overwrite an
+ * existing row (R-SETUP-002). If the operator re-claims after session expiry,
+ * the existing current_step is preserved.
+ */
+export async function seedInstallationState(
+  db: Database,
+  currentStep: InstallationStep,
+  timestamp: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO installation_state (id, status, current_step, schema_version, updated_at, created_at)
+       VALUES (1, 'setup', ?, 1, ?, ?)
+       ON CONFLICT(id) DO NOTHING`,
+    )
+    .bind(currentStep, timestamp, timestamp)
+    .run();
 }
