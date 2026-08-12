@@ -24,6 +24,7 @@
   },
   "files": [],
   "references": [
+    { "path": "./scripts" },
     { "path": "./packages/contracts" },
     { "path": "./packages/email-core" },
     { "path": "./packages/config" },

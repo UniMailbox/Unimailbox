@@ -6,6 +6,7 @@
 /**/.wrangler
 /apps/*/dist
 /packages/*/dist
+/scripts/dist
 
 # --- wrangler-generated types (`wrangler types` regenerates on every deploy) ---
 /apps/worker/worker-configuration.d.ts

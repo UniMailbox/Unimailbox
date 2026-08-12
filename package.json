@@ -23,7 +23,8 @@
     "test:worker": "vitest run --project workers",
     "test:watch": "vitest --watch",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "scaffold": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/scaffold.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
