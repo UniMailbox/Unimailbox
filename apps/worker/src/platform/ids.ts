@@ -8,5 +8,3 @@ export interface IdGenerator {
 export const systemIds: IdGenerator = {
   uuid: (): string => crypto.randomUUID(),
 };
-
-export {};

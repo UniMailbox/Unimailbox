@@ -18,20 +18,23 @@
     "clean": "pnpm --filter @unimailbox/worker run clean && pnpm --filter @unimailbox/web run clean",
     "dev:worker": "pnpm --filter @unimailbox/worker run dev",
     "dev:web": "pnpm --filter @unimailbox/web run dev",
-    "test": "pnpm run test:unit && pnpm run test:worker",
-    "test:unit": "pnpm -r --workspace-concurrency=1 --if-present run test:unit",
-    "test:worker": "pnpm -r --workspace-concurrency=1 --if-present run test:worker",
+    "test": "vitest run",
+    "test:unit": "vitest run --project '!workers'",
+    "test:worker": "vitest run --project workers",
+    "test:watch": "vitest --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "@types/node": "22.10.5",
+    "@vitest/coverage-v8": "4.1.10",
     "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "3.6.3",
     "eslint-plugin-import": "2.32.0",
     "prettier": "3.6.2",
     "typescript": "5.5.4",
-    "typescript-eslint": "8.46.4"
+    "typescript-eslint": "8.46.4",
+    "vitest": "4.1.10"
   }
 }

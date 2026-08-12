@@ -1,18 +1,41 @@
 /**
  * @unimailbox/test-kit
  *
- * Shared test fixtures and helpers. Real builders / fake clocks / factories
- * land with CAP-002 (test harness). CAP-001 ships a single placeholder so
- * the build pipeline can resolve the package from any workspace member.
+ * Shared test fixtures, helpers, and stubs. Single public entry point.
+ *
+ * Exports:
+ *   fakeClock(initial)               — deterministic Clock for domain code
+ *   fixedIds(...values)              — deterministic IdGenerator
+ *   fixtures.user({...})             — User row builder
+ *   fixtures.userRole({...})         — user_roles row builder (admin lives here, not on user)
+ *   fixtures.installationState({...}) — installation_state row builder
+ *   stubOutboundAdapter()            — recorder OutboundProviderAdapter
+ *   stubFetch()                      — canned-response fetch replacement
+ *
+ * What this package must NOT do:
+ *   - Import from `apps/worker` (would create a cycle through the harness).
+ *   - Mock D1/R2/KV/Queue (per .claude/rules/testing.md §Mocking).
+ *   - Call `Date.now()` / `crypto.randomUUID()` (determinism rule).
+ *
+ * The package depends only on `@unimailbox/contracts` for shared types.
  */
-
-/**
- * Returns a no-op async function. Useful as the seed of a builder until the
- * real test harness lands. Discouraged in production code — this exists to
- * prove the package boundary.
- */
-export const placeholderHelper = async (): Promise<void> => {
-  await Promise.resolve();
-};
-
-export {};
+export { fakeClock, type FakeClock } from './clock';
+export { fixedIds, type FixedIdGenerator } from './ids';
+export {
+  fixtures,
+  user,
+  userRole,
+  installationState,
+  type UserRowShape,
+  type UserRoleRowShape,
+  type InstallationStateRowShape,
+  type FixtureOverrides,
+} from './fixtures';
+export {
+  stubOutboundAdapter,
+  stubFetch,
+  type StubOutboundAdapter,
+  type RecordedSend,
+  type StubFetch,
+  type FetchHandler,
+} from './stubs';

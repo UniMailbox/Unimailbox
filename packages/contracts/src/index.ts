@@ -26,3 +26,83 @@ export const uuidSchema = z.string().uuid();
 
 export type Uuid = z.infer<typeof uuidSchema>;
 export type EmailAddress = z.infer<typeof emailAddressSchema>;
+
+// ---------------------------------------------------------------------------
+// Provider plugin interface — see docs/rebuild/05-target-architecture/integration-boundaries.md
+// ---------------------------------------------------------------------------
+
+/**
+ * Branded provider key. Prevents `string` from being passed where a concrete
+ * provider is required; e.g. `parseProviderKey('brevo')` is the only way to
+ * materialise one.
+ */
+export type ProviderKey = string & { readonly __brand: 'ProviderKey' };
+
+export function parseProviderKey(value: string): ProviderKey {
+  return value as ProviderKey;
+}
+
+/** MailAddress — provider-neutral. */
+export interface MailAddress {
+  readonly address: EmailAddress;
+  readonly displayName?: string;
+}
+
+/** Provider-neutral attachment payload. */
+export interface ProviderAttachment {
+  readonly filename: string | null;
+  readonly contentType: string;
+  readonly disposition: 'attachment' | 'inline';
+  readonly contentId?: string;
+  readonly content: ArrayBuffer;
+}
+
+/** Provider-neutral send payload. */
+export interface SendProviderMessage {
+  readonly idempotencyKey: string;
+  readonly from: MailAddress;
+  readonly to: ReadonlyArray<MailAddress>;
+  readonly cc: ReadonlyArray<MailAddress>;
+  readonly bcc: ReadonlyArray<MailAddress>;
+  readonly subject: string;
+  readonly html: string;
+  readonly text: string;
+  readonly messageId?: string;
+  readonly inReplyTo?: string;
+  readonly references?: string;
+  readonly attachments: ReadonlyArray<ProviderAttachment>;
+}
+
+export interface ProviderSendResult {
+  readonly providerMessageId: string;
+  readonly acceptedAt: string;
+}
+
+/**
+ * Runtime context handed to every adapter call. The minimal shape is
+ * `{ env: Env }` for now; the full context (request id, logger, secrets
+ * accessor) lands with the outbound-mail module.
+ */
+export interface ProviderRuntimeContext {
+  readonly env: {
+    readonly ENVIRONMENT?: string;
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * OutboundProviderAdapter — the single seam between domain code and any
+ * concrete email-sending provider (Brevo, Resend, CF-Sendmail, etc.).
+ *
+ * Modules depend on this interface — never on a provider SDK directly
+ * (.claude/rules/architecture.md §Forbidden). Adapters live in
+ * `apps/worker/src/integrations/providers/*` and own the SDK calls.
+ */
+export interface OutboundProviderAdapter {
+  readonly key: ProviderKey;
+  validateConnection(ctx: ProviderRuntimeContext): Promise<void>;
+  send(
+    ctx: ProviderRuntimeContext,
+    msg: SendProviderMessage,
+  ): Promise<ProviderSendResult>;
+}

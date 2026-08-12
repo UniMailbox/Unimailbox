@@ -7,6 +7,10 @@
 /apps/*/dist
 /packages/*/dist
 
+# --- wrangler-generated types (`wrangler types` regenerates on every deploy) ---
+/apps/worker/worker-configuration.d.ts
+/**/worker-configuration.d.ts
+
 # --- TS incremental build cache ---
 *.tsbuildinfo
 .tsbuildinfo
@@ -14,6 +18,8 @@
 /**/.tsbuildinfo
 
 # --- dependencies ---
+node_modules
+**/node_modules/
 /node_modules
 /.pnp
 .pnp.js

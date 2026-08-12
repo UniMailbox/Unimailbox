@@ -23,6 +23,109 @@ Format:
 
 ---
 
+## 2026-08-12 — CAP-002 Test harness (unit + worker pool)  |  Implemented
+
+**Changed:** The repository now has a working vitest harness covering all
+seven workspace projects. `pnpm test:unit` runs every non-worker project
+(`apps/worker` unit, `packages/contracts`, `packages/email-core`,
+`packages/config`, `packages/config`, `packages/test-kit`, `apps/web`) —
+6 files, 31 tests. `pnpm test:worker` runs the cloudflare pool against
+real D1/R2/KV/Queue bindings via `wrangler.jsonc` — 4 files, 10 tests.
+`pnpm test` runs both in sequence — 10 files, 41 tests, under 1 second.
+`pnpm exec vitest --project unit run --coverage --coverage.provider=v8`
+reports 100% lines covered in `apps/worker/src/platform/**` and
+`packages/email-core/**` against the 70% threshold (D-CAP-002-A: workers-pool
+coverage deferred). `packages/test-kit` exports `fakeClock`, `fixedIds`,
+`fixtures.{user,userRole,installationState}`, `stubOutboundAdapter`, and
+`stubFetch`. The stub implements the spec-shaped `OutboundProviderAdapter`
+(`key`, `validateConnection`, `send(ctx, msg)`) so it cannot drift before
+real adapters land.
+
+**Files:**
+- `vitest.config.ts` — root workspace with 7 projects; coverage block
+  moved here (per-project coverage is inert in vitest 4 projects mode)
+- `apps/worker/vitest.unit.config.ts` — exclude `*.worker.test.ts`
+- `apps/worker/vitest.workers.config.ts` — include `*.worker.test.ts`
+- `apps/worker/src/platform/{clock,ids,outbound-adapter}.test.ts` — unit tests
+  with compile-time interface checks (`const c: Clock = fakeClock(...)`)
+- `apps/worker/src/platform/{database,cache}.worker.test.ts` — real-binding
+  tests against D1/KV
+- `apps/worker/src/http/router.worker.test.ts` — `SELF.fetch()` against
+  `/healthz` (no `as unknown as Env` cast)
+- `apps/worker/src/entrypoints/inbound-email.worker.test.ts` — cloudflare
+  pool stub-flow test
+- `apps/worker/test/setup.ts` — `process` import fixed, console silenced
+- `packages/contracts/src/index.ts` — `OutboundProviderAdapter` reconciled
+  with `docs/rebuild/05-target-architecture/integration-boundaries.md`:
+  `readonly key: ProviderKey` (branded), `validateConnection(ctx)`,
+  `send(ctx, msg)`. `SendProviderMessage`, `ProviderSendResult`,
+  `ProviderRuntimeContext`, `MailAddress`, `ProviderAttachment`,
+  `parseProviderKey` added.
+- `packages/test-kit/src/{stubs,fixtures,clock,ids,index}.ts` — stub
+  implements the spec interface; `isAdministrator` removed from
+  `UserRowShape`; `passwordHash` removed (deferred to CAP-004 per
+  ADR-006); `userRole` builder added; `RecordedSend.at` renamed to
+  `sequence`; `stubFetch` URL-normalises
+- `packages/{email-core,config,test-kit}/package.json`,
+  `apps/{worker,web}/package.json` — `@unimailbox/test-kit` declared as
+  a workspace dep where tests need it; per-package `test*` scripts
+  deleted (root is the only supported entry point)
+- `work/active/CAP-002-test-harness/task.md` — criteria #10 (workers-pool
+  coverage deferred) and #11 (contracts cycle) amended; D-CAP-002-A/B/C
+  recorded
+- `docs/rebuild/capability-ledger.md` — CAP-002 row → Implemented; three
+  deferred items appended
+
+**Rules:** No business rules implemented. The capability's job is to
+enforce the testing rules from `.claude/rules/testing.md` so every later
+capability's tests are produced under them.
+
+**Decisions:**
+- **Filename convention for pool tests.** `*.worker.test.ts` for files
+  that need real bindings; the unit project excludes that glob, the
+  workers project includes it. One rule, no hand-maintained list.
+- **`@unimailbox/test-kit` ↔ `@unimailbox/contracts` cycle.** Documented
+  as a deliberate exception in criterion #11. If a future capability
+  needs contract tests that use `test-kit` helpers, the helper is moved
+  to `packages/contracts/src/test-helpers` and re-exported.
+- **`UserRowShape` no longer carries `passwordHash`.** The previous
+  `$`-delimited string violated ADR-006. The four-column shape
+  (`passwordAlgorithm`, `passwordIterations`, `passwordSalt`,
+  `passwordHash`) lands with CAP-004 (identity). Until then, the fixture
+  is the minimal row (id, email, timestamps).
+- **`OutboundProviderAdapter` reconciled with the spec now.** Cost: one
+  shape change before anyone imports it. Cost of deferring: a breaking
+  TypeScript change for every consumer plus the stub when the first real
+  adapter (CAP-014) lands.
+
+**Deferred:** Recorded in `docs/rebuild/capability-ledger.md` §Deferred items:
+- **D-CAP-002-A** — `@vitest/coverage-v8` is incompatible with workerd
+  (`node:inspector/promises` is unavailable). The first capability that
+  needs workers-pool coverage will switch to `@vitest/coverage-istanbul`
+  or move the measurement to the unit project.
+- **D-CAP-002-B** — `packages/test-kit` depends on `@unimailbox/contracts`,
+  so `contracts` cannot import `test-kit` (cycle). Recorded as the
+  reason criterion #11 excludes `packages/contracts`.
+- **D-CAP-002-C** — `UserRowShape.passwordHash` deferred to CAP-004
+  (identity). The fixture sets the row shape for the table that owns
+  the storage.
+
+**Notes:**
+- The block-on-cast defect (B2) deserves a wider callout: the legacy
+  system was riddled with `setting` rows that carried both a boolean
+  and a settings table, and those diverged. The fixture is the cheapest
+  place to be honest about the schema; future capabilities must read it.
+- Two reviewers (architecture + code) flagged the same root cause
+  independently: the harness shipped with the *minimum* shape that
+  proved the setup, but did not validate itself against the spec it
+  was supposed to enable. The fix pass is mostly about aligning the
+  harness with the spec, not adding behaviour.
+- No commit was made. The orchestrator is awaiting confirmation per
+  `.claude/rules/git.md` ("Agents do not commit or push unless explicitly
+  asked"). The working tree is dirty by design.
+
+---
+
 ## 2026-08-12 — CAP-001 Monorepo scaffold + toolchain  |  Implemented
 
 **Changed:** A clean checkout of this repo now runs `pnpm install` and `pnpm build` (worker + web)

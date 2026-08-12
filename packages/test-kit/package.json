@@ -15,9 +15,13 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc --build",
-    "clean": "rm -rf dist .tsbuildinfo",
-    "test:unit": "echo \"(test-kit: no unit tests yet)\" && exit 0",
-    "test:worker": "echo \"(test-kit: no worker tests yet)\" && exit 0"
+    "clean": "rm -rf dist .tsbuildinfo"
+  },
+  "dependencies": {
+    "@unimailbox/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "4.1.10"
   },
   "peerDependencies": {
     "vitest": "*"

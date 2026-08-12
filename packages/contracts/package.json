@@ -16,10 +16,12 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist .tsbuildinfo",
-    "test:unit": "echo \"(contracts: no unit tests yet)\" && exit 0",
-    "test:worker": "echo \"(contracts: no worker tests yet)\" && exit 0"
+    "test:unit": "vitest run --project unit"
   },
   "dependencies": {
     "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "vitest": "4.1.10"
   }
 }

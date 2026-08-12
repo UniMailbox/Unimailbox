@@ -5,7 +5,8 @@
     "rootDir": "./src",
     "outDir": "./dist",
     "tsBuildInfoFile": "./.tsbuildinfo",
-    "types": []
+    "lib": ["ES2022", "DOM"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

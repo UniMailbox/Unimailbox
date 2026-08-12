@@ -14,6 +14,7 @@ export default [
       '**/.wrangler/**',
       '**/node_modules/**',
       '**/.tsbuildinfo',
+      '**/worker-configuration.d.ts',
       '.tmp/**',
       'work/archive/**',
       'work/handoffs/**',

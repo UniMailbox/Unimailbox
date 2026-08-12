@@ -10,5 +10,3 @@ export const systemClock: Clock = {
   now: (): Date => new Date(),
   unixMs: (): number => Date.now(),
 };
-
-export {};
