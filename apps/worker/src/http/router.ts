@@ -4,6 +4,7 @@
 import { Hono } from 'hono';
 import { requestId } from './middleware/request-id';
 import { setupGate } from './middleware/setup-gate';
+import { setupRoutes } from './routes/setup';
 import type { AppEnv } from '../platform/env';
 
 export function buildRouter(): Hono<AppEnv> {
@@ -15,6 +16,9 @@ export function buildRouter(): Hono<AppEnv> {
 
   // R-SETUP-003: /healthz is exempt from the setup gate and always reachable.
   router.get('/healthz', (c) => c.json({ ok: true, surface: 'router' }));
+
+  // Setup API routes.
+  router.route('/api/v1/setup', setupRoutes());
 
   return router;
 }

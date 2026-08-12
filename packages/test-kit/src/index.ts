@@ -13,6 +13,9 @@
  *   stubFetch()                      — canned-response fetch replacement
  *   migrationsDb()                   — D1 binding with 0001_initial.sql applied
  *                                     (worker-pool only)
+ *   resetAndMigrate()                — reset + apply migrations (worker-pool only)
+ *   seedInstallationState({...})     — insert the installation_state row (worker-pool only)
+ *   FIXED_TIMESTAMP                  — '2026-01-01 00:00:00' for deterministic seeds
  *
  * What this package must NOT do:
  *   - Import from `apps/worker` (would create a cycle through the harness).
@@ -42,3 +45,9 @@ export {
   type FetchHandler,
 } from './stubs';
 export { migrationsDb } from './migrationsDb';
+export {
+  FIXED_TIMESTAMP,
+  resetAndMigrate,
+  seedInstallationState,
+  type SeedInstallationStateOptions,
+} from './seed';

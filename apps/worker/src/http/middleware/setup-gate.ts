@@ -17,7 +17,7 @@
 import type { MiddlewareHandler } from 'hono';
 import type { InstallationStateInfo } from '@unimailbox/contracts';
 import type { AppEnv } from '../../platform/env';
-import { getInstallationState } from '../../modules/onboarding';
+import { getSetupStatus } from '../../modules/onboarding';
 
 /**
  * Setup-gate middleware. Reads installation state on every request and redirects
@@ -45,11 +45,11 @@ export const setupGate: MiddlewareHandler<AppEnv> = async (c, next) => {
     return await next();
   }
 
-  // Read installation state. A missing row means the DB is fresh — treat as
-  // incomplete (R-SETUP-002).
-  let state: InstallationStateInfo | null;
+  // Read installation state. A missing row means the DB is fresh — getSetupStatus
+  // returns { status: 'setup', currentStep: 'claim' } for a fresh DB (R-SETUP-002).
+  let state: InstallationStateInfo;
   try {
-    state = await getInstallationState(c.env.DB);
+    state = await getSetupStatus(c.env.DB);
   } catch (err) {
     // R-SETUP-004: fail-closed — a broken DB must not expose the app.
     // Log the error so a DB outage is distinguishable from a genuine fresh
@@ -62,8 +62,8 @@ export const setupGate: MiddlewareHandler<AppEnv> = async (c, next) => {
     return c.redirect('/setup', 302);
   }
 
-  // If state is null (fresh DB) or status is not 'complete', redirect to /setup.
-  if (!state || state.status !== 'complete') {
+  // If status is not 'complete', redirect to /setup.
+  if (state.status !== 'complete') {
     return c.redirect('/setup', 302);
   }
 

@@ -23,6 +23,25 @@ Format:
 
 ---
 
+## 2026-08-12 — CAP-007 Setup status endpoint  |  Implemented
+
+**Changed:** `GET /api/v1/setup/status` returns the current installation state in the success envelope `{ "data": { "status", "currentStep" } }`. On a fresh DB (no `installation_state` row), defaults to `{ "status": "setup", "currentStep": "claim" }`. This is the first real API route and establishes the route-handler + sub-app pattern for all future setup endpoints.
+
+**Files:** `apps/worker/src/modules/onboarding/setup-status.ts` (new — `getSetupStatus` use case) · `apps/worker/src/modules/onboarding/index.ts` (exports `getSetupStatus`, repository now private) · `apps/worker/src/http/routes/setup.ts` (new — setup sub-app) · `apps/worker/src/http/router.ts` (mounts sub-app at `/api/v1/setup`) · `apps/worker/src/http/middleware/setup-gate.ts` (imports `getSetupStatus`, null branch removed) · `apps/worker/src/http/routes/setup-status.worker.test.ts` (new, 9 cases) · `packages/test-kit/src/seed.ts` (new — `seedInstallationState`, `resetAndMigrate`, `FIXED_TIMESTAMP`) · `packages/test-kit/src/index.ts` (exports seed helpers) · `scripts/doctor.ts` (intra-module self-import fix) · `apps/worker/src/http/middleware/setup-gate.worker.test.ts` (updated: uses test-kit helpers, `/status` now 200 not 404)
+
+**Rules:** R-SETUP-002 (fresh DB defaults to `claim`), R-SETUP-003 (setup routes exempt from gate)
+
+**Decisions:**
+- `getSetupStatus` absorbs the null case: the repository returns `null` for a fresh DB; the use case returns `{ status: 'setup', currentStep: 'claim' }`. Callers never handle null (resolves D-CAP-006-C).
+- Setup routes sub-app (`http/routes/setup.ts`): a Hono sub-app for `/api/v1/setup/*`. CAP-008 (claim) and CAP-009 (preflight) will add routes to the same file.
+- Response shape is `{ "data": InstallationStateInfo }` — returns both `status` and `currentStep`. The acceptance criterion mentions only `currentStep`, but the React client needs `status` to redirect away from `/setup` when installation is complete.
+- Test helpers promoted to test-kit (`packages/test-kit/src/seed.ts`): `seedInstallationState`, `resetAndMigrate`, `FIXED_TIMESTAMP` were duplicated across two test files (resolves D-CAP-006-A). `seedInstallationState`'s `currentStep` typed as `InstallationStep` from contracts, not `string`.
+- Doctor `module-dependency-zones` fix: intra-module self-imports (`t !== m`) are now allowed. The check was a latent false positive — `setup-status.ts` importing `./installation-state-repository` (same module) was flagged because `ALLOWED['onboarding']` doesn't contain `'onboarding'`. Self-imports are always legal; the zone rules govern cross-module edges only.
+
+**Deferred:** D-CAP-007-A (endpoint DB-failure test — error middleware is a CAP-001 stub). D-CAP-006-A and D-CAP-006-C resolved.
+
+**Notes:** Two reviewers ran (architecture ACCEPT WITH NOTES, code ACCEPT WITH NOTES). Architecture reviewer's LOW claiming the doctor fix was a no-op was factually incorrect — `ALLOWED.onboarding` does NOT contain `'onboarding'`, so the `t !== m` guard is necessary. Code review MEDIUM (duplicated test helpers) addressed by promoting to test-kit. Setup-gate CAP-006 test for `/api/v1/setup/status` updated from 404 → 200 (endpoint now has a handler).
+
 ## 2026-08-12 — CAP-006 Setup gate  |  Implemented
 
 **Changed:** While `installation_state.status !== 'complete'` (or the row is absent on a fresh DB), every non-setup HTTP route now 302-redirects to `/setup`. Exempt paths: `/healthz`, `/setup`, `/setup/*`, `/api/v1/setup/*`. This is the gate that forces the operator through the setup wizard before any other route is reachable.

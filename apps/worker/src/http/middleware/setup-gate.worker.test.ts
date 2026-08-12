@@ -9,32 +9,12 @@
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF } from 'cloudflare:test';
-import { migrationsDb } from '@unimailbox/test-kit';
-
-// Fixed timestamp — determinism rule (testing.md §Determinism).
-const FIXED_TIMESTAMP = '2026-01-01 00:00:00';
-
-async function resetAndMigrate() {
-  const { reset } = await import('cloudflare:test');
-  await reset();
-  await migrationsDb();
-}
+import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 
 /** Reset without migrating — the installation_state table won't exist. */
 async function resetWithoutMigrate() {
   const { reset } = await import('cloudflare:test');
   await reset();
-}
-
-async function seedInstallationState(status: 'setup' | 'complete', currentStep: string) {
-  const db = await migrationsDb();
-  await db
-    .prepare(
-      `INSERT INTO installation_state (id, status, current_step, schema_version, updated_at, created_at)
-       VALUES (1, ?, ?, 1, ?, ?)`,
-    )
-    .bind(status, currentStep, FIXED_TIMESTAMP, FIXED_TIMESTAMP)
-    .run();
 }
 
 describe('setup-gate middleware', () => {
@@ -64,7 +44,7 @@ describe('setup-gate middleware', () => {
   describe('R-SETUP-001: status = setup (installation incomplete)', () => {
     beforeEach(async () => {
       await resetAndMigrate();
-      await seedInstallationState('setup', 'claim');
+      await seedInstallationState({ status: 'setup', currentStep: 'claim' });
     });
 
     it('redirects GET / to /setup with 302', async () => {
@@ -98,9 +78,11 @@ describe('setup-gate middleware', () => {
       expect(response.headers.get('Location')).toBeNull();
     });
 
-    it('/api/v1/setup/status is exempt — returns 404', async () => {
+    // CAP-007 added GET /api/v1/setup/status — it now returns 200 instead of
+    // 404. The test still proves the path is exempt (not redirected).
+    it('/api/v1/setup/status is exempt — returns 200 (has handler)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/status');
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
     });
 
@@ -126,7 +108,7 @@ describe('setup-gate middleware', () => {
   describe('status = complete (installation complete)', () => {
     beforeEach(async () => {
       await resetAndMigrate();
-      await seedInstallationState('complete', 'complete');
+      await seedInstallationState({ status: 'complete', currentStep: 'complete' });
     });
 
     it('GET / does NOT redirect — falls through to normal router (404)', async () => {
@@ -152,7 +134,7 @@ describe('setup-gate middleware', () => {
   describe('path exemption variations', () => {
     beforeEach(async () => {
       await resetAndMigrate();
-      await seedInstallationState('setup', 'claim');
+      await seedInstallationState({ status: 'setup', currentStep: 'claim' });
     });
 
     it('/setup/step1 is exempt', async () => {

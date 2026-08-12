@@ -142,7 +142,10 @@ async function checkModuleDependencyZones(): Promise<R> {
       let match: RegExpExecArray | null;
       while ((match = importRe.exec(src)) !== null) {
         const t = targetModule(match[1] ?? '', f);
-        if (t && !ALLOWED[m]?.has(t)) bad.push(`${m} → ${t}`);
+        // Intra-module imports (a file in `onboarding` importing a sibling in
+        // `onboarding`) are always allowed — the dependency-zone rules govern
+        // cross-module edges only.
+        if (t && t !== m && !ALLOWED[m]?.has(t)) bad.push(`${m} → ${t}`);
       }
     }
   }

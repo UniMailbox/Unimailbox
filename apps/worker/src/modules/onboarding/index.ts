@@ -1,4 +1,5 @@
 // modules/onboarding — owner of installation_state, registration_keys.
-// Exports: getInstallationState — reads the single installation_state row.
+// Exports: getSetupStatus — the installation-state use case.
+// The repository (getInstallationState) is private (D-CAP-006-C).
 
-export { getInstallationState } from './installation-state-repository';
+export { getSetupStatus } from './setup-status';
