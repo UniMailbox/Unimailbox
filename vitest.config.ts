@@ -21,6 +21,7 @@ export default defineConfig({
       './packages/email-core/vitest.config.ts',
       './packages/config/vitest.config.ts',
       './packages/test-kit/vitest.config.ts',
+      './packages/test-kit/vitest.workers.config.ts',
     ],
     coverage: {
       provider: 'v8',

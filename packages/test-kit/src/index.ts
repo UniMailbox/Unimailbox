@@ -11,6 +11,8 @@
  *   fixtures.installationState({...}) — installation_state row builder
  *   stubOutboundAdapter()            — recorder OutboundProviderAdapter
  *   stubFetch()                      — canned-response fetch replacement
+ *   migrationsDb()                   — D1 binding with 0001_initial.sql applied
+ *                                     (worker-pool only)
  *
  * What this package must NOT do:
  *   - Import from `apps/worker` (would create a cycle through the harness).
@@ -39,3 +41,4 @@ export {
   type StubFetch,
   type FetchHandler,
 } from './stubs';
+export { migrationsDb } from './migrationsDb';

@@ -13,6 +13,7 @@
     "@unimailbox/config": "workspace:*",
     "@unimailbox/contracts": "workspace:*",
     "@unimailbox/email-core": "workspace:*",
+    "drizzle-orm": "0.44.5",
     "hono": "4.6.20"
   },
   "devDependencies": {

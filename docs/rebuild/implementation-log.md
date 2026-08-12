@@ -23,6 +23,99 @@ Format:
 
 ---
 
+## 2026-08-12 — CAP-004 Initial D1 schema + migration runner  |  Implemented
+
+**Changed:** Every Phase 0 capability can now persist to D1. The 11 tables the
+installer, identity, outbound-mail and admin code paths read and write
+(`installation_state`, `system_settings`, `users`, `sessions`,
+`encrypted_credentials`, `permissions`, `roles`, `role_permissions`,
+`user_roles`, `audit_events`, `maintenance_jobs`) exist as a single migration
+under `migrations/0001_initial.{sql,verify.sql,md}`. The Drizzle typed schemas
+at `apps/worker/src/database/schema/{identity,onboarding,admin,outbound-mail}.ts`
+mirror the SQL for repository-side typing; the SQL in `migrations/` is the
+deployable artifact per `data-model.md` §Migration authority. A new
+`scripts/db-migrate.ts` applies pending migrations against the local D1 binding
+via `wrangler d1 execute --local`, with apply and tracking-row insert atomic
+in the same D1 batch. `pnpm scaffold db:migrate [--reset] [--verify]` is the
+single command; the same runner handles fresh apply, idempotent re-run, and
+ghost-detection (`Migration file(s) missing from disk but recorded in
+d1_migrations` → exit 1). A new `packages/test-kit/src/migrationsDb.ts`
+exposes a worker-pool D1 fixture that every later capability can use in tests
+against a real D1 binding (no D1 mocking per `.claude/rules/testing.md`
+§Mocking). `pnpm scaffold doctor` `schema-version` check now actually
+verifies against the highest migration prefix and the `CURRENT_SCHEMA_VERSION`
+sentinel at `apps/worker/src/database/schema-version.ts`; it will break the
+moment a future capability adds a migration without bumping the sentinel.
+
+**Files:**
+- `migrations/0001_initial.sql` (~250 lines, 11 tables + indexes + checks)
+- `migrations/0001_initial.verify.sql` (53 assertions, one per row)
+- `migrations/0001_initial.md` (compatibility, backfill, recovery, tracking convention)
+- `apps/worker/src/database/schema/{identity,onboarding,admin,outbound-mail,index}.ts`
+- `apps/worker/src/database/schema-version.ts`
+- `apps/worker/drizzle.config.ts`
+- `scripts/db-migrate.ts`
+- `scripts/scaffold.ts` (extended dispatcher)
+- `scripts/doctor.ts` (migrations-present/ordered skip `.verify.sql` companions; schema-version parses CURRENT_SCHEMA_VERSION)
+- `packages/test-kit/src/migrationsDb.ts` (worker-pool D1 fixture)
+- `packages/test-kit/src/migrationsDb.worker.test.ts` (R-DATA-001, R-DATA-004, R-AUTH-002, ADR-006, R-AUTH-006-PBKDF2-floor)
+- `packages/test-kit/src/sql-raw.d.ts` (`?raw` + `cloudflare:test` declarations)
+- `packages/test-kit/src/fixtures.ts` (`installationState.status` aligned to SQL CHECK)
+- `packages/test-kit/vitest.workers.config.ts` (new worker-pool project)
+- `apps/worker/package.json` (drizzle-orm 0.44.5)
+- `package.json` (drizzle-kit 0.31.5 devDep; test:worker runs both worker-pool projects)
+- `.gitignore` (`/migrations/drizzle/`)
+
+**Rules:** R-AUTH-002 (status CHECK), R-AUTH-003 (sessions eviction index),
+R-AUTH-005 (sessions CASCADE), R-AUTH-009 (email NOCASE), R-DATA-001 (NOCASE
+everywhere), R-DATA-003 (users.deleted_at), R-DATA-004 (FK PRAGMA verified),
+R-DATA-005 (no JSON-in-text except the documented audit_events.metadata).
+ADR-006 (PBKDF2 4-column shape, floor 100k schema-side). ADR-007 (AES-GCM
+exact-length CHECKs on iv=12, auth_tag=16).
+
+**Decisions:**
+- 11 tables in one migration (0001_initial.sql) — they are one
+  "create the schema" event; later migrations are incremental. Logged in
+  `migrations/0001_initial.md` §Companion files.
+- audit_events.metadata is `TEXT` (JSON) — the explicit R-DATA-005 exception,
+  capped at 65536 bytes via CHECK. Documented in
+  `migrations/0001_initial.md` §Explicit exception to R-DATA-005.
+- Soft-delete only on `users` for now; other tables get `deleted_at` when
+  their owning capability lands.
+- CASCADE for hard ownership (sessions → users, role_permissions, user_roles);
+  SET NULL for soft references (audit_events.actor_user_id, user_roles.granted_by).
+- wrangler native `d1_migrations` table is created by the migration itself
+  (F1) so apply+track are atomic in one D1 batch; no custom tracking table.
+- db:reset is local-only (ENVIRONMENT=local or unset) per task.md AC #15.
+
+**Deferred:** D-CAP-004-A — `users.password_iterations` schema floor is
+100,000, weaker than ADR-006's 600,000. The application layer (CAP-019)
+sets the exact floor. D-CAP-004-B — `UserId` and cross-boundary types must
+live in `packages/contracts/` before repositories land. D-CAP-004-C —
+`scripts/db-migrate.ts` is ~260 lines, exceeds the 150-line rule;
+orchestrator judgment: dev-only CLI benefits from being one file.
+D-CAP-004-D — `packages/test-kit/src/sql-raw.d.ts` is the sole source of
+`cloudflare:test` typings; the official `@cloudflare/vitest-pool-workers`
+module does not export `applyD1Migrations`'s surface in 0.21.x.
+
+**Notes:**
+- The migration runner's first version shipped with separate Node-side
+  `CREATE TABLE d1_migrations` and `INSERT INTO d1_migrations` wrangler calls
+  (the BLOCKERs of the original code review). The fix-up pass moved both
+  into `0001_initial.sql` itself so apply+track are atomic. A crash
+  mid-`--file=0001_initial.sql` rolls back both. Every CREATE uses
+  `IF NOT EXISTS` so a partially-applied DB can re-apply cleanly.
+- `pnpm test:worker` is configured to run both `workers` (apps/worker) and
+  `test-kit-workers` (packages/test-kit) projects. The unit pool
+  (`packages/test-kit/vitest.config.ts`) excludes `*.worker.test.ts` so the
+  worker-only tests don't run in the node pool where `cloudflare:test`
+  doesn't exist.
+- `pnpm scaffold db:migrate --reset` exits 0 and applies the migration to a
+  fresh local DB; a follow-up `pnpm scaffold db:migrate` (no flags) is
+  idempotent (1 already applied, 53 verify assertions pass).
+- `pnpm scaffold doctor` is `10/10`; `pnpm exec drizzle-kit check` (from
+  `apps/worker/`) exits 0; `pnpm test` is `12/47`.
+
 ## 2026-08-12 — CAP-003 `pnpm scaffold doctor`  |  Implemented
 
 **Changed:** A new `pnpm scaffold` script dispatcher runs `scripts/doctor.ts`

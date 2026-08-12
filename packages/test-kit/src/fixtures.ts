@@ -29,7 +29,12 @@ export interface UserRoleRowShape {
 }
 
 export interface InstallationStateRowShape {
-  status: 'uninitialised' | 'in_progress' | 'complete';
+  // F14 — aligned with the SQL CHECK in migrations/0001_initial.sql:
+  //   CHECK (status IN ('setup', 'complete'))
+  // The old `'uninitialised' | 'in_progress' | 'complete'` shape predated
+  // CAP-004 and never matched the column's CHECK. CAP-006 will exercise
+  // the row writer; until then the builder's default is 'setup'.
+  status: 'setup' | 'complete';
   currentStep: string;
   claimedBy: string | null;
   updatedAt: string;
@@ -86,7 +91,7 @@ export function installationState(
   clock: { now(): Date } = { now: (): Date => new Date('2026-01-01T00:00:00.000Z') },
 ): InstallationStateRowShape {
   return {
-    status: 'uninitialised',
+    status: 'setup',
     currentStep: 'preflight',
     claimedBy: null,
     updatedAt: clock.now().toISOString(),

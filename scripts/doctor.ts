@@ -52,11 +52,15 @@ async function checkWranglerCompat(): Promise<R> {
   return { name: 'wrangler-compat', ok: true };
 }
 
+// Per CAP-004 every `NNNN_*.sql` ships with a companion `NNNN_*.verify.sql`.
+// Both checks below skip the verify companions so they neither demand their
+// own .verify.sql file nor double-count the sequence number.
+const MIGRATION_FILE = /^\d{4}_.+(?<!verify)\.sql$/;
 async function checkMigrationsPresent(): Promise<R> {
   const dir = join(REPO, 'migrations');
   if (!statSync(dir, { throwIfNoEntry: false })) return { name: 'migrations-present', ok: true, detail: 'no migrations dir' };
   const all = readdirSync(dir);
-  const sqls = all.filter(f => /^\d{4}_.+\.sql$/.test(f));
+  const sqls = all.filter(f => MIGRATION_FILE.test(f));
   if (!sqls.length) return { name: 'migrations-present', ok: true, detail: 'no migrations yet' };
   const missing = sqls.filter(s => !all.includes(s.replace(/\.sql$/, '.verify.sql')));
   if (missing.length) return { name: 'migrations-present', ok: false, detail: `missing verify files: ${missing.join(', ')}` };
@@ -66,20 +70,42 @@ async function checkMigrationsPresent(): Promise<R> {
 async function checkMigrationsOrdered(): Promise<R> {
   const dir = join(REPO, 'migrations');
   if (!statSync(dir, { throwIfNoEntry: false })) return { name: 'migrations-ordered', ok: true };
-  const seqs = readdirSync(dir).filter(f => /^\d{4}_.+\.sql$/.test(f)).map(f => parseInt(f.slice(0,4), 10)).sort((a,b)=>a-b);
+  const seqs = readdirSync(dir).filter(f => MIGRATION_FILE.test(f)).map(f => parseInt(f.slice(0,4), 10)).sort((a,b)=>a-b);
   for (let i = 0; i < seqs.length; i++) {
     if (seqs[i] !== i + 1) return { name: 'migrations-ordered', ok: false, detail: `expected ${String(i+1).padStart(4,'0')}, found ${String(seqs[i]).padStart(4,'0')}` };
   }
   return { name: 'migrations-ordered', ok: true };
 }
 
-// Schema-version vs migration history lands with CAP-004; trivially pass for now.
+// Schema-version vs migration history — CAP-004.
+// Reads the highest-numbered migration filename under migrations/ and
+// compares against CURRENT_SCHEMA_VERSION exported from
+// apps/worker/src/database/schema-version.ts. Until CAP-006 lands the
+// first installation_state row there is no DB row to compare against, so
+// the sentinel in source is authoritative. Future capabilities that
+// touch the schema must bump the constant and the migration number in
+// lockstep.
 async function checkSchemaVersion(): Promise<R> {
   const dir = join(REPO, 'migrations');
-  if (!statSync(dir, { throwIfNoEntry: false }) || !readdirSync(dir).some(f => /^\d{4}_.+\.sql$/.test(f))) {
-    return { name: 'schema-version', ok: true, detail: 'no migrations yet (CAP-004 owns the first)' };
+  if (!statSync(dir, { throwIfNoEntry: false })) {
+    return { name: 'schema-version', ok: true, detail: 'no migrations dir' };
   }
-  return { name: 'schema-version', ok: true };
+  const files = readdirSync(dir).filter((f) => /^\d{4}_.+\.sql$/.test(f));
+  if (!files.length) return { name: 'schema-version', ok: true, detail: 'no migrations yet' };
+  const highest = files.map((f) => f.slice(0, 4)).sort().pop();
+  const sentinelPath = join(REPO, 'apps/worker/src/database/schema-version.ts');
+  const src = readFileSync(sentinelPath, 'utf-8');
+  const match = src.match(/CURRENT_SCHEMA_VERSION\s*=\s*'(\d{4})'/);
+  if (!match) return { name: 'schema-version', ok: false, detail: `cannot parse CURRENT_SCHEMA_VERSION in ${sentinelPath}` };
+  const sentinel = match[1] ?? '';
+  if (highest !== sentinel) {
+    return {
+      name: 'schema-version',
+      ok: false,
+      detail: `highest migration is ${highest} but CURRENT_SCHEMA_VERSION is '${sentinel}' — bump the sentinel in lockstep with new migrations`,
+    };
+  }
+  return { name: 'schema-version', ok: true, detail: `${highest} matches schema-version.ts` };
 }
 
 // Encodes the module dependency table in .claude/rules/architecture.md.
