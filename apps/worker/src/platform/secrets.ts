@@ -8,7 +8,7 @@
  * is a SecretsStoreSecret with a get() method. In miniflare tests, the override
  * provides a plain string.
  */
-type SecretLike = string | { get(): Promise<string> };
+export type SecretLike = string | { get(): Promise<string> };
 
 /**
  * Read a secret value, handling both SecretsStoreSecret (production) and

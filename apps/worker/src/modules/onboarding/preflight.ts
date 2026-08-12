@@ -6,8 +6,25 @@
 // This is the operator's "is the deployment healthy?" check during setup.
 
 import type { Database } from '../../platform/database';
-import type { Env } from '../../platform/env';
+import type { SetupSessionStore, Cache } from '../../platform/cache';
+import type { ObjectStore } from '../../platform/object-store';
+import type { SecretLike } from '../../platform/secrets';
 import { readSecret } from '../../platform/secrets';
+
+/**
+ * Narrow port for the bindings preflight inspects. Deliberately NOT the full
+ * Cloudflare Env — modules must not import Env (architecture.md §Forbidden).
+ * The route handler passes `c.env`, which is structurally compatible.
+ */
+export interface PreflightBindings {
+  readonly DB: Database;
+  readonly ATTACHMENTS: ObjectStore;
+  readonly SETUP_SESSION: SetupSessionStore;
+  readonly CACHE: Cache;
+  readonly OUTBOUND: Queue;
+  readonly INSTALLATION_TOKEN: SecretLike;
+  readonly CREDENTIAL_ENCRYPTION_KEY: SecretLike;
+}
 
 export interface PreflightResult {
   readonly bindings: Readonly<Record<string, boolean>>;
@@ -18,7 +35,7 @@ export interface PreflightResult {
  * Checks a secret binding's accessibility. Returns true if the secret can be read,
  * false otherwise. Used for INSTALLATION_TOKEN and CREDENTIAL_ENCRYPTION_KEY.
  */
-async function checkSecret(secret: SecretsStoreSecret): Promise<boolean> {
+async function checkSecret(secret: SecretLike): Promise<boolean> {
   try {
     await readSecret(secret);
     return true;
@@ -35,9 +52,15 @@ async function checkSecret(secret: SecretsStoreSecret): Promise<boolean> {
  * Runs preflight checks: verifies all bindings exist and reads the schema version
  * from the d1_migrations table.
  *
+ * Note: the 5 object-binding checks (DB, ATTACHMENTS, SETUP_SESSION, CACHE,
+ * OUTBOUND) are existence-only — they verify the binding object is declared,
+ * not that the backing resource is reachable. A `true` result means "the binding
+ * is wired in wrangler.jsonc," not "the database is healthy." Deep health checks
+ * are a future concern. Secrets get a real accessibility read via readSecret.
+ *
  * @returns A report with binding presence and schema version.
  */
-export async function runPreflight(db: Database, env: Env): Promise<PreflightResult> {
+export async function runPreflight(db: Database, env: PreflightBindings): Promise<PreflightResult> {
   // Check each binding's existence
   const bindings: Record<string, boolean> = {
     DB: !!env.DB,
@@ -50,12 +73,19 @@ export async function runPreflight(db: Database, env: Env): Promise<PreflightRes
     CREDENTIAL_ENCRYPTION_KEY: await checkSecret(env.CREDENTIAL_ENCRYPTION_KEY),
   };
 
-  // Read schema version from d1_migrations
-  const row = await db
-    .prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1')
-    .first<{ name: string }>();
-  // Extract the numeric prefix (e.g., '0001_initial.sql' → '0001')
-  const schemaVersion = row?.name?.replace(/\.sql$/, '').split('_')[0] ?? 'unknown';
+  // Read schema version from d1_migrations. If the table doesn't exist
+  // (migrations never ran), the query throws — catch and report 'unknown'.
+  let schemaVersion = 'unknown';
+  try {
+    const row = await db
+      .prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1')
+      .first<{ name: string }>();
+    // Extract the numeric prefix (e.g., '0001_initial.sql' → '0001')
+    schemaVersion = row?.name?.replace(/\.sql$/, '').split('_')[0] ?? 'unknown';
+  } catch (err) {
+    // d1_migrations table missing — migrations haven't been applied.
+    console.warn('[preflight] d1_migrations read failed', err);
+  }
 
   return { bindings, schemaVersion };
 }
