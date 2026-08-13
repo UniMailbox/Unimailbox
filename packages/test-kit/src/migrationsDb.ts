@@ -22,6 +22,7 @@ import managedDomainsSql from '../../../migrations/0002_managed_domains.sql?raw'
 import providerConnectionsSql from '../../../migrations/0003_provider_connections.sql?raw';
 import registrationKeysSql from '../../../migrations/0004_registration_keys.sql?raw';
 import mailboxesSql from '../../../migrations/0005_mailboxes.sql?raw';
+import messagesSql from '../../../migrations/0006_messages.sql?raw';
 
 // Split migration SQL on semicolons for applyD1Migrations
 // Filters out comment-only lines to avoid passing them as separate statements
@@ -68,6 +69,7 @@ export async function migrationsDb(): Promise<D1Database> {
     { name: '0003_provider_connections', queries: splitSql(providerConnectionsSql) },
     { name: '0004_registration_keys', queries: splitSql(registrationKeysSql) },
     { name: '0005_mailboxes', queries: splitSql(mailboxesSql) },
+    { name: '0006_messages', queries: splitSql(messagesSql) },
   ]);
   return mod.env.DB;
 }

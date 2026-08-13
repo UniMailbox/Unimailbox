@@ -594,12 +594,22 @@ describe('email handler smoke test detection', () => {
   // Helper: create a mock email message
   function createMockMessage(to: string): ForwardableEmailMessage {
     let rejectReason: string | null = null;
+    const rawEmail = `From: sender@example.org
+To: ${to}
+Subject: Test
+
+Body`;
     return {
       to,
       from: 'sender@example.org',
       headers: new Headers(),
-      raw: new ReadableStream(),
-      rawSize: 0,
+      raw: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(rawEmail));
+          controller.close();
+        },
+      }),
+      rawSize: rawEmail.length,
       setReject: async (reason: string) => {
         rejectReason = reason;
       },
@@ -636,9 +646,9 @@ describe('email handler smoke test detection', () => {
 
     await inboundEmailHandler.email(mockMessage, env);
 
-    // Message should be rejected
+    // Message should be rejected with unknown recipient (no mailbox for this address)
     expect(mockMessage._getRejectReason()).toBe(
-      'Inbound email not yet enabled. Only smoke-test messages are accepted during setup.',
+      'Unknown recipient. No mailbox found for this address.',
     );
   });
 
@@ -647,9 +657,9 @@ describe('email handler smoke test detection', () => {
 
     await inboundEmailHandler.email(mockMessage, env);
 
-    // Message should be rejected
+    // Message should be rejected with unknown recipient (no mailbox for this address)
     expect(mockMessage._getRejectReason()).toBe(
-      'Inbound email not yet enabled. Only smoke-test messages are accepted during setup.',
+      'Unknown recipient. No mailbox found for this address.',
     );
   });
 
