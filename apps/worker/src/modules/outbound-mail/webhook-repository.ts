@@ -119,3 +119,67 @@ export async function findJobByProviderMessageId(
     .bind(providerMessageId)
     .first<{ message_id: string }>();
 }
+
+/**
+ * Admin-facing row shape for listing webhook deliveries. Excludes the
+ * raw_payload column — the admin view needs event metadata, not the full
+ * provider payload (which may carry recipient addresses etc.).
+ */
+export interface WebhookDeliveryRow {
+  readonly id: string;
+  readonly connection_id: string;
+  readonly event_type: string;
+  readonly message_id: string | null;
+  readonly status: string;
+  readonly created_at: string;
+}
+
+/**
+ * Lists recent webhook deliveries, newest first. Used by the admin webhook
+ * events view (CAP-025). The raw_payload column is deliberately omitted —
+ * the admin list view shows event metadata only.
+ */
+export async function listWebhookDeliveries(
+  db: Database,
+  limit = 50,
+): Promise<WebhookDeliveryRow[]> {
+  const result = await db
+    .prepare(
+      'SELECT id, connection_id, event_type, message_id, status, created_at FROM webhook_deliveries ORDER BY created_at DESC LIMIT ?',
+    )
+    .bind(limit)
+    .all<WebhookDeliveryRow>();
+  return result.results ?? [];
+}
+
+/**
+ * Admin-facing row shape for listing provider connections with their
+ * webhook configuration. credential_id is intentionally excluded — the
+ * admin webhook view does not need the encrypted-credential reference.
+ */
+export interface ProviderConnectionRow {
+  readonly id: string;
+  readonly provider_key: string;
+  readonly label: string;
+  readonly status: string;
+  readonly webhook_secret: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/**
+ * Lists all provider connections with their webhook secrets, newest first.
+ * Used by the admin connections view (CAP-025) so the operator can see
+ * which connections have webhook verification configured and copy the
+ * webhook URL + secret into the provider dashboard.
+ */
+export async function listProviderConnections(
+  db: Database,
+): Promise<ProviderConnectionRow[]> {
+  const result = await db
+    .prepare(
+      'SELECT id, provider_key, label, status, webhook_secret, created_at, updated_at FROM provider_connections ORDER BY created_at DESC',
+    )
+    .all<ProviderConnectionRow>();
+  return result.results ?? [];
+}

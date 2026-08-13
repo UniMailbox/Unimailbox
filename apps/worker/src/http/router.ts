@@ -8,6 +8,7 @@ import { authn } from './middleware/authn';
 import { setupRoutes } from './routes/setup';
 import { authRoutes } from './routes/auth';
 import { adminRoutes } from './routes/admin';
+import { adminWebhookRoutes } from './routes/admin-webhooks';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
@@ -43,6 +44,9 @@ export function buildRouter(): Hono<AppEnv> {
   // CAP-019: Auth and admin API routes.
   router.route('/api/v1/auth', authRoutes());
   router.route('/api/v1/admin', adminRoutes());
+
+  // CAP-025: Admin webhook events + connections view.
+  router.route('/api/v1', adminWebhookRoutes());
 
   // CAP-020: Mailbox routes.
   router.route('/api/v1', mailboxRoutes());
