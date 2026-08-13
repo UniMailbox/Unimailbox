@@ -463,3 +463,40 @@ export const messageDetailSchema = z.object({
 });
 
 export type MessageDetail = z.infer<typeof messageDetailSchema>;
+
+// ---------------------------------------------------------------------------
+// Compose — CAP-023
+// ---------------------------------------------------------------------------
+/**
+ * One recipient on a compose (send) request. Composed messages only carry
+ * address + optional displayName — type ('to' / 'cc') is encoded by which
+ * array the recipient lives in.
+ */
+export const composeRecipientSchema = z.object({
+  address: emailAddressSchema,
+  displayName: z.string().max(100).optional(),
+});
+
+/**
+ * Request body for POST /api/v1/mailboxes/:mailboxId/messages/send.
+ *
+ * - to: at least one recipient (sending with no 'to' is a client bug)
+ * - cc: optional, defaults to empty
+ * - subject / htmlBody / textBody: default to empty strings so a reply can be
+ *   sent with just bodies, or just a subject, etc.
+ * - inReplyTo / references: optional RFC 5322 headers for threading
+ *
+ * The route is mutating, so per R-IDEMPOTENCY-* the handler requires an
+ * Idempotency-Key header — that contract is enforced in middleware, not here.
+ */
+export const composeRequestSchema = z.object({
+  to: z.array(composeRecipientSchema).min(1),
+  cc: z.array(composeRecipientSchema).default([]),
+  subject: z.string().max(998).default(''),
+  htmlBody: z.string().max(1_000_000).default(''),
+  textBody: z.string().max(1_000_000).default(''),
+  inReplyTo: z.string().optional(),
+  references: z.string().optional(),
+});
+
+export type ComposeRequest = z.infer<typeof composeRequestSchema>;

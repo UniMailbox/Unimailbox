@@ -10,6 +10,7 @@ import { authRoutes } from './routes/auth';
 import { adminRoutes } from './routes/admin';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
+import { composeRoutes } from './routes/compose';
 import type { AppEnv } from '../platform/env';
 
 export function buildRouter(): Hono<AppEnv> {
@@ -47,6 +48,9 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-022: Message routes (inbox list, detail, mark-as-read).
   router.route('/api/v1', messageRoutes());
+
+  // CAP-023: Compose (send) routes.
+  router.route('/api/v1', composeRoutes());
 
   return router;
 }

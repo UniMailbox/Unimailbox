@@ -23,6 +23,8 @@ import {
   messageListItemSchema,
   messageListResponseSchema,
   messageDetailSchema,
+  composeRecipientSchema,
+  composeRequestSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -1011,6 +1013,124 @@ describe('messageDetailSchema', () => {
       folder: 'inbox',
       createdAt: '2026-01-01T00:00:00.000Z',
       recipients: { to: [], cc: [] },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-023: Compose request schemas
+// ---------------------------------------------------------------------------
+
+describe('composeRecipientSchema', () => {
+  it('accepts a valid recipient with address only', () => {
+    const result = composeRecipientSchema.parse({ address: 'user@example.com' });
+    expect(result).toEqual({ address: 'user@example.com', displayName: undefined });
+  });
+
+  it('accepts a valid recipient with displayName', () => {
+    const result = composeRecipientSchema.parse({
+      address: 'user@example.com',
+      displayName: 'User',
+    });
+    expect(result).toEqual({ address: 'user@example.com', displayName: 'User' });
+  });
+
+  it('normalises the email to lowercase (R-DATA-001)', () => {
+    const result = composeRecipientSchema.parse({ address: 'USER@Example.COM' });
+    expect(result.address).toBe('user@example.com');
+  });
+
+  it('rejects missing address via safeParse', () => {
+    const result = composeRecipientSchema.safeParse({ displayName: 'User' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects invalid email via safeParse', () => {
+    const result = composeRecipientSchema.safeParse({ address: 'not-an-email' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects displayName longer than 100 chars via safeParse', () => {
+    const result = composeRecipientSchema.safeParse({
+      address: 'user@example.com',
+      displayName: 'a'.repeat(101),
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('composeRequestSchema', () => {
+  it('accepts a minimal valid request (to only)', () => {
+    const result = composeRequestSchema.parse({
+      to: [{ address: 'recipient@example.com' }],
+    });
+    expect(result.to).toEqual([{ address: 'recipient@example.com', displayName: undefined }]);
+    expect(result.cc).toEqual([]);
+    expect(result.subject).toBe('');
+    expect(result.htmlBody).toBe('');
+    expect(result.textBody).toBe('');
+  });
+
+  it('accepts a full request with all fields', () => {
+    const result = composeRequestSchema.parse({
+      to: [{ address: 'to@example.com', displayName: 'To' }],
+      cc: [{ address: 'cc@example.com' }],
+      subject: 'Hello',
+      htmlBody: '<p>hi</p>',
+      textBody: 'hi',
+      inReplyTo: '<prev@example.com>',
+      references: '<thread@example.com>',
+    });
+    expect(result.to).toHaveLength(1);
+    expect(result.cc).toHaveLength(1);
+    expect(result.subject).toBe('Hello');
+    expect(result.htmlBody).toBe('<p>hi</p>');
+    expect(result.inReplyTo).toBe('<prev@example.com>');
+  });
+
+  it('applies defaults for omitted optional fields', () => {
+    const result = composeRequestSchema.parse({
+      to: [{ address: 'recipient@example.com' }],
+    });
+    expect(result.cc).toEqual([]);
+    expect(result.subject).toBe('');
+    expect(result.htmlBody).toBe('');
+    expect(result.textBody).toBe('');
+    expect(result.inReplyTo).toBeUndefined();
+    expect(result.references).toBeUndefined();
+  });
+
+  it('rejects an empty to array via safeParse', () => {
+    const result = composeRequestSchema.safeParse({ to: [] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects a missing to array via safeParse', () => {
+    const result = composeRequestSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a to entry with an invalid email via safeParse', () => {
+    const result = composeRequestSchema.safeParse({ to: [{ address: 'not-an-email' }] });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a subject longer than 998 chars via safeParse', () => {
+    const result = composeRequestSchema.safeParse({
+      to: [{ address: 'recipient@example.com' }],
+      subject: 'a'.repeat(999),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a body over 1MB via safeParse', () => {
+    const result = composeRequestSchema.safeParse({
+      to: [{ address: 'recipient@example.com' }],
+      htmlBody: 'a'.repeat(1_000_001),
     });
     expect(result.success).toBe(false);
   });
