@@ -1,12 +1,13 @@
 // http/routes/setup — setup API routes.
-// Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight, POST /administrator.
+// Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight, POST /administrator, POST /domain.
 
 import { Hono } from 'hono';
 import {
   setupClaimRequestSchema,
   setupAdministratorRequestSchema,
+  setupDomainRequestSchema,
 } from '@unimailbox/contracts';
-import { claimSetup, getSetupStatus, runPreflight, createAdministrator } from '../../modules/onboarding';
+import { claimSetup, getSetupStatus, runPreflight, createAdministrator, createDomainStep } from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { readSecret } from '../../platform/secrets';
@@ -54,6 +55,20 @@ export function setupRoutes(): Hono<AppEnv> {
         email: body.email,
         password: body.password,
         displayName: body.displayName ?? null,
+      },
+      { clock: systemClock, ids: systemIds },
+    );
+    return c.json({ data: result });
+  });
+
+  // POST /domain — session-protected endpoint that creates a managed domain.
+  // After successful creation, the installation step advances from 'domain' to 'cloudflare-verify'.
+  routes.post('/domain', setupSession, async (c) => {
+    const body = setupDomainRequestSchema.parse(await c.req.json());
+    const result = await createDomainStep(
+      {
+        db: c.env.DB,
+        name: body.name,
       },
       { clock: systemClock, ids: systemIds },
     );

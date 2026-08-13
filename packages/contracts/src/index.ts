@@ -190,3 +190,52 @@ export const setupAdministratorRequestSchema = z.object({
 });
 
 export type SetupAdministratorRequest = z.infer<typeof setupAdministratorRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Setup domain request — CAP-011
+// ---------------------------------------------------------------------------
+
+/**
+ * Domain name schema — validated per R-DATA-001 (case-insensitive).
+ *
+ * Validates:
+ * - Length: 4-253 chars (after trim/lowercase)
+ * - Each label: 1-63 chars, starts/ends with alphanumeric, hyphens allowed internally
+ * - At least one dot (subdomain.example or example.com)
+ * - Only lowercase ASCII letters, digits, and hyphens
+ *
+ * Examples:
+ * - ✓ example.com
+ * - ✓ mail.example.com
+ * - ✓ a-b.example.com
+ * - ✗ example (no dot)
+ * - ✗ -example.com (starts with hyphen)
+ * - ✗ example-.com (ends with hyphen)
+ * - ✗ Example.com (uppercase)
+ * - ✗ a.b (too short — minimum 4 chars after normalization)
+ */
+export const domainNameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(4)
+  .max(253)
+  .regex(
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/,
+    'Invalid domain name',
+  );
+
+export type DomainName = z.infer<typeof domainNameSchema>;
+
+/**
+ * Request body for POST /api/v1/setup/domain. The operator provides a domain
+ * name to add to the managed domains list. The domain is created with status='active'.
+ *
+ * R-DATA-001: Domain names are case-insensitive (lowercased before insert).
+ * ManagedDomain invariant: name is UNIQUE — duplicate returns 409.
+ */
+export const setupDomainRequestSchema = z.object({
+  name: domainNameSchema,
+});
+
+export type SetupDomainRequest = z.infer<typeof setupDomainRequestSchema>;

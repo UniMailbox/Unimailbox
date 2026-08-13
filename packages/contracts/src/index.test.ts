@@ -10,6 +10,8 @@ import {
   setupClaimRequestSchema,
   setupPreflightResponseSchema,
   setupAdministratorRequestSchema,
+  domainNameSchema,
+  setupDomainRequestSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -236,6 +238,124 @@ describe('setupAdministratorRequestSchema', () => {
       email: 'admin@example.com',
       password: 'securePassword123',
       displayName: 'a'.repeat(101),
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('domainNameSchema', () => {
+  it('accepts a valid domain', () => {
+    const result = domainNameSchema.parse('example.com');
+    expect(result).toBe('example.com');
+  });
+
+  it('normalises to lowercase + trimmed form (R-DATA-001)', () => {
+    const result = domainNameSchema.parse('  EXAMPLE.COM ');
+    expect(result).toBe('example.com');
+  });
+
+  it('accepts a subdomain', () => {
+    const result = domainNameSchema.parse('mail.example.com');
+    expect(result).toBe('mail.example.com');
+  });
+
+  it('accepts domain with hyphens in labels', () => {
+    const result = domainNameSchema.parse('mail-server.example.com');
+    expect(result).toBe('mail-server.example.com');
+  });
+
+  it('rejects domain without dots via safeParse', () => {
+    const result = domainNameSchema.safeParse('example');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects domain starting with hyphen via safeParse', () => {
+    const result = domainNameSchema.safeParse('-example.com');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects domain ending with hyphen via safeParse', () => {
+    const result = domainNameSchema.safeParse('example-.com');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects label starting with hyphen via safeParse', () => {
+    const result = domainNameSchema.safeParse('mail.-example.com');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects label ending with hyphen via safeParse', () => {
+    const result = domainNameSchema.safeParse('mail.example-.com');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects domain with special characters via safeParse', () => {
+    const result = domainNameSchema.safeParse('example_test.com');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects domain with spaces via safeParse', () => {
+    const result = domainNameSchema.safeParse('example test.com');
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects domain shorter than 4 chars via safeParse', () => {
+    const result = domainNameSchema.safeParse('a.b');
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts minimum valid domain length (4 chars)', () => {
+    const result = domainNameSchema.parse('a.co');
+    expect(result).toBe('a.co');
+  });
+
+  it('rejects domain longer than 253 chars via safeParse', () => {
+    const long = `${'a'.repeat(64)}.${'b'.repeat(64)}.${'c'.repeat(64)}.${'d'.repeat(64)}.com`;
+    const result = domainNameSchema.safeParse(long);
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('setupDomainRequestSchema', () => {
+  it('accepts a valid domain request', () => {
+    const result = setupDomainRequestSchema.parse({
+      name: 'example.com',
+    });
+    expect(result).toEqual({
+      name: 'example.com',
+    });
+  });
+
+  it('accepts a subdomain request', () => {
+    const result = setupDomainRequestSchema.parse({
+      name: 'mail.example.com',
+    });
+    expect(result).toEqual({
+      name: 'mail.example.com',
+    });
+  });
+
+  it('normalises domain to lowercase and trimmed (R-DATA-001)', () => {
+    const result = setupDomainRequestSchema.parse({
+      name: '  EXAMPLE.COM  ',
+    });
+    expect(result.name).toBe('example.com');
+  });
+
+  it('rejects missing name via safeParse', () => {
+    const result = setupDomainRequestSchema.safeParse({});
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects invalid domain format via safeParse', () => {
+    const result = setupDomainRequestSchema.safeParse({
+      name: 'not-a-domain',
     });
     expect(result.success).toBe(false);
   });

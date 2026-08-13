@@ -23,6 +23,22 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-011 Setup domain endpoint  |  Implemented
+
+**Changed:** `POST /api/v1/setup/domain` — session-protected endpoint persisting a managed domain with `status='active'`. After creation, the installation step advances to 'cloudflare-verify'. Introduces the tenancy module and the first schema migration since CAP-004.
+
+**Files:** `migrations/0002_managed_domains.sql` (new — managed_domains table) · `migrations/0002_managed_domains.verify.sql` (new) · `apps/worker/src/database/schema/tenancy.ts` (new — Drizzle typing) · `apps/worker/src/database/schema-version.ts` (bumped to '0002') · `apps/worker/src/modules/tenancy/domain-repository.ts` (new — prepareCreateDomain + createDomain) · `apps/worker/src/modules/tenancy/index.ts` (new module) · `apps/worker/src/modules/onboarding/create-domain.ts` (new — createDomainStep use case) · `apps/worker/src/http/routes/setup.ts` (added POST /domain) · `packages/contracts/src/index.ts` (domainNameSchema, setupDomainRequestSchema) · `packages/test-kit/src/migrationsDb.ts` (splitSql for multi-migration support) · `apps/worker/src/http/routes/domain.worker.test.ts` (new — 25 tests)
+
+**Decisions:**
+- `onboarding → tenancy` edge approved — onboarding orchestrates the setup wizard, which creates domains. Same pattern as `onboarding → identity` (CAP-010).
+- Domain-existence guard (`SELECT 1 FROM managed_domains LIMIT 1`) before insert — only one domain during setup. Same pattern as CAP-010's administrator singularity guard.
+- `splitSql` in migrationsDb.ts — splits migration SQL on line-ending semicolons for `applyD1Migrations`. Both migrations now use this (0001 was previously passed as a single string).
+- `outbound_connection_id` nullable without FK — `provider_connections` table doesn't exist yet. FK added in a later migration.
+
+**Deferred:** D-CAP-011-A (idempotency → CAP-027), D-CAP-011-B (splitSql semicolon risk → follow-up).
+
+**Notes:** Reviewer dispatched but went idle without report. Orchestrator validated: no architecture violations, no type-safety issues, all quality gates green (12/119 unit, 11/120 worker, doctor 10/10). Stale preflight test updated (schemaVersion '0001' → '0002'). Stale domain test updated (DOMAIN_NAME_TAKEN → DOMAIN_ALREADY_MANAGED — existence guard fires before D1 constraint).
+
 ## 2026-08-13 — CAP-010 Setup administrator endpoint  |  Implemented
 
 **Changed:** `POST /api/v1/setup/administrator` — session-protected endpoint that creates the first user (the initial administrator) with a PBKDF2-SHA256-hashed password (ADR-006). After successful creation, the installation step advances from 'administrator' to 'domain'. Introduces the identity module and `hashPassword` in platform/crypto.ts.

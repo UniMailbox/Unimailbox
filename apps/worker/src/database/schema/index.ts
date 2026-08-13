@@ -9,3 +9,4 @@ export * from './identity';
 export * from './onboarding';
 export * from './admin';
 export * from './outbound-mail';
+export * from './tenancy';
