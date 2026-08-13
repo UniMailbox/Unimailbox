@@ -8,6 +8,7 @@ import { authn } from './middleware/authn';
 import { setupRoutes } from './routes/setup';
 import { authRoutes } from './routes/auth';
 import { adminRoutes } from './routes/admin';
+import { mailboxRoutes } from './routes/mailboxes';
 import type { AppEnv } from '../platform/env';
 
 export function buildRouter(): Hono<AppEnv> {
@@ -39,6 +40,9 @@ export function buildRouter(): Hono<AppEnv> {
   // CAP-019: Auth and admin API routes.
   router.route('/api/v1/auth', authRoutes());
   router.route('/api/v1/admin', adminRoutes());
+
+  // CAP-020: Mailbox routes.
+  router.route('/api/v1', mailboxRoutes());
 
   return router;
 }

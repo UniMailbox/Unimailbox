@@ -18,6 +18,7 @@ import {
   registerRequestSchema,
   loginRequestSchema,
   refreshRequestSchema,
+  createMailboxRequestSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -656,6 +657,124 @@ describe('refreshRequestSchema', () => {
 
   it('rejects non-uuid refreshToken via safeParse', () => {
     const result = refreshRequestSchema.safeParse({ refreshToken: 'not-a-uuid' });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-020: Mailboxes
+// ---------------------------------------------------------------------------
+
+describe('createMailboxRequestSchema', () => {
+  it('accepts a valid request with displayName', () => {
+    const result = createMailboxRequestSchema.parse({
+      localPart: 'john.doe',
+      domainId: '00000000-0000-4000-8000-000000000001',
+      displayName: 'John Doe',
+    });
+    expect(result).toEqual({
+      localPart: 'john.doe',
+      domainId: '00000000-0000-4000-8000-000000000001',
+      displayName: 'John Doe',
+    });
+  });
+
+  it('accepts a valid request without displayName', () => {
+    const result = createMailboxRequestSchema.parse({
+      localPart: 'info',
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result).toEqual({
+      localPart: 'info',
+      domainId: '00000000-0000-4000-8000-000000000001',
+      displayName: undefined,
+    });
+  });
+
+  it('accepts localPart with dots, hyphens, underscores', () => {
+    const result = createMailboxRequestSchema.parse({
+      localPart: 'john.doe-test',
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.localPart).toBe('john.doe-test');
+  });
+
+  it('accepts localPart with numbers', () => {
+    const result = createMailboxRequestSchema.parse({
+      localPart: 'user123',
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.localPart).toBe('user123');
+  });
+
+  it('rejects missing localPart via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing domainId via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: 'john.doe',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects empty localPart via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: '',
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects localPart longer than 64 chars via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: 'a'.repeat(65),
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects localPart starting with special char via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: '.john',
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects localPart ending with special char via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: 'john.',
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects localPart with invalid special chars via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: 'john@doe',
+      domainId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects non-uuid domainId via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: 'john.doe',
+      domainId: 'not-a-uuid',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects displayName longer than 100 chars via safeParse', () => {
+    const result = createMailboxRequestSchema.safeParse({
+      localPart: 'john.doe',
+      domainId: '00000000-0000-4000-8000-000000000001',
+      displayName: 'a'.repeat(101),
+    });
     expect(result.success).toBe(false);
   });
 });

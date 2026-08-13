@@ -364,3 +364,28 @@ export const refreshRequestSchema = z.object({
 });
 
 export type RefreshRequest = z.infer<typeof refreshRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Mailboxes — CAP-020
+// ---------------------------------------------------------------------------
+/**
+ * Request body for POST /api/v1/mailboxes. Creates a new mailbox.
+ *
+ * - localPart: The part before @ (case-insensitive, validated per R-DATA-001)
+ * - domainId: UUID of the managed domain (must exist and be active)
+ * - displayName: Optional display name for the mailbox (max 100 chars)
+ *
+ * The mailbox address is constructed as {localPart}@{domain.name}.
+ * R-MAILBOX-003: Owner (the authenticated user) is implicitly a member.
+ */
+export const createMailboxRequestSchema = z.object({
+  localPart: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$/, 'Invalid local part format'),
+  domainId: uuidSchema,
+  displayName: z.string().max(100).optional(),
+});
+
+export type CreateMailboxRequest = z.infer<typeof createMailboxRequestSchema>;
