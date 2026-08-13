@@ -58,3 +58,32 @@ export async function seedInstallationState(
     .bind(currentStep, timestamp, timestamp)
     .run();
 }
+
+/**
+ * Returns a prepared UPDATE statement for the installation step. Use this
+ * when the update must be atomic with other writes (e.g., user creation).
+ */
+export function prepareUpdateInstallationStep(
+  db: Database,
+  step: InstallationStep,
+  timestamp: string,
+): D1PreparedStatement {
+  return db
+    .prepare('UPDATE installation_state SET current_step = ?, updated_at = ? WHERE id = 1')
+    .bind(step, timestamp);
+}
+
+/**
+ * Updates the current_step of the single installation_state row (id = 1).
+ * Used after each setup wizard step to advance the installation progress.
+ */
+export async function updateInstallationStep(
+  db: Database,
+  step: InstallationStep,
+  timestamp: string,
+): Promise<void> {
+  await db
+    .prepare('UPDATE installation_state SET current_step = ?, updated_at = ? WHERE id = 1')
+    .bind(step, timestamp)
+    .run();
+}

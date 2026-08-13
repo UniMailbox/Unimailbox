@@ -171,3 +171,22 @@ export const setupPreflightResponseSchema = z.object({
 });
 
 export type SetupPreflightResponse = z.infer<typeof setupPreflightResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Setup administrator request — CAP-010
+// ---------------------------------------------------------------------------
+
+/**
+ * Request body for POST /api/v1/setup/administrator. The operator creates
+ * the first user (the initial administrator) with a PBKDF2-hashed password.
+ *
+ * R-AUTH-002: users.status is 'active' for the new administrator.
+ * ADR-006: Password is hashed with PBKDF2-SHA256, 600k iterations.
+ */
+export const setupAdministratorRequestSchema = z.object({
+  email: emailAddressSchema,
+  password: z.string().min(8).max(72),
+  displayName: z.string().max(100).optional(),
+});
+
+export type SetupAdministratorRequest = z.infer<typeof setupAdministratorRequestSchema>;

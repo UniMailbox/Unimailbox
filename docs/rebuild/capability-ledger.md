@@ -26,9 +26,9 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 
 | | |
 |---|---|
-| **Phase** | 0 — Foundation (Audit Complete) |
+| **Phase** | 1 — Minimal Business Closed Loop |
 | **Active capability** | none |
-| **Next capability** | CAP-010 |
+| **Next capability** | CAP-011 |
 | **Blocked** | none |
 | **Repository state** | Phase 0 code complete; awaiting operator verification of deploy criterion |
 
@@ -75,7 +75,7 @@ implement it. There is no partial pass.
 
 | ID | Capability | Status | Depends on | Evidence |
 |---|---|---|---|---|
-| CAP-010 | `POST /setup/administrator` — first user, PBKDF2 password (ADR-006) | Pending | CAP-009 | |
+| CAP-010 | `POST /setup/administrator` — first user, PBKDF2 password (ADR-006) | Implemented | CAP-009 | `POST /api/v1/setup/administrator` — session-protected endpoint creating the first user with PBKDF2-SHA256 password (ADR-006: 600k iterations, 16-byte salt, 256-bit hash). `hashPassword` in `platform/crypto.ts` uses `crypto.subtle.deriveBits` — confirmed working in Workers (~600ms). Identity module introduced (`modules/identity/`) with `createUser` repository + `prepareCreateUser` for batch support. `createAdministrator` use case in onboarding (depends on identity — allowed): existence guard → hash → batch(insert user + advance step to 'domain') in one D1 transaction. Worker-pool tests (24 cases): successful creation, PBKDF2 parameters verified (salt=16 bytes, hash=32 bytes via `new Uint8Array()`), step advancement, singularity guard (SETUP_ADMINISTRATOR_EXISTS), email normalization, validation errors, session required, gate exemption, password boundaries. Unit tests: `hashPassword` (19 cases). `pnpm typecheck`/`lint`/`test:unit` (12/100)/`test:worker` (10/95)/`build` all exit 0. `pnpm scaffold doctor` 10/10. Two reviewers ran (architecture ACCEPT WITH NOTES, code ACCEPT WITH NOTES). All findings addressed: H1 (BLOB assertion via Uint8Array), M1/Arch-HIGH (D1 batch atomicity), Arch-MEDIUM (singularity guard before hash), Arch-LOW/M2 (error.message robustness). Deferred: D-CAP-010-A (idempotency → CAP-027), D-CAP-010-B (Drizzle BLOB typing → CAP-019). |
 | CAP-011 | `POST /setup/domain` — persist a managed domain as `active` | Pending | CAP-010 | |
 | CAP-012 | Cloudflare dashboard-link (allowlisted) + `/setup/cloudflare/verify` Email Routing check | Pending | CAP-011 | |
 | CAP-013 | `POST /setup/inbound-smoke-test` — generated message reaches the Worker | Pending | CAP-012 | |
@@ -158,6 +158,8 @@ with a reason. An unrecorded deferral is a dropped finding.
 | D-CAP-008-C | Error responses omit `requestId`. | CAP-008 | D-CAP-006-B | Architecture §API conventions specifies `{ error: { code, message, requestId } }`. The `requestId` middleware is still a CAP-001 stub — no request ID is available. Add when requestId becomes real. |
 | D-CAP-009-A | `checkSecret` parameter typed as `SecretsStoreSecret` instead of the broader `SecretLike` from `platform/secrets.ts`. | CAP-009 | Follow-up | Code review L3. Statically sound against the `Env` type but tests pass `string` values. Exporting `SecretLike` and using it here (and in `setup.ts` / `claim-setup.ts`) would be more honest. Zero functional impact. |
 | D-CAP-009-B | `runPreflight(db, env)` has a redundant `db` parameter (`db === env.DB` by construction). | CAP-009 | Follow-up | Code review L4. Minor smell — two references to the same object. Drop the `db` parameter and use `env.DB` internally, or pass a narrower `PreflightBindings` type. |
+| D-CAP-010-A | `POST /api/v1/setup/administrator` has no `Idempotency-Key` requirement. | CAP-010 | CAP-027 | Same deferral as D-CAP-008-B. Phase 0/1 setup endpoints are bootstrap — idempotency infrastructure lands in Phase 2. The singularity guard (SETUP_ADMINISTRATOR_EXISTS) provides natural idempotency. |
+| D-CAP-010-B | Drizzle BLOB typing (`mode: 'buffer'` → Buffer) disagrees with raw SQL path (Uint8Array write, ArrayBuffer read). | CAP-010 | CAP-019 | Code review L3. No Drizzle read path exists yet. When `verifyPassword` (CAP-019) introduces reads, align the types to avoid a mismatch. |
 
 ## Known documentation discrepancies
 

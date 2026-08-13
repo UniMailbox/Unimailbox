@@ -1,9 +1,12 @@
 // http/routes/setup — setup API routes.
-// Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight.
+// Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight, POST /administrator.
 
 import { Hono } from 'hono';
-import { setupClaimRequestSchema } from '@unimailbox/contracts';
-import { claimSetup, getSetupStatus, runPreflight } from '../../modules/onboarding';
+import {
+  setupClaimRequestSchema,
+  setupAdministratorRequestSchema,
+} from '@unimailbox/contracts';
+import { claimSetup, getSetupStatus, runPreflight, createAdministrator } from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { readSecret } from '../../platform/secrets';
@@ -37,6 +40,23 @@ export function setupRoutes(): Hono<AppEnv> {
   // and schema version. Requires a valid session token from /claim.
   routes.post('/preflight', setupSession, async (c) => {
     const result = await runPreflight(c.env.DB, c.env);
+    return c.json({ data: result });
+  });
+
+  // POST /administrator — session-protected endpoint that creates the first user
+  // (the initial administrator) with a PBKDF2-hashed password. After successful
+  // creation, the installation step advances from 'administrator' to 'domain'.
+  routes.post('/administrator', setupSession, async (c) => {
+    const body = setupAdministratorRequestSchema.parse(await c.req.json());
+    const result = await createAdministrator(
+      {
+        db: c.env.DB,
+        email: body.email,
+        password: body.password,
+        displayName: body.displayName ?? null,
+      },
+      { clock: systemClock, ids: systemIds },
+    );
     return c.json({ data: result });
   });
 

@@ -23,6 +23,26 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-010 Setup administrator endpoint  |  Implemented
+
+**Changed:** `POST /api/v1/setup/administrator` — session-protected endpoint that creates the first user (the initial administrator) with a PBKDF2-SHA256-hashed password (ADR-006). After successful creation, the installation step advances from 'administrator' to 'domain'. Introduces the identity module and `hashPassword` in platform/crypto.ts.
+
+**Files:** `apps/worker/src/platform/crypto.ts` (added `hashPassword` — PBKDF2-SHA256, 600k iterations) · `apps/worker/src/modules/identity/user-repository.ts` (new — `createUser` + `prepareCreateUser`) · `apps/worker/src/modules/identity/index.ts` (new module) · `apps/worker/src/modules/onboarding/create-administrator.ts` (new — `createAdministrator` use case) · `apps/worker/src/modules/onboarding/installation-state-repository.ts` (added `prepareUpdateInstallationStep`) · `apps/worker/src/modules/onboarding/index.ts` (export `createAdministrator`) · `apps/worker/src/http/routes/setup.ts` (added POST /administrator) · `packages/contracts/src/index.ts` (`setupAdministratorRequestSchema`) · `apps/worker/src/http/routes/administrator.worker.test.ts` (new — 24 worker-pool tests) · `apps/worker/src/platform/crypto.test.ts` (added 19 hashPassword unit tests)
+
+**Rules:** ADR-006 (PBKDF2-SHA256), security.md §Passwords, R-AUTH-002 (users.status='active'), R-AUTH-009 (email case-insensitive), R-DATA-001 (email normalized)
+
+**Decisions:**
+- `createAdministrator` use case lives in onboarding (not identity) because it needs to update `installation_state` (owned by onboarding). onboarding depends on identity — allowed per architecture rules.
+- User insert + step update are a single D1 `batch()` — atomic. If either fails, both roll back. `prepareCreateUser` and `prepareUpdateInstallationStep` expose `D1PreparedStatement` objects for batch composition.
+- Singularity guard checks `SELECT 1 FROM users LIMIT 1` BEFORE hashing (saves ~600ms on rejected calls). Returns SETUP_ADMINISTRATOR_EXISTS (409). The D1 UNIQUE constraint on email is a defensive backstop for race conditions.
+- No role assignment — roles and permissions are seeded in CAP-017. The setup session authenticates all setup operations.
+- PBKDF2 confirmed working in Cloudflare Workers via `crypto.subtle.deriveBits` — ~600ms per hash, within Workers Paid plan 30s CPU budget.
+- `hashPassword` uses `crypto.getRandomValues` for salt (not `ids.uuid()` — that's for domain IDs).
+
+**Deferred:** D-CAP-010-A (idempotency → CAP-027), D-CAP-010-B (Drizzle BLOB typing → CAP-019).
+
+**Notes:** Two reviewers ran (architecture ACCEPT WITH NOTES, code ACCEPT WITH NOTES). Code review HIGH (BLOB assertion via `as number[]`) fixed — `new Uint8Array()` with typed `.first<>()`. Both reviewers flagged atomicity (M1/Arch-HIGH) — fixed via D1 batch. Arch MEDIUM (singularity guard) fixed — existence check before hash. Arch LOW (error string robustness) fixed — `err instanceof Error && err.message`. Wrong rule citations in crypto.ts fixed.
+
 ## 2026-08-12 — CAP-009 Setup preflight endpoint  |  Implemented
 
 **Changed:** `POST /api/v1/setup/preflight` — session-protected endpoint that reports each of the 7 Cloudflare bindings as present/accessible and the database schema version from `d1_migrations`. Introduces the setup-session middleware that validates `Authorization: Bearer <sessionToken>` against KV — the gate for all post-claim setup endpoints.

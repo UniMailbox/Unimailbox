@@ -9,6 +9,7 @@ import {
   installationStateInfoSchema,
   setupClaimRequestSchema,
   setupPreflightResponseSchema,
+  setupAdministratorRequestSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -155,5 +156,87 @@ describe('setupPreflightResponseSchema', () => {
     if (!result.success) {
       expect(result.error.issues.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('setupAdministratorRequestSchema', () => {
+  it('accepts a valid administrator request with displayName', () => {
+    const result = setupAdministratorRequestSchema.parse({
+      email: 'admin@example.com',
+      password: 'securePassword123',
+      displayName: 'Admin User',
+    });
+    expect(result).toEqual({
+      email: 'admin@example.com',
+      password: 'securePassword123',
+      displayName: 'Admin User',
+    });
+  });
+
+  it('accepts a valid administrator request without displayName', () => {
+    const result = setupAdministratorRequestSchema.parse({
+      email: 'admin@example.com',
+      password: 'securePassword123',
+    });
+    expect(result).toEqual({
+      email: 'admin@example.com',
+      password: 'securePassword123',
+      displayName: undefined,
+    });
+  });
+
+  it('normalises email to lowercase and trimmed (R-DATA-001)', () => {
+    const result = setupAdministratorRequestSchema.parse({
+      email: '  ADMIN@Example.COM  ',
+      password: 'securePassword123',
+    });
+    expect(result.email).toBe('admin@example.com');
+  });
+
+  it('rejects missing email via safeParse', () => {
+    const result = setupAdministratorRequestSchema.safeParse({
+      password: 'securePassword123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing password via safeParse', () => {
+    const result = setupAdministratorRequestSchema.safeParse({
+      email: 'admin@example.com',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects password shorter than 8 characters via safeParse', () => {
+    const result = setupAdministratorRequestSchema.safeParse({
+      email: 'admin@example.com',
+      password: 'short',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects password longer than 72 characters via safeParse', () => {
+    const result = setupAdministratorRequestSchema.safeParse({
+      email: 'admin@example.com',
+      password: 'a'.repeat(73),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects invalid email format via safeParse', () => {
+    const result = setupAdministratorRequestSchema.safeParse({
+      email: 'not-an-email',
+      password: 'securePassword123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects displayName longer than 100 characters via safeParse', () => {
+    const result = setupAdministratorRequestSchema.safeParse({
+      email: 'admin@example.com',
+      password: 'securePassword123',
+      displayName: 'a'.repeat(101),
+    });
+    expect(result.success).toBe(false);
   });
 });
