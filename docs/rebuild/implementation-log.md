@@ -8,6 +8,33 @@ that future agents depend on, or when a documentation source of truth is correct
 
 **Do not log:** routine edits, test output, or anything the git history already answers well.
 
+---
+
+## 2026-08-13 — Phase 1 business loop: CAP-020 through CAP-026
+
+All seven Phase 1 capabilities implemented via subagent delegation. The minimal business closed loop
+is now code-complete: an admin can install, claim a domain, connect Brevo, invite a user, and that
+user can read a real inbound email and reply. The reply is sent via Brevo, the delivery webhook updates
+the message status, and every state transition writes an audit event.
+
+**Migrations landed:** 0005 (mailboxes), 0006 (messages), 0007 (outbound_jobs), 0008 (webhook_events).
+Schema version is now 0008. All quality gates pass: typecheck, lint, test:unit (232), test:worker (348),
+build, doctor 10/10.
+
+**Key decisions:**
+- `message_user_state` PK is `(mailbox_message_id)` not `(mailbox_message_id, user_id)` — multi-user
+  read-state independence has a known limitation. The query falls back to 0 when no row matches the
+  (mailbox_message_id, user_id) pair. Full fix is a schema migration in a future capability.
+- `webhook.delivered` audit emit is in the route layer (`webhooks.ts`), not in `webhook-processor.ts`,
+  because `outbound-mail` cannot import from `admin` per `module-dependency-zones`. The processor
+  returns `messageId` so the route can emit with the correct resourceId.
+- `webhook_secret` on `provider_connections` is stored as plaintext — it is a random HMAC signing key,
+  not a password or provider API key. `ensureWebhookSecret` generates a 256-bit hex secret on first read.
+- Compose endpoint does not yet enforce `Idempotency-Key` (R-OUTBOUND-006 defers to CAP-027).
+- `max_attempts` on outbound_jobs is set to 3 but the queue consumer relies on Cloudflare Queues'
+  own retry policy. Gating `msg.retry()` on attempts is a future capability.
+- Cursor pagination uses simple base64 encoding of `(created_at, id)`. HMAC signing is CAP-034 (Phase 2).
+
 Format:
 
 ```
