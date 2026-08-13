@@ -13,6 +13,7 @@ import {
   domainNameSchema,
   setupDomainRequestSchema,
   setupBrevoRequestSchema,
+  permissionKeySchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -394,5 +395,68 @@ describe('setupBrevoRequestSchema', () => {
     if (!result.success) {
       expect(result.error.issues.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('permissionKeySchema', () => {
+  it('accepts all valid permission keys via parse', () => {
+    const keys: Array<ReturnType<typeof permissionKeySchema.parse>> = [
+      'message.read',
+      'message.send',
+      'message.delete',
+      'mailbox.create',
+      'mailbox.manage',
+      'mailbox.share',
+      'user.read',
+      'user.manage',
+      'role.read',
+      'role.manage',
+      'domain.read',
+      'domain.manage',
+      'signature.read',
+      'signature.manage',
+      'settings.read',
+      'settings.manage',
+      'provider.sync',
+      'webhook_event.read',
+      'webhook_event.delete',
+      'analytics.read',
+    ];
+
+    for (const key of keys) {
+      const result = permissionKeySchema.parse(key);
+      expect(result).toBe(key);
+    }
+  });
+
+  it('rejects invalid permission keys via safeParse', () => {
+    const result = permissionKeySchema.safeParse('invalid.permission');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects non-string input via safeParse', () => {
+    const result = permissionKeySchema.safeParse(123);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects empty string via safeParse', () => {
+    const result = permissionKeySchema.safeParse('');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('has exactly 20 permission keys', () => {
+    // Verify the enum has the expected size
+    const allKeys = permissionKeySchema.options;
+    expect(allKeys).toHaveLength(20);
+    expect(new Set(allKeys).size).toBe(20);
   });
 });

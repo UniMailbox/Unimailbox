@@ -23,6 +23,17 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-017 Roles + permissions seed  |  Implemented
+
+**Changed:** Admin module introduced. 20 permission keys seeded. 2 roles (administrator=all, member=5 perms). `completeSetup` now seeds roles + assigns administrator to first user. `requirePermission(key)` middleware implemented (reads `c.get('userId')`, 401/403 on failure).
+
+**Files:** `apps/worker/src/modules/admin/permission-repository.ts` (new — checkPermission) · `apps/worker/src/modules/admin/seed-repository.ts` (new — seedRolesAndPermissions, assignRole) · `apps/worker/src/modules/admin/index.ts` (new module) · `apps/worker/src/http/middleware/authz.ts` (new — requirePermission) · `apps/worker/src/modules/onboarding/complete-setup.ts` (modified — seeding + role assignment) · `packages/contracts/src/index.ts` (permissionKeySchema) · `apps/worker/src/platform/env.ts` (AppEnv Variables: { userId?: string })
+
+**Decisions:**
+- Deterministic IDs: permission id = key (e.g., `'message.read'`), role id = name (e.g., `'administrator'`). System seed data, not domain aggregates.
+- Seeding during setup completion — `completeSetup` calls seed → assign admin → flip status. Roles exist before the first user logs in.
+- `requirePermission` reads `c.get('userId')` from Hono Variables — set by future auth middleware (CAP-019). Without auth, always returns 401.
+
 ## 2026-08-13 — CAP-015 + CAP-016 Setup wizard complete  |  Implemented
 
 **Changed:** `POST /api/v1/setup/outbound-smoke-test` (decrypts Brevo API key, sends test email, advances step to 'complete') + `POST /api/v1/setup/complete` (flips status to 'complete', `GET /` serves HTML shell). **The entire setup wizard is now implemented — all 9 steps.**

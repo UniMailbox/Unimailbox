@@ -256,3 +256,48 @@ export const setupBrevoRequestSchema = z.object({
 });
 
 export type SetupBrevoRequest = z.infer<typeof setupBrevoRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Authorization — CAP-017
+// ---------------------------------------------------------------------------
+/**
+ * PermissionKey — closed enum of all permission keys.
+ * R-AUTHZ-001: Permissions are a closed set; adding a key is a deliberate change.
+ * R-AUTHZ-002: Authorization checks hit the database per request; no cache older than 5 minutes.
+ *
+ * From .claude/rules/security.md §Authorization:
+ * - message.read, message.send, message.delete
+ * - mailbox.create, mailbox.manage, mailbox.share
+ * - user.read, user.manage
+ * - role.read, role.manage
+ * - domain.read, domain.manage
+ * - signature.read, signature.manage
+ * - settings.read, settings.manage
+ * - provider.sync
+ * - webhook_event.read, webhook_event.delete
+ * - analytics.read
+ */
+export const permissionKeySchema = z.enum([
+  'message.read',
+  'message.send',
+  'message.delete',
+  'mailbox.create',
+  'mailbox.manage',
+  'mailbox.share',
+  'user.read',
+  'user.manage',
+  'role.read',
+  'role.manage',
+  'domain.read',
+  'domain.manage',
+  'signature.read',
+  'signature.manage',
+  'settings.read',
+  'settings.manage',
+  'provider.sync',
+  'webhook_event.read',
+  'webhook_event.delete',
+  'analytics.read',
+]);
+
+export type PermissionKey = z.infer<typeof permissionKeySchema>;

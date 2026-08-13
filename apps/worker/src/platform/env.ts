@@ -18,4 +18,9 @@ export type Env = {
 
 // Hono's `Bindings` slot on the app env. Lives here so middleware files
 // can import a single, low-layer type rather than reaching upward.
-export type AppEnv = { Bindings: Env };
+export type AppEnv = {
+  Bindings: Env;
+  Variables: {
+    userId?: string;
+  };
+};
