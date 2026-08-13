@@ -26,3 +26,17 @@ export {
 } from './job-repository';
 
 export { processOutboundJob, type ProcessJobDeps } from './process-outbound-job';
+
+export {
+  createWebhookDelivery,
+  ensureWebhookSecret,
+  getProviderConnection,
+  findJobByProviderMessageId,
+  type WebhookDeliveryInput,
+  type ProviderConnectionForWebhook,
+} from './webhook-repository';
+
+export {
+  verifyAndProcessEvent,
+  type VerifyAndProcessEventInput,
+} from './webhook-processor';

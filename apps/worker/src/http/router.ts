@@ -11,6 +11,7 @@ import { adminRoutes } from './routes/admin';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
+import { webhookRoutes } from './routes/webhooks';
 import type { AppEnv } from '../platform/env';
 
 export function buildRouter(): Hono<AppEnv> {
@@ -51,6 +52,10 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-023: Compose (send) routes.
   router.route('/api/v1', composeRoutes());
+
+  // CAP-024: Webhook receiver (public — verified by HMAC signature, not
+  // authn/authz middleware).
+  router.route('/api/v1', webhookRoutes());
 
   return router;
 }

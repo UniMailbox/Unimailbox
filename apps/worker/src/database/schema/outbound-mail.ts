@@ -29,7 +29,9 @@ export type NewEncryptedCredential = typeof encryptedCredentials.$inferInsert;
 
 // provider_connections — CAP-014
 // Stores provider connections (Brevo, Resend, CF-Sendmail, etc.) with a
-// foreign key to encrypted_credentials.
+// foreign key to encrypted_credentials. CAP-024 adds webhook_secret — a
+// per-connection HMAC key used to verify inbound webhook payloads before
+// JSON parse (R-INBOUND-SIGNATURE).
 export const providerConnections = sqliteTable(
   'provider_connections',
   {
@@ -38,6 +40,9 @@ export const providerConnections = sqliteTable(
     label: text('label').notNull(),
     credentialId: text('credential_id').notNull().references(() => encryptedCredentials.id),
     status: text('status').notNull(), // 'active' | 'disabled' | 'invalid'
+    // R-INBOUND-SIGNATURE: HMAC-SHA256 key for verifying provider webhook
+    // bodies. NULL until ensureWebhookSecret generates one on first read.
+    webhookSecret: text('webhook_secret'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
@@ -45,6 +50,30 @@ export const providerConnections = sqliteTable(
 
 export type ProviderConnection = typeof providerConnections.$inferSelect;
 export type NewProviderConnection = typeof providerConnections.$inferInsert;
+
+// webhook_deliveries — CAP-024
+// One row per received provider event. Written after signature verification
+// succeeds; raw_payload is the exact bytes Brevo sent so we can replay or
+// audit. Owner: outbound-mail module.
+export const webhookDeliveries = sqliteTable(
+  'webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    connectionId: text('connection_id').notNull().references(() => providerConnections.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    rawPayload: text('raw_payload').notNull(),
+    messageId: text('message_id').references(() => messages.id, { onDelete: 'set null' }),
+    status: text('status').notNull().default('processed'),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => ({
+    connectionIdx: index('webhook_deliveries_connection_idx').on(t.connectionId),
+    createdIdx: index('webhook_deliveries_created_idx').on(t.createdAt),
+  }),
+);
+
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert;
 
 // outbound_jobs — CAP-023
 // One row per outbound message. Compose writes a 'queued' row in the same
