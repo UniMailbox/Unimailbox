@@ -12,6 +12,7 @@ import type { Clock } from '../../platform/clock';
 import type { IdGenerator } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
 import { constantTimeCompare } from '../../platform/crypto';
+import { createAuditEvent } from '../admin';
 import { getInstallationState, seedInstallationState } from './installation-state-repository';
 
 export interface ClaimSetupInput {
@@ -76,6 +77,16 @@ export async function claimSetup(
 
   // Seed installation_state if absent (fresh DB). Does not overwrite existing rows.
   await seedInstallationState(input.db, 'preflight', now);
+
+  // R-AUDIT-001: record the state transition.
+  await createAuditEvent(input.db, {
+    id: deps.ids.uuid(),
+    actorUserId: null,
+    action: 'setup.claim',
+    resourceType: 'system',
+    resourceId: null,
+    createdAt: now,
+  });
 
   return { sessionToken, expiresIn: SESSION_TTL_SECONDS };
 }

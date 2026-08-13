@@ -13,6 +13,7 @@ import {
   createMailbox,
   listMailboxesByOwner,
 } from '../../modules/tenancy';
+import { createAuditEvent } from '../../modules/admin';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
@@ -83,6 +84,16 @@ export function mailboxRoutes(): Hono<AppEnv> {
         status: 'active',
         createdAt: now,
         updatedAt: now,
+      });
+
+      // R-AUDIT-001: record the state transition.
+      await createAuditEvent(c.env.DB, {
+        id: systemIds.uuid(),
+        actorUserId: userId,
+        action: 'mailbox.create',
+        resourceType: 'mailbox',
+        resourceId: mailboxId,
+        createdAt: now.slice(0, 19).replace('T', ' '),
       });
 
       return c.json({ data: result });

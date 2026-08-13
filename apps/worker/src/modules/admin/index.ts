@@ -7,3 +7,8 @@
 
 export { checkPermission, getUserRoleIds } from './permission-repository';
 export { seedRolesAndPermissions, assignRole } from './seed-repository';
+export {
+  createAuditEvent,
+  prepareCreateAuditEvent,
+  type AuditEventInput,
+} from './audit-event-repository';

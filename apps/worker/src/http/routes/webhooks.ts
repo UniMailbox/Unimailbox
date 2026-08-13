@@ -20,6 +20,8 @@
 
 import { Hono } from 'hono';
 import { verifyAndProcessEvent } from '../../modules/outbound-mail';
+import { createAuditEvent } from '../../modules/admin';
+import { systemIds } from '../../platform/ids';
 import type { AppEnv } from '../../platform/env';
 
 export function webhookRoutes(): Hono<AppEnv> {
@@ -41,11 +43,23 @@ export function webhookRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const signatureHeader = c.req.header('X-Webhook-Signature') ?? null;
 
-    await verifyAndProcessEvent({
+    const result = await verifyAndProcessEvent({
       db: c.env.DB,
       connectionId,
       rawBody,
       signatureHeader,
+    });
+
+    // R-AUDIT-001: record the state transition. Emitted here (route layer)
+    // because outbound-mail cannot depend on admin per architecture rules.
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    await createAuditEvent(c.env.DB, {
+      id: systemIds.uuid(),
+      actorUserId: null,
+      action: 'webhook.delivered',
+      resourceType: 'message',
+      resourceId: result.messageId,
+      createdAt: now,
     });
 
     return c.json({ data: { ok: true } });

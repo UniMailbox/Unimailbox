@@ -47,11 +47,18 @@ function mapEventToMessageStatus(event: string | undefined): string {
   }
 }
 
+export interface VerifyAndProcessEventResult {
+  readonly messageId: string | null;
+}
+
 /**
  * Verifies the HMAC-SHA256 signature of `rawBody` against the connection's
  * stored `webhook_secret`, parses the JSON only after verification succeeds,
  * updates the matching message's status (if any), and stores a
  * webhook_deliveries row.
+ *
+ * Returns `{ messageId }` so the caller (route handler) can emit an audit
+ * event — the outbound-mail module cannot depend on admin per architecture rules.
  *
  * Throws DomainError on any failure (unknown connection, missing or invalid
  * signature, unconfigured secret). The HTTP error middleware maps these to
@@ -59,7 +66,7 @@ function mapEventToMessageStatus(event: string | undefined): string {
  */
 export async function verifyAndProcessEvent(
   input: VerifyAndProcessEventInput,
-): Promise<void> {
+): Promise<VerifyAndProcessEventResult> {
   const { db, connectionId, rawBody, signatureHeader } = input;
 
   // 1. Look up connection — 404 if unknown.
@@ -144,6 +151,8 @@ export async function verifyAndProcessEvent(
     messageId,
     createdAt: now,
   });
+
+  return { messageId };
 }
 
 /**

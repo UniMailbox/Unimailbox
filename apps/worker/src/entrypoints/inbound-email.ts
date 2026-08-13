@@ -26,6 +26,7 @@ import {
   type CreateRecipientInput,
   type CreateMailboxMessageInput,
 } from '../modules/messages';
+import { createAuditEvent } from '../modules/admin';
 import { systemIds } from '../platform/ids';
 
 const UNKNOWN_RECIPIENT_REASON = 'Unknown recipient. No mailbox found for this address.';
@@ -133,5 +134,15 @@ export default {
     ];
 
     await createMessageWithRelations(env.DB, allStatements);
+
+    // R-AUDIT-001: record the state transition.
+    await createAuditEvent(env.DB, {
+      id: systemIds.uuid(),
+      actorUserId: null,
+      action: 'message.receive',
+      resourceType: 'message',
+      resourceId: messageId,
+      createdAt: now,
+    });
   },
 };

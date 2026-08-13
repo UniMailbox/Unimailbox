@@ -8,7 +8,8 @@
 
 import type { Database } from '../../platform/database';
 import type { Clock } from '../../platform/clock';
-import { seedRolesAndPermissions } from '../admin';
+import { systemIds } from '../../platform/ids';
+import { seedRolesAndPermissions, createAuditEvent } from '../admin';
 import { getFirstUser } from '../identity';
 
 export interface CompleteSetupInput {
@@ -68,6 +69,16 @@ export async function completeSetup(
   if (stmts.length > 0) {
     await input.db.batch(stmts);
   }
+
+  // R-AUDIT-001: record the state transition.
+  await createAuditEvent(input.db, {
+    id: systemIds.uuid(),
+    actorUserId: admin?.id ?? null,
+    action: 'setup.complete',
+    resourceType: 'system',
+    resourceId: null,
+    createdAt: now,
+  });
 
   return { status: 'complete' };
 }

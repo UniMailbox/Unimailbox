@@ -43,4 +43,5 @@ export {
 export {
   verifyAndProcessEvent,
   type VerifyAndProcessEventInput,
+  type VerifyAndProcessEventResult,
 } from './webhook-processor';

@@ -17,7 +17,7 @@ import { Hono } from 'hono';
 import { composeRequestSchema } from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
 import { assertCan, findMailboxById } from '../../modules/tenancy';
-import { checkPermission } from '../../modules/admin';
+import { checkPermission, createAuditEvent } from '../../modules/admin';
 import { prepareCreateOutboundJob } from '../../modules/outbound-mail';
 import { createMessageWithRelations } from '../../modules/messages';
 import { systemIds } from '../../platform/ids';
@@ -160,6 +160,16 @@ export function composeRoutes(): Hono<AppEnv> {
       // the job, decrypts the credential, calls the adapter, and updates
       // message + job status.
       await c.env.OUTBOUND.send(JSON.stringify({ jobId }));
+
+      // R-AUDIT-001: record the state transition.
+      await createAuditEvent(c.env.DB, {
+        id: systemIds.uuid(),
+        actorUserId: userId,
+        action: 'message.send',
+        resourceType: 'message',
+        resourceId: messageId,
+        createdAt: now,
+      });
 
       return c.json({ data: { messageId, status: 'queued' } }, 202);
     },
