@@ -164,3 +164,59 @@ export async function decrypt(data: EncryptedData, key: CryptoKey): Promise<stri
   );
   return new TextDecoder().decode(decrypted);
 }
+
+// ---------------------------------------------------------------------------
+// Password verification — CAP-019
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify a password against a stored hash using PBKDF2-SHA256.
+ *
+ * Re-derives the hash from the input password using the stored salt and
+ * iterations, then compares using constant-time comparison to prevent timing
+ * attacks.
+ *
+ * @param password - The plaintext password to verify
+ * @param stored - The PasswordHash containing algorithm, iterations, salt, and hash
+ * @returns true if the password matches, false otherwise
+ *
+ * See .claude/rules/security.md §Passwords and ADR-006.
+ */
+export async function verifyPassword(
+  password: string,
+  stored: PasswordHash,
+): Promise<boolean> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const hashBuffer = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: stored.salt,
+      iterations: stored.iterations,
+      hash: 'SHA-256',
+    },
+    key,
+    PBKDF2_HASH_BITS,
+  );
+
+  // constantTimeCompare works with strings, so convert both Uint8Arrays to hex
+  const derivedHex = bufferToHex(new Uint8Array(hashBuffer));
+  const storedHex = bufferToHex(stored.hash);
+  return constantTimeCompare(derivedHex, storedHex);
+}
+
+/**
+ * Convert a Uint8Array to a hexadecimal string.
+ *
+ * Used by verifyPassword to convert hash buffers for constant-time comparison.
+ */
+function bufferToHex(buffer: Uint8Array): string {
+  return Array.from(buffer)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}

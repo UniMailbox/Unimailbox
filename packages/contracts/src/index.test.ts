@@ -14,6 +14,10 @@ import {
   setupDomainRequestSchema,
   setupBrevoRequestSchema,
   permissionKeySchema,
+  createInviteCodeRequestSchema,
+  registerRequestSchema,
+  loginRequestSchema,
+  refreshRequestSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -458,5 +462,200 @@ describe('permissionKeySchema', () => {
     const allKeys = permissionKeySchema.options;
     expect(allKeys).toHaveLength(20);
     expect(new Set(allKeys).size).toBe(20);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-018: Admin invite codes
+// ---------------------------------------------------------------------------
+
+describe('createInviteCodeRequestSchema', () => {
+  it('accepts a valid request with all fields via parse', () => {
+    const result = createInviteCodeRequestSchema.parse({
+      maxUses: 5,
+      roleId: 'role-123',
+      expiresInHours: 24,
+    });
+    expect(result).toEqual({
+      maxUses: 5,
+      roleId: 'role-123',
+      expiresInHours: 24,
+    });
+  });
+
+  it('accepts a minimal request (empty object) and applies defaults via parse', () => {
+    const result = createInviteCodeRequestSchema.parse({});
+    expect(result).toEqual({
+      maxUses: 1,
+      roleId: undefined,
+      expiresInHours: undefined,
+    });
+  });
+
+  it('accepts maxUses explicitly via parse', () => {
+    const result = createInviteCodeRequestSchema.parse({
+      maxUses: 10,
+    });
+    expect(result).toEqual({
+      maxUses: 10,
+      roleId: undefined,
+      expiresInHours: undefined,
+    });
+  });
+
+  it('rejects maxUses < 1 via safeParse', () => {
+    const result = createInviteCodeRequestSchema.safeParse({ maxUses: 0 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects negative maxUses via safeParse', () => {
+    const result = createInviteCodeRequestSchema.safeParse({ maxUses: -5 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects non-integer maxUses via safeParse', () => {
+    const result = createInviteCodeRequestSchema.safeParse({ maxUses: 1.5 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects non-string roleId via safeParse', () => {
+    const result = createInviteCodeRequestSchema.safeParse({ roleId: 123 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects expiresInHours <= 0 via safeParse', () => {
+    const result = createInviteCodeRequestSchema.safeParse({ expiresInHours: 0 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects negative expiresInHours via safeParse', () => {
+    const result = createInviteCodeRequestSchema.safeParse({ expiresInHours: -1 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects non-integer expiresInHours via safeParse', () => {
+    const result = createInviteCodeRequestSchema.safeParse({ expiresInHours: 1.5 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('applies default maxUses when only other fields present via parse', () => {
+    const result = createInviteCodeRequestSchema.parse({
+      roleId: 'role-456',
+      expiresInHours: 48,
+    });
+    expect(result).toEqual({
+      maxUses: 1,
+      roleId: 'role-456',
+      expiresInHours: 48,
+    });
+  });
+});
+describe('registerRequestSchema', () => {
+  it('accepts a valid registration request', () => {
+    const result = registerRequestSchema.parse({
+      code: 'a'.repeat(64), // 64-char hex code
+      email: 'user@example.com',
+      password: 'securePassword123',
+    });
+    expect(result.email).toBe('user@example.com');
+    expect(result.password).toBe('securePassword123');
+  });
+
+  it('rejects missing code via safeParse', () => {
+    const result = registerRequestSchema.safeParse({
+      email: 'user@example.com',
+      password: 'securePassword123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing email via safeParse', () => {
+    const result = registerRequestSchema.safeParse({
+      code: 'a'.repeat(64),
+      password: 'securePassword123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects invalid email via safeParse', () => {
+    const result = registerRequestSchema.safeParse({
+      code: 'a'.repeat(64),
+      email: 'not-an-email',
+      password: 'securePassword123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects code not exactly 64 characters via safeParse', () => {
+    const result = registerRequestSchema.safeParse({
+      code: 'abc123',
+      email: 'user@example.com',
+      password: 'securePassword123',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('loginRequestSchema', () => {
+  it('accepts a valid login request', () => {
+    const result = loginRequestSchema.parse({
+      email: 'user@example.com',
+      password: 'securePassword123',
+    });
+    expect(result.email).toBe('user@example.com');
+  });
+
+  it('rejects missing password via safeParse', () => {
+    const result = loginRequestSchema.safeParse({
+      email: 'user@example.com',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing email via safeParse', () => {
+    const result = loginRequestSchema.safeParse({
+      password: 'securePassword123',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('refreshRequestSchema', () => {
+  it('accepts a valid refresh request', () => {
+    const result = refreshRequestSchema.parse({
+      refreshToken: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.refreshToken).toBe('00000000-0000-4000-8000-000000000001');
+  });
+
+  it('rejects missing refreshToken via safeParse', () => {
+    const result = refreshRequestSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects non-uuid refreshToken via safeParse', () => {
+    const result = refreshRequestSchema.safeParse({ refreshToken: 'not-a-uuid' });
+    expect(result.success).toBe(false);
   });
 });

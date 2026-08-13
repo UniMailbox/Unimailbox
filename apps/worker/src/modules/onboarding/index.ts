@@ -3,6 +3,7 @@
 //   getCloudflareDashboardLink, verifyCloudflareEmailRouting, startInboundSmokeTest, checkInboundSmokeTest,
 //   handleSmokeTestMessage, setupBrevo, runOutboundSmokeTest, completeSetup — the setup use cases.
 // The repository (getInstallationState, seedInstallationState, updateInstallationStep) is private (D-CAP-006-C).
+// Registration key repository is also exported (CAP-018).
 
 export { getSetupStatus } from './setup-status';
 export { claimSetup } from './claim-setup';
@@ -15,6 +16,7 @@ export { startInboundSmokeTest, checkInboundSmokeTest, handleSmokeTestMessage } 
 export { setupBrevo } from './setup-brevo';
 export { runOutboundSmokeTest } from './outbound-smoke-test';
 export { completeSetup } from './complete-setup';
+export { createRegistrationKey, findKeyByCodeHash, prepareIncrementKeyUsage } from './registration-key-repository';
 export type { CreateAdministratorInput, CreateAdministratorResult } from './create-administrator';
 export type { CreateDomainInput, CreateDomainResult } from './create-domain';
 export type { CloudflareDashboardLinkResult } from './cloudflare-dashboard-link';
@@ -23,3 +25,4 @@ export type { StartSmokeTestInput, StartSmokeTestResult, CheckSmokeTestResult } 
 export type { SetupBrevoInput, SetupBrevoResult } from './setup-brevo';
 export type { OutboundSmokeTestInput, OutboundSmokeTestResult } from './outbound-smoke-test';
 export type { CompleteSetupInput, CompleteSetupResult } from './complete-setup';
+export type { CreateRegistrationKeyInput, RegistrationKeyRow } from './registration-key-repository';

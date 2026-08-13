@@ -23,6 +23,25 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-018 + CAP-019 Registration keys + Auth  |  Implemented
+
+**Changed:** Full authentication system. CAP-018: admin issues invite codes via `POST /api/v1/admin/invite-codes`. CAP-019: users register with a code (`POST /api/v1/auth/register`), login with email+password (`POST /api/v1/auth/login`), get access+refresh tokens, refresh tokens, get current user (`GET /api/v1/auth/me`). Global auth middleware sets `userId` from KV `auth:{token}`. `requirePermission` now fully functional.
+
+**Files:** `migrations/0004_registration_keys.sql` + verify · `apps/worker/src/database/schema/onboarding.ts` (registrationKeys) · `apps/worker/src/platform/crypto.ts` (verifyPassword) · `apps/worker/src/modules/onboarding/registration-key-repository.ts` (new) · `apps/worker/src/modules/identity/user-repository.ts` (findUserByEmail) · `apps/worker/src/modules/identity/session-repository.ts` (new) · `apps/worker/src/http/middleware/authn.ts` (new — global auth middleware) · `apps/worker/src/http/routes/auth.ts` (new — register, login, refresh, me) · `apps/worker/src/http/routes/admin.ts` (new — invite-codes CRUD) · `apps/worker/src/http/router.ts` (mount authn + new routes) · `packages/contracts/src/index.ts` (registerRequestSchema, loginRequestSchema, refreshRequestSchema) · schema version → '0004'
+
+**Decisions:**
+- Access token: UUID stored in CACHE KV (`auth:{token}`), 15-min TTL. Sets `c.set('userId', userId)` if valid.
+- Refresh token: UUID, SHA-256 hash stored in sessions table, 30-day expiry. Never plaintext.
+- Registration code: 32 random bytes → 64-char hex, SHA-256 hash stored. Only shown to admin once.
+- `INVALID_CREDENTIALS` for both wrong email AND wrong password (don't leak which).
+- Registration is a single D1 batch: create user + assign member role + increment key usage.
+- Auth routes (register, login, refresh) are public. Admin routes need authn + requirePermission.
+- `verifyPassword` converts both Uint8Arrays to hex, then uses `constantTimeCompare` on hex strings.
+
+**Deferred:** D-CAP-019-A (idempotency on /register → CAP-027), D-CAP-019-B (email verification flow → Phase 2).
+
+**Notes:** Fixed test bug: admin tests were destructuring `accessToken` from top-level response instead of `data.accessToken`. Two locations, both 403 tests. Fixed preflight test (schemaVersion '0003' → '0004'). Added contract tests for registerRequestSchema, loginRequestSchema, refreshRequestSchema.
+
 ## 2026-08-13 — CAP-017 Roles + permissions seed  |  Implemented
 
 **Changed:** Admin module introduced. 20 permission keys seeded. 2 roles (administrator=all, member=5 perms). `completeSetup` now seeds roles + assigns administrator to first user. `requirePermission(key)` middleware implemented (reads `c.get('userId')`, 401/403 on failure).

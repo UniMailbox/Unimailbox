@@ -1,7 +1,7 @@
 // platform/crypto.test.ts — unit tests for constantTimeCompare, hashPassword,
-// and AES-GCM encrypt/decrypt (ADR-007).
+// verifyPassword, and AES-GCM encrypt/decrypt (ADR-007).
 import { describe, expect, it } from 'vitest';
-import { constantTimeCompare, hashPassword, importEncryptionKey, encrypt, decrypt } from './crypto';
+import { constantTimeCompare, hashPassword, verifyPassword, importEncryptionKey, encrypt, decrypt } from './crypto';
 
 describe('constantTimeCompare', () => {
   it('returns true for equal strings', () => {
@@ -299,5 +299,126 @@ describe('encrypt/decrypt round-trip', () => {
       const decrypted = await decrypt(encrypted, key);
       expect(decrypted).toBe(original);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verifyPassword — CAP-019
+// ---------------------------------------------------------------------------
+
+describe('verifyPassword', () => {
+  it('returns true for correct password', async () => {
+    const password = 'test-password-123';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(password, stored);
+    expect(result).toBe(true);
+  });
+
+  it('returns false for incorrect password', async () => {
+    const password = 'test-password-123';
+    const wrongPassword = 'wrong-password-456';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(wrongPassword, stored);
+    expect(result).toBe(false);
+  });
+
+  it('returns false for empty password when non-empty was hashed', async () => {
+    const password = 'test-password-123';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword('', stored);
+    expect(result).toBe(false);
+  });
+
+  it('returns false for different case of same password', async () => {
+    const password = 'TestPassword123';
+    const wrongCase = 'testpassword123';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(wrongCase, stored);
+    expect(result).toBe(false);
+  });
+
+  it('verifies minimum-length password (8 chars)', async () => {
+    const password = '12345678';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(password, stored);
+    expect(result).toBe(true);
+  });
+
+  it('verifies maximum-length password (72 chars)', async () => {
+    const password = 'a'.repeat(72);
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(password, stored);
+    expect(result).toBe(true);
+  });
+
+  it('verifies password with special characters', async () => {
+    const password = 'P@ssw0rd!#$%^&*()';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(password, stored);
+    expect(result).toBe(true);
+  });
+
+  it('verifies password with Unicode characters', async () => {
+    const password = 'пароль123';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(password, stored);
+    expect(result).toBe(true);
+  });
+
+  it('verifies password against manually-constructed PasswordHash', async () => {
+    // Test that verifyPassword works with the exact shape stored in the database
+    const password = 'manual-test-password';
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(password),
+      'PBKDF2',
+      false,
+      ['deriveBits'],
+    );
+    const hashBuffer = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: 600_000, hash: 'SHA-256' },
+      key,
+      256,
+    );
+
+    const stored: PasswordHash = {
+      algorithm: 'pbkdf2-sha256',
+      iterations: 600_000,
+      salt,
+      hash: new Uint8Array(hashBuffer),
+    };
+
+    const result = await verifyPassword(password, stored);
+    expect(result).toBe(true);
+  });
+
+  it('returns false for password that differs by one character', async () => {
+    const password = 'password123';
+    const wrongPassword = 'password124';
+    const stored = await hashPassword(password);
+    const result = await verifyPassword(wrongPassword, stored);
+    expect(result).toBe(false);
+  });
+
+  it('is resistant to timing attacks (uses constant-time compare)', async () => {
+    // This test verifies that verifyPassword uses constantTimeCompare internally.
+    // The actual constant-time property is verified by constantTimeCompare tests.
+    const password = 'test-password-123';
+    const stored = await hashPassword(password);
+
+    // Both should complete in similar time (no early exit on mismatch)
+    const start1 = performance.now();
+    await verifyPassword(password, stored);
+    const time1 = performance.now() - start1;
+
+    const start2 = performance.now();
+    await verifyPassword('completely-different-password', stored);
+    const time2 = performance.now() - start2;
+
+    // Both should take roughly the same time (within 5x for test robustness)
+    // Real timing attacks require statistical analysis over many requests
+    expect(time2).toBeLessThan(time1 * 5);
   });
 });

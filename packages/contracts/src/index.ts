@@ -301,3 +301,66 @@ export const permissionKeySchema = z.enum([
 ]);
 
 export type PermissionKey = z.infer<typeof permissionKeySchema>;
+
+// ---------------------------------------------------------------------------
+// Admin invite codes — CAP-018
+// ---------------------------------------------------------------------------
+
+/**
+ * Request body for POST /api/v1/admin/invite-codes. Admin creates a registration key.
+ *
+ * - maxUses: maximum number of times the code can be used (default: 1)
+ * - roleId: optional role ID to assign to users who register with this code
+ * - expiresInHours: optional expiration in hours from now (null = no expiration)
+ */
+export const createInviteCodeRequestSchema = z.object({
+  maxUses: z.number().int().min(1).default(1),
+  roleId: z.string().optional(),
+  expiresInHours: z.number().int().positive().optional(),
+});
+
+export type CreateInviteCodeRequest = z.infer<typeof createInviteCodeRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Authentication — CAP-019
+// ---------------------------------------------------------------------------
+/**
+ * Request body for POST /api/v1/auth/register.
+ *
+ * - code: 64-character hex registration code (32 bytes, SHA-256 hashed for storage)
+ * - email: user's email address (case-insensitive, validated per R-DATA-001)
+ * - password: 8-72 characters (enforced by API, hashed with PBKDF2-SHA256)
+ * - displayName: optional display name (max 100 chars)
+ */
+export const registerRequestSchema = z.object({
+  code: z.string().length(64),
+  email: emailAddressSchema,
+  password: z.string().min(8).max(72),
+  displayName: z.string().max(100).optional(),
+});
+
+export type RegisterRequest = z.infer<typeof registerRequestSchema>;
+
+/**
+ * Request body for POST /api/v1/auth/login.
+ *
+ * - email: user's email address (case-insensitive)
+ * - password: user's password (1-72 chars to allow already-hashed edge cases)
+ */
+export const loginRequestSchema = z.object({
+  email: emailAddressSchema,
+  password: z.string().min(1).max(72),
+});
+
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
+/**
+ * Request body for POST /api/v1/auth/refresh.
+ *
+ * - refreshToken: UUID refresh token (SHA-256 hashed for lookup in sessions table)
+ */
+export const refreshRequestSchema = z.object({
+  refreshToken: uuidSchema,
+});
+
+export type RefreshRequest = z.infer<typeof refreshRequestSchema>;

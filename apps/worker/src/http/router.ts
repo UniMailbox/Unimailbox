@@ -4,15 +4,19 @@
 import { Hono } from 'hono';
 import { requestId } from './middleware/request-id';
 import { setupGate } from './middleware/setup-gate';
+import { authn } from './middleware/authn';
 import { setupRoutes } from './routes/setup';
+import { authRoutes } from './routes/auth';
+import { adminRoutes } from './routes/admin';
 import type { AppEnv } from '../platform/env';
 
 export function buildRouter(): Hono<AppEnv> {
   const router = new Hono<AppEnv>();
 
-  // Infrastructure middleware first, then gates, then routes.
+  // Infrastructure middleware first, then gates, then authn, then routes.
   router.use('*', requestId);
   router.use('*', setupGate);
+  router.use('*', authn); // CAP-019: sets userId if valid token present
 
   // R-SETUP-003: /healthz is exempt from the setup gate and always reachable.
   router.get('/healthz', (c) => c.json({ ok: true, surface: 'router' }));
@@ -31,6 +35,10 @@ export function buildRouter(): Hono<AppEnv> {
 
   // Setup API routes.
   router.route('/api/v1/setup', setupRoutes());
+
+  // CAP-019: Auth and admin API routes.
+  router.route('/api/v1/auth', authRoutes());
+  router.route('/api/v1/admin', adminRoutes());
 
   return router;
 }
