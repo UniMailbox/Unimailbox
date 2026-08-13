@@ -26,7 +26,10 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -50,6 +53,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-admin-key',
       },
     });
     if (adminResponse.status !== 200) {
@@ -63,6 +67,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
     if (domainResponse.status !== 200) {
@@ -96,6 +101,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-brevo-key',
       },
     });
 
@@ -147,6 +153,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -166,6 +173,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -192,6 +200,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -218,6 +227,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -234,6 +244,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -255,6 +266,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -272,6 +284,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -298,6 +311,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -309,7 +323,10 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     it('returns 401 without a session', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -323,6 +340,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-invalid-token-key',
           Authorization: 'Bearer invalid-session-token',
         },
       });
@@ -358,6 +376,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-admin-key',
           Authorization: `Bearer ${newSessionToken}`,
         },
       });
@@ -378,6 +397,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -399,6 +419,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -408,7 +429,64 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     });
   });
 
-  describe('idempotency', () => {
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      mockSuccessfulSend();
+
+      const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-outbound-smoke-key-abc123';
+      mockSuccessfulSend('brevo-message-123');
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+      expect(body1.data.providerMessageId).toBe('brevo-message-123');
+
+      // Reset step to allow second call (simulating a replay attempt)
+      await env.DB
+        .prepare(`UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`)
+        .bind(FIXED_TIMESTAMP)
+        .run();
+
+      // Change the mock to return a different messageId - replay should return the original
+      mockSuccessfulSend('brevo-message-different');
+
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the SAME providerMessageId as the first request (replay)
+      expect(body2.data.providerMessageId).toBe('brevo-message-123');
+    });
+
     it('generates a unique idempotency key for each send', async () => {
       let callCount = 0;
       fetchSpy.mockImplementation(async () => {
@@ -422,6 +500,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'unique-key-1',
         },
       });
 
@@ -435,12 +514,13 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         .bind(FIXED_TIMESTAMP)
         .run();
 
-      // Second call
+      // Second call with different key
       const response2 = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'unique-key-2',
         },
       });
 
@@ -462,6 +542,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -480,6 +561,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 
@@ -498,6 +580,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-outbound-smoke-key',
         },
       });
 

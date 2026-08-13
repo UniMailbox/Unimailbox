@@ -10,6 +10,8 @@
 // a specific mailbox by ID (see http/routes/messages.ts and compose.ts).
 // R-MAILBOX-003: Owner (the authenticated user) is implicitly a member.
 // R-DATA-001: localPart is case-insensitive (COLLATE NOCASE).
+// R-API-004: POST /mailboxes requires Idempotency-Key; replays return the
+// stored response.
 
 import { Hono } from 'hono';
 import {
@@ -24,7 +26,18 @@ import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
 import { requirePermission } from '../middleware/authz';
+import { requireIdempotencyKey } from '../middleware/idempotency';
+import {
+  findIdempotencyRecord,
+  prepareCreateIdempotencyRecord,
+  replayResponse,
+  assertSameRequestHash,
+  sha256Hex,
+  sqliteTimestamp,
+} from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
+
+const CREATE_MAILBOX_OPERATION = 'POST /api/v1/mailboxes';
 
 export function mailboxRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -43,7 +56,7 @@ export function mailboxRoutes(): Hono<AppEnv> {
    * Returns 403 PERMISSION_DENIED if user lacks mailbox.create permission.
    * Returns 409 DOMAIN_ADDRESS_TAKEN if address already exists (case-insensitive).
    */
-  routes.post('/mailboxes', requirePermission('mailbox.create'), async (c) => {
+  routes.post('/mailboxes', requirePermission('mailbox.create'), requireIdempotencyKey, async (c) => {
     const userId = c.get('userId');
     if (!userId) {
       throw new DomainError({
@@ -53,7 +66,34 @@ export function mailboxRoutes(): Hono<AppEnv> {
       });
     }
 
-    const body = createMailboxRequestSchema.parse(await c.req.json());
+    // Read raw body for hashing so a replay is byte-identical (no JSON
+    // re-serialise, which would change whitespace / key order).
+    const rawBody = await c.req.text();
+    const requestHash = await sha256Hex(rawBody);
+
+    const idempotencyKey = c.get('idempotencyKey');
+    if (!idempotencyKey) {
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
+    }
+
+    // Idempotency replay lookup (before parsing — replays skip validation
+    // and the use case).
+    const existing = await findIdempotencyRecord(
+      c.env.DB,
+      userId,
+      CREATE_MAILBOX_OPERATION,
+      idempotencyKey,
+    );
+    if (existing) {
+      assertSameRequestHash(existing, requestHash);
+      return replayResponse(existing);
+    }
+
+    const body = createMailboxRequestSchema.parse(JSON.parse(rawBody));
 
     // Verify the domain exists
     const domain = await c.env.DB
@@ -102,7 +142,31 @@ export function mailboxRoutes(): Hono<AppEnv> {
         createdAt: now.slice(0, 19).replace('T', ' '),
       });
 
-      return c.json({ data: result });
+      // Best-effort idempotency record (the createMailbox + createAuditEvent
+      // pair is two separate D1 statements owned by the modules; folding the
+      // idempotency row into a single batch with them would require touching
+      // modules/tenancy + modules/admin, which the implementer does not own).
+      // Retries between the use-case commit and this INSERT are safe: the
+      // mailbox-create UNIQUE constraint on (domain_id, local_part) is the
+      // natural dedup — re-running with the same key replays the 409 on the
+      // second create and the client gets a DOMAIN_ADDRESS_TAKEN.
+      const idempotencyNow = sqliteTimestamp(systemClock.now());
+      const successBody = JSON.stringify({ data: result });
+      await prepareCreateIdempotencyRecord(c.env.DB, {
+        id: systemIds.uuid(),
+        actorId: userId,
+        operation: CREATE_MAILBOX_OPERATION,
+        idempotencyKey,
+        requestHash,
+        responseStatus: 200,
+        responseJson: successBody,
+        createdAt: idempotencyNow,
+      }).run();
+
+      return new Response(successBody, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     } catch (error) {
       // D1 error for unique constraint violation
       if (

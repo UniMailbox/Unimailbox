@@ -20,6 +20,10 @@ import { hashPassword, importEncryptionKey, encrypt } from '../../platform/crypt
 
 const ENCRYPTION_KEY = 'a'.repeat(64);
 
+// R-OUTBOUND-005 / R-API-004 / R-OUTBOUND-006: send requires Idempotency-Key.
+// One key per test is sufficient — beforeEach resets the DB.
+const IDEMPOTENCY_KEY = 'test-idem-key-compose01';
+
 // ---------------------------------------------------------------------------
 // Seeding helpers (modelled on mailboxes.worker.test.ts and
 // messages.worker.test.ts).
@@ -250,6 +254,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          'Idempotency-Key': IDEMPOTENCY_KEY,
         },
       },
     );
@@ -278,6 +283,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          'Idempotency-Key': IDEMPOTENCY_KEY,
         },
       },
     );
@@ -354,6 +360,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          'Idempotency-Key': IDEMPOTENCY_KEY,
         },
       },
     );
@@ -383,6 +390,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${viewerToken}`,
+          'Idempotency-Key': IDEMPOTENCY_KEY,
         },
       },
     );
@@ -409,6 +417,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${intruderToken}`,
+          'Idempotency-Key': IDEMPOTENCY_KEY,
         },
       },
     );
@@ -436,6 +445,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${senderToken}`,
+          'Idempotency-Key': IDEMPOTENCY_KEY,
         },
       },
     );
@@ -458,6 +468,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          'Idempotency-Key': IDEMPOTENCY_KEY,
         },
       },
     );

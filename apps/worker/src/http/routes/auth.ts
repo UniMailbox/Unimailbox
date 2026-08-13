@@ -5,6 +5,9 @@
 // R-AUTH-008: Refresh tokens stored as SHA-256 hashes in sessions table.
 // R-SECRET-003: Secrets (tokens, passwords) are never logged or returned in errors.
 //
+// CAP-027 / ADR-004: All POST routes enforce Idempotency-Key. Best-effort mode:
+// lookup before use case, record write after.
+//
 // Public routes: register, login, refresh (no authn/requirePermission needed).
 // Protected route: me (requires authn, which sets userId).
 
@@ -28,6 +31,19 @@ import { systemIds } from '../../platform/ids';
 import { verifyPassword, hashPassword } from '../../platform/crypto';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+import { requireIdempotencyKey } from '../middleware/idempotency';
+import {
+  tryReplayIdempotency,
+  sha256Hex,
+  sqliteTimestamp,
+  writeIdempotencyRecord,
+  opaqueActorId,
+} from '../../platform/idempotency';
+
+// Operation strings for idempotency records (CAP-027 / ADR-004)
+const REGISTER_OPERATION = 'POST /api/v1/auth/register';
+const LOGIN_OPERATION = 'POST /api/v1/auth/login';
+const REFRESH_OPERATION = 'POST /api/v1/auth/refresh';
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -65,14 +81,39 @@ export function authRoutes(): Hono<AppEnv> {
    * - Increments key usage
    * - All in one D1 batch for atomicity (R-OUTBOUND-006 pattern)
    *
+   * CAP-027 / ADR-004: Idempotency-Key required. Actor is sha256_hex of the registration code.
+   * Best-effort mode: lookup before use case, record write after.
+   *
    * Returns 409 REGISTRATION_CODE_INVALID if code is invalid/expired/revoked/fully-used.
    * Returns 409 USER_EMAIL_TAKEN if email already exists.
    */
-  routes.post('/register', async (c) => {
-    const body = registerRequestSchema.parse(await c.req.json());
+  routes.post('/register', requireIdempotencyKey, async (c) => {
+    // Read raw body for hashing
+    const rawBody = await c.req.text();
+    const requestHash = await sha256Hex(rawBody);
 
-    // Hash the code to look up in the database
+    const body = registerRequestSchema.parse(JSON.parse(rawBody));
+
+    // Hash the code to look up in the database (also used as actor_id for idempotency)
     const codeHash = await hashToken(body.code);
+
+    // Actor for register is sha256 of the registration code (R-SECRET-003)
+    const actorId = await opaqueActorId('registration-code', body.code);
+
+    const idempotencyKey = c.get('idempotencyKey');
+    if (!idempotencyKey) {
+      throw new Error('idempotencyKey middleware failed to set key');
+    }
+
+    // Lookup replay
+    const replay = await tryReplayIdempotency(
+      c.env.DB,
+      actorId,
+      REGISTER_OPERATION,
+      idempotencyKey,
+      requestHash,
+    );
+    if (replay) return replay;
 
     // Look up the registration key
     const key = await findKeyByCodeHash(c.env.DB, codeHash);
@@ -173,7 +214,7 @@ export function authRoutes(): Hono<AppEnv> {
     await c.env.DB.batch([userStmt, userRoleStmt, incrementStmt]);
 
     // Return user info (without password)
-    return c.json({
+    const successBody = JSON.stringify({
       data: {
         user: {
           id: userId,
@@ -181,6 +222,23 @@ export function authRoutes(): Hono<AppEnv> {
           displayName: body.displayName ?? null,
         },
       },
+    });
+
+    // Write idempotency record after success (best-effort mode)
+    await writeIdempotencyRecord(c.env.DB, {
+      id: systemIds.uuid(),
+      actorId,
+      operation: REGISTER_OPERATION,
+      idempotencyKey,
+      requestHash,
+      responseStatus: 200,
+      responseJson: successBody,
+      createdAt: sqliteTimestamp(systemClock.now()),
+    });
+
+    return new Response(successBody, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
     });
   });
 
@@ -194,11 +252,36 @@ export function authRoutes(): Hono<AppEnv> {
    * - Generates access token (KV, 15-min TTL) and refresh token (sessions table, 30-day)
    * - Returns tokens and user info
    *
+   * CAP-027 / ADR-004: Idempotency-Key required. Actor is sha256_hex of the login email.
+   * Best-effort mode: lookup before use case, record write after.
+   *
    * Returns 401 INVALID_CREDENTIALS for both wrong email and wrong password
    * (don't leak which factor failed per R-AUTH-008).
    */
-  routes.post('/login', async (c) => {
-    const body = loginRequestSchema.parse(await c.req.json());
+  routes.post('/login', requireIdempotencyKey, async (c) => {
+    // Read raw body for hashing
+    const rawBody = await c.req.text();
+    const requestHash = await sha256Hex(rawBody);
+
+    const body = loginRequestSchema.parse(JSON.parse(rawBody));
+
+    // Actor for login is sha256 of the email (R-SECRET-003)
+    const actorId = await opaqueActorId('email', body.email);
+
+    const idempotencyKey = c.get('idempotencyKey');
+    if (!idempotencyKey) {
+      throw new Error('idempotencyKey middleware failed to set key');
+    }
+
+    // Lookup replay
+    const replay = await tryReplayIdempotency(
+      c.env.DB,
+      actorId,
+      LOGIN_OPERATION,
+      idempotencyKey,
+      requestHash,
+    );
+    if (replay) return replay;
 
     // Find user by email
     const user = await findUserByEmail(c.env.DB, body.email);
@@ -275,7 +358,7 @@ export function authRoutes(): Hono<AppEnv> {
     });
 
     // Return tokens and user info
-    return c.json({
+    const successBody = JSON.stringify({
       data: {
         accessToken,
         refreshToken,
@@ -285,6 +368,23 @@ export function authRoutes(): Hono<AppEnv> {
           displayName: user.display_name,
         },
       },
+    });
+
+    // Write idempotency record after success (best-effort mode)
+    await writeIdempotencyRecord(c.env.DB, {
+      id: systemIds.uuid(),
+      actorId,
+      operation: LOGIN_OPERATION,
+      idempotencyKey,
+      requestHash,
+      responseStatus: 200,
+      responseJson: successBody,
+      createdAt: sqliteTimestamp(systemClock.now()),
+    });
+
+    return new Response(successBody, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
     });
   });
 
@@ -297,13 +397,38 @@ export function authRoutes(): Hono<AppEnv> {
    * - Generates new access token (KV, 15-min TTL)
    * - Returns new access token
    *
+   * CAP-027 / ADR-004: Idempotency-Key required. Actor is sha256_hex of the refresh token.
+   * Best-effort mode: lookup before use case, record write after.
+   *
    * Returns 401 REFRESH_TOKEN_INVALID if token is invalid/expired/revoked.
    */
-  routes.post('/refresh', async (c) => {
-    const body = refreshRequestSchema.parse(await c.req.json());
+  routes.post('/refresh', requireIdempotencyKey, async (c) => {
+    // Read raw body for hashing
+    const rawBody = await c.req.text();
+    const requestHash = await sha256Hex(rawBody);
 
-    // Hash the refresh token to look up in the database
+    const body = refreshRequestSchema.parse(JSON.parse(rawBody));
+
+    // Hash the refresh token to look up in the database (also used as actor_id for idempotency)
     const tokenHash = await hashToken(body.refreshToken);
+
+    // Actor for refresh is sha256 of the refresh token (R-SECRET-003)
+    const actorId = await opaqueActorId('refresh-token', body.refreshToken);
+
+    const idempotencyKey = c.get('idempotencyKey');
+    if (!idempotencyKey) {
+      throw new Error('idempotencyKey middleware failed to set key');
+    }
+
+    // Lookup replay
+    const replay = await tryReplayIdempotency(
+      c.env.DB,
+      actorId,
+      REFRESH_OPERATION,
+      idempotencyKey,
+      requestHash,
+    );
+    if (replay) return replay;
 
     // Find the session
     const session = await findSessionByRefreshHash(c.env.DB, tokenHash);
@@ -337,10 +462,27 @@ export function authRoutes(): Hono<AppEnv> {
     );
 
     // Return new access token
-    return c.json({
+    const successBody = JSON.stringify({
       data: {
         accessToken,
       },
+    });
+
+    // Write idempotency record after success (best-effort mode)
+    await writeIdempotencyRecord(c.env.DB, {
+      id: systemIds.uuid(),
+      actorId,
+      operation: REFRESH_OPERATION,
+      idempotencyKey,
+      requestHash,
+      responseStatus: 200,
+      responseJson: successBody,
+      createdAt: sqliteTimestamp(systemClock.now()),
+    });
+
+    return new Response(successBody, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
     });
   });
 

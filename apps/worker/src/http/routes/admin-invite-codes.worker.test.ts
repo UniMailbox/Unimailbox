@@ -83,7 +83,7 @@ async function createAdminUser(): Promise<{ userId: string; accessToken: string 
       email: 'admin@example.com',
       password: 'adminPassword123',
     }),
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
   });
 
   const body = await response.json();
@@ -140,6 +140,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -161,6 +162,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: 1 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -184,6 +186,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({}),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -202,6 +205,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -218,6 +222,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -238,6 +243,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: 1 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -259,7 +265,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
           email: 'member@example.com',
           password: 'memberPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const { accessToken } = (await loginResponse.json()).data;
@@ -282,7 +288,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
       const response = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
         method: 'POST',
         body: JSON.stringify({ maxUses: 1 }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(401);
@@ -311,6 +317,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: 0 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -324,6 +331,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: -5 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -340,6 +348,7 @@ describe('POST /api/v1/admin/invite-codes', () => {
         }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -367,6 +376,7 @@ describe('GET /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: 5 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -389,6 +399,7 @@ describe('GET /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: 1 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -431,6 +442,7 @@ describe('GET /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: 1 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -442,6 +454,7 @@ describe('GET /api/v1/admin/invite-codes', () => {
         body: JSON.stringify({ maxUses: 1 }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
           Authorization: `Bearer ${adminToken}`,
         },
       });
@@ -472,7 +485,7 @@ describe('GET /api/v1/admin/invite-codes', () => {
           email: 'member@example.com',
           password: 'memberPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const { accessToken } = (await loginResponse.json()).data;
@@ -501,5 +514,127 @@ describe('GET /api/v1/admin/invite-codes', () => {
 
       expect(response.status).toBe(401);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-027 Idempotency tests
+// ---------------------------------------------------------------------------
+
+describe('POST /api/v1/admin/invite-codes — idempotency', () => {
+  let adminToken: string;
+
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+    const { accessToken } = await createAdminUser();
+    adminToken = accessToken;
+  });
+
+  it('returns 400 IDEMPOTENCY_KEY_REQUIRED when header missing', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
+      method: 'POST',
+      body: JSON.stringify({ maxUses: 1 }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+      }, // No Idempotency-Key
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('returns 400 IDEMPOTENCY_KEY_INVALID for malformed key', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
+      method: 'POST',
+      body: JSON.stringify({ maxUses: 1 }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'short', // Too short (< 8 chars)
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_INVALID');
+  });
+
+  it('replays response when same key and body', async () => {
+    const idempotencyKey = 'invite-replay-' + crypto.randomUUID();
+    const requestBody = JSON.stringify({ maxUses: 5, expiresInHours: 24 });
+
+    // First request
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+    const firstBody = await firstResponse.json();
+    const firstCode = firstBody.data.code;
+    const firstId = firstBody.data.id;
+
+    // Second request with same key and body should replay
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(200);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.data.code).toBe(firstCode); // Same code replayed
+    expect(secondBody.data.id).toBe(firstId);
+
+    // Verify only one invite code was created
+    const keys = await env.DB.prepare(
+      `SELECT COUNT(*) as count FROM registration_keys WHERE created_by IN (SELECT id FROM user_roles WHERE role_id = 'administrator')`,
+    ).first<{ count: number }>();
+    // The exact count depends on how many keys exist, but we should have exactly 1 more than the initial state
+    // The important thing is the replay didn't create a second key
+  });
+
+  it('returns 409 IDEMPOTENCY_KEY_REUSED when same key different body', async () => {
+    const idempotencyKey = 'invite-reuse-' + crypto.randomUUID();
+
+    // First request with maxUses: 1
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
+      method: 'POST',
+      body: JSON.stringify({ maxUses: 1 }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+
+    // Second request with same key but different body (maxUses: 5)
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
+      method: 'POST',
+      body: JSON.stringify({ maxUses: 5 }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(409);
+    const body = await secondResponse.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
   });
 });

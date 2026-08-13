@@ -26,7 +26,10 @@ describe('POST /api/v1/setup/brevo', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -50,6 +53,7 @@ describe('POST /api/v1/setup/brevo', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-admin-key',
       },
     });
     if (adminResponse.status !== 200) {
@@ -63,6 +67,7 @@ describe('POST /api/v1/setup/brevo', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
     if (domainResponse.status !== 200) {
@@ -104,6 +109,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-brevo-key',
         },
       });
 
@@ -138,6 +144,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-encrypted-cred-key',
         },
       });
 
@@ -192,6 +199,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-provider-connection-key',
         },
       });
 
@@ -238,6 +246,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-link-key',
         },
       });
 
@@ -267,6 +276,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-advance-step-key',
         },
       });
 
@@ -296,6 +306,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-envelope-key',
         },
       });
 
@@ -315,6 +326,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-no-api-key-response',
         },
       });
 
@@ -337,6 +349,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-response-fields-key',
         },
       });
 
@@ -356,6 +369,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-brevo-401-key',
         },
       });
 
@@ -401,6 +415,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-brevo-403-key',
         },
       });
 
@@ -420,6 +435,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-brevo-500-key',
         },
       });
 
@@ -432,7 +448,10 @@ describe('POST /api/v1/setup/brevo', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
         body: JSON.stringify({ apiKey: 'test-api-key' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -447,6 +466,7 @@ describe('POST /api/v1/setup/brevo', () => {
         body: JSON.stringify({ apiKey: 'test-api-key' }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-invalid-token-key',
           Authorization: 'Bearer invalid-session-token',
         },
       });
@@ -466,6 +486,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-missing-api-key',
         },
       });
 
@@ -482,6 +503,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-empty-api-key',
         },
       });
 
@@ -506,8 +528,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
-          // In a real test with gateway exemption, we'd set X-Forwarded-For
-          // For worker-pool tests, the session is sufficient
+          'Idempotency-Key': 'test-gateway-exemption-key',
         },
       });
 
@@ -528,6 +549,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-duplicate-setup-first-key',
         },
       });
 
@@ -540,6 +562,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-duplicate-setup-second-key',
         },
       });
 
@@ -573,6 +596,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-encryption-quality-first-key',
         },
       });
       expect(response1.status).toBe(200);
@@ -604,6 +628,7 @@ describe('POST /api/v1/setup/brevo', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-encryption-quality-second-key',
         },
       });
       expect(response2.status).toBe(200);
@@ -625,6 +650,70 @@ describe('POST /api/v1/setup/brevo', () => {
 
       // Ciphertexts should also differ because IVs differ
       expect(new Uint8Array(credential1.ciphertext)).not.toEqual(new Uint8Array(credential2.ciphertext));
+    });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
+      );
+
+      const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
+        method: 'POST',
+        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
+      );
+
+      const idempotencyKey = 'test-brevo-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
+        method: 'POST',
+        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+      const connectionId1 = body1.data.connectionId;
+
+      // Second request with same key and body should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
+        method: 'POST',
+        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same connectionId as the first request (replay)
+      expect(body2.data.connectionId).toBe(connectionId1);
+      expect(body2.data.providerKey).toBe(body1.data.providerKey);
+      expect(body2.data.status).toBe(body1.data.status);
+
+      // Verify only one connection was created (Brevo API called only once)
+      expect(fetchSpy).toHaveBeenCalledOnce();
     });
   });
 });

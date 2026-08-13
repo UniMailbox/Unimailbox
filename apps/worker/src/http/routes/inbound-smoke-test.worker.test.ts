@@ -28,7 +28,10 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -47,6 +50,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
 
@@ -72,6 +76,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-smoke-key',
         },
       });
 
@@ -93,6 +98,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-smoke-key',
         },
       });
 
@@ -110,6 +116,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-smoke-key',
         },
       });
 
@@ -134,6 +141,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-smoke-key',
         },
       });
 
@@ -156,6 +164,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-no-advance-key',
         },
       });
 
@@ -183,6 +192,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-smoke-key',
         },
       });
 
@@ -200,6 +210,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-smoke-key',
         },
       });
 
@@ -218,7 +229,10 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
     it('returns 401 SETUP_SESSION_REQUIRED', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -234,6 +248,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-invalid-token-key',
           Authorization: 'Bearer invalid-token',
         },
       });
@@ -259,6 +274,7 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-gateway-exempt-key',
         },
         redirect: 'manual',
       });
@@ -266,6 +282,60 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
       // Should succeed, not redirect
       expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+    });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    beforeEach(async () => {
+      await resetAndMigrate();
+      sessionToken = await claimSession();
+      await createDomain('example.com', sessionToken);
+    });
+
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-inbound-smoke-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+      const address1 = body1.data.smokeTestAddress;
+
+      // Second request with same key should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same smoke test address as the first request
+      expect(body2.data.smokeTestAddress).toBe(address1);
     });
   });
 });
@@ -278,7 +348,10 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -297,6 +370,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
 
@@ -315,6 +389,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-start-smoke-key',
       },
     });
 
@@ -346,6 +421,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-check-key',
         },
       });
 
@@ -368,6 +444,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-check-key',
         },
       });
 
@@ -397,6 +474,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-advance-to-brevo-key',
         },
       });
 
@@ -424,6 +502,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-check-pending-key',
         },
       });
 
@@ -443,6 +522,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-check-key',
         },
       });
 
@@ -463,6 +543,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-inbound-check-key',
         },
       });
 
@@ -478,7 +559,10 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
     it('returns 401 SETUP_SESSION_REQUIRED', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test/check', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-check-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -494,6 +578,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-check-invalid-token-key',
           Authorization: 'Bearer invalid-token',
         },
       });
@@ -520,6 +605,7 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-check-exempt-key',
         },
         redirect: 'manual',
       });
@@ -527,6 +613,60 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
       // Should succeed, not redirect
       expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+    });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    beforeEach(async () => {
+      await resetAndMigrate();
+      sessionToken = await claimSession();
+      await createDomain('example.com', sessionToken);
+      await startSmokeTest();
+    });
+
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-inbound-check-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+
+      // Second request with same key should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test/check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same status
+      expect(body2.data.status).toBe(body1.data.status);
     });
   });
 });
@@ -541,7 +681,10 @@ describe('email handler smoke test detection', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -560,6 +703,7 @@ describe('email handler smoke test detection', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
 
@@ -578,6 +722,7 @@ describe('email handler smoke test detection', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-start-smoke-key',
       },
     });
 

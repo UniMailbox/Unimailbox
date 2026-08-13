@@ -9,6 +9,9 @@ import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { hashPassword } from '../../platform/crypto';
 import { assertCan } from '../../modules/tenancy';
 
+// R-API-004: POST /mailboxes requires Idempotency-Key.
+const IDEMPOTENCY_KEY = 'test-idem-key-mailbox01';
+
 // Helper: complete setup before tests
 async function completeSetup(): Promise<void> {
   // Seed installation_state as complete
@@ -186,6 +189,7 @@ describe('POST /api/v1/mailboxes', () => {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -215,6 +219,7 @@ describe('POST /api/v1/mailboxes', () => {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -246,6 +251,7 @@ describe('POST /api/v1/mailboxes', () => {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -274,10 +280,13 @@ describe('POST /api/v1/mailboxes', () => {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
-    // Try to create duplicate with different case
+    // Try to create duplicate with different case. A distinct Idempotency-Key:
+    // reusing the first request's key would (correctly, per ADR-004) return
+    // IDEMPOTENCY_KEY_REUSED before the duplicate check runs.
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       method: 'POST',
       body: JSON.stringify({
@@ -287,6 +296,7 @@ describe('POST /api/v1/mailboxes', () => {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': 'test-idem-key-mailbox-dup1',
       },
     });
 
@@ -308,6 +318,7 @@ describe('POST /api/v1/mailboxes', () => {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -335,6 +346,7 @@ describe('POST /api/v1/mailboxes', () => {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -393,6 +405,7 @@ describe('GET /api/v1/mailboxes', () => {
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -408,6 +421,7 @@ describe('GET /api/v1/mailboxes', () => {
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -462,6 +476,7 @@ describe('GET /api/v1/mailboxes', () => {
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
         'Authorization': `Bearer ${user1Token}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 
@@ -500,6 +515,7 @@ describe('GET /api/v1/mailboxes', () => {
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
+        'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
 

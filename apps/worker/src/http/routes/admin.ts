@@ -4,16 +4,29 @@
 // R-AUTHZ-001: Admin endpoints require 'user.manage' permission.
 // R-AUTHZ-002: Authorization checks hit the database per request.
 //
+// CAP-027 / ADR-004: All POST routes enforce Idempotency-Key. Best-effort mode:
+// lookup before use case, record write after.
+//
 // Protected routes: invite-codes (requires authn + requirePermission).
 
 import { Hono } from 'hono';
 import { createInviteCodeRequestSchema } from '@unimailbox/contracts';
 import { createRegistrationKey } from '../../modules/onboarding';
 import { requirePermission } from '../middleware/authz';
+import { requireIdempotencyKey } from '../middleware/idempotency';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+import {
+  tryReplayIdempotency,
+  sha256Hex,
+  sqliteTimestamp,
+  writeIdempotencyRecord,
+} from '../../platform/idempotency';
+
+// Operation strings for idempotency records (CAP-027 / ADR-004)
+const INVITE_CODES_CREATE_OPERATION = 'POST /api/v1/admin/invite-codes';
 
 // ---------------------------------------------------------------------------
 // Helper functions
@@ -62,57 +75,104 @@ export function adminRoutes(): Hono<AppEnv> {
    * - Stores in registration_keys table
    * - Returns plaintext code (shown once)
    *
+   * CAP-027 / ADR-004: Idempotency-Key required. Actor is the authenticated userId.
+   * Best-effort mode: lookup before use case, record write after.
+   *
    * Returns 403 PERMISSION_DENIED if user lacks 'user.manage' permission.
    */
-  routes.post('/invite-codes', requirePermission('user.manage'), async (c) => {
-    const userId = c.get('userId');
-    if (!userId) {
-      throw new DomainError({
-        code: 'AUTHENTICATION_REQUIRED',
-        message: 'Authentication required',
-        httpStatus: 401,
-      });
-    }
+  routes.post(
+    '/invite-codes',
+    requirePermission('user.manage'),
+    requireIdempotencyKey,
+    async (c) => {
+      const userId = c.get('userId');
+      if (!userId) {
+        throw new DomainError({
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Authentication required',
+          httpStatus: 401,
+        });
+      }
 
-    const body = createInviteCodeRequestSchema.parse(await c.req.json());
+      // Read raw body for hashing
+      const rawBody = await c.req.text();
+      const requestHash = await sha256Hex(rawBody);
 
-    // Generate the code and its hash
-    const code = generateInviteCode();
-    const codeHash = await hashToken(code);
+      const body = createInviteCodeRequestSchema.parse(JSON.parse(rawBody));
 
-    // Calculate expiry
-    let expiresAt: string | null = null;
-    if (body.expiresInHours) {
-      const expiryDate = new Date(
-        systemClock.now().getTime() + body.expiresInHours * 60 * 60 * 1000,
+      // Actor for invite-codes create is the authenticated userId
+      const actorId = userId;
+
+      const idempotencyKey = c.get('idempotencyKey');
+      if (!idempotencyKey) {
+        throw new Error('idempotencyKey middleware failed to set key');
+      }
+
+      // Lookup replay
+      const replay = await tryReplayIdempotency(
+        c.env.DB,
+        actorId,
+        INVITE_CODES_CREATE_OPERATION,
+        idempotencyKey,
+        requestHash,
       );
-      expiresAt = expiryDate.toISOString();
-    }
+      if (replay) return replay;
 
-    // Create the registration key
-    const keyId = systemIds.uuid();
-    const now = systemClock.now().toISOString();
+      // Generate the code and its hash
+      const code = generateInviteCode();
+      const codeHash = await hashToken(code);
 
-    await createRegistrationKey(c.env.DB, {
-      id: keyId,
-      codeHash,
-      roleId: body.roleId ?? null,
-      maxUses: body.maxUses ?? 1, // Schema default is 1, but zod.parse returns undefined
-      createdBy: userId,
-      expiresAt,
-      createdAt: now,
-    });
+      // Calculate expiry
+      let expiresAt: string | null = null;
+      if (body.expiresInHours) {
+        const expiryDate = new Date(
+          systemClock.now().getTime() + body.expiresInHours * 60 * 60 * 1000,
+        );
+        expiresAt = expiryDate.toISOString();
+      }
 
-    // Return the code (shown only once)
-    return c.json({
-      data: {
-        code,
+      // Create the registration key
+      const keyId = systemIds.uuid();
+      const now = systemClock.now().toISOString();
+
+      await createRegistrationKey(c.env.DB, {
         id: keyId,
-        maxUses: body.maxUses,
+        codeHash,
+        roleId: body.roleId ?? null,
+        maxUses: body.maxUses ?? 1, // Schema default is 1, but zod.parse returns undefined
+        createdBy: userId,
         expiresAt,
-      },
-    });
-  });
+        createdAt: now,
+      });
+
+      // Return the code (shown only once)
+      const successBody = JSON.stringify({
+        data: {
+          code,
+          id: keyId,
+          maxUses: body.maxUses,
+          expiresAt,
+        },
+      });
+
+      // Write idempotency record after success (best-effort mode)
+      await writeIdempotencyRecord(c.env.DB, {
+        id: systemIds.uuid(),
+        actorId,
+        operation: INVITE_CODES_CREATE_OPERATION,
+        idempotencyKey,
+        requestHash,
+        responseStatus: 200,
+        responseJson: successBody,
+        createdAt: sqliteTimestamp(systemClock.now()),
+      });
+
+      return new Response(successBody, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+  );
 
   /**
    * GET /api/v1/admin/invite-codes

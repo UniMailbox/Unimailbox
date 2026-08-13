@@ -11,6 +11,11 @@
 // - Already complete → 409 SETUP_ALREADY_COMPLETE
 // - Post-claim: installation_state seeded to currentStep='preflight'
 // - Post-claim: sessionToken exists in KV
+// - CAP-027 / ADR-004: Idempotency-Key required, replays return stored response
+//   NOTE: IDEMPOTENCY_KEY_REUSED is not testable for /claim because its only
+//   request field (token) determines the actorId for idempotency. Changing the
+//   token changes the actorId, so the idempotency lookup fails to find the
+//   previous record.
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
@@ -24,7 +29,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-key',
+        },
       });
 
       expect(response.status).toBe(200);
@@ -46,7 +54,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-key',
+        },
       });
 
       const body = await response.json();
@@ -66,7 +77,10 @@ describe('POST /api/v1/setup/claim', () => {
       await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-key',
+        },
       });
 
       // GET /status should now return preflight
@@ -88,7 +102,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'wrong-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-wrong-token-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -103,7 +120,10 @@ describe('POST /api/v1/setup/claim', () => {
       await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'wrong-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-wrong-token-key',
+        },
       });
 
       // List all keys in KV (should be empty)
@@ -119,7 +139,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({}),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-missing-token-key',
+        },
       });
 
       expect(response.status).toBe(400);
@@ -137,7 +160,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: '' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-empty-token-key',
+        },
       });
 
       expect(response.status).toBe(400);
@@ -158,7 +184,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-already-complete-key',
+        },
       });
 
       expect(response.status).toBe(409);
@@ -173,7 +202,10 @@ describe('POST /api/v1/setup/claim', () => {
       await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-key',
+        },
       });
 
       const list = await env.SETUP_SESSION.list();
@@ -191,7 +223,10 @@ describe('POST /api/v1/setup/claim', () => {
       await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-key',
+        },
       });
 
       // currentStep should still be 'domain', not 'preflight'
@@ -213,7 +248,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-key',
+        },
       });
 
       expect(response.status).toBe(200);
@@ -229,7 +267,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'wrong-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-wrong-token-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -252,7 +293,10 @@ describe('POST /api/v1/setup/claim', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-key',
+        },
         redirect: 'manual',
       });
 
@@ -260,5 +304,59 @@ describe('POST /api/v1/setup/claim', () => {
       expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
     });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    beforeEach(resetAndMigrate);
+
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
+        method: 'POST',
+        body: JSON.stringify({ token: 'test-installation-token' }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-idempotency-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/claim', {
+        method: 'POST',
+        body: JSON.stringify({ token: 'test-installation-token' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+      const sessionToken1 = body1.data.sessionToken;
+
+      // Second request with same key and body should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/claim', {
+        method: 'POST',
+        body: JSON.stringify({ token: 'test-installation-token' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same sessionToken as the first request
+      expect(body2.data.sessionToken).toBe(sessionToken1);
+    });
+
+    // NOTE: IDEMPOTENCY_KEY_REUSED test is not applicable to /claim endpoint.
+    // The only request field (token) determines the actorId for idempotency.
+    // Changing the token changes the actorId, so the idempotency lookup fails
+    // to find the previous record. This is tested on other endpoints where the
+    // request body and actor identity are decoupled.
   });
 });

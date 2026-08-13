@@ -23,7 +23,10 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -46,6 +49,7 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-dashboard-link-key',
         },
       });
 
@@ -63,6 +67,7 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-dashboard-link-key',
         },
       });
 
@@ -80,6 +85,7 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-dashboard-link-key',
         },
       });
 
@@ -102,6 +108,7 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-dashboard-link-key',
         },
       });
 
@@ -122,7 +129,10 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
     it('returns 401 SETUP_SESSION_REQUIRED', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/dashboard-link', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -138,6 +148,7 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
           Authorization: 'Bearer invalid-token',
         },
       });
@@ -162,6 +173,7 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-dashboard-link-key',
         },
         redirect: 'manual',
       });
@@ -169,6 +181,58 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
       // Should succeed, not redirect
       expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+    });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    beforeEach(async () => {
+      await resetAndMigrate();
+      sessionToken = await claimSession();
+    });
+
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/dashboard-link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-dashboard-link-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/dashboard-link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+
+      // Second request with same key should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/dashboard-link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same url
+      expect(body2.data.url).toBe(body1.data.url);
     });
   });
 });
@@ -181,7 +245,10 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -201,6 +268,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
 
@@ -226,6 +294,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -244,6 +313,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -261,6 +331,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -281,6 +352,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -301,6 +373,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -322,6 +395,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -339,6 +413,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -364,6 +439,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -381,7 +457,10 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
     it('returns 401 SETUP_SESSION_REQUIRED', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/verify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -397,6 +476,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-invalid-token-key',
           Authorization: 'Bearer invalid-token',
         },
       });
@@ -422,6 +502,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
         redirect: 'manual',
       });
@@ -446,6 +527,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key',
         },
       });
 
@@ -461,6 +543,7 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-verify-key-2',
         },
       });
 
@@ -475,6 +558,60 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
       const statusBody = await statusResponse.json();
 
       expect(statusBody.data.currentStep).toBe('inbound-smoke');
+    });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    beforeEach(async () => {
+      await resetAndMigrate();
+      sessionToken = await claimSession();
+      await createDomain('example.com', sessionToken);
+    });
+
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-verify-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+
+      // Second request with same key should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same verified status and domain
+      expect(body2.data.verified).toBe(body1.data.verified);
+      expect(body2.data.domain).toBe(body1.data.domain);
     });
   });
 });

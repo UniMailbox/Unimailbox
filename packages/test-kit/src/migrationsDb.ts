@@ -25,6 +25,7 @@ import mailboxesSql from '../../../migrations/0005_mailboxes.sql?raw';
 import messagesSql from '../../../migrations/0006_messages.sql?raw';
 import outboundJobsSql from '../../../migrations/0007_outbound_jobs.sql?raw';
 import webhookEventsSql from '../../../migrations/0008_webhook_events.sql?raw';
+import idempotencyRecordsSql from '../../../migrations/0009_idempotency_records.sql?raw';
 
 // Split migration SQL on semicolons for applyD1Migrations
 // Filters out comment-only lines to avoid passing them as separate statements
@@ -74,6 +75,7 @@ export async function migrationsDb(): Promise<D1Database> {
     { name: '0006_messages', queries: splitSql(messagesSql) },
     { name: '0007_outbound_jobs', queries: splitSql(outboundJobsSql) },
     { name: '0008_webhook_events', queries: splitSql(webhookEventsSql) },
+    { name: '0009_idempotency_records', queries: splitSql(idempotencyRecordsSql) },
   ]);
   return mod.env.DB;
 }

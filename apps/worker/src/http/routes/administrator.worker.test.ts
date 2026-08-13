@@ -24,7 +24,10 @@ describe('POST /api/v1/setup/administrator', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -52,6 +55,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-returns-200-with-userId',
         },
       });
 
@@ -80,6 +84,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-creates-user-row',
         },
       });
 
@@ -116,6 +121,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-password-hash',
         },
       });
 
@@ -139,6 +145,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-pbkdf2-params',
         },
       });
 
@@ -178,6 +185,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-advances-step',
         },
       });
 
@@ -200,6 +208,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-no-display-name',
         },
       });
 
@@ -223,6 +232,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-success-envelope',
         },
       });
 
@@ -245,6 +255,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-no-password-response',
         },
       });
 
@@ -274,6 +285,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-success-envelope',
         },
       });
     });
@@ -288,6 +300,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-no-password-in-response',
         },
       });
 
@@ -309,6 +322,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-error-envelope',
         },
       });
 
@@ -332,6 +346,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-step-remains-domain',
         },
       });
 
@@ -358,6 +373,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-duplicate-first',
         },
       });
     });
@@ -372,6 +388,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-duplicate-second',
         },
       });
 
@@ -390,7 +407,10 @@ describe('POST /api/v1/setup/administrator', () => {
           email: 'admin@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-admin-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -411,6 +431,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: 'Bearer invalid-token',
+          'Idempotency-Key': 'test-admin-invalid-session-key',
         },
       });
 
@@ -437,6 +458,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-missing-email',
         },
       });
 
@@ -454,6 +476,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-missing-password',
         },
       });
 
@@ -472,6 +495,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-missing-email',
         },
       });
 
@@ -490,6 +514,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-short-password',
         },
       });
 
@@ -508,6 +533,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-long-password',
         },
       });
 
@@ -527,6 +553,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-key',
         },
       });
 
@@ -552,6 +579,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-key',
         },
       });
 
@@ -570,6 +598,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-key',
         },
       });
 
@@ -595,6 +624,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-key',
         },
         redirect: 'manual',
       });
@@ -621,6 +651,7 @@ describe('POST /api/v1/setup/administrator', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-key',
         },
       });
 
@@ -632,6 +663,110 @@ describe('POST /api/v1/setup/administrator', () => {
         .first();
 
       expect(user?.email).toBe('admin@example.com');
+    });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    beforeEach(async () => {
+      await resetAndMigrate();
+      sessionToken = await claimSession();
+    });
+
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'admin@example.com',
+          password: 'securePassword123',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-administrator-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'admin@example.com',
+          password: 'securePassword123',
+          displayName: 'Admin User',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+      const userId1 = body1.data.userId;
+
+      // Second request with same key and body should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'admin@example.com',
+          password: 'securePassword123',
+          displayName: 'Admin User',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same userId as the first request
+      expect(body2.data.userId).toBe(userId1);
+    });
+
+    it('returns 409 IDEMPOTENCY_KEY_REUSED when same key + different body', async () => {
+      const idempotencyKey = 'test-administrator-key-xyz789';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'admin@example.com',
+          password: 'securePassword123',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+
+      // Second request with same key but different body
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'admin2@example.com',
+          password: 'differentPassword123',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(409);
+      const body2 = await response2.json();
+      expect(body2.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
     });
   });
 });

@@ -8,21 +8,42 @@
 // R-OUTBOUND-006: message + recipients + mailbox_message + outbound_jobs
 // rows are written in one D1 batch so a crash between them cannot leave a
 // 'queued' message with no job (or vice versa).
+// R-OUTBOUND-005: send requires Idempotency-Key; replays return the stored
+// response.
+// R-API-004: mutating endpoints accept Idempotency-Key; replays return
+// the stored response.
 //
 // On success the route enqueues `{ jobId }` to the OUTBOUND queue and returns
 // 202; the queue consumer (entrypoints/queue.ts) calls processOutboundJob,
 // which decrypts the credential and calls the Brevo adapter.
+//
+// CAP-027 wires Idempotency-Key: the record INSERT is appended to the
+// route's existing D1 batch so message + job + idempotency row land
+// atomically.
 
 import { Hono } from 'hono';
 import { composeRequestSchema } from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
+import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan, findMailboxById } from '../../modules/tenancy';
 import { checkPermission, createAuditEvent } from '../../modules/admin';
 import { prepareCreateOutboundJob } from '../../modules/outbound-mail';
 import { createMessageWithRelations } from '../../modules/messages';
 import { systemIds } from '../../platform/ids';
+import { systemClock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors';
+import {
+  findIdempotencyRecord,
+  prepareCreateIdempotencyRecord,
+  replayResponse,
+  assertSameRequestHash,
+  sha256Hex,
+  sqliteTimestamp,
+} from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
+
+const SEND_OPERATION =
+  'POST /api/v1/mailboxes/:mailboxId/messages/send';
 
 /**
  * SQLite datetime string: 'YYYY-MM-DD HH:MM:SS' UTC. Matches the migration's
@@ -44,10 +65,19 @@ export function composeRoutes(): Hono<AppEnv> {
    *
    * Returns 202 { data: { messageId, status: 'queued' } } — the message has
    * been accepted but not yet handed to the provider.
+   *
+   * Idempotency (R-OUTBOUND-005, R-OUTBOUND-006, R-API-004):
+   *   - requireIdempotencyKey middleware enforces header presence + format.
+   *   - Before the D1 batch, look up the record. If present with a matching
+   *     hash, replay the stored response (status + JSON).
+   *   - If present with a different hash, throw 409 IDEMPOTENCY_KEY_REUSED.
+   *   - Otherwise, append the record INSERT to the route's D1 batch so the
+   *     idempotency row lands atomically with the message + job rows.
    */
   routes.post(
     '/mailboxes/:mailboxId/messages/send',
     requirePermission('message.send'),
+    requireIdempotencyKey,
     async (c) => {
       const userId = c.get('userId');
       if (!userId) {
@@ -66,9 +96,39 @@ export function composeRoutes(): Hono<AppEnv> {
       const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
       await assertCan(c.env.DB, userId, mailboxId, 'send', isAdmin);
 
+      // Read the raw body so the SHA-256 hash is computed over the bytes
+      // the client actually sent (a JSON re-serialise would change whitespace
+      // and key order, breaking byte-equality replays — see .md §request_hash).
+      const rawBody = await c.req.text();
+      const requestHash = await sha256Hex(rawBody);
+
+      // Idempotency replay lookup (before parsing — a replay must return the
+      // stored response, not re-validate / re-execute).
+      const idempotencyKey = c.get('idempotencyKey');
+      if (!idempotencyKey) {
+        // requireIdempotencyKey middleware should have rejected already;
+        // defensive check for direct handler invocation.
+        throw new DomainError({
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'Idempotency-Key header required',
+          httpStatus: 400,
+        });
+      }
+
+      const existing = await findIdempotencyRecord(
+        c.env.DB,
+        userId,
+        SEND_OPERATION,
+        idempotencyKey,
+      );
+      if (existing) {
+        assertSameRequestHash(existing, requestHash);
+        return replayResponse(existing);
+      }
+
       // Parse the body with the closed contract schema. composeRequestSchema
       // applies defaults for cc / subject / htmlBody / textBody.
-      const body = composeRequestSchema.parse(await c.req.json());
+      const body = composeRequestSchema.parse(JSON.parse(rawBody));
 
       // Look up the mailbox so we can construct the from address and verify
       // it exists. findMailboxById returns the full localPart@domain.name.
@@ -100,10 +160,19 @@ export function composeRoutes(): Hono<AppEnv> {
       const now = sqliteNow();
       const messageId = systemIds.uuid();
       const jobId = systemIds.uuid();
+      const idempotencyRecordId = systemIds.uuid();
+      const idempotencyNow = sqliteTimestamp(systemClock.now());
+
+      // Build the success body up front so we can store the exact same JSON
+      // the client will receive on a replay.
+      const successBody = JSON.stringify({
+        data: { messageId, status: 'queued' },
+      });
 
       // R-OUTBOUND-006: every row that must exist for the queue consumer to
       // send the message is written in one D1 batch. If any statement fails,
-      // D1 rolls the whole batch back — no orphaned 'queued' message.
+      // D1 rolls the whole batch back — no orphaned 'queued' message. The
+      // idempotency record is appended to the same batch (R-API-004).
       const statements: D1PreparedStatement[] = [
         // 1. Message row, status 'queued', from the mailbox address.
         c.env.DB.prepare(
@@ -152,6 +221,17 @@ export function composeRoutes(): Hono<AppEnv> {
           createdAt: now,
           updatedAt: now,
         }),
+        // 6. Idempotency record (R-API-004, R-OUTBOUND-006).
+        prepareCreateIdempotencyRecord(c.env.DB, {
+          id: idempotencyRecordId,
+          actorId: userId,
+          operation: SEND_OPERATION,
+          idempotencyKey,
+          requestHash,
+          responseStatus: 202,
+          responseJson: successBody,
+          createdAt: idempotencyNow,
+        }),
       ];
 
       await createMessageWithRelations(c.env.DB, statements);
@@ -171,7 +251,10 @@ export function composeRoutes(): Hono<AppEnv> {
         createdAt: now,
       });
 
-      return c.json({ data: { messageId, status: 'queued' } }, 202);
+      return new Response(successBody, {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      });
     },
   );
 

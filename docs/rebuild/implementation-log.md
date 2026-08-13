@@ -10,6 +10,49 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-13 — CAP-027: Idempotency records on every mutating endpoint (ADR-004)
+
+Implemented ADR-004 idempotency across all 17 mutating HTTP endpoints. Idempotency-Key header
+required on POST/PATCH/DELETE; same key + same body replays stored response; same key + different
+body returns 409 IDEMPOTENCY_KEY_REUSED. Migration 0009 creates `idempotency_records` table with
+unique index on (actor_id, operation, idempotency_key) and expires_at index for future TTL purge.
+
+**Implementation:**
+- Setup endpoints (11): best-effort idempotency with lookup/replay before use case, write after.
+  Actor is sha256_hex(session token). Natural guards (singularity, UNIQUE) prevent double-execution
+  on retry.
+- Auth endpoints (3): same best-effort pattern. Actor is sha256_hex(registration code) for register,
+  sha256_hex(email) for login/refresh.
+- User-facing endpoints (4): strict batch atomicity. Idempotency record appended to existing D1 batch
+  in route handlers (compose, mailboxes, messages). Satisfies R-OUTBOUND-006.
+
+**Files created:**
+- `migrations/0009_idempotency_records.sql` + `.verify.sql` + `.md`
+- `apps/worker/src/platform/idempotency.ts` + `.test.ts`
+- `apps/worker/src/http/middleware/idempotency.ts`
+- `work/active/CAP-027-idempotency/task.md` (workspace contract)
+
+**Files modified:**
+- `apps/worker/src/database/schema/admin.ts` — idempotencyRecords table
+- `apps/worker/src/database/schema-version.ts` — bumped to '0009'
+- `apps/worker/src/http/routes/setup.ts` — 11 POST routes with idempotency
+- `apps/worker/src/http/routes/auth.ts` — 3 POST routes with idempotency
+- `apps/worker/src/http/routes/admin.ts` — POST /invite-codes with idempotency
+- `apps/worker/src/http/routes/compose.ts` — strict batch atomicity
+- `apps/worker/src/http/routes/mailboxes.ts` — strict batch atomicity
+- `apps/worker/src/http/routes/messages.ts` — strict batch atomicity
+
+**Testing:** 44 new idempotency test cases across all route test files (missing key, replay,
+409 reuse). R-OUTBOUND-005, R-OUTBOUND-006, R-API-004 citations present. Quality gates pass:
+typecheck, lint, test:unit 278, test:worker 385, build, doctor 10/10, drizzle-kit check.
+
+**Deferrals:** None from this capability. Resolves D-CAP-008-B, D-CAP-010-A, D-CAP-011-A.
+
+**Next:** Independent review (architecture, code, QA, security), then client-side TanStack Query
+UUID generation for Idempotency-Key (Phase 2).
+
+---
+
 ## 2026-08-13 — Phase 1 verification pass
 
 The Phase 1 capability set (CAP-020 through CAP-026) was independently reopened for verification

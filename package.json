@@ -20,7 +20,7 @@
     "dev:web": "pnpm --filter @unimailbox/web run dev",
     "test": "vitest run",
     "test:unit": "vitest run --project '!workers'",
-    "test:worker": "vitest run --project workers --project test-kit-workers",
+    "test:worker": "pnpm --filter @unimailbox/test-kit run build && vitest run --project workers --project test-kit-workers",
     "test:watch": "vitest --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

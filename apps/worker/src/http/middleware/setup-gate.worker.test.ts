@@ -150,7 +150,13 @@ describe('setup-gate middleware', () => {
     });
 
     it('/api/v1/setup/preflight is exempt (401, not 302)', async () => {
-      const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', { method: 'POST' });
+      const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+        },
+      });
       // The endpoint exists but requires session auth (401), not a 302 redirect.
       // A 302 would mean the setup gate redirected it.
       expect(response.status).toBe(401);
@@ -158,7 +164,13 @@ describe('setup-gate middleware', () => {
     });
 
     it('/api/v1/setup/cloudflare/verify is exempt (401, not 302)', async () => {
-      const response = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/verify', { method: 'POST' });
+      const response = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-verify-key',
+        },
+      });
       // The endpoint exists but requires session auth (401), not a 302 redirect.
       // A 302 would mean the setup gate redirected it.
       expect(response.status).toBe(401);

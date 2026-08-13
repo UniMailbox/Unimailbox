@@ -175,7 +175,7 @@ describe('POST /api/v1/auth/register', () => {
           password: 'securePassword123',
           displayName: 'New User',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(200);
@@ -197,7 +197,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'pbkdf2test@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const user = await env.DB.prepare(
@@ -219,7 +219,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'memberuser@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const body = await response.json();
@@ -243,7 +243,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user1@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const key = await env.DB.prepare(
@@ -263,7 +263,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'nodisplay@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(200);
@@ -281,7 +281,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(409);
@@ -299,7 +299,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(409);
@@ -322,7 +322,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(409);
@@ -341,7 +341,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user1@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       // Second registration should fail
@@ -352,7 +352,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user2@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(409);
@@ -373,7 +373,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'duplicate@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       // Second registration with same email
@@ -384,7 +384,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'duplicate@example.com',
           password: 'differentPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(409);
@@ -402,7 +402,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(400);
@@ -418,7 +418,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'notanemail',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(400);
@@ -434,7 +434,7 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'short',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(400);
@@ -459,7 +459,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       if (response.status !== 200) {
@@ -483,7 +483,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const body = await response.json();
@@ -501,7 +501,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const body = await response.json();
@@ -523,7 +523,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'ADMIN@EXAMPLE.COM', // Uppercase
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(200);
@@ -538,7 +538,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'wrongPassword',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(401);
@@ -553,7 +553,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'nonexistent@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(401);
@@ -573,7 +573,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(401);
@@ -591,7 +591,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(403);
@@ -608,7 +608,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'notanemail',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(400);
@@ -621,7 +621,7 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: '',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(400);
@@ -645,7 +645,7 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(200);
@@ -657,7 +657,7 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       const body = await response.json();
@@ -674,7 +674,7 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: crypto.randomUUID() }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(401);
@@ -702,7 +702,7 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: expiredToken }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(401);
@@ -716,7 +716,7 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: 'not-a-uuid' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
       });
 
       expect(response.status).toBe(400);
@@ -740,7 +740,7 @@ describe('GET /api/v1/auth/me', () => {
         email: 'admin@example.com',
         password: 'adminPassword123',
       }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
     });
 
     const body = await response.json();
@@ -787,5 +787,363 @@ describe('GET /api/v1/auth/me', () => {
 
       expect(response.status).toBe(401);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-027 Idempotency tests
+// ---------------------------------------------------------------------------
+
+describe('POST /api/v1/auth/register — idempotency', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+  });
+
+  it('returns 400 IDEMPOTENCY_KEY_REQUIRED when header missing', async () => {
+    const code = await createRegistrationKey({ maxUses: 1 });
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        email: 'user@example.com',
+        password: 'securePassword123',
+      }),
+      headers: { 'Content-Type': 'application/json' }, // No Idempotency-Key
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('returns 400 IDEMPOTENCY_KEY_INVALID for malformed key', async () => {
+    const code = await createRegistrationKey({ maxUses: 1 });
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        email: 'user@example.com',
+        password: 'securePassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'short', // Too short (< 8 chars)
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_INVALID');
+  });
+
+  it('replays response when same key and body', async () => {
+    const code = await createRegistrationKey({ maxUses: 2 });
+    const idempotencyKey = 'replay-test-' + crypto.randomUUID();
+    const requestBody = JSON.stringify({
+      code,
+      email: 'user@example.com',
+      password: 'securePassword123',
+    });
+
+    // First request
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+    const firstBody = await firstResponse.json();
+    const userId = firstBody.data.user.id;
+
+    // Second request with same key and body should replay
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(200);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.data.user.id).toBe(userId); // Same user replayed
+
+    // Verify only one user was created
+    const userCount = await env.DB.prepare(
+      `SELECT COUNT(*) as count FROM users WHERE email = ?`,
+    ).bind('user@example.com').first<{ count: number }>();
+    expect(userCount?.count).toBe(1);
+  });
+
+  it('returns 409 IDEMPOTENCY_KEY_REUSED when same key and code but different email', async () => {
+    // Use a code with maxUses: 2 so both requests could succeed if not for idempotency
+    const code = await createRegistrationKey({ maxUses: 2 });
+    const idempotencyKey = 'reuse-same-code-' + crypto.randomUUID();
+
+    // First request with the code
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        email: 'user1@example.com',
+        password: 'securePassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+
+    // Second request with same key and code but different email
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        email: 'user2@example.com', // Different email
+        password: 'securePassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(409);
+    const body = await secondResponse.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+});
+
+describe('POST /api/v1/auth/login — idempotency', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+    await createAdminUser();
+  });
+
+  it('returns 400 IDEMPOTENCY_KEY_REQUIRED when header missing', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'admin@example.com',
+        password: 'adminPassword123',
+      }),
+      headers: { 'Content-Type': 'application/json' }, // No Idempotency-Key
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('replays response when same key and body', async () => {
+    const idempotencyKey = 'login-replay-' + crypto.randomUUID();
+    const requestBody = JSON.stringify({
+      email: 'admin@example.com',
+      password: 'adminPassword123',
+    });
+
+    // First request
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+    const firstBody = await firstResponse.json();
+    const firstAccessToken = firstBody.data.accessToken;
+
+    // Second request with same key and body should replay
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(200);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.data.accessToken).toBe(firstAccessToken); // Same token replayed
+  });
+
+  it('returns 409 IDEMPOTENCY_KEY_REUSED when same key different body', async () => {
+    const idempotencyKey = 'login-reuse-' + crypto.randomUUID();
+
+    // First request with correct password
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'admin@example.com',
+        password: 'adminPassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+
+    // Second request with same key but different password
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'admin@example.com',
+        password: 'wrongPassword',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(409);
+    const body = await secondResponse.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+});
+
+describe('POST /api/v1/auth/refresh — idempotency', () => {
+  let userId: string;
+  let refreshToken: string;
+
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+    userId = await createAdminUser();
+    refreshToken = await createSession(userId);
+  });
+
+  it('returns 400 IDEMPOTENCY_KEY_REQUIRED when header missing', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+      headers: { 'Content-Type': 'application/json' }, // No Idempotency-Key
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('replays response when same key and body', async () => {
+    const idempotencyKey = 'refresh-replay-' + crypto.randomUUID();
+    const requestBody = JSON.stringify({ refreshToken });
+
+    // First request
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+    const firstBody = await firstResponse.json();
+    const firstAccessToken = firstBody.data.accessToken;
+
+    // Second request with same key and body should replay
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: requestBody,
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(200);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.data.accessToken).toBe(firstAccessToken); // Same token replayed
+  });
+
+  it('different refresh tokens can each use their own idempotency key', async () => {
+    const otherToken = await createSession(userId);
+    const key1 = 'token1-' + crypto.randomUUID();
+    const key2 = 'token2-' + crypto.randomUUID();
+
+    // First request with refreshToken and key1
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': key1,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+    const firstBody = await firstResponse.json();
+    const firstAccessToken = firstBody.data.accessToken;
+
+    // Second request with otherToken and key2 should also succeed
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: otherToken }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': key2,
+      },
+    });
+
+    expect(secondResponse.status).toBe(200);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.data.accessToken).not.toBe(firstAccessToken); // Different token, different result
+
+    // Verify both tokens work (are in KV)
+    const kv1 = await env.CACHE.get(`auth:${firstAccessToken}`);
+    const kv2 = await env.CACHE.get(`auth:${secondBody.data.accessToken}`);
+    expect(kv1).not.toBeNull();
+    expect(kv2).not.toBeNull();
+  });
+
+  it('same idempotency key with different refresh token succeeds (different actor scope)', async () => {
+    const otherToken = await createSession(userId);
+    const sharedKey = 'shared-' + crypto.randomUUID();
+
+    // First request with refreshToken
+    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': sharedKey,
+      },
+    });
+
+    expect(firstResponse.status).toBe(200);
+
+    // Second request with otherToken and same key succeeds because actorId is different
+    // (actorId is derived from the refresh token itself)
+    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refreshToken: otherToken }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': sharedKey,
+      },
+    });
+
+    expect(secondResponse.status).toBe(200);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.data).toHaveProperty('accessToken');
   });
 });

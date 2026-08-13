@@ -72,7 +72,10 @@ async function createAdminUser(): Promise<{ userId: string; accessToken: string 
       email: 'admin@example.com',
       password: 'adminPassword123',
     }),
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'test-admin-login-' + crypto.randomUUID(),
+    },
   });
 
   const body = await response.json();
@@ -112,7 +115,10 @@ async function createMemberUser(): Promise<string> {
       email: 'member@example.com',
       password: 'memberPassword123',
     }),
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'test-member-login-' + crypto.randomUUID(),
+    },
   });
 
   const body = await response.json();

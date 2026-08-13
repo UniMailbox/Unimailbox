@@ -27,10 +27,10 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | | |
 |---|---|
 | **Phase** | 1 — Minimal Business Closed Loop |
-| **Active capability** | none |
+| **Active capability** | CAP-027 (in review) |
 | **Next capability** | Phase 1 verification (operator preview deploy) — then Phase 2 |
 | **Blocked** | none |
-| **Repository state** | Phase 1 code complete AND quality-gate verified (CAP-020 through CAP-026). All 29 §F.4 exit criteria mapped to artifacts. Quality gates green: typecheck, lint, test:unit 232/232, test:worker 348/348, build, doctor 10/10. `Verified` status requires an operator preview deploy to observe the §F.1 27-step loop end-to-end. |
+| **Repository state** | Phase 1 code complete AND quality-gate verified (CAP-020 through CAP-027). All 29 §F.4 exit criteria mapped to artifacts. Quality gates green: typecheck, lint, test:unit 278/278, test:worker 385/385, build, doctor 10/10. `Verified` status requires an operator preview deploy to observe the §F.1 27-step loop end-to-end. |
 
 ## Phase progress
 
@@ -101,7 +101,7 @@ implement it. There is no partial pass.
 
 | ID | Capability | Status | Depends on | Evidence |
 |---|---|---|---|---|
-| CAP-027 | Idempotency records on every mutating endpoint (ADR-004) | Pending | Phase 1 | |
+| CAP-027 | Idempotency records on every mutating endpoint (ADR-004) | Implemented | Phase 1 | Migration `0009_idempotency_records.sql` (8 columns, unique index on actor_id/operation/idempotency_key, expires_at index for TTL purge). `apps/worker/src/platform/idempotency.ts` (sha256Hex, findIdempotencyRecord, prepareCreateIdempotencyRecord, tryReplayIdempotency). `apps/worker/src/http/middleware/idempotency.ts` (requireIdempotencyKey enforces header presence and format). All 17 mutating endpoints wired: 11 setup routes (best-effort), 3 auth routes + 1 admin route (best-effort), 2 mailboxes/compose routes + 1 messages route (strict batch atomicity). Quality gates pass: typecheck ✓, lint ✓, test:unit 278/278, test:worker 385/385, build ✓, doctor 10/10, drizzle-kit check ✓. 44 idempotency-specific test cases (missing key, replay, 409 reuse) across all route test files. R-OUTBOUND-005, R-OUTBOUND-006, R-API-004 citations present. Resolves D-CAP-008-B, D-CAP-010-A, D-CAP-011-A. **Verified** requires operator preview deploy with Idempotency-Key retry observation. |
 | CAP-028 | Durable outbox: attempts, lock expiry, re-queue on consumer crash (ADR-003) | Pending | CAP-023 | |
 | CAP-029 | Webhook ordering — early or out-of-order events queued, never lost (`R-MESSAGE-007`) | Pending | CAP-024 | |
 | CAP-030 | Message + OutboundJob state machine guards; terminal states provably terminal | Pending | CAP-023 | |

@@ -170,7 +170,10 @@ describe('audit_events on state transitions', () => {
     await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-audit-claim-key',
+      },
     });
 
     const events = await getAuditEvents();
@@ -186,7 +189,10 @@ describe('audit_events on state transitions', () => {
     const claimResponse = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-audit-claim-key',
+      },
     });
     const sessionToken = (await claimResponse.json()).data.sessionToken;
 
@@ -198,14 +204,22 @@ describe('audit_events on state transitions', () => {
         password: 'securePassword123',
         displayName: 'Admin User',
       }),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-audit-admin-key',
+        Authorization: `Bearer ${sessionToken}`,
+      },
     });
 
     // Create domain
     await SELF.fetch('http://localhost/api/v1/setup/domain', {
       method: 'POST',
       body: JSON.stringify({ name: 'example.com' }),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-audit-domain-key',
+        Authorization: `Bearer ${sessionToken}`,
+      },
     });
 
     // Advance step to complete
@@ -216,7 +230,11 @@ describe('audit_events on state transitions', () => {
     // Call complete
     await SELF.fetch('http://localhost/api/v1/setup/complete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-audit-complete-key',
+        Authorization: `Bearer ${sessionToken}`,
+      },
     });
 
     const events = await getAuditEvents();
@@ -236,7 +254,11 @@ describe('audit_events on state transitions', () => {
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       method: 'POST',
       body: JSON.stringify({ localPart: 'test', domainId }),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'Idempotency-Key': 'test-idem-key-audit-mb01',
+      },
     });
 
     expect(response.status).toBe(200);
@@ -339,7 +361,11 @@ Body text.`;
         {
           method: 'POST',
           body: JSON.stringify({ to: [{ address: 'to@example.com' }] }),
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            'Idempotency-Key': 'test-idem-key-audit-send1',
+          },
         },
       );
 

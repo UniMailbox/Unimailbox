@@ -23,7 +23,10 @@ describe('POST /api/v1/setup/complete', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -47,6 +50,7 @@ describe('POST /api/v1/setup/complete', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-admin-key',
       },
     });
     if (adminResponse.status !== 200) {
@@ -60,6 +64,7 @@ describe('POST /api/v1/setup/complete', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
     if (domainResponse.status !== 200) {
@@ -87,6 +92,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -104,6 +110,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -118,6 +125,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -138,6 +146,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -158,6 +167,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -180,6 +190,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -190,6 +201,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -202,11 +214,62 @@ describe('POST /api/v1/setup/complete', () => {
     });
   });
 
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/complete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-complete-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/complete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+
+      // Second request with same key should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/complete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same status
+      expect(body2.data.status).toBe(body1.data.status);
+      expect(body2.data.status).toBe('complete');
+    });
+  });
+
   describe('session requirement', () => {
     it('returns 401 without a session', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/complete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -220,6 +283,7 @@ describe('POST /api/v1/setup/complete', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-invalid-token-key',
           Authorization: 'Bearer invalid-session-token',
         },
       });
@@ -238,6 +302,7 @@ describe('POST /api/v1/setup/complete', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-complete-key',
         },
       });
 
@@ -261,7 +326,10 @@ describe('GET /', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -285,6 +353,7 @@ describe('GET /', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-admin-key',
       },
     });
 
@@ -295,6 +364,7 @@ describe('GET /', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-domain-key',
       },
     });
 
@@ -311,6 +381,7 @@ describe('GET /', () => {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'test-complete-key',
       },
     });
   }
@@ -340,6 +411,7 @@ describe('GET /', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-admin-key',
         },
       });
 

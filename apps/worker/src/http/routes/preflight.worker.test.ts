@@ -22,7 +22,10 @@ describe('POST /api/v1/setup/preflight', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -42,7 +45,10 @@ describe('POST /api/v1/setup/preflight', () => {
     it('returns 200 with binding report and schema version', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-preflight-key',
+        },
       });
 
       expect(response.status).toBe(200);
@@ -57,7 +63,10 @@ describe('POST /api/v1/setup/preflight', () => {
     it('reports all 7 bindings as present', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-preflight-key',
+        },
       });
 
       const body = await response.json();
@@ -81,17 +90,23 @@ describe('POST /api/v1/setup/preflight', () => {
     it('reports schema version from d1_migrations', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-preflight-key',
+        },
       });
 
       const body = await response.json();
-      expect(body.data.schemaVersion).toBe('0008');
+      expect(body.data.schemaVersion).toBe('0009');
     });
 
     it('returns the success envelope { data: T }', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-preflight-key',
+        },
       });
 
       expect(response.status).toBe(200);
@@ -110,6 +125,10 @@ describe('POST /api/v1/setup/preflight', () => {
     it('returns 401 SETUP_SESSION_REQUIRED', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -123,6 +142,10 @@ describe('POST /api/v1/setup/preflight', () => {
     it('returns error envelope { error: { code, message } }', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+        },
       });
 
       const body = await response.json();
@@ -140,7 +163,11 @@ describe('POST /api/v1/setup/preflight', () => {
     it('returns 401 SETUP_SESSION_INVALID', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: 'Bearer invalid-token' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+          Authorization: 'Bearer invalid-token',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -154,7 +181,11 @@ describe('POST /api/v1/setup/preflight', () => {
     it('returns error envelope { error: { code, message } }', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: 'Bearer invalid-token' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+          Authorization: 'Bearer invalid-token',
+        },
       });
 
       const body = await response.json();
@@ -172,7 +203,11 @@ describe('POST /api/v1/setup/preflight', () => {
     it('returns 401 for "Bearer" prefix without token', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: 'Bearer' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+          Authorization: 'Bearer',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -185,7 +220,11 @@ describe('POST /api/v1/setup/preflight', () => {
       // 'Bearer', which does not match startsWith('Bearer ') → REQUIRED.
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: 'Bearer ' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+          Authorization: 'Bearer ',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -196,7 +235,11 @@ describe('POST /api/v1/setup/preflight', () => {
     it('returns 401 for token without "Bearer" prefix', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: 'some-token' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+          Authorization: 'some-token',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -214,7 +257,11 @@ describe('POST /api/v1/setup/preflight', () => {
     it('is NOT 302-redirected by the setup gate (exempt path)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${sessionToken}` },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-preflight-key',
+          Authorization: `Bearer ${sessionToken}`,
+        },
         redirect: 'manual',
       });
 
@@ -237,10 +284,61 @@ describe('POST /api/v1/setup/preflight', () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-claim-session-key',
+        },
       });
 
       expect(response.status).toBe(200);
+    });
+  });
+
+  describe('idempotency (CAP-027 / ADR-004)', () => {
+    beforeEach(async () => {
+      await resetAndMigrate();
+      sessionToken = await claimSession();
+    });
+
+    it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    });
+
+    it('replays the stored response when same key + same body', async () => {
+      const idempotencyKey = 'test-preflight-key-abc123';
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+
+      // Second request with same key should replay
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+      // Should return the same bindings and schema version
+      expect(body2.data.bindings).toEqual(body1.data.bindings);
+      expect(body2.data.schemaVersion).toBe(body1.data.schemaVersion);
     });
   });
 });

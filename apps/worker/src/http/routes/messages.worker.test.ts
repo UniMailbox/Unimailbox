@@ -14,6 +14,9 @@ import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { hashPassword } from '../../platform/crypto';
 
+// R-API-004: PATCH .../read requires Idempotency-Key.
+const IDEMPOTENCY_KEY = 'test-idem-key-messages01';
+
 // ---------------------------------------------------------------------------
 // Seeding helpers (modelled on mailboxes.worker.test.ts).
 // ---------------------------------------------------------------------------
@@ -472,7 +475,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
       `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
       {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
       },
     );
 
@@ -501,7 +504,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
         `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
         {
           method: 'PATCH',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
         },
       );
       expect(response.status).toBe(200);
@@ -531,7 +534,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
       `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
       {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${ownerToken}` },
+        headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
       },
     );
     expect(ownerPatch.status).toBe(200);
@@ -570,7 +573,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
       `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${crypto.randomUUID()}/read`,
       {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
       },
     );
 
@@ -592,7 +595,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
       `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
       {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${otherToken}` },
+        headers: { Authorization: `Bearer ${otherToken}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
       },
     );
 

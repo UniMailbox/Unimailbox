@@ -25,7 +25,10 @@ describe('POST /api/v1/setup/domain', () => {
     const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
       method: 'POST',
       body: JSON.stringify({ token: 'test-installation-token' }),
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-claim-session-key',
+      },
     });
 
     if (response.status !== 200) {
@@ -51,6 +54,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -79,6 +83,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -108,6 +113,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -130,6 +136,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -152,6 +159,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -173,6 +181,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -194,6 +203,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -217,6 +227,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
     });
@@ -230,6 +241,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-second-domain-key',
         },
       });
 
@@ -250,6 +262,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-second-domain-key',
         },
       });
 
@@ -272,6 +285,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-second-domain-key',
         },
       });
 
@@ -297,6 +311,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
     });
@@ -310,6 +325,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-uppercase-domain-key',
         },
       });
 
@@ -327,7 +343,10 @@ describe('POST /api/v1/setup/domain', () => {
         body: JSON.stringify({
           name: 'example.com',
         }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-no-session-key',
+        },
       });
 
       expect(response.status).toBe(401);
@@ -346,6 +365,7 @@ describe('POST /api/v1/setup/domain', () => {
         }),
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-invalid-token-key',
           Authorization: 'Bearer invalid-token',
         },
       });
@@ -371,6 +391,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -388,6 +409,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -405,6 +427,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -422,6 +445,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -439,6 +463,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -456,6 +481,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -473,6 +499,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -491,6 +518,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -515,6 +543,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -532,6 +561,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
@@ -556,6 +586,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
         redirect: 'manual',
       });
@@ -581,6 +612,7 @@ describe('POST /api/v1/setup/domain', () => {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-domain-key',
         },
       });
 
