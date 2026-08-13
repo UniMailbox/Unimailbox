@@ -23,6 +23,16 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-012 Cloudflare dashboard-link + verify  |  Implemented
+
+**Changed:** Two session-protected endpoints: `POST /api/v1/setup/cloudflare/dashboard-link` (returns allowlisted Cloudflare dashboard URL, no step change) and `POST /api/v1/setup/cloudflare/verify` (checks managed domain exists, advances step to 'inbound-smoke'). Phase 1: verify is operator-confirmation only — no Cloudflare API call. Real email-delivery verification via CAP-013 inbound smoke test.
+
+**Files:** `apps/worker/src/modules/onboarding/cloudflare-dashboard-link.ts` (new — getCloudflareDashboardLink) · `apps/worker/src/modules/onboarding/cloudflare-verify.ts` (new — verifyCloudflareEmailRouting) · `apps/worker/src/modules/tenancy/domain-repository.ts` (added getManagedDomain) · `apps/worker/src/modules/tenancy/index.ts` (export getManagedDomain) · `apps/worker/src/http/routes/setup.ts` (added POST /cloudflare/dashboard-link + POST /cloudflare/verify) · `apps/worker/src/http/routes/cloudflare.worker.test.ts` (new — 19 tests)
+
+**Decisions:** Verify is operator-confirmation only (Phase 1). Dashboard URL is generic (`https://dash.cloudflare.com`). No new contracts (empty POST bodies, simple response shapes).
+
+**Notes:** Orchestrator-validated (pattern identical to CAP-009/010/011 — session-protected, one use case, envelope response). Setup-gate test updated (dashboard-link and verify routes now exist → 401 instead of 404).
+
 ## 2026-08-13 — CAP-011 Setup domain endpoint  |  Implemented
 
 **Changed:** `POST /api/v1/setup/domain` — session-protected endpoint persisting a managed domain with `status='active'`. After creation, the installation step advances to 'cloudflare-verify'. Introduces the tenancy module and the first schema migration since CAP-004.

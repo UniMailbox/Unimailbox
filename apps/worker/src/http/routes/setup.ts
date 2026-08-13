@@ -1,5 +1,6 @@
 // http/routes/setup — setup API routes.
-// Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight, POST /administrator, POST /domain.
+// Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight,
+// POST /administrator, POST /domain, POST /cloudflare/dashboard-link, POST /cloudflare/verify.
 
 import { Hono } from 'hono';
 import {
@@ -7,7 +8,15 @@ import {
   setupAdministratorRequestSchema,
   setupDomainRequestSchema,
 } from '@unimailbox/contracts';
-import { claimSetup, getSetupStatus, runPreflight, createAdministrator, createDomainStep } from '../../modules/onboarding';
+import {
+  claimSetup,
+  getSetupStatus,
+  runPreflight,
+  createAdministrator,
+  createDomainStep,
+  getCloudflareDashboardLink,
+  verifyCloudflareEmailRouting,
+} from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { readSecret } from '../../platform/secrets';
@@ -71,6 +80,24 @@ export function setupRoutes(): Hono<AppEnv> {
         name: body.name,
       },
       { clock: systemClock, ids: systemIds },
+    );
+    return c.json({ data: result });
+  });
+
+  // POST /cloudflare/dashboard-link — session-protected endpoint that returns
+  // an allowlisted Cloudflare dashboard URL. Does NOT advance the installation step.
+  routes.post('/cloudflare/dashboard-link', setupSession, async (c) => {
+    const result = await getCloudflareDashboardLink();
+    return c.json({ data: result });
+  });
+
+  // POST /cloudflare/verify — session-protected endpoint that confirms a managed
+  // domain exists and advances the installation step to 'inbound-smoke'.
+  // If no domain exists, returns 409 SETUP_DOMAIN_REQUIRED.
+  routes.post('/cloudflare/verify', setupSession, async (c) => {
+    const result = await verifyCloudflareEmailRouting(
+      { db: c.env.DB },
+      { clock: systemClock },
     );
     return c.json({ data: result });
   });

@@ -1,4 +1,4 @@
-// domain-repository — creates a managed domain row.
+// domain-repository — creates and reads managed domain rows.
 // Owner: tenancy module. Private file — export through modules/tenancy/index.ts.
 //
 // R-DATA-001: managed_domains.name is case-insensitive (COLLATE NOCASE).
@@ -14,6 +14,12 @@ export interface CreateDomainInput {
   readonly outboundConnectionId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface ManagedDomainInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly status: string;
 }
 
 /**
@@ -60,4 +66,15 @@ export async function createDomain(db: Database, input: CreateDomainInput): Prom
       input.updatedAt,
     )
     .run();
+}
+
+/**
+ * Reads the first managed domain row. Returns null when no domain exists.
+ * Used by setup to verify a domain was created before advancing the step.
+ */
+export async function getManagedDomain(db: Database): Promise<ManagedDomainInfo | null> {
+  const result = await db
+    .prepare('SELECT id, name, status FROM managed_domains LIMIT 1')
+    .first<{ id: string; name: string; status: string }>();
+  return result ?? null;
 }
