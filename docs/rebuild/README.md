@@ -72,7 +72,7 @@ the ledger's `Known documentation discrepancies` table records each.
 | Phase | Status | Exit criteria | When |
 |---|---|---|---|
 | 0 — Foundation | **Audit Complete — Conditional Pass** (10/11 MET) | 11 boxes — `08-roadmap/phase-0-foundation.md` | 2026-08-12 — Audit complete; operator deploy verification pending |
-| 1 — Minimal Loop | Not started | 29 boxes — `F-minimal-business-closed-loop.md` §F.4 (H doc says 23) | — |
+| 1 — Minimal Loop | **Code complete and quality-gate verified** | 29 boxes — `F-minimal-business-closed-loop.md` §F.4 (H doc says 23) | 2026-08-13 — All 7 phase-1 capabilities implemented (CAP-020–026); audit at `phase-1-audit.md`. Operator preview deploy pending for `Verified` status. |
 | 2 — Reliable Loop | Not started | 7 boxes — `08-roadmap/phase-2-core-loop.md` | — |
 | 3 — Complete Core | Not started | drafts + attachments | — |
 | 4 — Operations + Data Import | Not started | ops tooling + legacy import | — |

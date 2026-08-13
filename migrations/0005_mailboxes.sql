@@ -6,6 +6,9 @@
 --
 -- R-DATA-001: local_part is case-insensitive (COLLATE NOCASE).
 -- R-MAILBOX-003: Owner is implicitly a member; no explicit row needed.
+--
+-- Migration tracking (F1): the INSERT OR IGNORE INTO d1_migrations makes
+-- apply+track atomic with the CREATE TABLE.
 
 CREATE TABLE IF NOT EXISTS mailboxes (
   id            TEXT PRIMARY KEY,
@@ -29,3 +32,5 @@ CREATE TABLE IF NOT EXISTS mailbox_members (
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (mailbox_id, user_id)
 );
+
+INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0005_mailboxes.sql');

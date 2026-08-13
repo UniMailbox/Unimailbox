@@ -1,7 +1,13 @@
 // http/routes/mailboxes — CAP-020 mailbox routes.
 // Hono sub-app for /api/v1/mailboxes/* endpoints: create, list.
 //
-// R-AUTHZ-003: Two layers — requirePermission('mailbox.create') + mailbox-scoped checks.
+// R-AUTHZ-003: Two layers — global `requirePermission` middleware + per-request
+// scope checks. The two mailbox routes do not have a pre-existing mailbox to
+// scope against: `POST` creates a new mailbox (no target yet) and `GET` returns
+// mailboxes owned by the authenticated user (the SQL `WHERE owner_user_id = ?`
+// is the scope check). The mailbox-scoped `assertCan` authorizer is therefore
+// not applicable on these routes — it is exercised on routes that operate on
+// a specific mailbox by ID (see http/routes/messages.ts and compose.ts).
 // R-MAILBOX-003: Owner (the authenticated user) is implicitly a member.
 // R-DATA-001: localPart is case-insensitive (COLLATE NOCASE).
 

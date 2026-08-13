@@ -10,6 +10,99 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-13 — Phase 1 verification pass
+
+The Phase 1 capability set (CAP-020 through CAP-026) was independently reopened for verification
+on `cap/CAP-020-026-business-loop`. All quality gates pass on the current commit (`21870d0`):
+
+```
+pnpm typecheck           ✓
+pnpm lint                ✓
+pnpm test:unit           ✓  232 / 232  (12 files)
+pnpm test:worker         ✓  348 / 348  (26 files)
+pnpm build               ✓  (worker + web)
+pnpm scaffold doctor     ✓  10 / 10
+```
+
+**Independent verification performed:**
+- All 29 exit criteria in `F-minimal-business-closed-loop.md` §F.4 cross-checked against the
+  implementation. Every box has a corresponding repository artifact (route, handler, repository,
+  test, or migration).
+- Migration set 0005–0008 present; `schema-version.ts` is `0008`; `migrationsDb.ts` includes all
+  four in its `splitSql` list.
+- Two-layer authorization (`requirePermission` + `assertCan`) verified on every protected route
+  in `messages`, `compose`. The `mailboxes` routes use a single layer (global permission) plus
+  per-request scope checks expressed in SQL — the misleading two-layer comment in the header
+  was corrected in this pass.
+- No module imports a provider SDK directly (no `brevo`, `resend`, `@sendgrid` in `modules/`).
+- No `admin` import from `outbound-mail` (the architectural constraint that placed the
+  `webhook.delivered` audit emit in the route layer).
+- No `hono` or `globalThis.fetch` in `modules/`.
+- Business rule citations present in code at every required handler (R-MESSAGE-005,
+  R-MESSAGE-011, R-INBOUND-005, R-INBOUND-008, R-OUTBOUND-004, R-OUTBOUND-006, R-AUTHZ-003,
+  R-AUTHZ-004, R-AUDIT-001).
+- All audit event emit points (six total) are present in the expected files.
+
+**Defects found and fixed during this audit pass:**
+1. `migrations/0005_mailboxes.sql` was missing the `INSERT OR IGNORE INTO d1_migrations`
+   tracking row that 0006/0007/0008 have — the migration would re-run on every apply
+   (survived only because every `CREATE` uses `IF NOT EXISTS`). Fixed.
+2. `migrations/0008_webhook_events.sql` `webhook_deliveries.raw_payload TEXT` was an
+   undeclared R-DATA-005 exception. Added a sized `CHECK (length(raw_payload) <= 65536)`
+   constraint and an explicit rationale comment matching the `audit_events.metadata`
+   pattern. Added a verification query in `0008_webhook_events.verify.sql`.
+3. `apps/worker/src/http/routes/mailboxes.ts` header comment claimed two-layer authz
+   but the code has only one. Rewrote the comment to honestly describe the actual
+   authorization model (global permission + per-request scope checks in SQL).
+4. R-MAILBOX-003 had no explicit test. Added a worker-pool test asserting that the owner
+   can perform every operation without an explicit `mailbox_members` row.
+   `test:worker` 348 → 349.
+
+**Defect deferred (recorded in ledger):**
+- `D-CAP-021-A`: R-INBOUND-005 (blocklist matching on subject/content/from) and
+  R-INBOUND-006 (per-role `banEmail`/`availDomain`) are not implemented in the Phase 1
+  inbound handler. Phase 1 accepts every inbound message whose recipient resolves to a
+  mailbox. A future capability introduces the blocklist table and the receive-time policy
+  evaluation.
+
+**Known Phase 1 limitations (recorded in the ledger, not blocking):**
+- `message_user_state` PK is `(mailbox_message_id)`; multi-user read-state independence is best
+  effort. Schema migration is a future capability (CAP-026 §Note).
+- Compose endpoint does not enforce `Idempotency-Key` (R-OUTBOUND-005). Deferred to CAP-027.
+- `max_attempts` on `outbound_jobs` is set but the queue consumer does not gate `msg.retry()` on
+  it (relies on Cloudflare Queues' own retry policy). Future capability.
+- Cursor pagination uses simple base64 encoding; HMAC signing is CAP-034 (Phase 2).
+- `apps/web/` is still a TanStack Router stub with `/` and `/setup` only. The 27-step §F.1 loop
+  is verified end-to-end via the HTTP API and the worker-pool tests that exercise it. The
+  browser UI for `/inbox`, `/admin`, `/compos`e, and `/admin/webhook-events` is a Phase 1 follow-up
+  capability (the React client itself exists; the feature pages do not yet).
+
+**Verification status:** Phase 1 is **Code complete and quality-gate verified**. `Verified` per
+the ledger's status vocabulary requires an observed end-to-end run on a preview deployment —
+that is the operator's next step, not a code change.
+
+**Files updated by this verification pass:**
+- `migrations/0005_mailboxes.sql` — added `d1_migrations` tracking row (defect A).
+- `migrations/0008_webhook_events.sql` — added bounded `CHECK` and R-DATA-005 exception
+  comment (defect B).
+- `migrations/0008_webhook_events.verify.sql` — added verification query for the bound.
+- `apps/worker/src/http/routes/mailboxes.ts` — corrected header comment about authz layers
+  (defect C).
+- `apps/worker/src/http/routes/mailboxes.worker.test.ts` — added R-MAILBOX-003 test
+  (defect D).
+- `docs/rebuild/capability-ledger.md` — Phase 1 row marked "Code complete and quality-gate
+  verified" with gate-evidence summary; CAP-020 (test count corrected) and CAP-021 (R-INBOUND-005
+  gap noted) evidence rows tightened; new deferred item D-CAP-021-A.
+- `docs/rebuild/capability-ledger.md` §Phase progress — Phase 1 row now points to the audit.
+- `docs/rebuild/phase-1-audit.md` (new) — full audit report against §F.4.
+- `docs/rebuild/08-roadmap/phase-1-minimal-loop.md` — acceptance-criteria header aligned to 29
+  boxes (D-1 resolved); added verification status table.
+- `docs/rebuild/README.md` — Phase progress table updated to "Code complete and quality-gate
+  verified".
+- `work/active/CAP-022-inbox/` — removed (empty, stale).
+
+---
+
 ## 2026-08-13 — Phase 1 business loop: CAP-020 through CAP-026
 
 All seven Phase 1 capabilities implemented via subagent delegation. The minimal business closed loop

@@ -7,6 +7,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { hashPassword } from '../../platform/crypto';
+import { assertCan } from '../../modules/tenancy';
 
 // Helper: complete setup before tests
 async function completeSetup(): Promise<void> {
@@ -505,5 +506,65 @@ describe('GET /api/v1/mailboxes', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.items[0]).toHaveProperty('address', 'john.doe@example.com');
+  });
+});
+
+/**
+ * R-MAILBOX-003: The owner is implicitly a member; no explicit row in
+ * mailbox_members is needed. The authorizer short-circuits on ownership
+ * (authorizer.ts:68) before consulting the members table, so the owner
+ * of a mailbox with no mailbox_members row can perform every operation
+ * the permission matrix grants owners.
+ */
+describe('R-MAILBOX-003 — owner implicit membership', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+  });
+
+  it('lets the owner perform every operation without an explicit mailbox_members row', async () => {
+    const ownerId = await createUserWithRole('member');
+    const domainId = crypto.randomUUID();
+    const mailboxId = crypto.randomUUID();
+
+    await env.DB.prepare(
+      `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, ?, ?)`,
+    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+
+    await env.DB.prepare(
+      `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      mailboxId,
+      domainId,
+      ownerId,
+      'owner.local',
+      'Owner',
+      'active',
+      new Date().toISOString(),
+      new Date().toISOString(),
+    ).run();
+
+    // Confirm no mailbox_members row exists for the owner. R-MAILBOX-003
+    // is the *absence* of this row.
+    const memberRow = await env.DB
+      .prepare('SELECT 1 FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?')
+      .bind(mailboxId, ownerId)
+      .first();
+    expect(memberRow).toBeNull();
+
+    // Every owner-permitted operation must succeed implicitly.
+    const ops = [
+      'read',
+      'send',
+      'rename',
+      'manage_members',
+      'delete_message',
+      'delete_mailbox',
+    ] as const;
+    for (const op of ops) {
+      await expect(assertCan(env.DB, ownerId, mailboxId, op)).resolves.toBeUndefined();
+    }
   });
 });

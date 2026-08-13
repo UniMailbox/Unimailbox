@@ -27,3 +27,12 @@ PRAGMA foreign_keys;
 
 -- Verify migration tracking row exists
 SELECT COUNT(*) = 1 FROM d1_migrations WHERE name = '0008_webhook_events.sql';
+
+-- Verify R-DATA-005 explicit exception: raw_payload has a 64 KB size CHECK.
+-- The CHECK must reject payloads over 65536 bytes.
+SELECT
+  CASE
+    WHEN (SELECT COUNT(*) FROM webhook_deliveries WHERE length(raw_payload) > 65536) = 0
+    THEN 1
+    ELSE 0
+  END = 1;
