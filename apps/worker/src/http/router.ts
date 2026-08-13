@@ -9,6 +9,7 @@ import { setupRoutes } from './routes/setup';
 import { authRoutes } from './routes/auth';
 import { adminRoutes } from './routes/admin';
 import { mailboxRoutes } from './routes/mailboxes';
+import { messageRoutes } from './routes/messages';
 import type { AppEnv } from '../platform/env';
 
 export function buildRouter(): Hono<AppEnv> {
@@ -43,6 +44,9 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-020: Mailbox routes.
   router.route('/api/v1', mailboxRoutes());
+
+  // CAP-022: Message routes (inbox list, detail, mark-as-read).
+  router.route('/api/v1', messageRoutes());
 
   return router;
 }

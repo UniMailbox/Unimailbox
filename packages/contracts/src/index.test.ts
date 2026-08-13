@@ -19,6 +19,10 @@ import {
   loginRequestSchema,
   refreshRequestSchema,
   createMailboxRequestSchema,
+  messageRecipientSchema,
+  messageListItemSchema,
+  messageListResponseSchema,
+  messageDetailSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -774,6 +778,239 @@ describe('createMailboxRequestSchema', () => {
       localPart: 'john.doe',
       domainId: '00000000-0000-4000-8000-000000000001',
       displayName: 'a'.repeat(101),
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-022: Message response schemas
+// ---------------------------------------------------------------------------
+
+describe('messageRecipientSchema', () => {
+  it('accepts a valid recipient', () => {
+    const result = messageRecipientSchema.parse({
+      address: 'user@example.com',
+      displayName: 'User',
+    });
+    expect(result).toEqual({ address: 'user@example.com', displayName: 'User' });
+  });
+
+  it('accepts an empty displayName', () => {
+    const result = messageRecipientSchema.parse({
+      address: 'user@example.com',
+      displayName: '',
+    });
+    expect(result.displayName).toBe('');
+  });
+
+  it('rejects missing address via safeParse', () => {
+    const result = messageRecipientSchema.safeParse({ displayName: 'User' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing displayName via safeParse', () => {
+    const result = messageRecipientSchema.safeParse({ address: 'user@example.com' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('messageListItemSchema', () => {
+  it('accepts a valid list item with recipients', () => {
+    const result = messageListItemSchema.parse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: 'Sender',
+      subject: 'Hello',
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: {
+        to: [{ address: 'recipient@example.com', displayName: 'Recipient' }],
+        cc: [],
+      },
+    });
+    expect(result.subject).toBe('Hello');
+    expect(result.recipients.to).toHaveLength(1);
+  });
+
+  it('accepts an item with isRead = 1', () => {
+    const result = messageListItemSchema.parse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: '',
+      subject: '',
+      isRead: 1,
+      isStarred: 1,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
+    });
+    expect(result.isRead).toBe(1);
+    expect(result.isStarred).toBe(1);
+  });
+
+  it('rejects non-uuid id via safeParse', () => {
+    const result = messageListItemSchema.safeParse({
+      id: 'not-a-uuid',
+      fromAddress: 'sender@example.com',
+      fromName: '',
+      subject: '',
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing recipients via safeParse', () => {
+    const result = messageListItemSchema.safeParse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: '',
+      subject: '',
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('messageListResponseSchema', () => {
+  it('accepts a response with items and a null cursor', () => {
+    const result = messageListResponseSchema.parse({
+      items: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          fromAddress: 'sender@example.com',
+          fromName: 'Sender',
+          subject: 'Hello',
+          isRead: 0,
+          isStarred: 0,
+          folder: 'inbox',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          recipients: { to: [], cc: [] },
+        },
+      ],
+      nextCursor: null,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('accepts an empty page', () => {
+    const result = messageListResponseSchema.parse({
+      items: [],
+      nextCursor: null,
+    });
+    expect(result.items).toEqual([]);
+  });
+
+  it('accepts a non-null cursor string', () => {
+    const result = messageListResponseSchema.parse({
+      items: [],
+      nextCursor: 'eyJjcmVhdGVkQXQiOiIyMDI2IiwiaWQiOiJ4In0=',
+    });
+    expect(result.nextCursor).toBe('eyJjcmVhdGVkQXQiOiIyMDI2IiwiaWQiOiJ4In0=');
+  });
+
+  it('rejects a missing nextCursor via safeParse', () => {
+    const result = messageListResponseSchema.safeParse({ items: [] });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('messageDetailSchema', () => {
+  it('accepts a valid detail with null messageIdHeader', () => {
+    const result = messageDetailSchema.parse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: 'Sender',
+      subject: 'Hello',
+      htmlBody: '<p>Hi</p>',
+      textBody: 'Hi',
+      messageIdHeader: null,
+      inReplyToHeader: null,
+      referencesHeader: '',
+      status: 'delivered',
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: {
+        to: [{ address: 'recipient@example.com', displayName: 'Recipient' }],
+        cc: [],
+      },
+    });
+    expect(result.messageIdHeader).toBeNull();
+    expect(result.inReplyToHeader).toBeNull();
+    expect(result.htmlBody).toBe('<p>Hi</p>');
+  });
+
+  it('accepts non-null header values', () => {
+    const result = messageDetailSchema.parse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: 'Sender',
+      subject: 'Re: Hello',
+      htmlBody: '<p>Hi</p>',
+      textBody: 'Hi',
+      messageIdHeader: '<abc@example.com>',
+      inReplyToHeader: '<def@example.com>',
+      referencesHeader: '<def@example.com>',
+      status: 'delivered',
+      isRead: 1,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
+    });
+    expect(result.messageIdHeader).toBe('<abc@example.com>');
+    expect(result.inReplyToHeader).toBe('<def@example.com>');
+  });
+
+  it('rejects missing htmlBody via safeParse', () => {
+    const result = messageDetailSchema.safeParse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: '',
+      subject: '',
+      textBody: '',
+      messageIdHeader: null,
+      inReplyToHeader: null,
+      referencesHeader: '',
+      status: 'delivered',
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects non-string status via safeParse', () => {
+    const result = messageDetailSchema.safeParse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: '',
+      subject: '',
+      htmlBody: '',
+      textBody: '',
+      messageIdHeader: null,
+      inReplyToHeader: null,
+      referencesHeader: '',
+      status: 123,
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
     });
     expect(result.success).toBe(false);
   });

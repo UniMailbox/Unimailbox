@@ -389,3 +389,77 @@ export const createMailboxRequestSchema = z.object({
 });
 
 export type CreateMailboxRequest = z.infer<typeof createMailboxRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Messages — CAP-022
+// ---------------------------------------------------------------------------
+/**
+ * Recipient of a message — used in the to/cc arrays of list and detail responses.
+ */
+export const messageRecipientSchema = z.object({
+  address: z.string(),
+  displayName: z.string(),
+});
+
+export type MessageRecipientInfo = z.infer<typeof messageRecipientSchema>;
+
+/**
+ * One row in the inbox list response (GET /api/v1/mailboxes/:mailboxId/messages).
+ *
+ * R-MESSAGE-005: isRead is the per-user value (0 or 1).
+ */
+export const messageListItemSchema = z.object({
+  id: uuidSchema,
+  fromAddress: z.string(),
+  fromName: z.string(),
+  subject: z.string(),
+  isRead: z.number(),
+  isStarred: z.number(),
+  folder: z.string(),
+  createdAt: z.string(),
+  recipients: z.object({
+    to: z.array(messageRecipientSchema),
+    cc: z.array(messageRecipientSchema),
+  }),
+});
+
+export type MessageListItem = z.infer<typeof messageListItemSchema>;
+
+/**
+ * Response envelope for GET .../messages — cursor-paginated list of messages.
+ */
+export const messageListResponseSchema = z.object({
+  items: z.array(messageListItemSchema),
+  nextCursor: z.string().nullable(),
+});
+
+export type MessageListResponse = z.infer<typeof messageListResponseSchema>;
+
+/**
+ * Full message detail (GET /api/v1/mailboxes/:mailboxId/messages/:messageId).
+ *
+ * messageIdHeader/inReplyToHeader are nullable RFC 5322 headers; referencesHeader
+ * is always present (defaults to empty string per the schema).
+ */
+export const messageDetailSchema = z.object({
+  id: uuidSchema,
+  fromAddress: z.string(),
+  fromName: z.string(),
+  subject: z.string(),
+  htmlBody: z.string(),
+  textBody: z.string(),
+  messageIdHeader: z.string().nullable(),
+  inReplyToHeader: z.string().nullable(),
+  referencesHeader: z.string(),
+  status: z.string(),
+  isRead: z.number(),
+  isStarred: z.number(),
+  folder: z.string(),
+  createdAt: z.string(),
+  recipients: z.object({
+    to: z.array(messageRecipientSchema),
+    cc: z.array(messageRecipientSchema),
+  }),
+});
+
+export type MessageDetail = z.infer<typeof messageDetailSchema>;
