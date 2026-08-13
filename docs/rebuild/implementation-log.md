@@ -23,6 +23,21 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-013 Inbound smoke test  |  Implemented
+
+**Changed:** `POST /api/v1/setup/inbound-smoke-test` (start) + `POST /api/v1/setup/inbound-smoke-test/check` — verifies Cloudflare Email Routing delivers emails to the Worker. Start generates `smoke+<uuid>@<domain>` address; operator sends email manually; email handler detects the `smoke+` prefix, validates token in KV, sets receipt flag; check endpoint polls KV, advances step to 'brevo' on receipt. First modification to the inbound email handler (previously reject-all stub).
+
+**Files:** `apps/worker/src/modules/onboarding/inbound-smoke-test.ts` (new — startInboundSmokeTest, checkInboundSmokeTest, handleSmokeTestMessage) · `apps/worker/src/entrypoints/inbound-email.ts` (modified — added env param, calls handleSmokeTestMessage) · `apps/worker/src/http/routes/setup.ts` (added 2 routes) · `apps/worker/src/http/routes/inbound-smoke-test.worker.test.ts` (new — 24 tests) · `apps/worker/src/entrypoints/inbound-email.worker.test.ts` (updated — real env instead of mock)
+
+**Decisions:**
+- Operator sends email manually — Worker can't send email to itself (no outbound provider yet).
+- CACHE KV for ephemeral smoke test state (`smoke:{token}`, `smoke:active`, `smoke-result:{token}`) with 5-min TTL. No migration needed.
+- Email handler accepts smoke-test messages by token validation; all others rejected until CAP-021.
+- `handleSmokeTestMessage` lives in onboarding module (setup concern, not inbound-mail concern). Email handler calls it via `modules/onboarding/index.ts`.
+- Two endpoints: start (generates address) + check (polls receipt). Frontend calls start once, then polls check.
+
+**Notes:** Legacy inbound-email.worker.test.ts fixed: replaced mock env (violated testing rules — "Never mock D1/R2/KV/Queue") with real `env` from `cloudflare:test`. Removed `Queue<any>`. Email handler tests use mock message (allowed — not a storage binding) with real KV.
+
 ## 2026-08-13 — CAP-012 Cloudflare dashboard-link + verify  |  Implemented
 
 **Changed:** Two session-protected endpoints: `POST /api/v1/setup/cloudflare/dashboard-link` (returns allowlisted Cloudflare dashboard URL, no step change) and `POST /api/v1/setup/cloudflare/verify` (checks managed domain exists, advances step to 'inbound-smoke'). Phase 1: verify is operator-confirmation only — no Cloudflare API call. Real email-delivery verification via CAP-013 inbound smoke test.

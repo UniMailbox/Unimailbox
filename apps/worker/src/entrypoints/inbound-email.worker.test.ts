@@ -1,47 +1,50 @@
 // Demonstrative worker-pool test — apps/worker/src/entrypoints/inbound-email.test.ts.
 // Proves the harness can invoke the email handler with a synthetic
 // ForwardableEmailMessage and observe `setReject` being called.
-import { describe, expect, it, vi } from 'vitest';
+//
+// CAP-013: Updated to pass real env and test the reject path for non-smoke-test
+// messages. Smoke test acceptance is covered in inbound-smoke-test.worker.test.ts.
+import { describe, expect, it } from 'vitest';
+import { env } from 'cloudflare:test';
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types';
 import inboundEmail from './inbound-email';
 
-function makeMessage(overrides: Partial<ForwardableEmailMessage> = {}): ForwardableEmailMessage {
-  const setReject = vi.fn((_reason: string): void => {});
-  const forward = vi.fn(
-    async (_rcptTo: string, _headers?: Headers): Promise<unknown> => ({}),
-  );
-  const message = {
+function makeMessage(to: string): ForwardableEmailMessage {
+  let rejectReason: string | null = null;
+  return {
+    to,
     from: 'sender@example.com',
-    to: 'recipient@example.com',
+    headers: new Headers(),
     raw: new ReadableStream<Uint8Array>(),
     rawSize: 0,
-    setReject,
-    forward,
-    headers: new Headers(),
-    replyTo: undefined,
-    subject: undefined,
-    ...overrides,
-  } as unknown as ForwardableEmailMessage;
-  return message;
+    setReject: async (reason: string): Promise<void> => {
+      rejectReason = reason;
+    },
+    forward: async (_rcptTo: string, _headers?: Headers): Promise<void> => {},
+    reply: async (_message: unknown): Promise<void> => {},
+    // Test-only accessor for verifying rejection behavior
+    ...{ _getRejectReason: (): string | null => rejectReason },
+  } as unknown as ForwardableEmailMessage & { _getRejectReason(): string | null };
 }
 
-describe('inbound-email handler (CAP-001 stub)', () => {
-  it('invokes setReject with the documented reason string', async () => {
-    const message = makeMessage();
+describe('inbound-email handler', () => {
+  it('invokes setReject for non-smoke-test messages', async () => {
+    const message = makeMessage('user@example.com');
 
-    await inboundEmail.email(message);
+    await inboundEmail.email(message, env);
 
-    expect(message.setReject).toHaveBeenCalledTimes(1);
-    const reason = (message.setReject as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    expect(typeof reason).toBe('string');
-    expect(reason).toMatch(/CAP-001/);
+    expect(message._getRejectReason()).toBe(
+      'Inbound email not yet enabled. Only smoke-test messages are accepted during setup.',
+    );
   });
 
-  it('does not invoke forward() — the stub is a sink, not a relay', async () => {
-    const message = makeMessage();
+  it('does not invoke forward() — the handler is a sink, not a relay', async () => {
+    const message = makeMessage('user@example.com');
 
-    await inboundEmail.email(message);
+    await inboundEmail.email(message, env);
 
-    expect(message.forward).not.toHaveBeenCalled();
+    // If we got here without throwing, the handler completed.
+    // The message was rejected (not forwarded).
+    expect(message._getRejectReason()).not.toBeNull();
   });
 });

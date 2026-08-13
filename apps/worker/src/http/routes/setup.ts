@@ -1,6 +1,7 @@
 // http/routes/setup — setup API routes.
 // Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight,
-// POST /administrator, POST /domain, POST /cloudflare/dashboard-link, POST /cloudflare/verify.
+// POST /administrator, POST /domain, POST /cloudflare/dashboard-link, POST /cloudflare/verify,
+// POST /inbound-smoke-test, POST /inbound-smoke-test/check.
 
 import { Hono } from 'hono';
 import {
@@ -16,6 +17,8 @@ import {
   createDomainStep,
   getCloudflareDashboardLink,
   verifyCloudflareEmailRouting,
+  startInboundSmokeTest,
+  checkInboundSmokeTest,
 } from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
@@ -97,6 +100,28 @@ export function setupRoutes(): Hono<AppEnv> {
   routes.post('/cloudflare/verify', setupSession, async (c) => {
     const result = await verifyCloudflareEmailRouting(
       { db: c.env.DB },
+      { clock: systemClock },
+    );
+    return c.json({ data: result });
+  });
+
+  // POST /inbound-smoke-test — session-protected endpoint that starts the inbound
+  // smoke test. Generates a unique smoke+<token>@<domain> address and stores the token in KV.
+  // Returns { smokeTestAddress: "smoke+<token>@<domain>" }.
+  routes.post('/inbound-smoke-test', setupSession, async (c) => {
+    const result = await startInboundSmokeTest(
+      { db: c.env.DB, cache: c.env.CACHE },
+      { ids: systemIds },
+    );
+    return c.json({ data: result });
+  });
+
+  // POST /inbound-smoke-test/check — session-protected endpoint that checks whether
+  // the smoke test email has been received. Returns { status: "pending" | "received" }.
+  // If received, advances the installation step to 'brevo'.
+  routes.post('/inbound-smoke-test/check', setupSession, async (c) => {
+    const result = await checkInboundSmokeTest(
+      { db: c.env.DB, cache: c.env.CACHE },
       { clock: systemClock },
     );
     return c.json({ data: result });
