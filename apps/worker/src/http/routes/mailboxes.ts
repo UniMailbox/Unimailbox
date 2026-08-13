@@ -17,11 +17,7 @@ import { Hono } from 'hono';
 import {
   createMailboxRequestSchema,
 } from '@unimailbox/contracts';
-import {
-  createMailbox,
-  listMailboxesByOwner,
-} from '../../modules/tenancy';
-import { createAuditEvent } from '../../modules/admin';
+import { listMailboxesByOwner } from '../../modules/tenancy';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
@@ -34,6 +30,8 @@ import {
   assertSameRequestHash,
   sha256Hex,
   sqliteTimestamp,
+  isIdempotencyUniqueViolation,
+  replayAfterRace,
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
 
@@ -117,61 +115,84 @@ export function mailboxRoutes(): Hono<AppEnv> {
       });
     }
 
-    const now = systemClock.now().toISOString();
     const mailboxId = systemIds.uuid();
+    const auditEventId = systemIds.uuid();
+    const idempotencyRecordId = systemIds.uuid();
 
-    try {
-      const result = await createMailbox(c.env.DB, {
+    const now = sqliteTimestamp(systemClock.now());
+    const address = `${body.localPart}@${domain.name}`;
+
+    // Fix 4 (strict batch mode): Build the success body up front so we can
+    // store the exact same JSON the client will receive on a replay.
+    const successBody = JSON.stringify({
+      data: {
         id: mailboxId,
-        domainId: body.domainId,
-        ownerUserId: userId,
-        localPart: body.localPart,
+        address,
         displayName: body.displayName ?? '',
         status: 'active',
-        createdAt: now,
-        updatedAt: now,
-      });
+        domainId: body.domainId,
+        localPart: body.localPart,
+        ownerUserId: userId,
+      },
+    });
 
-      // R-AUDIT-001: record the state transition.
-      await createAuditEvent(c.env.DB, {
-        id: systemIds.uuid(),
-        actorUserId: userId,
-        action: 'mailbox.create',
-        resourceType: 'mailbox',
-        resourceId: mailboxId,
-        createdAt: now.slice(0, 19).replace('T', ' '),
-      });
-
-      // Best-effort idempotency record (the createMailbox + createAuditEvent
-      // pair is two separate D1 statements owned by the modules; folding the
-      // idempotency row into a single batch with them would require touching
-      // modules/tenancy + modules/admin, which the implementer does not own).
-      // Retries between the use-case commit and this INSERT are safe: the
-      // mailbox-create UNIQUE constraint on (domain_id, local_part) is the
-      // natural dedup — re-running with the same key replays the 409 on the
-      // second create and the client gets a DOMAIN_ADDRESS_TAKEN.
-      const idempotencyNow = sqliteTimestamp(systemClock.now());
-      const successBody = JSON.stringify({ data: result });
-      await prepareCreateIdempotencyRecord(c.env.DB, {
-        id: systemIds.uuid(),
+    // Fix 4 (R-API-004, R-OUTBOUND-006): mailbox + audit_event + idempotency
+    // record are written in one D1 batch so they land atomically.
+    const statements: D1PreparedStatement[] = [
+      // 1. Mailbox row.
+      c.env.DB.prepare(
+        `INSERT INTO mailboxes (
+           id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        mailboxId,
+        body.domainId,
+        userId,
+        body.localPart,
+        body.displayName ?? '',
+        'active',
+        now,
+        now,
+      ),
+      // 2. Audit event (R-AUDIT-001).
+      c.env.DB.prepare(
+        `INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(auditEventId, userId, 'mailbox.create', 'mailbox', mailboxId, now),
+      // 3. Idempotency record (R-API-004, R-OUTBOUND-006).
+      prepareCreateIdempotencyRecord(c.env.DB, {
+        id: idempotencyRecordId,
         actorId: userId,
         operation: CREATE_MAILBOX_OPERATION,
         idempotencyKey,
         requestHash,
         responseStatus: 200,
         responseJson: successBody,
-        createdAt: idempotencyNow,
-      }).run();
+        createdAt: now,
+      }),
+    ];
 
-      return new Response(successBody, {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+    try {
+      await c.env.DB.batch(statements);
     } catch (error) {
-      // D1 error for unique constraint violation
+      // Fix 3: Handle UNIQUE-constraint race — two concurrent requests with
+      // the same Idempotency-Key raced to INSERT. Re-read the winner's row
+      // and replay it.
+      if (isIdempotencyUniqueViolation(error)) {
+        return replayAfterRace(
+          c.env.DB,
+          userId,
+          CREATE_MAILBOX_OPERATION,
+          idempotencyKey,
+          requestHash,
+        );
+      }
+
+      // D1 error for mailbox unique constraint violation (domain_id, local_part)
       if (
         error instanceof Error &&
-        error.message.includes('UNIQUE constraint failed')
+        error.message.includes('UNIQUE constraint failed') &&
+        error.message.includes('mailboxes')
       ) {
         throw new DomainError({
           code: 'DOMAIN_ADDRESS_TAKEN',
@@ -181,6 +202,11 @@ export function mailboxRoutes(): Hono<AppEnv> {
       }
       throw error;
     }
+
+    return new Response(successBody, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   });
 
   /**

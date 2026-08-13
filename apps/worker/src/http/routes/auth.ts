@@ -38,6 +38,8 @@ import {
   sqliteTimestamp,
   writeIdempotencyRecord,
   opaqueActorId,
+  findIdempotencyRecord,
+  assertSameRequestHash,
 } from '../../platform/idempotency';
 
 // Operation strings for idempotency records (CAP-027 / ADR-004)
@@ -92,20 +94,30 @@ export function authRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
-    const body = registerRequestSchema.parse(JSON.parse(rawBody));
-
-    // Hash the code to look up in the database (also used as actor_id for idempotency)
-    const codeHash = await hashToken(body.code);
+    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays)
+    const rawBodyJson = JSON.parse(rawBody);
+    const code = typeof rawBodyJson?.code === 'string' ? rawBodyJson.code : '';
+    if (!code) {
+      throw new DomainError({
+        code: 'INVALID_REQUEST',
+        message: 'code is required',
+        httpStatus: 400,
+      });
+    }
 
     // Actor for register is sha256 of the registration code (R-SECRET-003)
-    const actorId = await opaqueActorId('registration-code', body.code);
+    const actorId = await opaqueActorId('registration-code', code);
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
-    // Lookup replay
+    // Lookup replay (before use case, before schema.parse)
     const replay = await tryReplayIdempotency(
       c.env.DB,
       actorId,
@@ -114,6 +126,11 @@ export function authRoutes(): Hono<AppEnv> {
       requestHash,
     );
     if (replay) return replay;
+
+    const body = registerRequestSchema.parse(rawBodyJson);
+
+    // Hash the code to look up in the database (also used as actor_id for idempotency)
+    const codeHash = await hashToken(body.code);
 
     // Look up the registration key
     const key = await findKeyByCodeHash(c.env.DB, codeHash);
@@ -263,25 +280,51 @@ export function authRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
-    const body = loginRequestSchema.parse(JSON.parse(rawBody));
+    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays)
+    const rawBodyJson = JSON.parse(rawBody);
+    const email = typeof rawBodyJson?.email === 'string' ? rawBodyJson.email : '';
+    if (!email) {
+      throw new DomainError({
+        code: 'INVALID_REQUEST',
+        message: 'email is required',
+        httpStatus: 400,
+      });
+    }
 
     // Actor for login is sha256 of the email (R-SECRET-003)
-    const actorId = await opaqueActorId('email', body.email);
+    const actorId = await opaqueActorId('email', email);
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
-    // Lookup replay
-    const replay = await tryReplayIdempotency(
+    // Secret-bearing endpoint (Fix 1): re-execute on replay rather than serving
+    // stored tokens, which may have been revoked per R-AUTH-005. Delete the old
+    // record and fall through to the use case to mint fresh credentials.
+    const existing = await findIdempotencyRecord(
       c.env.DB,
       actorId,
       LOGIN_OPERATION,
       idempotencyKey,
-      requestHash,
     );
-    if (replay) return replay;
+    if (existing) {
+      assertSameRequestHash(existing, requestHash);
+      // Same key + same hash: delete the old record and re-execute.
+      await c.env.DB
+        .prepare(
+          `DELETE FROM idempotency_records
+           WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+        )
+        .bind(actorId, LOGIN_OPERATION, idempotencyKey)
+        .run();
+    }
+
+    const body = loginRequestSchema.parse(rawBodyJson);
 
     // Find user by email
     const user = await findUserByEmail(c.env.DB, body.email);
@@ -370,7 +413,20 @@ export function authRoutes(): Hono<AppEnv> {
       },
     });
 
-    // Write idempotency record after success (best-effort mode)
+    // Write idempotency record after success (best-effort mode).
+    // Fix 1 (R-SECRET-003): redact tokens from the stored response — replay
+    // re-executes, so serving plaintext tokens would return dead credentials.
+    const redactedBody = JSON.stringify({
+      data: {
+        accessToken: 'redacted',
+        refreshToken: 'redacted',
+        user: {
+          id: user.id,
+          email: user.email,
+          displayName: user.display_name,
+        },
+      },
+    });
     await writeIdempotencyRecord(c.env.DB, {
       id: systemIds.uuid(),
       actorId,
@@ -378,7 +434,7 @@ export function authRoutes(): Hono<AppEnv> {
       idempotencyKey,
       requestHash,
       responseStatus: 200,
-      responseJson: successBody,
+      responseJson: redactedBody,
       createdAt: sqliteTimestamp(systemClock.now()),
     });
 
@@ -407,28 +463,54 @@ export function authRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
-    const body = refreshRequestSchema.parse(JSON.parse(rawBody));
-
-    // Hash the refresh token to look up in the database (also used as actor_id for idempotency)
-    const tokenHash = await hashToken(body.refreshToken);
+    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays)
+    const rawBodyJson = JSON.parse(rawBody);
+    const refreshToken = typeof rawBodyJson?.refreshToken === 'string' ? rawBodyJson.refreshToken : '';
+    if (!refreshToken) {
+      throw new DomainError({
+        code: 'INVALID_REQUEST',
+        message: 'refreshToken is required',
+        httpStatus: 400,
+      });
+    }
 
     // Actor for refresh is sha256 of the refresh token (R-SECRET-003)
-    const actorId = await opaqueActorId('refresh-token', body.refreshToken);
+    const actorId = await opaqueActorId('refresh-token', refreshToken);
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
-    // Lookup replay
-    const replay = await tryReplayIdempotency(
+    // Secret-bearing endpoint (Fix 1): re-execute on replay rather than serving
+    // a stored token that may have been revoked per R-AUTH-005. Delete the old
+    // record and fall through to the use case to mint a fresh access token.
+    const existing = await findIdempotencyRecord(
       c.env.DB,
       actorId,
       REFRESH_OPERATION,
       idempotencyKey,
-      requestHash,
     );
-    if (replay) return replay;
+    if (existing) {
+      assertSameRequestHash(existing, requestHash);
+      // Same key + same hash: delete the old record and re-execute.
+      await c.env.DB
+        .prepare(
+          `DELETE FROM idempotency_records
+           WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+        )
+        .bind(actorId, REFRESH_OPERATION, idempotencyKey)
+        .run();
+    }
+
+    const body = refreshRequestSchema.parse(rawBodyJson);
+
+    // Hash the refresh token to look up in the database
+    const tokenHash = await hashToken(body.refreshToken);
 
     // Find the session
     const session = await findSessionByRefreshHash(c.env.DB, tokenHash);
@@ -468,7 +550,13 @@ export function authRoutes(): Hono<AppEnv> {
       },
     });
 
-    // Write idempotency record after success (best-effort mode)
+    // Write idempotency record after success (best-effort mode).
+    // Fix 1 (R-SECRET-003): redact accessToken from the stored response.
+    const redactedBody = JSON.stringify({
+      data: {
+        accessToken: 'redacted',
+      },
+    });
     await writeIdempotencyRecord(c.env.DB, {
       id: systemIds.uuid(),
       actorId,
@@ -476,7 +564,7 @@ export function authRoutes(): Hono<AppEnv> {
       idempotencyKey,
       requestHash,
       responseStatus: 200,
-      responseJson: successBody,
+      responseJson: redactedBody,
       createdAt: sqliteTimestamp(systemClock.now()),
     });
 

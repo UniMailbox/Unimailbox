@@ -603,4 +603,196 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
     const body = await response.json();
     expect(body.error.code).toBe('MAILBOX_ACCESS_DENIED');
   });
+
+  // Fix 2: Comprehensive idempotency tests
+  it('returns 400 when Idempotency-Key header is missing', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('returns 400 when Idempotency-Key header is too short', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': 'short',
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_INVALID');
+  });
+
+  it('returns the stored response on replay with same key and body (byte-identical)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+
+    const firstResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(firstResponse.status).toBe(200);
+    const firstBody = await firstResponse.json();
+
+    // Second request with same key should replay exactly (including any whitespace).
+    const secondResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(secondResponse.status).toBe(200);
+    const secondBody = await secondResponse.json();
+    expect(secondBody).toEqual(firstBody);
+
+    // Verify idempotency record was stored.
+    const record = await env.DB
+      .prepare('SELECT * FROM idempotency_records WHERE idempotency_key = ?')
+      .bind(idempotencyKey)
+      .first();
+    expect(record).toBeDefined();
+  });
+
+  it('returns 409 when same Idempotency-Key is reused with different body', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+
+    // First request with empty body.
+    const firstResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: '',
+      },
+    );
+
+    expect(firstResponse.status).toBe(200);
+
+    // Second request with different body (some bytes vs empty).
+    const secondResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: '{"different": "body"}',
+      },
+    );
+
+    expect(secondResponse.status).toBe(409);
+    const body = await secondResponse.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    expect(body.error.message).toMatch(/different request body/i);
+  });
+
+  it('replays after UNIQUE-constraint race (R-API-004) — loser returns winner response', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const requestBody = '';
+    const idempotencyKey = 'test-race-loser-key-001';
+    const operation = 'PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read';
+
+    // Simulate the race winner: pre-insert the idempotency record as if the winner
+    // already committed. The PATCH /read endpoint uses best-effort mode (record
+    // INSERT after the business write), but the race path is still the same:
+    // loser re-reads the winner's record and replays it.
+    const { sha256Hex, sqliteTimestamp, prepareCreateIdempotencyRecord } = await import('../../platform/idempotency');
+    const requestHash = await sha256Hex(requestBody);
+    const now = sqliteTimestamp(new Date());
+    const successBody = JSON.stringify({ data: { ok: true } });
+
+    await prepareCreateIdempotencyRecord(env.DB, {
+      id: crypto.randomUUID(),
+      actorId: ownerId,
+      operation,
+      idempotencyKey,
+      requestHash,
+      responseStatus: 200,
+      responseJson: successBody,
+      createdAt: now,
+    }).run();
+
+    // The loser fires its request with the same key + same body. Because the
+    // winner's record exists, the loser must replay it (return 200 with {ok: true},
+    // NOT 500, NOT 409).
+    const loserResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: requestBody,
+      },
+    );
+
+    expect(loserResponse.status).toBe(200);
+    const loserBody = await loserResponse.json();
+    expect(loserBody.data).toEqual({ ok: true });
+
+    // Verify no duplicate idempotency record was created (the loser replayed)
+    const recordCount = await env.DB
+      .prepare('SELECT COUNT(*) as count FROM idempotency_records WHERE idempotency_key = ?')
+      .bind(idempotencyKey)
+      .first<{ count: number }>();
+    expect(recordCount?.count).toBe(1);
+  });
 });

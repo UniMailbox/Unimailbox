@@ -20,6 +20,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
+import { sha256Hex } from '../../platform/idempotency';
 
 describe('POST /api/v1/setup/claim', () => {
   describe('correct token, fresh DB', () => {
@@ -321,7 +322,7 @@ describe('POST /api/v1/setup/claim', () => {
       expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
     });
 
-    it('replays the stored response when same key + same body', async () => {
+    it('deletes and re-executes on replay (Fix 1: secret-bearing endpoint)', async () => {
       const idempotencyKey = 'test-idempotency-key-abc123';
 
       const response1 = await SELF.fetch('http://localhost/api/v1/setup/claim', {
@@ -337,7 +338,9 @@ describe('POST /api/v1/setup/claim', () => {
       const body1 = await response1.json();
       const sessionToken1 = body1.data.sessionToken;
 
-      // Second request with same key and body should replay
+      // Second request with same key + same body: claim endpoint is secret-bearing
+      // (Fix 1), so it deletes the old record and re-executes, returning a fresh
+      // session token.
       const response2 = await SELF.fetch('http://localhost/api/v1/setup/claim', {
         method: 'POST',
         body: JSON.stringify({ token: 'test-installation-token' }),
@@ -349,8 +352,19 @@ describe('POST /api/v1/setup/claim', () => {
 
       expect(response2.status).toBe(200);
       const body2 = await response2.json();
-      // Should return the same sessionToken as the first request
-      expect(body2.data.sessionToken).toBe(sessionToken1);
+      // Each call gets a fresh session token (not replayed)
+      expect(body2.data.sessionToken).not.toBe(sessionToken1);
+
+      // Verify the old record was deleted and a new one written
+      const record = await env.DB
+        .prepare(
+          `SELECT response_json FROM idempotency_records
+           WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+        )
+        .bind(await sha256Hex('setup-session:test-installation-token'), 'POST /api/v1/setup/claim', idempotencyKey)
+        .first<{ response_json: string }>();
+      expect(record).toBeDefined();
+      expect(record?.response_json).toContain('redacted');
     });
 
     // NOTE: IDEMPOTENCY_KEY_REUSED test is not applicable to /claim endpoint.

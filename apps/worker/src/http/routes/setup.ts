@@ -50,6 +50,11 @@ import {
   prepareSettleIdempotencyRecord,
   prepareReleaseIdempotencyRecord,
   prepareCreateIdempotencyRecord,
+  findIdempotencyRecord,
+  assertSameRequestHash,
+  isIdempotencyUniqueViolation,
+  isPendingRecord,
+  replayResponse,
 } from '../../platform/idempotency';
 
 // Operation strings for idempotency records (CAP-027 / ADR-004)
@@ -85,18 +90,33 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
-    // Lookup replay
-    const replay = await tryReplayIdempotency(
+    // Secret-bearing endpoint (Fix 1): setup/claim returns a 30-minute session
+    // token. Re-executing issues a fresh token; replaying would return a token
+    // that may have expired or been revoked. Delete the old record and proceed.
+    const existing = await findIdempotencyRecord(
       c.env.DB,
       actorId,
       CLAIM_OPERATION,
       idempotencyKey,
-      requestHash,
     );
-    if (replay) return replay;
+    if (existing) {
+      assertSameRequestHash(existing, requestHash);
+      // Same key + same hash: delete the old record and re-execute.
+      await c.env.DB
+        .prepare(
+          `DELETE FROM idempotency_records
+           WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+        )
+        .bind(actorId, CLAIM_OPERATION, idempotencyKey)
+        .run();
+    }
 
     const expectedToken = await readSecret(c.env.INSTALLATION_TOKEN);
     const result = await claimSetup(
@@ -109,8 +129,12 @@ export function setupRoutes(): Hono<AppEnv> {
       { clock: systemClock, ids: systemIds },
     );
 
-    // Write idempotency record after success (best-effort mode)
+    // Write idempotency record after success (best-effort mode).
+    // Fix 1 (R-SECRET-003): redact the session token from stored response.
     const successBody = JSON.stringify({ data: result });
+    const redactedBody = JSON.stringify({
+      data: { sessionToken: 'redacted' },
+    });
     await writeIdempotencyRecord(c.env.DB, {
       id: systemIds.uuid(),
       actorId,
@@ -118,7 +142,7 @@ export function setupRoutes(): Hono<AppEnv> {
       idempotencyKey,
       requestHash,
       responseStatus: 200,
-      responseJson: successBody,
+      responseJson: redactedBody,
       createdAt: sqliteTimestamp(systemClock.now()),
     });
 
@@ -130,7 +154,7 @@ export function setupRoutes(): Hono<AppEnv> {
 
   // POST /preflight — session-protected endpoint that reports binding presence
   // and schema version. Requires a valid session token from /claim.
-  routes.post('/preflight', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/preflight', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -140,7 +164,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -175,7 +203,7 @@ export function setupRoutes(): Hono<AppEnv> {
   // POST /administrator — session-protected endpoint that creates the first user
   // (the initial administrator) with a PBKDF2-hashed password. After successful
   // creation, the installation step advances from 'administrator' to 'domain'.
-  routes.post('/administrator', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/administrator', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -184,7 +212,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -227,7 +259,7 @@ export function setupRoutes(): Hono<AppEnv> {
 
   // POST /domain — session-protected endpoint that creates a managed domain.
   // After successful creation, the installation step advances from 'domain' to 'cloudflare-verify'.
-  routes.post('/domain', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/domain', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -236,7 +268,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -277,7 +313,7 @@ export function setupRoutes(): Hono<AppEnv> {
 
   // POST /cloudflare/dashboard-link — session-protected endpoint that returns
   // an allowlisted Cloudflare dashboard URL. Does NOT advance the installation step.
-  routes.post('/cloudflare/dashboard-link', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/cloudflare/dashboard-link', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -286,7 +322,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -321,7 +361,7 @@ export function setupRoutes(): Hono<AppEnv> {
   // POST /cloudflare/verify — session-protected endpoint that confirms a managed
   // domain exists and advances the installation step to 'inbound-smoke'.
   // If no domain exists, returns 409 SETUP_DOMAIN_REQUIRED.
-  routes.post('/cloudflare/verify', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/cloudflare/verify', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -330,7 +370,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -368,7 +412,7 @@ export function setupRoutes(): Hono<AppEnv> {
   // POST /inbound-smoke-test — session-protected endpoint that starts the inbound
   // smoke test. Generates a unique smoke+<token>@<domain> address and stores the token in KV.
   // Returns { smokeTestAddress: "smoke+<token>@<domain>" }.
-  routes.post('/inbound-smoke-test', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/inbound-smoke-test', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -377,7 +421,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -415,7 +463,7 @@ export function setupRoutes(): Hono<AppEnv> {
   // POST /inbound-smoke-test/check — session-protected endpoint that checks whether
   // the smoke test email has been received. Returns { status: "pending" | "received" }.
   // If received, advances the installation step to 'brevo'.
-  routes.post('/inbound-smoke-test/check', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/inbound-smoke-test/check', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -424,7 +472,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -462,7 +514,7 @@ export function setupRoutes(): Hono<AppEnv> {
   // POST /brevo — session-protected endpoint that validates and stores the Brevo
   // API key. Validates via Brevo API, encrypts with AES-GCM, stores credential and
   // connection, links to managed domain, and advances step to 'outbound-smoke'.
-  routes.post('/brevo', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/brevo', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -471,7 +523,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(
@@ -520,7 +576,7 @@ export function setupRoutes(): Hono<AppEnv> {
   //
   // CAP-027 / ADR-004: Uses option (C) - inserts a pending idempotency record before
   // the Brevo call, then settles it after. This prevents double-send on retry.
-  routes.post('/outbound-smoke-test', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/outbound-smoke-test', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -529,7 +585,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     // Check for existing record directly to handle the pending case without consuming Response body
@@ -550,7 +610,11 @@ export function setupRoutes(): Hono<AppEnv> {
         // Same hash - check if it's a pending record
         const parsedBody = JSON.parse(existingRecord.response_json) as { pending?: boolean };
         if (parsedBody.pending === true) {
-          throw new Error('Idempotency key is pending from a previous request');
+          throw new DomainError({
+            code: 'IDEMPOTENCY_REQUEST_PENDING',
+            message: 'Idempotency key is pending from a previous request',
+            httpStatus: 409,
+          });
         }
         // Replay the stored response
         return new Response(existingRecord.response_json, {
@@ -570,16 +634,54 @@ export function setupRoutes(): Hono<AppEnv> {
     // Insert a pending record BEFORE the Brevo call (option C)
     // This reserves the key so a concurrent or retried request won't send twice
     const pendingRecordId = systemIds.uuid();
-    await prepareCreateIdempotencyRecord(c.env.DB, {
-      id: pendingRecordId,
-      actorId,
-      operation: OUTBOUND_SMOKE_TEST_OPERATION,
-      idempotencyKey,
-      requestHash,
-      responseStatus: IDEMPOTENCY_PENDING_STATUS,
-      responseJson: IDEMPOTENCY_PENDING_BODY,
-      createdAt: sqliteTimestamp(systemClock.now()),
-    }).run();
+    try {
+      await prepareCreateIdempotencyRecord(c.env.DB, {
+        id: pendingRecordId,
+        actorId,
+        operation: OUTBOUND_SMOKE_TEST_OPERATION,
+        idempotencyKey,
+        requestHash,
+        responseStatus: IDEMPOTENCY_PENDING_STATUS,
+        responseJson: IDEMPOTENCY_PENDING_BODY,
+        createdAt: sqliteTimestamp(systemClock.now()),
+      }).run();
+    } catch (error) {
+      // Fix 6: Handle UNIQUE-constraint race — two concurrent requests raced
+      // to INSERT the pending record. Re-read the winner's row to determine
+      // the response.
+      if (isIdempotencyUniqueViolation(error)) {
+        const winner = await findIdempotencyRecord(
+          c.env.DB,
+          actorId,
+          OUTBOUND_SMOKE_TEST_OPERATION,
+          idempotencyKey,
+        );
+
+        if (!winner) {
+          // The row collided a moment ago but is gone now (TTL purge, or a
+          // rolled-back sibling statement). Surface it rather than inventing a
+          // response the client never received.
+          throw new DomainError({
+            code: 'IDEMPOTENCY_CONFLICT',
+            message: 'Concurrent request with the same Idempotency-Key is in flight',
+            httpStatus: 409,
+          });
+        }
+
+        assertSameRequestHash(winner, requestHash);
+        // If it's still pending, report pending (Fix 6: reuse DomainError)
+        if (isPendingRecord(winner)) {
+          throw new DomainError({
+            code: 'IDEMPOTENCY_REQUEST_PENDING',
+            message: 'Idempotency key is pending from a previous request',
+            httpStatus: 409,
+          });
+        }
+        // Otherwise replay the settled response
+        return replayResponse(winner);
+      }
+      throw error;
+    }
 
     try {
       const encryptionKey = await readSecret(c.env.CREDENTIAL_ENCRYPTION_KEY);
@@ -616,7 +718,7 @@ export function setupRoutes(): Hono<AppEnv> {
   // POST /complete — session-protected endpoint that marks installation as complete.
   // Sets status='complete' and current_step='complete'. After this, the setup gate
   // passes through to the app instead of redirecting to /setup.
-  routes.post('/complete', requireIdempotencyKey, setupSession, async (c) => {
+  routes.post('/complete', setupSession, requireIdempotencyKey, async (c) => {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
@@ -625,7 +727,11 @@ export function setupRoutes(): Hono<AppEnv> {
 
     const idempotencyKey = c.get('idempotencyKey');
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey middleware failed to set key');
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
     }
 
     const replay = await tryReplayIdempotency(

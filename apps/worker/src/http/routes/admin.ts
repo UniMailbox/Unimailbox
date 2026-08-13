@@ -19,10 +19,11 @@ import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
 import {
-  tryReplayIdempotency,
   sha256Hex,
   sqliteTimestamp,
   writeIdempotencyRecord,
+  findIdempotencyRecord,
+  assertSameRequestHash,
 } from '../../platform/idempotency';
 
 // Operation strings for idempotency records (CAP-027 / ADR-004)
@@ -98,25 +99,40 @@ export function adminRoutes(): Hono<AppEnv> {
       const rawBody = await c.req.text();
       const requestHash = await sha256Hex(rawBody);
 
-      const body = createInviteCodeRequestSchema.parse(JSON.parse(rawBody));
-
       // Actor for invite-codes create is the authenticated userId
       const actorId = userId;
 
       const idempotencyKey = c.get('idempotencyKey');
       if (!idempotencyKey) {
-        throw new Error('idempotencyKey middleware failed to set key');
+        throw new DomainError({
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'Idempotency-Key header required',
+          httpStatus: 400,
+        });
       }
 
-      // Lookup replay
-      const replay = await tryReplayIdempotency(
+      // Secret-bearing endpoint (Fix 1): the invite code is shown once, then stored
+      // only as a hash. Re-executing mints a fresh independent code; replaying would
+      // return a code that may have been used already. Delete and fall through.
+      const existing = await findIdempotencyRecord(
         c.env.DB,
         actorId,
         INVITE_CODES_CREATE_OPERATION,
         idempotencyKey,
-        requestHash,
       );
-      if (replay) return replay;
+      if (existing) {
+        assertSameRequestHash(existing, requestHash);
+        // Same key + same hash: delete the old record and re-execute.
+        await c.env.DB
+          .prepare(
+            `DELETE FROM idempotency_records
+             WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+          )
+          .bind(actorId, INVITE_CODES_CREATE_OPERATION, idempotencyKey)
+          .run();
+      }
+
+      const body = createInviteCodeRequestSchema.parse(JSON.parse(rawBody));
 
       // Generate the code and its hash
       const code = generateInviteCode();
@@ -155,7 +171,16 @@ export function adminRoutes(): Hono<AppEnv> {
         },
       });
 
-      // Write idempotency record after success (best-effort mode)
+      // Write idempotency record after success (best-effort mode).
+      // Fix 1 (R-SECRET-003): redact the invite code from stored response.
+      const redactedBody = JSON.stringify({
+        data: {
+          code: 'redacted',
+          id: keyId,
+          maxUses: body.maxUses,
+          expiresAt,
+        },
+      });
       await writeIdempotencyRecord(c.env.DB, {
         id: systemIds.uuid(),
         actorId,
@@ -163,7 +188,7 @@ export function adminRoutes(): Hono<AppEnv> {
         idempotencyKey,
         requestHash,
         responseStatus: 200,
-        responseJson: successBody,
+        responseJson: redactedBody,
         createdAt: sqliteTimestamp(systemClock.now()),
       });
 

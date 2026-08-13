@@ -10,6 +10,55 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-13 — CAP-027 review round: secret redaction, race wiring, ADR-004 amendment
+
+Independent code + architecture review of CAP-027 (commit `ba35bd3`) produced two BLOCKERs, one
+HIGH, and several MEDIUM/LOW findings; all confirmed by the orchestrator against the code before
+delegation. The fix round (implementer subagent, validated by the orchestrator — its report
+channel failed, so the tree was verified directly against the contract):
+
+- **Secret redaction (BLOCKER).** `login`, `refresh`, `setup/claim`, and `admin/invite-codes`
+  were persisting plaintext credentials in `idempotency_records.response_json`, surviving
+  R-AUTH-005 revocation. These four now store a redacted body that is never served, and replay
+  (same key + same hash) **re-executes** the handler, minting fresh credentials. Same key +
+  different body still 409s. `register` keeps true replay (response carries no tokens —
+  verified).
+- **Race wiring (HIGH).** `replayAfterRace`/`isIdempotencyUniqueViolation` are now called by the
+  three strict/batch routes; a UNIQUE-race loser replays the winner's response instead of 500ing
+  or getting a false 409 `DOMAIN_ADDRESS_TAKEN` (mailboxes distinguishes the idempotency UNIQUE
+  from the `(domain_id, local_part)` business UNIQUE).
+- **Mailboxes create is now strict batch** (mailbox + audit_event + record in one D1 batch,
+  R-OUTBOUND-006); messages read stays best-effort with a rationale comment.
+- Setup routes run `setupSession` (401) before `requireIdempotencyKey` (400); smoke-test pending
+  path returns typed 409 `IDEMPOTENCY_REQUEST_PENDING`; defensive missing-key errors are typed
+  `IDEMPOTENCY_KEY_REQUIRED`; auth routes hash the raw body before replay lookup;
+  `idempotencyRecords` Drizzle typing moved to `database/schema/identity.ts` (identity owns the
+  table); verify.sql 9-column assertion fixed.
+- **Tests.** Per-route-file: missing key 400, malformed key 400, byte-identical replay with
+  no-second-business-row, 409 reuse, and a UNIQUE-race loser simulation named after
+  R-OUTBOUND-005 / R-API-004. Gates (orchestrator-run): lint ✓, typecheck ✓, unit 278/278,
+  worker 402/402, build ✓, doctor 10/10.
+
+**ADR-004 amended** (orchestrator edit): requestHash is sha256 of raw body bytes (not canonical
+JSON); secret-bearing endpoints redact-and-re-execute; strict batch only where a crash gap would
+duplicate a business effect.
+
+**Process notes.** QA + security review of the fixed state were performed by the orchestrator,
+not independent subagents — seven agent report channels failed with API 400s this session. The
+orchestrator did not author the fix code, but this is a weaker guarantee than independent review;
+the user's manual local check is the compensating control. Subagent infra, not the rules, was the
+constraint.
+
+**Accepted LOW findings (recorded, not fixed).** (1) The secret endpoints' delete-then-re-execute
+is not atomic: a concurrent same-key different-body request can execute instead of 409ing; same
+actor only, no privilege impact. (2) A 409 response is an oracle for "this key was used by this
+actor for this operation" — negligible. (3) Mark-read writes no `audit_events` row (pre-existing;
+view-state, not a lifecycle transition).
+
+**Deferred:** D-CAP-027-A — route-level idempotency orchestration is copy-pasted ~18× and the
+mailboxes route owns raw batch SQL pending a tenancy-module batch API; a follow-up capability
+introduces shared middleware/HOC.
+
 ## 2026-08-13 — CAP-027: Idempotency records on every mutating endpoint (ADR-004)
 
 Implemented ADR-004 idempotency across all 17 mutating HTTP endpoints. Idempotency-Key header

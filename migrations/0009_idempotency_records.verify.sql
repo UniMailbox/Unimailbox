@@ -3,7 +3,7 @@
 -- integrity.
 --
 -- Verification checks:
--- 1. idempotency_records table exists with all 8 expected columns
+-- 1. idempotency_records table exists with all 9 expected columns
 -- 2. Unique index on (actor_id, operation, idempotency_key) exists
 -- 3. Index on expires_at exists (TTL purge target)
 -- 4. Length CHECKs on actor_id, operation, idempotency_key, request_hash,
@@ -12,8 +12,8 @@
 -- 6. Migration tracking row recorded
 -- 7. d1_migrations table exists
 
--- Verify idempotency_records table exists and has all 8 columns
-SELECT COUNT(*) = 8 FROM pragma_table_info('idempotency_records')
+-- Verify idempotency_records table exists and has all 9 columns
+SELECT COUNT(*) = 9 FROM pragma_table_info('idempotency_records')
 WHERE name IN (
   'id', 'actor_id', 'operation', 'idempotency_key',
   'request_hash', 'response_status', 'response_json',

@@ -523,11 +523,13 @@ describe('GET /api/v1/admin/invite-codes', () => {
 
 describe('POST /api/v1/admin/invite-codes — idempotency', () => {
   let adminToken: string;
+  let adminId: string;
 
   beforeEach(async () => {
     await resetAndMigrate();
     await completeSetup();
-    const { accessToken } = await createAdminUser();
+    const { userId, accessToken } = await createAdminUser();
+    adminId = userId;
     adminToken = accessToken;
   });
 
@@ -582,7 +584,8 @@ describe('POST /api/v1/admin/invite-codes — idempotency', () => {
     const firstCode = firstBody.data.code;
     const firstId = firstBody.data.id;
 
-    // Second request with same key and body should replay
+    // Second request with same key and body: invite-codes is secret-bearing (Fix 1),
+    // so it deletes the old record and re-executes, returning a fresh code.
     const secondResponse = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
       method: 'POST',
       body: requestBody,
@@ -595,15 +598,20 @@ describe('POST /api/v1/admin/invite-codes — idempotency', () => {
 
     expect(secondResponse.status).toBe(200);
     const secondBody = await secondResponse.json();
-    expect(secondBody.data.code).toBe(firstCode); // Same code replayed
-    expect(secondBody.data.id).toBe(firstId);
+    // Each call gets a fresh code (not replayed)
+    expect(secondBody.data.code).not.toBe(firstCode);
+    expect(secondBody.data.id).not.toBe(firstId);
 
-    // Verify only one invite code was created
-    const keys = await env.DB.prepare(
-      `SELECT COUNT(*) as count FROM registration_keys WHERE created_by IN (SELECT id FROM user_roles WHERE role_id = 'administrator')`,
-    ).first<{ count: number }>();
-    // The exact count depends on how many keys exist, but we should have exactly 1 more than the initial state
-    // The important thing is the replay didn't create a second key
+    // Verify the old record was deleted and a new one written (with redacted code)
+    const record = await env.DB
+      .prepare(
+        `SELECT response_json FROM idempotency_records
+         WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+      )
+      .bind(adminId, 'POST /api/v1/admin/invite-codes', idempotencyKey)
+      .first<{ response_json: string }>();
+    expect(record).toBeDefined();
+    expect(record?.response_json).toContain('redacted');
   });
 
   it('returns 409 IDEMPOTENCY_KEY_REUSED when same key different body', async () => {

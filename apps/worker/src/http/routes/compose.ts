@@ -39,19 +39,13 @@ import {
   assertSameRequestHash,
   sha256Hex,
   sqliteTimestamp,
+  isIdempotencyUniqueViolation,
+  replayAfterRace,
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
 
 const SEND_OPERATION =
   'POST /api/v1/mailboxes/:mailboxId/messages/send';
-
-/**
- * SQLite datetime string: 'YYYY-MM-DD HH:MM:SS' UTC. Matches the migration's
- * DEFAULT (datetime('now')) and D1's existing rows.
- */
-function sqliteNow(): string {
-  return new Date().toISOString().slice(0, 19).replace('T', ' ');
-}
 
 export function composeRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -157,7 +151,7 @@ export function composeRoutes(): Hono<AppEnv> {
         });
       }
 
-      const now = sqliteNow();
+      const now = sqliteTimestamp(systemClock.now());
       const messageId = systemIds.uuid();
       const jobId = systemIds.uuid();
       const idempotencyRecordId = systemIds.uuid();
@@ -234,7 +228,23 @@ export function composeRoutes(): Hono<AppEnv> {
         }),
       ];
 
-      await createMessageWithRelations(c.env.DB, statements);
+      try {
+        await createMessageWithRelations(c.env.DB, statements);
+      } catch (error) {
+        // Fix 3: Handle UNIQUE-constraint race — two concurrent requests with
+        // the same Idempotency-Key raced to INSERT. Re-read the winner's row
+        // and replay it.
+        if (isIdempotencyUniqueViolation(error)) {
+          return replayAfterRace(
+            c.env.DB,
+            userId,
+            SEND_OPERATION,
+            idempotencyKey,
+            requestHash,
+          );
+        }
+        throw error;
+      }
 
       // Hand the job to the queue. The consumer (entrypoints/queue.ts) reads
       // the job, decrypts the credential, calls the adapter, and updates

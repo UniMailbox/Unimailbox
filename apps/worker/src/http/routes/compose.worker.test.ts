@@ -477,4 +477,299 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     const body = await response.json();
     expect(body.error.code).toBe('PROVIDER_CONNECTION_NOT_FOUND');
   });
+
+  // ---------------------------------------------------------------------------
+  // Idempotency tests (Fix 2 / BLOCKER)
+  // ---------------------------------------------------------------------------
+
+  it('returns 400 when Idempotency-Key header is missing', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'me');
+    await createActiveProviderConnection();
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ to: [{ address: 'to@example.com' }] }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('returns 400 when Idempotency-Key header is too short', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'me');
+    await createActiveProviderConnection();
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ to: [{ address: 'to@example.com' }] }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': 'short',
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_INVALID');
+  });
+
+  it('replays the stored response when same key + same body (R-API-004)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'me');
+    await createActiveProviderConnection();
+
+    const requestBody = JSON.stringify({
+      to: [{ address: 'to@example.com', displayName: 'To' }],
+      subject: 'Hello',
+      htmlBody: '<p>body</p>',
+      textBody: 'body',
+    });
+    const idempotencyKey = 'test-replay-key-001';
+
+    // First request
+    const firstResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: requestBody,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(firstResponse.status).toBe(202);
+    const firstBody = await firstResponse.json();
+    const firstMessageId = firstBody.data.messageId;
+
+    // Verify idempotency record was written
+    const record = await env.DB
+      .prepare(
+        `SELECT response_status, response_json, request_hash
+         FROM idempotency_records
+         WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+      )
+      .bind(ownerId, 'POST /api/v1/mailboxes/:mailboxId/messages/send', idempotencyKey)
+      .first<{ response_status: number; response_json: string; request_hash: string }>();
+    expect(record).toBeDefined();
+    expect(record?.response_status).toBe(202);
+
+    // Second request with same key + same body → replay
+    const secondResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: requestBody,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(secondResponse.status).toBe(202);
+    const secondBody = await secondResponse.json();
+    expect(secondBody.data.messageId).toBe(firstMessageId);
+    expect(secondBody.data.status).toBe('queued');
+
+    // Verify no additional message was created
+    const messageCount = await env.DB
+      .prepare('SELECT COUNT(*) as count FROM messages WHERE created_by_user_id = ?')
+      .bind(ownerId)
+      .first<{ count: number }>();
+    expect(messageCount?.count).toBe(1);
+
+    // Verify OUTBOUND.send was called only once (no second job)
+    expect(queueSendSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 409 when same key + different body (IDEMPOTENCY_KEY_REUSED)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'me');
+    await createActiveProviderConnection();
+
+    const idempotencyKey = 'test-reuse-key-001';
+
+    // First request
+    const firstResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          to: [{ address: 'to1@example.com' }],
+          subject: 'First',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(firstResponse.status).toBe(202);
+
+    // Second request with same key + different body → 409
+    const secondResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          to: [{ address: 'to2@example.com' }],
+          subject: 'Different',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(secondResponse.status).toBe(409);
+    const body = await secondResponse.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+
+  it('replays the stored response byte-identically (JSON whitespace preserved)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'me');
+    await createActiveProviderConnection();
+
+    // Deliberately non-minified JSON with whitespace
+    const requestBody = JSON.stringify(
+      { to: [{ address: 'to@example.com' }], subject: 'Hello' },
+      null,
+      2,
+    );
+    const idempotencyKey = 'test-whitespace-key-001';
+
+    const firstResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: requestBody,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(firstResponse.status).toBe(202);
+    const firstText = await firstResponse.text();
+
+    // Replay with identical whitespace
+    const secondResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: requestBody,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(secondResponse.status).toBe(202);
+    const secondText = await secondResponse.text();
+    expect(secondText).toBe(firstText);
+  });
+
+  it('replays after UNIQUE-constraint race (R-OUTBOUND-005) — loser returns winner response', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'me');
+    await createActiveProviderConnection();
+
+    const requestBody = JSON.stringify({
+      to: [{ address: 'to@example.com' }],
+      subject: 'Race test',
+      htmlBody: '<p>body</p>',
+      textBody: 'body',
+    });
+    const idempotencyKey = 'test-race-loser-key-001';
+    const winnerMessageId = crypto.randomUUID();
+    const operation = 'POST /api/v1/mailboxes/:mailboxId/messages/send';
+
+    // Simulate the race winner: pre-insert the idempotency record as if the winner
+    // already committed (message + job + record atomically).
+    const { sha256Hex, sqliteTimestamp } = await import('../../platform/idempotency');
+    const { prepareCreateIdempotencyRecord } = await import('../../platform/idempotency');
+    const requestHash = await sha256Hex(requestBody);
+    const now = sqliteTimestamp(new Date());
+    const successBody = JSON.stringify({
+      data: { messageId: winnerMessageId, status: 'queued' },
+    });
+
+    await prepareCreateIdempotencyRecord(env.DB, {
+      id: crypto.randomUUID(),
+      actorId: ownerId,
+      operation,
+      idempotencyKey,
+      requestHash,
+      responseStatus: 202,
+      responseJson: successBody,
+      createdAt: now,
+    }).run();
+
+    // The loser fires its request with the same key + same body. Because the
+    // winner's record exists, the loser must replay it (return 202 with the
+    // winner's messageId, NOT 500, NOT 409).
+    const loserResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: requestBody,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+
+    expect(loserResponse.status).toBe(202);
+    const loserBody = await loserResponse.json();
+    expect(loserBody.data.messageId).toBe(winnerMessageId);
+    expect(loserBody.data.status).toBe('queued');
+
+    // Verify no second message was created (the loser replayed, didn't execute)
+    const messageCount = await env.DB
+      .prepare('SELECT COUNT(*) as count FROM messages WHERE created_by_user_id = ?')
+      .bind(ownerId)
+      .first<{ count: number }>();
+    expect(messageCount?.count).toBe(0);
+  });
 });

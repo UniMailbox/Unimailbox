@@ -29,6 +29,8 @@ import {
   assertSameRequestHash,
   sha256Hex,
   sqliteTimestamp,
+  isIdempotencyUniqueViolation,
+  replayAfterRace,
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
 
@@ -206,16 +208,32 @@ export function messageRoutes(): Hono<AppEnv> {
       const now = sqliteTimestamp(systemClock.now());
       const successBody = JSON.stringify({ data: { ok: true } });
 
-      await prepareCreateIdempotencyRecord(c.env.DB, {
-        id: systemIds.uuid(),
-        actorId: userId,
-        operation: MARK_READ_OPERATION,
-        idempotencyKey,
-        requestHash,
-        responseStatus: 200,
-        responseJson: successBody,
-        createdAt: now,
-      }).run();
+      try {
+        await prepareCreateIdempotencyRecord(c.env.DB, {
+          id: systemIds.uuid(),
+          actorId: userId,
+          operation: MARK_READ_OPERATION,
+          idempotencyKey,
+          requestHash,
+          responseStatus: 200,
+          responseJson: successBody,
+          createdAt: now,
+        }).run();
+      } catch (error) {
+        // Fix 3: Handle UNIQUE-constraint race — two concurrent requests with
+        // the same Idempotency-Key raced to INSERT. Re-read the winner's row
+        // and replay it.
+        if (isIdempotencyUniqueViolation(error)) {
+          return replayAfterRace(
+            c.env.DB,
+            userId,
+            MARK_READ_OPERATION,
+            idempotencyKey,
+            requestHash,
+          );
+        }
+        throw error;
+      }
 
       return new Response(successBody, {
         status: 200,

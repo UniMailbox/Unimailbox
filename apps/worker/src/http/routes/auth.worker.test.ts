@@ -967,7 +967,8 @@ describe('POST /api/v1/auth/login — idempotency', () => {
     const firstBody = await firstResponse.json();
     const firstAccessToken = firstBody.data.accessToken;
 
-    // Second request with same key and body should replay
+    // Second request with same key and body: login is secret-bearing (Fix 1),
+    // so it deletes the old record and re-executes, returning fresh tokens.
     const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/login', {
       method: 'POST',
       body: requestBody,
@@ -979,7 +980,8 @@ describe('POST /api/v1/auth/login — idempotency', () => {
 
     expect(secondResponse.status).toBe(200);
     const secondBody = await secondResponse.json();
-    expect(secondBody.data.accessToken).toBe(firstAccessToken); // Same token replayed
+    // Each call gets fresh tokens (not replayed)
+    expect(secondBody.data.accessToken).not.toBe(firstAccessToken);
   });
 
   it('returns 409 IDEMPOTENCY_KEY_REUSED when same key different body', async () => {
@@ -1060,7 +1062,8 @@ describe('POST /api/v1/auth/refresh — idempotency', () => {
     const firstBody = await firstResponse.json();
     const firstAccessToken = firstBody.data.accessToken;
 
-    // Second request with same key and body should replay
+    // Second request with same key and body: refresh is secret-bearing (Fix 1),
+    // so it deletes the old record and re-executes, returning fresh tokens.
     const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
       method: 'POST',
       body: requestBody,
@@ -1072,7 +1075,8 @@ describe('POST /api/v1/auth/refresh — idempotency', () => {
 
     expect(secondResponse.status).toBe(200);
     const secondBody = await secondResponse.json();
-    expect(secondBody.data.accessToken).toBe(firstAccessToken); // Same token replayed
+    // Each call gets fresh tokens (not replayed)
+    expect(secondBody.data.accessToken).not.toBe(firstAccessToken);
   });
 
   it('different refresh tokens can each use their own idempotency key', async () => {
