@@ -12,6 +12,7 @@ import {
   setupAdministratorRequestSchema,
   domainNameSchema,
   setupDomainRequestSchema,
+  setupBrevoRequestSchema,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -358,5 +359,40 @@ describe('setupDomainRequestSchema', () => {
       name: 'not-a-domain',
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('setupBrevoRequestSchema', () => {
+  it('accepts a valid API key', () => {
+    const result = setupBrevoRequestSchema.parse({
+      apiKey: 'xkeysib-abc123def456',
+    });
+    expect(result).toEqual({
+      apiKey: 'xkeysib-abc123def456',
+    });
+  });
+
+  it('rejects missing apiKey via safeParse', () => {
+    const result = setupBrevoRequestSchema.safeParse({});
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects empty apiKey via safeParse', () => {
+    const result = setupBrevoRequestSchema.safeParse({ apiKey: '' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects whitespace-only apiKey via safeParse', () => {
+    const result = setupBrevoRequestSchema.safeParse({ apiKey: '   ' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeGreaterThan(0);
+    }
   });
 });

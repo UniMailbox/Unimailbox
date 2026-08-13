@@ -1,7 +1,7 @@
 // modules/onboarding — owner of installation_state, registration_keys.
 // Exports: getSetupStatus, claimSetup, runPreflight, createAdministrator, createDomainStep,
 //   getCloudflareDashboardLink, verifyCloudflareEmailRouting, startInboundSmokeTest, checkInboundSmokeTest,
-//   handleSmokeTestMessage — the setup use cases.
+//   handleSmokeTestMessage, setupBrevo — the setup use cases.
 // The repository (getInstallationState, seedInstallationState, updateInstallationStep) is private (D-CAP-006-C).
 
 export { getSetupStatus } from './setup-status';
@@ -12,8 +12,10 @@ export { createDomainStep } from './create-domain';
 export { getCloudflareDashboardLink } from './cloudflare-dashboard-link';
 export { verifyCloudflareEmailRouting } from './cloudflare-verify';
 export { startInboundSmokeTest, checkInboundSmokeTest, handleSmokeTestMessage } from './inbound-smoke-test';
+export { setupBrevo } from './setup-brevo';
 export type { CreateAdministratorInput, CreateAdministratorResult } from './create-administrator';
 export type { CreateDomainInput, CreateDomainResult } from './create-domain';
 export type { CloudflareDashboardLinkResult } from './cloudflare-dashboard-link';
 export type { CloudflareVerifyInput, CloudflareVerifyResult } from './cloudflare-verify';
 export type { StartSmokeTestInput, StartSmokeTestResult, CheckSmokeTestResult } from './inbound-smoke-test';
+export type { SetupBrevoInput, SetupBrevoResult } from './setup-brevo';

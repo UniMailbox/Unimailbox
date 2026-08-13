@@ -42,6 +42,6 @@
   "vars": {
     "ENVIRONMENT": "local",
     "INSTALLATION_TOKEN": "test-installation-token",
-    "CREDENTIAL_ENCRYPTION_KEY": "test-encryption-key"
+    "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   }
 }

@@ -111,7 +111,7 @@ async function checkSchemaVersion(): Promise<R> {
 // Encodes the module dependency table in .claude/rules/architecture.md.
 const ALLOWED: Record<string, ReadonlySet<string>> = {
   identity: new Set(['platform','contracts','identity']),
-  onboarding: new Set(['platform','contracts','identity','tenancy']),
+  onboarding: new Set(['platform','contracts','identity','tenancy','outbound-mail']),
   tenancy: new Set(['platform','contracts','identity']),
   messages: new Set(['platform','contracts','tenancy']),
   'inbound-mail': new Set(['platform','contracts','tenancy','messages','email-core']),

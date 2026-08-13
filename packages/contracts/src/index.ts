@@ -239,3 +239,20 @@ export const setupDomainRequestSchema = z.object({
 });
 
 export type SetupDomainRequest = z.infer<typeof setupDomainRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Setup Brevo request — CAP-014
+// ---------------------------------------------------------------------------
+
+/**
+ * Request body for POST /api/v1/setup/brevo. The operator provides their
+ * Brevo API key to validate and encrypt for storage.
+ *
+ * R-SECRET-002: Provider API keys live in encrypted_credentials.
+ * R-SECRET-003: Secrets are never returned in API responses.
+ */
+export const setupBrevoRequestSchema = z.object({
+  apiKey: z.string().trim().min(1),
+});
+
+export type SetupBrevoRequest = z.infer<typeof setupBrevoRequestSchema>;

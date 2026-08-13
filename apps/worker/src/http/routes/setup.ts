@@ -8,6 +8,7 @@ import {
   setupClaimRequestSchema,
   setupAdministratorRequestSchema,
   setupDomainRequestSchema,
+  setupBrevoRequestSchema,
 } from '@unimailbox/contracts';
 import {
   claimSetup,
@@ -19,12 +20,14 @@ import {
   verifyCloudflareEmailRouting,
   startInboundSmokeTest,
   checkInboundSmokeTest,
+  setupBrevo,
 } from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { readSecret } from '../../platform/secrets';
 import type { AppEnv } from '../../platform/env';
 import { setupSession } from '../middleware/setup-session';
+import { brevoAdapter } from '../../integrations/providers/brevo';
 
 export function setupRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -123,6 +126,24 @@ export function setupRoutes(): Hono<AppEnv> {
     const result = await checkInboundSmokeTest(
       { db: c.env.DB, cache: c.env.CACHE },
       { clock: systemClock },
+    );
+    return c.json({ data: result });
+  });
+
+  // POST /brevo — session-protected endpoint that validates and stores the Brevo
+  // API key. Validates via Brevo API, encrypts with AES-GCM, stores credential and
+  // connection, links to managed domain, and advances step to 'outbound-smoke'.
+  routes.post('/brevo', setupSession, async (c) => {
+    const body = setupBrevoRequestSchema.parse(await c.req.json());
+    const encryptionKey = await readSecret(c.env.CREDENTIAL_ENCRYPTION_KEY);
+    const result = await setupBrevo(
+      {
+        db: c.env.DB,
+        encryptionKey,
+        apiKey: body.apiKey,
+        adapter: brevoAdapter,
+      },
+      { clock: systemClock, ids: systemIds },
     );
     return c.json({ data: result });
   });

@@ -1,6 +1,7 @@
-// platform/crypto.test.ts — unit tests for constantTimeCompare and hashPassword.
+// platform/crypto.test.ts — unit tests for constantTimeCompare, hashPassword,
+// and AES-GCM encrypt/decrypt (ADR-007).
 import { describe, expect, it } from 'vitest';
-import { constantTimeCompare, hashPassword } from './crypto';
+import { constantTimeCompare, hashPassword, importEncryptionKey, encrypt, decrypt } from './crypto';
 
 describe('constantTimeCompare', () => {
   it('returns true for equal strings', () => {
@@ -121,5 +122,182 @@ describe('hashPassword', () => {
     const result = await hashPassword('пароль123');
     expect(result.hash.byteLength).toBe(32);
     expect(result.salt.byteLength).toBe(16);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AES-GCM encrypt/decrypt — ADR-007
+// ---------------------------------------------------------------------------
+
+describe('importEncryptionKey', () => {
+  it('imports a valid 32-byte hex key', async () => {
+    // A 32-byte key encoded as 64 hex characters
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    expect(key).toBeInstanceOf(CryptoKey);
+    expect(key.type).toBe('secret');
+    expect(key.algorithm.name).toBe('AES-GCM');
+  });
+
+  it('imports a real 256-bit hex key', async () => {
+    // Example: 256-bit key as hex (64 hex chars = 32 bytes)
+    const hexKey =
+      '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
+    const key = await importEncryptionKey(hexKey);
+    expect(key.algorithm.name).toBe('AES-GCM');
+  });
+});
+
+describe('encrypt', () => {
+  it('encrypts plaintext to ciphertext with IV and auth tag', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const encrypted = await encrypt('test-api-key', key);
+
+    expect(encrypted.ciphertext).toBeInstanceOf(Uint8Array);
+    expect(encrypted.ciphertext.byteLength).toBeGreaterThan(0);
+    expect(encrypted.iv).toBeInstanceOf(Uint8Array);
+    expect(encrypted.iv.byteLength).toBe(12); // GCM standard IV length
+    expect(encrypted.authTag).toBeInstanceOf(Uint8Array);
+    expect(encrypted.authTag.byteLength).toBe(16); // GCM tag length
+  });
+
+  it('generates different ciphertext for the same plaintext (random IV)', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const encrypted1 = await encrypt('test-api-key', key);
+    const encrypted2 = await encrypt('test-api-key', key);
+
+    // IVs should differ
+    expect(encrypted1.iv).not.toEqual(encrypted2.iv);
+    // Ciphertexts should also differ because IVs differ
+    expect(encrypted1.ciphertext).not.toEqual(encrypted2.ciphertext);
+  });
+
+  it('encrypts empty string', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const encrypted = await encrypt('', key);
+    expect(encrypted.ciphertext).toBeInstanceOf(Uint8Array);
+    expect(encrypted.iv.byteLength).toBe(12);
+    expect(encrypted.authTag.byteLength).toBe(16);
+  });
+
+  it('encrypts long API key (100+ chars)', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const longKey = 'x'.repeat(150);
+    const encrypted = await encrypt(longKey, key);
+    expect(encrypted.ciphertext.byteLength).toBeGreaterThan(100);
+  });
+
+  it('encrypts API key with special characters', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const apiKey = 'xkcd-2024!@#$%^&*()_+-=[]{}|;:\'",.<>?/~`';
+    const encrypted = await encrypt(apiKey, key);
+    expect(encrypted.ciphertext).toBeInstanceOf(Uint8Array);
+  });
+});
+
+describe('decrypt', () => {
+  it('decrypts to original plaintext', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const plaintext = 'my-secret-api-key';
+    const encrypted = await encrypt(plaintext, key);
+    const decrypted = await decrypt(encrypted, key);
+    expect(decrypted).toBe(plaintext);
+  });
+
+  it('decrypts empty string', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const encrypted = await encrypt('', key);
+    const decrypted = await decrypt(encrypted, key);
+    expect(decrypted).toBe('');
+  });
+
+  it('decrypts long API key', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const longKey = 'x'.repeat(150);
+    const encrypted = await encrypt(longKey, key);
+    const decrypted = await decrypt(encrypted, key);
+    expect(decrypted).toBe(longKey);
+  });
+
+  it('decrypts API key with special characters', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const apiKey = 'xkcd-2024!@#$%^&*()_+-=[]{}|;:\'",.<>?/~`';
+    const encrypted = await encrypt(apiKey, key);
+    const decrypted = await decrypt(encrypted, key);
+    expect(decrypted).toBe(apiKey);
+  });
+
+  it('throws on wrong key', async () => {
+    const hexKey1 = 'a'.repeat(64);
+    const hexKey2 = 'b'.repeat(64);
+    const key1 = await importEncryptionKey(hexKey1);
+    const key2 = await importEncryptionKey(hexKey2);
+    const plaintext = 'my-secret-api-key';
+    const encrypted = await encrypt(plaintext, key1);
+
+    // Decrypting with a different key should fail
+    await expect(decrypt(encrypted, key2)).rejects.toThrow();
+  });
+
+  it('throws on tampered ciphertext', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const plaintext = 'my-secret-api-key';
+    const encrypted = await encrypt(plaintext, key);
+
+    // Tamper with the ciphertext
+    const tampered = {
+      ciphertext: new Uint8Array(encrypted.ciphertext),
+      iv: encrypted.iv,
+      authTag: encrypted.authTag,
+    };
+    tampered.ciphertext[0] = tampered.ciphertext[0] ^ 0xff;
+
+    await expect(decrypt(tampered, key)).rejects.toThrow();
+  });
+
+  it('throws on tampered auth tag', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const plaintext = 'my-secret-api-key';
+    const encrypted = await encrypt(plaintext, key);
+
+    // Tamper with the auth tag
+    const tampered = {
+      ciphertext: encrypted.ciphertext,
+      iv: encrypted.iv,
+      authTag: new Uint8Array(encrypted.authTag),
+    };
+    tampered.authTag[0] = tampered.authTag[0] ^ 0xff;
+
+    await expect(decrypt(tampered, key)).rejects.toThrow();
+  });
+});
+
+describe('encrypt/decrypt round-trip', () => {
+  it('round-trips Brevo-style API keys', async () => {
+    const hexKey = 'a'.repeat(64);
+    const key = await importEncryptionKey(hexKey);
+    const apiKeys = [
+      'xkeys-1234567890abcdef',
+      'brevo-api-key-1234567890abcdefghijklmnopqrstuvwxyz',
+      'a'.repeat(10),
+      'z'.repeat(100),
+    ];
+
+    for (const original of apiKeys) {
+      const encrypted = await encrypt(original, key);
+      const decrypted = await decrypt(encrypted, key);
+      expect(decrypted).toBe(original);
+    }
   });
 });

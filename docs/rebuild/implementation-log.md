@@ -23,6 +23,22 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-014 Brevo provider + encrypted credentials  |  Implemented
+
+**Changed:** `POST /api/v1/setup/brevo` — accepts Brevo API key, validates via adapter, encrypts with AES-GCM, stores encrypted credential + provider connection, links to managed domain, advances step to 'outbound-smoke'. Introduces outbound-mail module, provider registry, Brevo adapter, and AES-GCM encryption.
+
+**Files:** `migrations/0003_provider_connections.sql` (new) · `apps/worker/src/platform/crypto.ts` (added `importEncryptionKey`/`encrypt`/`decrypt`) · `apps/worker/src/modules/outbound-mail/` (new module — credential + connection repositories) · `apps/worker/src/integrations/providers/brevo.ts` (new — OutboundProviderAdapter) · `apps/worker/src/integrations/providers/provider-registry.ts` (new) · `apps/worker/src/modules/onboarding/setup-brevo.ts` (new — use case) · `packages/contracts/src/index.ts` (`setupBrevoRequestSchema`) · `apps/worker/src/http/routes/brevo.worker.test.ts` (new) · schema version bumped to '0003'
+
+**Decisions:**
+- `onboarding → outbound-mail` edge approved — setup wizard creates provider connections.
+- Validation before encryption — don't encrypt an invalid API key. Adapter validates first via `GET /v3/account`.
+- Four-statement D1 batch (credential + connection + domain.outbound_connection_id + step advance) — atomic.
+- AES-GCM: 12-byte IV, 16-byte auth tag stored as separate BLOB columns per ADR-007. Key from Secrets Store via `importEncryptionKey` (hex → CryptoKey).
+- Brevo adapter in `integrations/providers/` — owns HTTP calls. Modules call through `OutboundProviderAdapter` interface (ADR-002).
+- Implemented via two sequential subagents (infrastructure + integration) due to API size limits on single-agent dispatch.
+
+**Notes:** Brevo API mocked via `vi.spyOn(globalThis, 'fetch')` in worker-pool tests. Preflight test updated (schemaVersion '0002' → '0003'). `CREDENTIAL_ENCRYPTION_KEY` in wrangler.test.jsonc is a valid 32-byte hex string for AES-256.
+
 ## 2026-08-13 — CAP-013 Inbound smoke test  |  Implemented
 
 **Changed:** `POST /api/v1/setup/inbound-smoke-test` (start) + `POST /api/v1/setup/inbound-smoke-test/check` — verifies Cloudflare Email Routing delivers emails to the Worker. Start generates `smoke+<uuid>@<domain>` address; operator sends email manually; email handler detects the `smoke+` prefix, validates token in KV, sets receipt flag; check endpoint polls KV, advances step to 'brevo' on receipt. First modification to the inbound email handler (previously reject-all stub).

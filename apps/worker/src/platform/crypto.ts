@@ -80,3 +80,87 @@ export async function hashPassword(password: string): Promise<PasswordHash> {
     hash: new Uint8Array(hashBuffer),
   };
 }
+
+// ---------------------------------------------------------------------------
+// AES-GCM encryption for credential storage — ADR-007
+// ---------------------------------------------------------------------------
+
+/**
+ * EncryptedData — the result of AES-GCM encryption.
+ *
+ * Per ADR-007: ciphertext, IV, and auth tag are stored as separate BLOB
+ * columns in the encrypted_credentials table. The version field lives
+ * on the row itself.
+ */
+export interface EncryptedData {
+  readonly ciphertext: Uint8Array;
+  readonly iv: Uint8Array;
+  readonly authTag: Uint8Array;
+}
+
+/**
+ * Import an AES-GCM key from a hex string.
+ *
+ * The CREDENTIAL_ENCRYPTION_KEY from Secrets Store is a hex-encoded
+ * 32-byte key (64 hex characters). This function converts it to a CryptoKey
+ * suitable for encrypt/decrypt operations.
+ *
+ * See ADR-007 §Key format.
+ *
+ * @param rawKey - Hex-encoded key string (64 characters for AES-256)
+ * @returns A CryptoKey for AES-GCM encrypt/decrypt
+ */
+export async function importEncryptionKey(rawKey: string): Promise<CryptoKey> {
+  const keyBytes = new Uint8Array(
+    rawKey.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) ?? [],
+  );
+  return crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+/**
+ * Encrypt plaintext using AES-GCM.
+ *
+ * - IV: 12 random bytes (recommended for GCM)
+ * - Auth tag: 16 bytes (appended by Web Crypto, we split it out)
+ *
+ * The Web Crypto API returns ciphertext + authTag concatenated; we split
+ * them so both can be stored as BLOB columns per ADR-007.
+ *
+ * @param plaintext - The secret to encrypt (e.g. API key)
+ * @param key - The encryption key from importEncryptionKey
+ * @returns EncryptedData with separate ciphertext, iv, and authTag
+ */
+export async function encrypt(plaintext: string, key: CryptoKey): Promise<EncryptedData> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(plaintext);
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  // AES-GCM returns ciphertext + authTag concatenated (last 16 bytes = tag)
+  const bytes = new Uint8Array(encrypted);
+  const ciphertext = bytes.slice(0, bytes.length - 16);
+  const authTag = bytes.slice(bytes.length - 16);
+  return { ciphertext, iv, authTag };
+}
+
+/**
+ * Decrypt AES-GCM ciphertext.
+ *
+ * Re-concatenates ciphertext and authTag for the Web Crypto API, which
+ * expects them combined. The IV is passed separately.
+ *
+ * @param data - EncryptedData with ciphertext, iv, and authTag
+ * @param key - The decryption key from importEncryptionKey
+ * @returns The original plaintext
+ * @throws {DOMException} If authentication fails (wrong key or tampered data)
+ */
+export async function decrypt(data: EncryptedData, key: CryptoKey): Promise<string> {
+  // Re-concatenate ciphertext + authTag for decrypt
+  const combined = new Uint8Array(data.ciphertext.length + data.authTag.length);
+  combined.set(data.ciphertext);
+  combined.set(data.authTag, data.ciphertext.length);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: data.iv },
+    key,
+    combined,
+  );
+  return new TextDecoder().decode(decrypted);
+}
