@@ -23,6 +23,19 @@ Format:
 
 ---
 
+## 2026-08-13 — CAP-015 + CAP-016 Setup wizard complete  |  Implemented
+
+**Changed:** `POST /api/v1/setup/outbound-smoke-test` (decrypts Brevo API key, sends test email, advances step to 'complete') + `POST /api/v1/setup/complete` (flips status to 'complete', `GET /` serves HTML shell). **The entire setup wizard is now implemented — all 9 steps.**
+
+**Files:** `apps/worker/src/modules/identity/user-repository.ts` (added `getFirstUser`) · `apps/worker/src/modules/outbound-mail/credential-repository.ts` (added `getCredentialByName`) · `apps/worker/src/modules/onboarding/outbound-smoke-test.ts` (new — decrypt + send) · `apps/worker/src/modules/onboarding/complete-setup.ts` (new — flip status) · `apps/worker/src/http/routes/setup.ts` (added POST /outbound-smoke-test + POST /complete) · `apps/worker/src/http/router.ts` (added GET / handler) · `apps/worker/src/http/routes/outbound-smoke-test.worker.test.ts` + `complete-setup.worker.test.ts` (new — 34 tests combined)
+
+**Decisions:**
+- First decrypt-and-use flow: outbound smoke test reads encrypted_credentials, decrypts with AES-GCM, constructs ProviderRuntimeContext with the plaintext key, calls adapter.send(). Decrypted key lives only in request scope (ADR-007).
+- `GET /` returns minimal HTML shell (`<div id="root">`). Real React app assets served via CDN/Workers Sites in production. Setup gate ensures `GET /` is only reachable when status='complete'.
+- Sender address for smoke test: `noreply@<domain>`. Recipient: admin user's email.
+
+**Notes:** Setup wizard complete: claim → preflight → administrator → domain → cloudflare-verify → inbound-smoke → brevo → outbound-smoke → complete. After complete, `GET /` returns 200 HTML (setup gate passes through). Phase 1 progress: 9/17 capabilities. Remaining: CAP-017 through CAP-026 (roles, registration, mailboxes, inbound processing, inbox, compose, webhooks, audit).
+
 ## 2026-08-13 — CAP-014 Brevo provider + encrypted credentials  |  Implemented
 
 **Changed:** `POST /api/v1/setup/brevo` — accepts Brevo API key, validates via adapter, encrypts with AES-GCM, stores encrypted credential + provider connection, links to managed domain, advances step to 'outbound-smoke'. Introduces outbound-mail module, provider registry, Brevo adapter, and AES-GCM encryption.

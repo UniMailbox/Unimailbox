@@ -79,3 +79,15 @@ export async function createUser(db: Database, input: CreateUserInput): Promise<
     )
     .run();
 }
+
+/**
+ * Gets the first user (administrator) created during setup.
+ * Returns null if no user exists.
+ */
+export async function getFirstUser(
+  db: Database,
+): Promise<{ id: string; email: string } | null> {
+  return db
+    .prepare('SELECT id, email FROM users ORDER BY created_at LIMIT 1')
+    .first<{ id: string; email: string }>();
+}

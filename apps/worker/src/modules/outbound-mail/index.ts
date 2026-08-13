@@ -7,6 +7,7 @@
 
 export {
   prepareCreateCredential,
+  getCredentialByName,
   type CreateCredentialInput,
 } from './credential-repository';
 

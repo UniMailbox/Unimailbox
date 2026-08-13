@@ -46,3 +46,23 @@ export function prepareCreateCredential(
     input.updatedAt,
   );
 }
+
+/**
+ * Reads an encrypted credential by name. Returns null if not found.
+ * Used during outbound smoke test to retrieve the stored Brevo API key.
+ */
+export async function getCredentialByName(
+  db: D1Database,
+  name: string,
+): Promise<{
+  id: string;
+  ciphertext: ArrayBuffer;
+  iv: ArrayBuffer;
+  auth_tag: ArrayBuffer;
+  version: number;
+} | null> {
+  return db
+    .prepare('SELECT id, ciphertext, iv, auth_tag, version FROM encrypted_credentials WHERE name = ? LIMIT 1')
+    .bind(name)
+    .first();
+}

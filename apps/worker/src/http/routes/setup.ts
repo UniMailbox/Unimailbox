@@ -1,7 +1,8 @@
 // http/routes/setup — setup API routes.
 // Hono sub-app for /api/v1/setup/* endpoints. GET /status, POST /claim, POST /preflight,
 // POST /administrator, POST /domain, POST /cloudflare/dashboard-link, POST /cloudflare/verify,
-// POST /inbound-smoke-test, POST /inbound-smoke-test/check.
+// POST /inbound-smoke-test, POST /inbound-smoke-test/check, POST /brevo, POST /outbound-smoke-test,
+// POST /complete.
 
 import { Hono } from 'hono';
 import {
@@ -21,6 +22,8 @@ import {
   startInboundSmokeTest,
   checkInboundSmokeTest,
   setupBrevo,
+  runOutboundSmokeTest,
+  completeSetup,
 } from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
@@ -145,6 +148,26 @@ export function setupRoutes(): Hono<AppEnv> {
       },
       { clock: systemClock, ids: systemIds },
     );
+    return c.json({ data: result });
+  });
+
+  // POST /outbound-smoke-test — session-protected endpoint that sends a test email
+  // via Brevo. Decrypts the stored API key, constructs a test message from
+  // noreply@<domain> to the admin's email, sends it, and advances step to 'complete'.
+  routes.post('/outbound-smoke-test', setupSession, async (c) => {
+    const encryptionKey = await readSecret(c.env.CREDENTIAL_ENCRYPTION_KEY);
+    const result = await runOutboundSmokeTest(
+      { db: c.env.DB, encryptionKey, adapter: brevoAdapter },
+      { clock: systemClock, ids: systemIds },
+    );
+    return c.json({ data: result });
+  });
+
+  // POST /complete — session-protected endpoint that marks installation as complete.
+  // Sets status='complete' and current_step='complete'. After this, the setup gate
+  // passes through to the app instead of redirecting to /setup.
+  routes.post('/complete', setupSession, async (c) => {
+    const result = await completeSetup({ db: c.env.DB }, { clock: systemClock });
     return c.json({ data: result });
   });
 

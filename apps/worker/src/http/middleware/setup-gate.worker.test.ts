@@ -113,10 +113,14 @@ describe('setup-gate middleware', () => {
       await seedInstallationState({ status: 'complete', currentStep: 'complete' });
     });
 
-    it('GET / does NOT redirect — falls through to normal router (404)', async () => {
+    it('GET / does NOT redirect — returns 200 HTML app shell', async () => {
       const response = await SELF.fetch('http://localhost/');
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toContain('text/html');
       expect(response.headers.get('Location')).toBeNull();
+      const text = await response.text();
+      expect(text).toContain('<!DOCTYPE html>');
+      expect(text).toContain('<title>Unimailbox</title>');
     });
 
     it('R-SETUP-003: /healthz returns 200', async () => {
