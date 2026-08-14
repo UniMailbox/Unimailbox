@@ -8,6 +8,8 @@ import { authn } from './middleware/authn';
 import { setupRoutes } from './routes/setup';
 import { authRoutes } from './routes/auth';
 import { adminRoutes } from './routes/admin';
+import { adminBlocklistRoutes } from './routes/admin-blocklist';
+import { adminRolePolicyRoutes } from './routes/admin-role-policies';
 import { adminWebhookRoutes } from './routes/admin-webhooks';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
@@ -44,6 +46,12 @@ export function buildRouter(): Hono<AppEnv> {
   // CAP-019: Auth and admin API routes.
   router.route('/api/v1/auth', authRoutes());
   router.route('/api/v1/admin', adminRoutes());
+
+  // D-CAP-021 / CAP-035: blocklist + per-role policies.
+  // Mounted under /api/v1/admin so the route paths inside the sub-apps
+  // resolve to /api/v1/admin/blocklist* and /api/v1/admin/roles/:id/policy.
+  router.route('/api/v1/admin', adminBlocklistRoutes());
+  router.route('/api/v1/admin', adminRolePolicyRoutes());
 
   // CAP-025: Admin webhook events + connections view.
   router.route('/api/v1', adminWebhookRoutes());

@@ -15,6 +15,11 @@ import { getObjectStore } from './platform/object-store';
 import { systemClock, type Clock } from './platform/clock';
 import { systemIds, type IdGenerator } from './platform/ids';
 import { logger, type LogFields, type LogContext } from './platform/logger';
+import type { BlocklistReader, RolePolicyReader } from '@unimailbox/contracts';
+import {
+  createBlocklistReader,
+  createRolePolicyReader,
+} from './modules/admin';
 
 export interface AppContext {
   readonly db: Database;
@@ -30,11 +35,17 @@ export interface AppContext {
     readonly warn: (fields: LogFields, context?: LogContext) => void;
     readonly error: (fields: LogFields, context?: LogContext) => void;
   };
+  // D-CAP-021 / CAP-035: cross-module readers for inbound-mail.
+  // Wired through app-context (composition root) — see ADR-002 for the
+  // outbound-provider-registry equivalent.
+  readonly blocklistReader: BlocklistReader;
+  readonly rolePolicyReader: RolePolicyReader;
 }
 
 export function buildAppContext(env: Env): AppContext {
+  const db = getDatabase(env);
   return {
-    db: getDatabase(env),
+    db,
     cache: getCache(env),
     setupSessionStore: getSetupSessionStore(env),
     objectStore: getObjectStore(env),
@@ -42,5 +53,7 @@ export function buildAppContext(env: Env): AppContext {
     clock: systemClock,
     ids: systemIds,
     logger,
+    blocklistReader: createBlocklistReader(db),
+    rolePolicyReader: createRolePolicyReader(db),
   };
 }

@@ -12,3 +12,23 @@ export {
   prepareCreateAuditEvent,
   type AuditEventInput,
 } from './audit-event-repository';
+
+// D-CAP-021 / CAP-035: blocklist + role policies.
+export {
+  createBlocklistEntry,
+  prepareCreateBlocklistEntry,
+  listBlocklistEntries,
+  deleteBlocklistEntry,
+  prepareDeleteBlocklistEntry,
+  findBlocklistEntryById,
+  createBlocklistReader,
+  type CreateBlocklistEntryInput,
+} from './blocklist-repository';
+export {
+  getRolePolicy,
+  setRolePolicy,
+  prepareSetRolePolicy,
+  loadRolePoliciesForRoleIds,
+  createRolePolicyReader,
+  type SetRolePolicyInput,
+} from './role-policy-repository';

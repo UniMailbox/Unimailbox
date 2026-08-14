@@ -1,21 +1,112 @@
 /**
  * Worker-pool test for inbound-email handler — CAP-021.
  * Tests real inbound mail processing: MIME parse → message persisted → mailbox associations.
+ *
+ * D-CAP-021 / CAP-035: also covers R-INBOUND-005 (blocklist) and
+ * R-INBOUND-006 (per-role banEmail) rejection paths. Rejection
+ * short-circuits before any DB write (Decision §Q4: audit OUT OF SCOPE).
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types';
 import inboundEmail from './inbound-email';
-import { migrationsDb } from '@unimailbox/test-kit';
+import { migrationsDb, seedInstallationState } from '@unimailbox/test-kit';
 import { systemIds } from '../platform/ids';
 import { prepareCreateDomain } from '../modules/tenancy';
 import { hashPassword } from '../platform/crypto';
+
+// Module-scope helpers — used by both describe blocks (CAP-021 base
+// behaviour + D-CAP-021 / CAP-035 rejection paths).
+async function createTestUser(db: D1Database): Promise<string> {
+  const userId = systemIds.uuid();
+  const passwordHash = await hashPassword('testPassword123');
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+  await db.prepare(
+    `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    userId,
+    'test@example.com',
+    'Test User',
+    'active',
+    passwordHash.algorithm,
+    passwordHash.iterations,
+    passwordHash.salt,
+    passwordHash.hash,
+    now,
+    now,
+  ).run();
+
+  return userId;
+}
+
+async function createTestDomain(db: D1Database): Promise<string> {
+  const domainId = systemIds.uuid();
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const domainStmt = prepareCreateDomain(db, {
+    id: domainId,
+    name: 'example.com',
+    status: 'active',
+    outboundConnectionId: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.batch([domainStmt]);
+  return domainId;
+}
+
+async function createTestMailbox(
+  db: D1Database,
+  domainId: string,
+  ownerUserId: string,
+  localPart: string,
+): Promise<string> {
+  const mailboxId = systemIds.uuid();
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  await db.prepare(
+    `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(mailboxId, domainId, ownerUserId, localPart, `${localPart} Mailbox`, 'active', now, now).run();
+  return mailboxId;
+}
+
+function makeMessage(
+  to: string,
+  from: string,
+  subject: string,
+  raw: string,
+): ForwardableEmailMessage {
+  let rejectReason: string | null = null;
+  return {
+    to,
+    from,
+    headers: new Headers(),
+    raw: new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(raw));
+        controller.close();
+      },
+    }),
+    rawSize: raw.length,
+    setReject: async (reason: string): Promise<void> => {
+      rejectReason = reason;
+    },
+    forward: async (_rcptTo: string, _headers?: Headers): Promise<void> => {},
+    reply: async (_message: unknown): Promise<void> => {},
+    // Test-only accessor for verifying rejection behavior
+    ...{ _getRejectReason: (): string | null => rejectReason },
+  } as unknown as ForwardableEmailMessage & { _getRejectReason(): string | null };
+}
 
 describe('inbound-email handler — CAP-021', () => {
   beforeEach(async () => {
     const db = await migrationsDb();
 
     // Clean up any existing data
+    await db.prepare('DELETE FROM blocklist_entries').run();
+    await db.prepare('DELETE FROM role_policies').run();
+    await db.prepare('DELETE FROM user_roles').run();
     await db.prepare('DELETE FROM mailbox_messages').run();
     await db.prepare('DELETE FROM message_recipients').run();
     await db.prepare('DELETE FROM messages').run();
@@ -23,86 +114,6 @@ describe('inbound-email handler — CAP-021', () => {
     await db.prepare('DELETE FROM managed_domains').run();
     await db.prepare('DELETE FROM users').run();
   });
-
-  function makeMessage(
-    to: string,
-    from: string,
-    subject: string,
-    raw: string,
-  ): ForwardableEmailMessage {
-    let rejectReason: string | null = null;
-    return {
-      to,
-      from,
-      headers: new Headers(),
-      raw: new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode(raw));
-          controller.close();
-        },
-      }),
-      rawSize: raw.length,
-      setReject: async (reason: string): Promise<void> => {
-        rejectReason = reason;
-      },
-      forward: async (_rcptTo: string, _headers?: Headers): Promise<void> => {},
-      reply: async (_message: unknown): Promise<void> => {},
-      // Test-only accessor for verifying rejection behavior
-      ...{ _getRejectReason: (): string | null => rejectReason },
-    } as unknown as ForwardableEmailMessage & { _getRejectReason(): string | null };
-  }
-
-  // Helper to create a user (required for mailbox FK constraint)
-  async function createTestUser(db: D1Database): Promise<string> {
-    const userId = systemIds.uuid();
-    const passwordHash = await hashPassword('testPassword123');
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-    await db.prepare(
-      `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      userId,
-      'test@example.com',
-      'Test User',
-      'active',
-      passwordHash.algorithm,
-      passwordHash.iterations,
-      passwordHash.salt,
-      passwordHash.hash,
-      now,
-      now,
-    ).run();
-
-    return userId;
-  }
-
-  // Helper to create a domain
-  async function createTestDomain(db: D1Database): Promise<string> {
-    const domainId = systemIds.uuid();
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    const domainStmt = prepareCreateDomain(db, {
-      id: domainId,
-      name: 'example.com',
-      status: 'active',
-      outboundConnectionId: null,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await db.batch([domainStmt]);
-    return domainId;
-  }
-
-  // Helper to create a mailbox
-  async function createTestMailbox(db: D1Database, domainId: string, ownerUserId: string, localPart: string): Promise<string> {
-    const mailboxId = systemIds.uuid();
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    await db.prepare(
-      `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(mailboxId, domainId, ownerUserId, localPart, `${localPart} Mailbox`, 'active', now, now).run();
-    return mailboxId;
-  }
 
   it('parses and persists an inbound email to a known mailbox', async () => {
     const db = await migrationsDb();
@@ -338,5 +349,165 @@ Body`;
       .bind(messages?.id)
       .all();
     expect(recipients.results?.[0].address).toBe('inbox@example.com'); // lowercased
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-CAP-021 / CAP-035 — R-INBOUND-005 + R-INBOUND-006 rejection paths.
+//
+// Rejection short-circuits BEFORE any DB write (no messages row, no audit).
+// ---------------------------------------------------------------------------
+
+describe('inbound-email handler — D-CAP-021 / CAP-035', () => {
+  beforeEach(async () => {
+    const db = await migrationsDb();
+    await db.prepare('DELETE FROM installation_state').run();
+    await db.prepare('DELETE FROM blocklist_entries').run();
+    await db.prepare('DELETE FROM role_policies').run();
+    await db.prepare('DELETE FROM user_roles').run();
+    await db.prepare('DELETE FROM mailbox_messages').run();
+    await db.prepare('DELETE FROM message_recipients').run();
+    await db.prepare('DELETE FROM messages').run();
+    await db.prepare('DELETE FROM mailboxes').run();
+    await db.prepare('DELETE FROM managed_domains').run();
+    await db.prepare('DELETE FROM users').run();
+    await db.prepare('DELETE FROM roles WHERE id NOT IN (\'administrator\', \'member\')').run();
+    await db.prepare('DELETE FROM audit_events').run();
+  });
+
+  async function setupMailboxWithRolePolicy(
+    policyJson: { ban_email_patterns_json: string; avail_domain_patterns_json: string } | null,
+  ): Promise<{ userId: string; mailboxId: string }> {
+    const db = await migrationsDb();
+    await seedInstallationState({ status: 'complete', currentStep: 'complete' });
+
+    // Custom role for the mailbox owner (so we can attach a policy).
+    await db.prepare(
+      `INSERT OR IGNORE INTO roles (id, name, description, is_system, created_at)
+       VALUES ('test-owner', 'test-owner', 'Test owner', 1, datetime('now'))`,
+    ).run();
+
+    const userId = await createTestUser(db);
+    await db.prepare(
+      `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, 'test-owner', datetime('now'))`,
+    ).bind(userId).run();
+
+    const domainId = await createTestDomain(db);
+    const mailboxId = await createTestMailbox(db, domainId, userId, 'inbox');
+
+    if (policyJson) {
+      await db.prepare(
+        `INSERT INTO role_policies (role_id, ban_email_patterns_json, avail_domain_patterns_json, updated_by, updated_at)
+         VALUES ('test-owner', ?, ?, ?, datetime('now'))`,
+      ).bind(policyJson.ban_email_patterns_json, policyJson.avail_domain_patterns_json, userId).run();
+    }
+
+    return { userId, mailboxId };
+  }
+
+  // R-INBOUND-005 — blocklist hits subject, denies before any DB write.
+  it('rejects when subject matches a blocklist entry (R-INBOUND-005)', async () => {
+    const db = await migrationsDb();
+    const { mailboxId: _mailboxId } = await setupMailboxWithRolePolicy(null);
+
+    // Insert a blocklist entry matching the subject.
+    await db.prepare(
+      `INSERT INTO blocklist_entries (id, kind, pattern, created_by, created_at)
+       VALUES ('blocklist-subj', 'subject', 'special offer', NULL, datetime('now'))`,
+    ).run();
+
+    const rawEmail = `From: sender@example.com
+To: inbox@example.com
+Subject: SPECIAL OFFER today
+Message-ID: <block-test-1@message.id>
+
+Body`;
+
+    const message = makeMessage(
+      'inbox@example.com',
+      'sender@example.com',
+      'SPECIAL OFFER today',
+      rawEmail,
+    );
+
+    await inboundEmail.email(message, env);
+
+    expect(message._getRejectReason()).toMatch(/special offer/i);
+    expect(message._getRejectReason()).toContain('subject');
+
+    // No message persisted (R-INBOUND-008: rejection short-circuits).
+    const msg = await db.prepare('SELECT id FROM messages WHERE message_id_header = ?')
+      .bind('<block-test-1@message.id>')
+      .first();
+    expect(msg).toBeNull();
+
+    // No audit row written (Decision §Q4: audit on reject OUT OF SCOPE).
+    const audit = await db.prepare('SELECT id FROM audit_events WHERE resource_type = \'message\'').first();
+    expect(audit).toBeNull();
+  });
+
+  // R-INBOUND-006 — banEmail exact match denies.
+  it('rejects when sender matches a banEmail exact pattern (R-INBOUND-006)', async () => {
+    const db = await migrationsDb();
+    const { mailboxId: _mailboxId } = await setupMailboxWithRolePolicy({
+      ban_email_patterns_json: JSON.stringify(['spammer@example.com']),
+      avail_domain_patterns_json: '[]',
+    });
+
+    const rawEmail = `From: spammer@example.com
+To: inbox@example.com
+Subject: Hello
+Message-ID: <block-test-2@message.id>
+
+Body`;
+
+    const message = makeMessage(
+      'inbox@example.com',
+      'spammer@example.com',
+      'Hello',
+      rawEmail,
+    );
+
+    await inboundEmail.email(message, env);
+
+    expect(message._getRejectReason()).toContain('banned');
+    expect(message._getRejectReason()).toContain('spammer@example.com');
+
+    const msg = await db.prepare('SELECT id FROM messages WHERE message_id_header = ?')
+      .bind('<block-test-2@message.id>')
+      .first();
+    expect(msg).toBeNull();
+  });
+
+  // R-INBOUND-006 — banEmail `*` denies even if domain would be allowed.
+  it('rejects when banEmail is a wildcard * (R-INBOUND-006 — ban precedence)', async () => {
+    const db = await migrationsDb();
+    const { mailboxId: _mailboxId } = await setupMailboxWithRolePolicy({
+      ban_email_patterns_json: JSON.stringify(['*']),
+      avail_domain_patterns_json: JSON.stringify(['@example.com']),
+    });
+
+    const rawEmail = `From: anyone@example.com
+To: inbox@example.com
+Subject: Hello
+Message-ID: <block-test-3@message.id>
+
+Body`;
+
+    const message = makeMessage(
+      'inbox@example.com',
+      'anyone@example.com',
+      'Hello',
+      rawEmail,
+    );
+
+    await inboundEmail.email(message, env);
+
+    expect(message._getRejectReason()).toContain('banned');
+
+    const msg = await db.prepare('SELECT id FROM messages WHERE message_id_header = ?')
+      .bind('<block-test-3@message.id>')
+      .first();
+    expect(msg).toBeNull();
   });
 });

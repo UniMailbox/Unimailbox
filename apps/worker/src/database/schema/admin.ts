@@ -101,6 +101,43 @@ export const maintenanceJobs = sqliteTable(
   }),
 );
 
+// ---------------------------------------------------------------------------
+// D-CAP-021 / CAP-035: blocklist + per-role policies.
+//
+// R-INBOUND-005: blocklist_entries holds subject/content/from patterns
+// (case-insensitive substring). The admin module owns this table.
+//
+// R-INBOUND-006: role_policies holds banEmail + availDomain JSON arrays per
+// role. One row per role (PRIMARY KEY = role_id). Empty arrays mean "allow
+// all" for availDomain; banEmail is empty by default. R-DATA-005 is relaxed
+// for these two columns — see the migration's deferred-normalization comment.
+//
+// SQL in migrations/0010_blocklist_and_role_policies.sql is the deployable
+// artifact; these declarations are typing only.
+// ---------------------------------------------------------------------------
+
+export const blocklistEntries = sqliteTable(
+  'blocklist_entries',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', { enum: ['subject', 'content', 'from'] }).notNull(),
+    pattern: text('pattern').notNull(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => ({
+    createdAtIdx: index('blocklist_entries_created_at_idx').on(t.createdAt),
+  }),
+);
+
+export const rolePolicies = sqliteTable('role_policies', {
+  roleId: text('role_id').primaryKey().references(() => roles.id, { onDelete: 'cascade' }),
+  banEmailPatternsJson: text('ban_email_patterns_json').notNull(),
+  availDomainPatternsJson: text('avail_domain_patterns_json').notNull(),
+  updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: text('updated_at').notNull(),
+});
+
 export type SystemSetting = typeof systemSettings.$inferSelect;
 export type NewSystemSetting = typeof systemSettings.$inferInsert;
 export type Permission = typeof permissions.$inferSelect;
@@ -113,3 +150,7 @@ export type AuditEvent = typeof auditEvents.$inferSelect;
 export type NewAuditEvent = typeof auditEvents.$inferInsert;
 export type MaintenanceJob = typeof maintenanceJobs.$inferSelect;
 export type NewMaintenanceJob = typeof maintenanceJobs.$inferInsert;
+export type BlocklistEntryRowDrizzle = typeof blocklistEntries.$inferSelect;
+export type NewBlocklistEntryRowDrizzle = typeof blocklistEntries.$inferInsert;
+export type RolePolicyRowDrizzle = typeof rolePolicies.$inferSelect;
+export type NewRolePolicyRowDrizzle = typeof rolePolicies.$inferInsert;

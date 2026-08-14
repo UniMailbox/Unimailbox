@@ -10,6 +10,159 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-14 — CAP-035 fix slice: review round + resolutions + re-review
+
+Following the initial implementation (entry below), three independent reviewers ran in parallel
+(architecture, code, security) and produced a consolidated finding list: **2 BLOCKER, 2 HIGH, 3
+MEDIUM, 2 LOW**. The orchestrator dispatched a fix slice to the implementer (slice scope frozen
+to the named finding list), ran the six quality gates independently to validate, then dispatched
+fresh security + code reviewers for re-review.
+
+**Fix slice — resolutions (file:line evidence where reviewer-named):**
+
+- **B1 — Architecture rule dependency table did not permit `inbound-mail → admin`.** Added
+  `admin (read-only, via contracts/*)` to the `inbound-mail` row at
+  `.claude/rules/architecture.md:48`, plus the explanatory paragraph at `:60-64` recording the
+  interface-only constraint (`BlocklistReader` + `RolePolicyReader` in
+  `packages/contracts/src/admin/`, implementations in `modules/admin/`, wired in
+  `app-context.ts`). Mirrors the outbound provider registry pattern (ADR-002). The
+  persistence-ownership row at `:103` extended with `blocklist_entries, role_policies`.
+- **B2 — Audit row not in the same D1 batch as the business write (R-AUDIT-001).** Every
+  state transition on `blocklist_entries` / `role_policies` now writes `audit_events` +
+  business row + `idempotency_records` in one `db.batch([...])`:
+  - `admin-blocklist.ts:107` — POST: `prepareCreateBlocklistEntry` +
+    `prepareCreateAuditEvent` (`action: 'blocklist.create'`) +
+    `prepareCreateIdempotencyRecord`.
+  - `admin-blocklist.ts:239` — DELETE (success path): `prepareDeleteBlocklistEntry` +
+    `prepareCreateAuditEvent` (`action: 'blocklist.delete'`) +
+    `prepareCreateIdempotencyRecord`.
+  - `admin-role-policies.ts:169` — PUT: `prepareSetRolePolicy` +
+    `prepareCreateAuditEvent` (`action: 'role_policy.set'`) +
+    `prepareCreateIdempotencyRecord`.
+  - DELETE 404 path (`admin-blocklist.ts:209-231`) writes an idempotency-only record with
+    no business write and no audit row — security reviewer confirmed this is the correct
+    non-state-transition shape.
+- **H1 — Idempotency `operation` literal used a static `:id`-like substring instead of the
+  per-request id (ADR-004 cross-resource collision).** Per-id operation namespace now
+  embedded with the template literal at handler entry:
+  - `admin-blocklist.ts:185` — `const operation = \`DELETE /api/v1/admin/blocklist/${id}\`;`,
+    used by both `findIdempotencyRecord` and `prepareCreateIdempotencyRecord`.
+  - `admin-role-policies.ts:100` — `const operation = \`PUT /api/v1/admin/roles/${roleId}/policy\`;`.
+  - Cross-role idempotency collision test asserts isolation
+    (`admin-role-policies.worker.test.ts:522-607`).
+- **H2 — Test coverage gap on audit-in-batch + INVALID_JSON + banEmail `*`.** Added per-route
+  worker tests named after the rule IDs:
+  - `admin-blocklist.worker.test.ts:374-422` — POST audit row appears in `audit_events`.
+  - `admin-blocklist.worker.test.ts:727-776` — DELETE audit row appears in `audit_events`.
+  - `admin-blocklist.worker.test.ts:780-802` — DELETE 404 writes NO audit row.
+  - `admin-role-policies.worker.test.ts:613-670` — PUT audit row appears in `audit_events`.
+  - `admin-role-policies.worker.test.ts:676-693` — `INVALID_JSON` round-trip (status + code).
+  - `pattern-matchers.test.ts` — deep-subdomain `matchesAvailDomain`, banEmail `*` round-trip.
+- **M1 — `JSON.parse(rawBody)` would surface a SyntaxError as 500 instead of 400.** Wrapped
+  in try/catch at `admin-role-policies.ts:132-151`: SyntaxError → log at `warn` with
+  `{ event: 'role_policy.put.invalid_json', actorUserId: userId }` (no body) → throw
+  `DomainError({ code: 'INVALID_JSON', message: 'Request body is not valid JSON',
+  httpStatus: 400 })`. **The same antipattern is also present at `admin-blocklist.ts:88`**
+  — escalated to MEDIUM and recorded as **CAP-037** rather than expanding the frozen slice.
+- **M2 — Drizzle row-type aliases collided with contracts interface names.** Renamed to
+  `BlocklistEntryRowDrizzle` / `NewBlocklistEntryRowDrizzle` in
+  `apps/worker/src/database/schema/admin.ts:153-154`. `RolePolicyRowDrizzle` /
+  `NewRolePolicyRowDrizzle` already had the suffix. Cross-boundary types continue to come
+  from `packages/contracts`.
+- **M3 — JSON-in-text relaxation comment referenced a placeholder CAP ID.** Migration
+  `0010_blocklist_and_role_policies.sql:16` now names **CAP-036 JSON-AUDIT**; placeholder
+  resolved.
+- **L1 (accepted) — `inbound-mail.ts:88-97` per-recipient `getUserRoleIds` loop.** Future-
+  scaling note, not a defect at current throughput; orchestrator-acknowledged.
+
+**Process notes:**
+
+- Architecture / code / security reviewers ran **in parallel** (3 independent reviewers, not
+  3 sequential rounds).
+- The fix slice was **frozen** to the consolidated finding list — implementer did not
+  redesign or "fix" adjacent code outside the named list.
+- All six quality gates run by the orchestrator **after** the fix slice, **before** the
+  re-review dispatch:
+  - `pnpm typecheck` ✓
+  - `pnpm lint` ✓
+  - `pnpm test:unit` — **304/304** (+1: matchesAvailDomain deep-subdomain)
+  - `pnpm test:worker` — **448/448** (+7: audit-in-batch ×3, 404-no-audit, INVALID_JSON,
+    cross-role idempotency, banEmail `*` round-trip)
+  - `pnpm build` ✓
+  - `pnpm scaffold doctor` — 10/10
+
+**Re-review** (fresh security + code reviewers, did not write the fix slice):
+
+- Security: **0 findings.** B1, H1, M1 all confirmed resolved with file:line evidence.
+- Code: **0 BLOCKER / 0 HIGH / 0 MEDIUM / 1 LOW** — L1 admin-blocklist.ts:88 bare
+  `JSON.parse`. Security reviewer had stated admin-blocklist was unaffected by M1 (incorrect);
+  code reviewer correctly caught the inconsistency but under-classified the severity as LOW.
+
+**Resolution of the classification conflict:** Per `.claude/rules/agent-collaboration.md`
+§Conflict handling, the orchestrator decides and records the reasoning when two reviewers
+disagree. The L1 finding is **the same class of bug** as M1 (bare `JSON.parse` on rawBody
+with no try/catch), in **the same module** (admin), with **the same downstream consequence**
+(SyntaxError surfaces as 500 instead of 400). Re-classified LOW → MEDIUM based on the
+established precedent. Recorded as **CAP-037** rather than expanding the fix slice — the
+scope was frozen.
+
+**Deferred:**
+
+- **CAP-037** — Port INVALID_JSON guard from `admin-role-policies.ts:132-151` to
+  `admin-blocklist.ts:88`. Mechanical 5-line fix reusing the established pattern. Captured
+  by the orchestrator during closure; the next capability picker will see it on the same
+  row as CAP-035.
+
+**CAP-035 status:** In Progress → **Implemented**. Contract archived to
+`work/archive/2026-08/CAP-035/`.
+
+---
+
+## 2026-08-14 — D-CAP-021-A → CAP-035: Inbound blocklist + per-role policies
+
+Phase 1 closed with two deferred rules unaddressed: `R-INBOUND-005` (blocklist matching on
+subject/content/from) and `R-INBOUND-006` (per-role `availDomain` + `banEmail`). The deferred
+item's wording ("per-role policies" is part of the same subsystem) was the prompt to lift both
+into one capability rather than two.
+
+**Contract** at `work/active/D-CAP-021-blocklist-and-role-policies/task.md`. Highlights:
+
+- New tables `blocklist_entries` and `role_policies`, both admin-owned. The admin module already
+  owns `roles`, so the `role_policies` FK is local; the inbound-mail module does **not** own
+  the storage — it consumes via `packages/contracts` interfaces, the same shape the rest of
+  the architecture uses for cross-module reads.
+- Pattern semantics preserved from legacy facts BF-099 / BF-100: substring for blocklist;
+  exact / `@domain` / `*` for `banEmail`; `@domain` for `availDomain`; empty `availDomain`
+  means allow all. No regex in v1.
+- Evaluation order from `workflows.md` step 4–6: blocklist → mailbox resolve → per-role
+  policy. Rejection short-circuits before the `R-INBOUND-008` atomic batch, so no new
+  atomicity concern.
+- Admin CRUD surface for both tables. Idempotency wired (CAP-027). All routes gated by
+  `requirePermission` (`settings.manage` / `role.manage`).
+- Tests named after the rule IDs (`R-INBOUND-005` per kind; `R-INBOUND-006` per pattern form).
+
+**Decisions locked in the contract** (all four open questions resolved before delegation):
+
+1. The `inbound-mail → admin` dependency edge is **read-only and interface-only**: `inbound-mail`
+   consumes `BlocklistEntryReader` / `RolePolicyReader` declared in `packages/contracts`,
+   implemented in `modules/admin/*`, wired in `app-context.ts`. Mirrors the outbound provider
+   registry pattern (ADR-002). The architecture rule table was updated to add this edge and
+   record its semantics; `admin` persistence ownership row extended with `blocklist_entries`
+   and `role_policies`.
+2. `role_policies` JSON columns ship as **TEXT JSON in v1** with an inline comment naming the
+   deferred-normalization follow-up. Captured as **CAP-036 (JSON-AUDIT)** in the ledger; the
+   migration's `CAP-NNN` placeholder resolves to CAP-036.
+3. Admin routes split into `admin-blocklist.ts` + `admin-role-policies.ts` (the existing
+   `admin.ts` was already at 256 lines; the split keeps route files under the 150-line
+   guideline).
+4. Audit on reject is **OUT OF SCOPE** for v1 — `message.setReject(reason)` short-circuits
+   before any DB write and returns immediately. Rationale: rejection is a no-op from the
+   system's perspective (no state transition occurred), and the policy engine is local logic
+   rather than a state machine. A future audit pass can add a `message.reject` action with no
+   schema change beyond a new `audit_events.action` enum value.
+
+**Resolved D-CAP-021-A** — the deferred item is closed by promotion to CAP-035 (In Progress).
+
 ## 2026-08-13 — CAP-027 review round: secret redaction, race wiring, ADR-004 amendment
 
 Independent code + architecture review of CAP-027 (commit `ba35bd3`) produced two BLOCKERs, one

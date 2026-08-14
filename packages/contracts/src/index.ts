@@ -500,3 +500,30 @@ export const composeRequestSchema = z.object({
 });
 
 export type ComposeRequest = z.infer<typeof composeRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Admin: Inbound blocklist + per-role policies — D-CAP-021 / CAP-035.
+// ---------------------------------------------------------------------------
+export {
+  blocklistKindSchema,
+  createBlocklistEntryRequestSchema,
+  blocklistEntrySchema,
+  type BlocklistKind,
+  type CreateBlocklistEntryRequest,
+  type BlocklistEntry,
+  type BlocklistEntryRow,
+  type BlocklistReader,
+} from './admin/blocklist';
+
+export {
+  banEmailPatternSchema,
+  availDomainPatternSchema,
+  setRolePolicyRequestSchema,
+  rolePolicySchema,
+  type BanEmailPattern,
+  type AvailDomainPattern,
+  type SetRolePolicyRequest,
+  type RolePolicy,
+  type RolePolicyRow,
+  type RolePolicyReader,
+} from './admin/role-policy';

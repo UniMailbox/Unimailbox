@@ -45,7 +45,7 @@ entrypoints ──▶ modules ──▶ domain ◀── integrations (via contr
 | `onboarding` | `identity` |
 | `tenancy` | `identity` |
 | `messages` | `tenancy` |
-| `inbound-mail` | `tenancy`, `messages`, `email-core/*` |
+| `inbound-mail` | `tenancy`, `messages`, `email-core/*`, `admin` (read-only, via `contracts/*`) |
 | `outbound-mail` | `tenancy`, `messages`, `integrations/providers/*`, `email-core/*` |
 | `provider-sync` | `messages`, `integrations/providers/*` |
 | `attachments` | `messages`, `tenancy` |
@@ -56,6 +56,12 @@ entrypoints ──▶ modules ──▶ domain ◀── integrations (via contr
 
 Every module may additionally depend on `platform/*` and `contracts/*`. **No cycles.** An edge
 not in this table is the orchestrator's decision, not the implementer's.
+
+The `inbound-mail → admin` edge is read-only and interface-only. `inbound-mail` consumes the
+read interfaces (`BlocklistReader`, `RolePolicyReader`) declared in `packages/contracts`,
+not the admin module's symbols. The implementations are wired in `app-context.ts` (composition
+root), mirroring the outbound provider registry pattern (ADR-002). `inbound-mail` never imports
+from `modules/admin/*` directly.
 
 **Forbidden — a reviewer must block on any of these:**
 
@@ -94,7 +100,7 @@ A table has exactly one owning module. Cross-module reads go through the owner's
 | tenancy | `managed_domains`, `signatures`, `mailboxes`, `mailbox_members` |
 | messages | `messages`, `message_recipients`, `mailbox_messages`, `message_user_state`, `message_attachments`, `attachment_uploads`, `drafts` |
 | outbound | `outbound_jobs`, `provider_connections`, `encrypted_credentials`, `webhook_deliveries`, `provider_message_state`, `webhook_events` |
-| admin | `roles`, `permissions`, `role_permissions`, `user_roles`, `system_settings`, `audit_events`, `maintenance_jobs` |
+| admin | `roles`, `permissions`, `role_permissions`, `user_roles`, `system_settings`, `audit_events`, `maintenance_jobs`, `blocklist_entries`, `role_policies` |
 
 ## API conventions
 
