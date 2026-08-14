@@ -28,6 +28,7 @@ import {
 } from '../../modules/admin';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
+import { logger } from '../../platform/logger';
 import {
   sha256Hex,
   sqliteTimestamp,
@@ -85,7 +86,26 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
         });
       }
 
-      const body = createBlocklistEntryRequestSchema.parse(JSON.parse(rawBody));
+      // Security: JSON.parse throws SyntaxError on malformed bodies. Surface
+      // a stable INVALID_JSON code (400) instead of letting the raw
+      // SyntaxError reach the error middleware. zod still handles
+      // structural validation below.
+      let body: ReturnType<typeof createBlocklistEntryRequestSchema.parse>;
+      try {
+        body = createBlocklistEntryRequestSchema.parse(JSON.parse(rawBody));
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          logger.warn(
+            { event: 'blocklist.post.invalid_json', actorUserId: userId },
+          );
+          throw new DomainError({
+            code: 'INVALID_JSON',
+            message: 'Request body is not valid JSON',
+            httpStatus: 400,
+          });
+        }
+        throw error;
+      }
 
       const id = systemIds.uuid();
       const now = sqliteTimestamp(systemClock.now());

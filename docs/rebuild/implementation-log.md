@@ -10,6 +10,59 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-14 — CAP-037: port INVALID_JSON guard to admin-blocklist POST
+
+Mechanical mirror of the CAP-035 fix-slice M1 guard. Same pattern, same shape, single route
+extension. Captured as a follow-up during CAP-035 closure rather than expanding that slice.
+
+**Fix** — `apps/worker/src/http/routes/admin-blocklist.ts:89-108`:
+
+- Added `import { logger } from '../../platform/logger';` (line 31).
+- Wrapped `createBlocklistEntryRequestSchema.parse(JSON.parse(rawBody))` (was line 88) in a
+  try/catch that mirrors `admin-role-policies.ts:132-151` verbatim: `SyntaxError` →
+  `logger.warn({ event: 'blocklist.post.invalid_json', actorUserId: userId })` (no body per
+  R-SECRET-003 / `.claude/rules/security.md` §Logging) → `DomainError({ code: 'INVALID_JSON',
+  message: 'Request body is not valid JSON', httpStatus: 400 })`. Non-`SyntaxError` exceptions
+  re-throw so the zod `ZodError` path still reaches the error middleware as `400 VALIDATION_ERROR`.
+
+**Test** — `apps/worker/src/http/routes/admin-blocklist.worker.test.ts` (added inside the existing
+`describe('POST /api/v1/admin/blocklist', …)` block): one test that POSTs `{not valid json` with a
+fresh `Idempotency-Key` and asserts `response.status === 400` + `body.error.code === 'INVALID_JSON'`.
+Mirrors `admin-role-policies.worker.test.ts:672-693`.
+
+**Pre-fix behavior** (corrected per review M1): the error middleware (`http/middleware/error.ts:31-41`)
+already maps `SyntaxError → 400 VALIDATION_ERROR`, so the pre-fix bug was not "500" but "generic
+`VALIDATION_ERROR` code conflated with zod structural failures, no audit log line". The fix upgrades
+the response to a stable dedicated code with a structured warn log carrying `actorUserId`. The
+followup `VALIDATION_ERROR` path for zod failures is unchanged.
+
+**Rule of Three:** two sites (`admin-role-policies.ts` + `admin-blocklist.ts`) remain a coincidence.
+Deliberately not extracted into a helper — the helper is the CAP-031 decision.
+
+**Review round** (single code reviewer — surface is verbatim mirror of an audited pattern):
+
+- **M1** (contract + ledger text overstated pre-fix severity): original text claimed "surfaces as
+  500 instead of 400". Verified false by reading `error.ts:31-41`. Corrected both the contract
+  (`work/archive/2026-08/CAP-037/task.md`) and the ledger row to state "400 `VALIDATION_ERROR`
+  (generic) → 400 `INVALID_JSON` (specific stable code)".
+- **M2** (idempotency record not written on `INVALID_JSON`): intentional per ADR-004 — malformed
+  body has no usable `requestHash`; storing and replaying would 409 a corrected retry. Same gap
+  exists at `admin-role-policies.ts:132-151`. Deferred to **CAP-031** as **D-CAP-037-A**.
+- **L1** (test header drops "Security M1" provenance): contract-prescribed, no action.
+- **L2** (contract cited `:128-151` for the guard; actual guard is `:132-151`): corrected in
+  contract.
+
+**Status:** ACCEPT WITH FIXES. Ship after M1 + L2 (applied). M2 promoted to ledger; L1 follows.
+
+**Gates** (orchestrator-run, post-fix, post-review): `pnpm typecheck` ✓, `pnpm lint` ✓,
+`pnpm test:unit` 304/304, `pnpm test:worker` 449/449 (+1), `pnpm build` ✓,
+`pnpm scaffold doctor` 10/10.
+
+**Verified status** requires the operator's Phase 1 preview deploy with an
+`Idempotency-Key`-keyed retry of the malformed-body case.
+
+---
+
 ## 2026-08-14 — CAP-035 fix slice: review round + resolutions + re-review
 
 Following the initial implementation (entry below), three independent reviewers ran in parallel

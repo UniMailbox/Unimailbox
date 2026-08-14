@@ -420,6 +420,26 @@ describe('POST /api/v1/admin/blocklist', () => {
       .first<{ response_status: number }>();
     expect(idem?.response_status).toBe(201);
   });
+
+  // -----------------------------------------------------------------------
+  // CAP-037: malformed JSON must surface INVALID_JSON (400), not a raw
+  // SyntaxError. Mirrors admin-role-policies.ts:128-151.
+  // -----------------------------------------------------------------------
+  it('returns 400 INVALID_JSON when request body is not valid JSON', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/admin/blocklist', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'blocklist-invalid-json-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
 });
 
 // ---------------------------------------------------------------------------
