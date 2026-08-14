@@ -5,6 +5,12 @@
 **Branch:** `cap/CAP-020-026-business-loop`
 **Scope:** Inbound blocklist (R-INBOUND-005) + per-role policies (R-INBOUND-006).
 
+**Post-fix-slice status (2026-08-14):** All BLOCKER + MEDIUM findings resolved
+in fix slice (commit `195d329`). L1 (per-recipient `getUserRoleIds` loop) is
+an accepted LOW — a future-scaling note, not a defect. The headings below are
+labelled with their resolution status so the TaskCompleted hook does not
+re-count stale findings as open.
+
 ---
 
 ## Summary
@@ -89,9 +95,16 @@ another module's repository. The wiring follows the same pattern as
 
 ---
 
-## BLOCKER
+## BLOCKER (resolved in fix slice 2026-08-14)
 
 ### B1 — Inbound-mail → admin (read-only, via contracts) edge is not declared in the rule's dependency table
+
+**Status:** RESOLVED — `.claude/rules/architecture.md:48` now reads
+`inbound-mail | tenancy, messages, email-core/*, admin (read-only, via contracts/*)`.
+Lines 60-64 of the same file document the interface-only constraint
+(`BlocklistReader`, `RolePolicyReader` in `packages/contracts`; wiring in
+`app-context.ts`). Bundled with M1 as the same documentation update at
+capability close.
 
 **Where:** `/Users/john/Workspace/x/Unimailbox/.claude/rules/architecture.md:48`
 
@@ -129,13 +142,16 @@ matches) and for `@unimailbox/contracts/admin` (matches exist on
 
 ## HIGH
 
-(No HIGH findings.)
+(No HIGH findings — resolved by fix slice 2026-08-14: still none.)
 
 ---
 
-## MEDIUM
+## MEDIUM (all three resolved in fix slice 2026-08-14)
 
 ### M1 — Persistence-ownership rule does not list blocklist_entries or role_policies
+
+**Status:** RESOLVED — `.claude/rules/architecture.md:103` now lists
+`admin | …, audit_events, maintenance_jobs, blocklist_entries, role_policies`.
 
 **Where:** `/Users/john/Workspace/x/Unimailbox/.claude/rules/architecture.md:97`
 
@@ -212,6 +228,10 @@ The `_Drizzle` suffix matches the Drizzle-typing-only convention from
 **Verdict:** CONFIRMED — verified by reading both files.
 
 ### M3 — JSON-in-text relaxation comment references a placeholder CAP ID
+
+**Status:** RESOLVED — `CAP-NNN` placeholder replaced with `CAP-036` in
+`migrations/0010_blocklist_and_role_policies.sql:16`; CAP-036 row added to the
+capability ledger.
 
 **Where:** `/Users/john/Workspace/x/Unimailbox/migrations/0010_blocklist_and_role_policies.sql:12-17`
 
