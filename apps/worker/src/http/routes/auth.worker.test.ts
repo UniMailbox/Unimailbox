@@ -440,6 +440,27 @@ describe('POST /api/v1/auth/register', () => {
       expect(response.status).toBe(400);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // CAP-031 / R-INPUT-002: malformed JSON returns 400 INVALID_JSON
+  // (the local try/catch in /api/v1/auth/* — D-CAP-031-C — not the helper,
+  // because the helper would force schema validation before the replay
+  // lookup and break Fix 9 from CAP-027).
+  // -----------------------------------------------------------------------
+  it('returns 400 INVALID_JSON when body is malformed JSON', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'auth-register-invalid-json-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
 });
 
 describe('POST /api/v1/auth/login', () => {
@@ -627,6 +648,23 @@ describe('POST /api/v1/auth/login', () => {
       expect(response.status).toBe(400);
     });
   });
+
+  // CAP-031 / R-INPUT-002 / D-CAP-031-C: /login uses the local try/catch
+  // (not the helper), but the surface is identical: 400 INVALID_JSON.
+  it('returns 400 INVALID_JSON when body is malformed JSON', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'auth-login-invalid-json-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
 });
 
 describe('POST /api/v1/auth/refresh', () => {
@@ -721,6 +759,23 @@ describe('POST /api/v1/auth/refresh', () => {
 
       expect(response.status).toBe(400);
     });
+  });
+
+  // CAP-031 / R-INPUT-002 / D-CAP-031-C: /refresh uses the local try/catch
+  // for the same reason as /register and /login.
+  it('returns 400 INVALID_JSON when body is malformed JSON', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'auth-refresh-invalid-json-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
   });
 });
 
@@ -921,6 +976,49 @@ describe('POST /api/v1/auth/register — idempotency', () => {
     expect(secondResponse.status).toBe(409);
     const body = await secondResponse.json();
     expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+
+  // -----------------------------------------------------------------------
+  // CAP-031 / R-INPUT-002 / AC11: a malformed body must NOT persist an
+  // idempotency_records row — the helper throws INVALID_JSON before the
+  // D1 batch, so a corrected retry with the same Idempotency-Key succeeds.
+  // -----------------------------------------------------------------------
+  it('allows corrected retry with same Idempotency-Key after malformed body', async () => {
+    const code = await createRegistrationKey({ maxUses: 1 });
+    const idempotencyKey = 'auth-retry-after-invalid-' + crypto.randomUUID();
+
+    // First attempt: malformed JSON — must return 400 INVALID_JSON and
+    // must NOT write an idempotency_records row.
+    const malformedResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(malformedResponse.status).toBe(400);
+    const malformedBody = await malformedResponse.json();
+    expect(malformedBody.error.code).toBe('INVALID_JSON');
+
+    // Second attempt: valid body, same Idempotency-Key — must succeed.
+    // If the first attempt had written a record with the malformed body
+    // hash, this would 409 IDEMPOTENCY_KEY_REUSED.
+    const validResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        email: 'retry@example.com',
+        password: 'securePassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(validResponse.status).toBe(200);
   });
 });
 

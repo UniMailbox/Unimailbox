@@ -10,6 +10,72 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-14 — CAP-031: request validation + 1 MB body limit on all `/api/v1/*`
+
+Codified the long-standing gap that `JSON.parse(rawBody)` was duplicated at every route, with no
+single point of error shape (`VALIDATION_ERROR` only, never the dedicated `INVALID_JSON` that
+CAP-035 introduced), and no single place to enforce the 1 MB body cap from R-API-005. The slice
+also resolves **D-CAP-037-A** (CAP-037's own follow-up: "codify the no-record rule"), making
+CAP-031 the natural owner of the `INVALID_JSON` → `idempotency_records` gap.
+
+**New helpers** — `apps/worker/src/http/middleware/`:
+
+- `parse-json-body.ts` — file header cites **ADR-004 + D-CAP-037-A** so the no-record rule
+  travels with the helper, not with every call site. `parseJsonBody(rawBody, schema, ctx)`
+  parses, validates via zod, and on `SyntaxError` emits a structured `logger.warn({ event,
+  actorUserId })` (never the body — R-LOG-001 / R-SECRET-003) and throws
+  `DomainError({ code: 'INVALID_JSON', httpStatus: 400 })`. `ZodError` is intentionally NOT
+  caught here (D-CAP-031-B): structural failures continue to surface as `400 VALIDATION_ERROR`
+  via the error middleware, preserving the distinct error code for clients.
+- `body-size.ts` — `enforceBodySize` middleware uses `c.req.raw` byte-length check via
+  `Content-Length` header BEFORE any body read so oversized payloads never enter the helper
+  pipeline. Wired in `router.ts` AFTER `requestId` but BEFORE authn/authz/idempotency so
+  rejected requests still carry a `requestId` for the audit log line. Webhook routes are
+  exempt — see D-CAP-031-A below.
+
+**Refactors** — 12 route sites updated:
+
+- 9 sites call `parseJsonBody`: `compose.ts` (compose), messages-send, messages-read,
+  messages-list, `mailboxes.ts` (mailboxes-create), `admin-blocklist.ts` POST, `admin-role-policies.ts`
+  PUT, `admin.ts` invite-codes, `setup.ts` `create`/`invite`/`disable-invite`/`claim` (4 sites in
+  setup.ts). Each cites **D-CAP-037-A** in an inline comment explaining why no
+  `idempotency_records` row is written on `INVALID_JSON`.
+- 3 sites in `auth.ts` keep a local try/catch (D-CAP-031-C): Fix 9 / CAP-027 requires
+  extracting the `actorId` field from `rawBodyJson` BEFORE schema parse AND BEFORE replay
+  lookup, so the canonical message ID can be used as the provider idempotency key.
+
+**Defense in depth** — `apps/worker/src/http/middleware/error.ts:31-41` retains its
+`SyntaxError → 400 VALIDATION_ERROR` branch (D-CAP-031-D). With every route now going through
+`parseJsonBody` (or a local try/catch in /api/v1/auth/*), this branch should be unreachable in
+normal flow. Kept so a future route that forgets the helper still returns `400` rather than
+`500`. R-INPUT-002 keeps the stable code (`VALIDATION_ERROR`) here only as a last-resort shape —
+the canonical surface for malformed bodies is `INVALID_JSON`.
+
+**Tests** — `parse-json-body.test.ts` + `body-size.test.ts` (unit, 100% line coverage of the
+two helpers), plus 12 AC10 + 2 AC11 cases in `compose.worker.test.ts` covering malformed body
+(round-trip with same Idempotency-Key succeeds), `VALIDATION_ERROR` still served on zod
+failures, and `BODY_TOO_LARGE` (413) on 1 MB + 1 byte.
+
+**Citation drift caught at orchestrator review** — the first slice used `D-CAP-031-D` in
+helper-site comments to mean "no `idempotency_records` row", but `D-CAP-031-D` is actually the
+error.ts defense-in-depth decision. The rule the comments describe is `D-CAP-037-A`. Fixed
+mechanically across 10 comments in 6 files: `admin-blocklist.ts:89`, `admin-role-policies.ts:128`,
+`admin.ts:136`, `mailboxes.ts:95`, `setup.ts` ×4 (the `/claim` site had different comment wording
+and was missed by the first `replace_all` pass — caught by post-edit grep, fixed by targeted
+edit), `compose.worker.test.ts:806`. `error.ts:32` correctly retains `D-CAP-031-D` (the canonical
+home). All gates re-verified post-fix (test:worker 461/461, exit 0).
+
+**Deferred** — **D-CAP-031-A**: webhook routes (`/api/v1/webhooks/:providerKey/:connectionId`)
+exempt from `enforceBodySize`. Provider payloads routinely exceed 1 MB (raw RFC 5322 with
+attachments, multi-MB JSON event streams from Brevo/Resend). The right enforcement point is
+inside `integrations/providers/*`, where per-provider size limits are published and known.
+Captured in ledger §Deferred items so the work has an owner.
+
+**Gates** (orchestrator-run, post-citation-drift-fix): typecheck ✓, lint ✓, test:unit 313/313,
+test:worker 461/461, build ✓, scaffold doctor 10/10.
+
+---
+
 ## 2026-08-14 — CAP-037: port INVALID_JSON guard to admin-blocklist POST
 
 Mechanical mirror of the CAP-035 fix-slice M1 guard. Same pattern, same shape, single route

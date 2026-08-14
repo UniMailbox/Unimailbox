@@ -648,6 +648,29 @@ describe('POST /api/v1/mailboxes', () => {
       .first<{ count: number }>();
     expect(mailboxCount?.count).toBe(0);
   });
+
+  // -----------------------------------------------------------------------
+  // CAP-031 / R-INPUT-002: malformed JSON returns 400 INVALID_JSON
+  // (stable code from parseJsonBody), not a raw SyntaxError or 500.
+  // -----------------------------------------------------------------------
+  it('returns 400 INVALID_JSON when request body is not valid JSON', async () => {
+    const userId = await createUserWithRole('member');
+    const accessToken = await createSession(userId);
+
+    const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'Idempotency-Key': 'mailboxes-invalid-json-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
 });
 
 describe('GET /api/v1/mailboxes', () => {

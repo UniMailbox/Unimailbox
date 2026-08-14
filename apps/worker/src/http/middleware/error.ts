@@ -27,7 +27,16 @@ export const errorMiddleware: ErrorHandler<AppEnv> = (err, _c) => {
     );
   }
 
-  // Handle SyntaxError (JSON parsing failures from c.req.json())
+  // Handle SyntaxError (JSON parsing failures).
+  //
+  // D-CAP-031-D (defense in depth, post-CAP-031): every `/api/v1/*` route
+  // that calls `JSON.parse(rawBody)` now goes through `parseJsonBody`
+  // (or a local try/catch in /api/v1/auth/*) which converts SyntaxError
+  // into a typed `INVALID_JSON` DomainError before it reaches this branch.
+  // We keep this fallback so a future route that forgets to use the
+  // helper still returns `400` rather than `500`. R-INPUT-002 keeps the
+  // stable code (`VALIDATION_ERROR`) here only as a last-resort shape —
+  // the canonical surface for malformed bodies is `INVALID_JSON`.
   if (err instanceof SyntaxError) {
     return Response.json(
       {

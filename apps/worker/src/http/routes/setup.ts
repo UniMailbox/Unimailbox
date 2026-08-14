@@ -37,6 +37,7 @@ import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
 import { setupSession } from '../middleware/setup-session';
 import { requireIdempotencyKey } from '../middleware/idempotency';
+import { parseJsonBody } from '../middleware/parse-json-body';
 import { brevoAdapter } from '../../integrations/providers/brevo';
 import {
   tryReplayIdempotency,
@@ -83,7 +84,12 @@ export function setupRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
-    const body = setupClaimRequestSchema.parse(JSON.parse(rawBody));
+    // R-INPUT-002 / D-CAP-037-A: malformed JSON surfaces 400 INVALID_JSON
+    // before any state change. /claim has no authenticated userId, so
+    // actorUserId is omitted from the warn log.
+    const body = parseJsonBody(rawBody, setupClaimRequestSchema, {
+      event: 'setup.claim.invalid_json',
+    });
 
     // Actor for /claim is sha256 of the provided token (R-SECRET-003)
     const actorId = await opaqueActorId('setup-session', body.token);
@@ -228,7 +234,12 @@ export function setupRoutes(): Hono<AppEnv> {
     );
     if (replay) return replay;
 
-    const body = setupAdministratorRequestSchema.parse(JSON.parse(rawBody));
+    // R-INPUT-002 / D-CAP-037-A: malformed JSON surfaces 400 INVALID_JSON
+    // before any state change. /setup has no authenticated userId, so
+    // actorUserId is omitted from the warn log.
+    const body = parseJsonBody(rawBody, setupAdministratorRequestSchema, {
+      event: 'setup.administrator.invalid_json',
+    });
     const result = await createAdministrator(
       {
         db: c.env.DB,
@@ -284,7 +295,12 @@ export function setupRoutes(): Hono<AppEnv> {
     );
     if (replay) return replay;
 
-    const body = setupDomainRequestSchema.parse(JSON.parse(rawBody));
+    // R-INPUT-002 / D-CAP-037-A: malformed JSON surfaces 400 INVALID_JSON
+    // before any state change. /setup has no authenticated userId, so
+    // actorUserId is omitted from the warn log.
+    const body = parseJsonBody(rawBody, setupDomainRequestSchema, {
+      event: 'setup.domain.invalid_json',
+    });
     const result = await createDomainStep(
       {
         db: c.env.DB,
@@ -539,7 +555,12 @@ export function setupRoutes(): Hono<AppEnv> {
     );
     if (replay) return replay;
 
-    const body = setupBrevoRequestSchema.parse(JSON.parse(rawBody));
+    // R-INPUT-002 / D-CAP-037-A: malformed JSON surfaces 400 INVALID_JSON
+    // before any state change. /setup has no authenticated userId, so
+    // actorUserId is omitted from the warn log.
+    const body = parseJsonBody(rawBody, setupBrevoRequestSchema, {
+      event: 'setup.brevo.invalid_json',
+    });
     const encryptionKey = await readSecret(c.env.CREDENTIAL_ENCRYPTION_KEY);
     const result = await setupBrevo(
       {

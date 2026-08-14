@@ -30,6 +30,7 @@ import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { verifyPassword, hashPassword } from '../../platform/crypto';
 import { DomainError } from '../../platform/errors';
+import { logger } from '../../platform/logger';
 import type { AppEnv } from '../../platform/env';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import {
@@ -94,9 +95,29 @@ export function authRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
-    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays)
-    const rawBodyJson = JSON.parse(rawBody);
-    const code = typeof rawBodyJson?.code === 'string' ? rawBodyJson.code : '';
+    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays).
+    // D-CAP-031-C: parseJsonBody is NOT used here — the helper would force
+    // schema validation BEFORE replay lookup, breaking Fix 9's order. The
+    // local try/catch mirrors parseJsonBody's INVALID_JSON handling.
+    let rawBodyJson: unknown;
+    try {
+      rawBodyJson = JSON.parse(rawBody);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        // R-LOG-001: never log the body bytes. /register has no
+        // authenticated userId, so actorUserId is omitted (TS2379).
+        logger.warn({ event: 'auth.register.invalid_json' });
+        throw new DomainError({
+          code: 'INVALID_JSON',
+          message: 'Request body is not valid JSON',
+          httpStatus: 400,
+        });
+      }
+      throw error;
+    }
+    const code = typeof (rawBodyJson as { code?: unknown })?.code === 'string'
+      ? (rawBodyJson as { code: string }).code
+      : '';
     if (!code) {
       throw new DomainError({
         code: 'INVALID_REQUEST',
@@ -280,9 +301,28 @@ export function authRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
-    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays)
-    const rawBodyJson = JSON.parse(rawBody);
-    const email = typeof rawBodyJson?.email === 'string' ? rawBodyJson.email : '';
+    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays).
+    // D-CAP-031-C: see /register — local try/catch is required so the helper's
+    // schema validation does not run before the replay lookup.
+    let rawBodyJson: unknown;
+    try {
+      rawBodyJson = JSON.parse(rawBody);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        // R-LOG-001: never log the body bytes. /login has no
+        // authenticated userId, so actorUserId is omitted (TS2379).
+        logger.warn({ event: 'auth.login.invalid_json' });
+        throw new DomainError({
+          code: 'INVALID_JSON',
+          message: 'Request body is not valid JSON',
+          httpStatus: 400,
+        });
+      }
+      throw error;
+    }
+    const email = typeof (rawBodyJson as { email?: unknown })?.email === 'string'
+      ? (rawBodyJson as { email: string }).email
+      : '';
     if (!email) {
       throw new DomainError({
         code: 'INVALID_REQUEST',
@@ -463,9 +503,28 @@ export function authRoutes(): Hono<AppEnv> {
     const rawBody = await c.req.text();
     const requestHash = await sha256Hex(rawBody);
 
-    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays)
-    const rawBodyJson = JSON.parse(rawBody);
-    const refreshToken = typeof rawBodyJson?.refreshToken === 'string' ? rawBodyJson.refreshToken : '';
+    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays).
+    // D-CAP-031-C: see /register — local try/catch is required so the helper's
+    // schema validation does not run before the replay lookup.
+    let rawBodyJson: unknown;
+    try {
+      rawBodyJson = JSON.parse(rawBody);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        // R-LOG-001: never log the body bytes. /refresh has no
+        // authenticated userId, so actorUserId is omitted (TS2379).
+        logger.warn({ event: 'auth.refresh.invalid_json' });
+        throw new DomainError({
+          code: 'INVALID_JSON',
+          message: 'Request body is not valid JSON',
+          httpStatus: 400,
+        });
+      }
+      throw error;
+    }
+    const refreshToken = typeof (rawBodyJson as { refreshToken?: unknown })?.refreshToken === 'string'
+      ? (rawBodyJson as { refreshToken: string }).refreshToken
+      : '';
     if (!refreshToken) {
       throw new DomainError({
         code: 'INVALID_REQUEST',

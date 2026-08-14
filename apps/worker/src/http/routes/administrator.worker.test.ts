@@ -563,6 +563,27 @@ describe('POST /api/v1/setup/administrator', () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // CAP-031 / R-INPUT-002: malformed JSON returns 400 INVALID_JSON via
+  // parseJsonBody. /setup/* has no authenticated userId, so actorUserId
+  // is omitted from the warn log (TS2379).
+  // -----------------------------------------------------------------------
+  it('returns 400 INVALID_JSON when body is malformed JSON', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'setup-administrator-invalid-json-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
+
   describe('minimum and maximum password lengths', () => {
     beforeEach(async () => {
       await resetAndMigrate();

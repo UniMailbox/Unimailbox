@@ -356,6 +356,26 @@ describe('POST /api/v1/admin/invite-codes', () => {
       expect(response.status).toBe(400);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // CAP-031 / R-INPUT-002: malformed JSON returns 400 INVALID_JSON
+  // (stable code from parseJsonBody), not a raw SyntaxError or 500.
+  // -----------------------------------------------------------------------
+  it('returns 400 INVALID_JSON when request body is not valid JSON', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'invite-codes-invalid-json-' + crypto.randomUUID(),
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
 });
 
 describe('GET /api/v1/admin/invite-codes', () => {

@@ -18,6 +18,7 @@ import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+import { parseJsonBody } from '../middleware/parse-json-body';
 import {
   sha256Hex,
   sqliteTimestamp,
@@ -132,7 +133,13 @@ export function adminRoutes(): Hono<AppEnv> {
           .run();
       }
 
-      const body = createInviteCodeRequestSchema.parse(JSON.parse(rawBody));
+      // R-INPUT-002 / D-CAP-037-A: helper throws INVALID_JSON before the
+      // D1 batch, so no idempotency_records row is written on malformed
+      // bodies (a corrected retry with the same Idempotency-Key succeeds).
+      const body = parseJsonBody(rawBody, createInviteCodeRequestSchema, {
+        event: 'admin.invite_codes.invalid_json',
+        actorUserId: userId,
+      });
 
       // Generate the code and its hash
       const code = generateInviteCode();

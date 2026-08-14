@@ -28,7 +28,6 @@ import {
 } from '../../modules/admin';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
-import { logger } from '../../platform/logger';
 import {
   sha256Hex,
   sqliteTimestamp,
@@ -39,6 +38,7 @@ import {
 } from '../../platform/idempotency';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+import { parseJsonBody } from '../middleware/parse-json-body';
 
 const OPERATION_CREATE = 'POST /api/v1/admin/blocklist';
 
@@ -86,26 +86,13 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
         });
       }
 
-      // Security: JSON.parse throws SyntaxError on malformed bodies. Surface
-      // a stable INVALID_JSON code (400) instead of letting the raw
-      // SyntaxError reach the error middleware. zod still handles
-      // structural validation below.
-      let body: ReturnType<typeof createBlocklistEntryRequestSchema.parse>;
-      try {
-        body = createBlocklistEntryRequestSchema.parse(JSON.parse(rawBody));
-      } catch (error) {
-        if (error instanceof SyntaxError) {
-          logger.warn(
-            { event: 'blocklist.post.invalid_json', actorUserId: userId },
-          );
-          throw new DomainError({
-            code: 'INVALID_JSON',
-            message: 'Request body is not valid JSON',
-            httpStatus: 400,
-          });
-        }
-        throw error;
-      }
+      // R-INPUT-002 / D-CAP-037-A: helper throws INVALID_JSON before the
+      // D1 batch, so no idempotency_records row is written on malformed
+      // bodies (a corrected retry with the same Idempotency-Key succeeds).
+      const body = parseJsonBody(rawBody, createBlocklistEntryRequestSchema, {
+        event: 'blocklist.post.invalid_json',
+        actorUserId: userId,
+      });
 
       const id = systemIds.uuid();
       const now = sqliteTimestamp(systemClock.now());

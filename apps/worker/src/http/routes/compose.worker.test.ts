@@ -772,4 +772,85 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
       .first<{ count: number }>();
     expect(messageCount?.count).toBe(0);
   });
+
+  // -----------------------------------------------------------------------
+  // CAP-031 / R-INPUT-002: malformed JSON returns 400 INVALID_JSON
+  // (stable code from parseJsonBody), not a raw SyntaxError or 500.
+  // -----------------------------------------------------------------------
+  it('returns 400 INVALID_JSON when request body is not valid JSON', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await createActiveProviderConnection();
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: '{not valid json',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': 'compose-invalid-json-' + crypto.randomUUID(),
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
+
+  // -----------------------------------------------------------------------
+  // CAP-031 / D-CAP-037-A / AC11: a corrected retry with the same
+  // Idempotency-Key after an INVALID_JSON rejection succeeds — the helper
+  // throws BEFORE the D1 batch, so no idempotency_records row was written
+  // and the retry is not flagged as IDEMPOTENCY_KEY_REUSED.
+  // -----------------------------------------------------------------------
+  it('after INVALID_JSON, a corrected retry with the same Idempotency-Key succeeds', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await createActiveProviderConnection();
+
+    const idempotencyKey = 'compose-retry-after-invalid-json-' + crypto.randomUUID();
+
+    // First request: malformed body. Returns 400 INVALID_JSON.
+    const malformedResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: '{not valid json',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+    expect(malformedResponse.status).toBe(400);
+
+    // Second request: same Idempotency-Key, valid body. Must succeed — NOT 409.
+    const validBody = JSON.stringify({
+      to: [{ address: 'recipient@example.com' }],
+      subject: 'retry after malformed',
+    });
+    const retryResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,
+      {
+        method: 'POST',
+        body: validBody,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    );
+    expect(retryResponse.status).toBe(202);
+    const retryBody = await retryResponse.json();
+    expect(retryBody.data.status).toBe('queued');
+  });
 });

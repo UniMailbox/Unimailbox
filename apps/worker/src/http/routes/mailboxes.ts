@@ -34,6 +34,7 @@ import {
   replayAfterRace,
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
+import { parseJsonBody } from '../middleware/parse-json-body';
 
 const CREATE_MAILBOX_OPERATION = 'POST /api/v1/mailboxes';
 
@@ -91,7 +92,13 @@ export function mailboxRoutes(): Hono<AppEnv> {
       return replayResponse(existing);
     }
 
-    const body = createMailboxRequestSchema.parse(JSON.parse(rawBody));
+    // R-INPUT-002 / D-CAP-037-A: helper throws INVALID_JSON before the
+    // D1 batch, so no idempotency_records row is written on malformed
+    // bodies (a corrected retry with the same Idempotency-Key succeeds).
+    const body = parseJsonBody(rawBody, createMailboxRequestSchema, {
+      event: 'mailboxes.create.invalid_json',
+      actorUserId: userId,
+    });
 
     // Verify the domain exists
     const domain = await c.env.DB

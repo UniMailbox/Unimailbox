@@ -24,7 +24,6 @@ import {
 } from '../../modules/admin';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
-import { logger } from '../../platform/logger';
 import {
   sha256Hex,
   sqliteTimestamp,
@@ -34,6 +33,7 @@ import {
 } from '../../platform/idempotency';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+import { parseJsonBody } from '../middleware/parse-json-body';
 
 export function adminRolePolicyRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -125,30 +125,13 @@ export function adminRolePolicyRoutes(): Hono<AppEnv> {
         });
       }
 
-      // Security M1: JSON.parse throws SyntaxError on malformed bodies.
-      // Surface a stable INVALID_JSON code (400) instead of letting the
-      // raw SyntaxError reach the error middleware. zod still handles
-      // structural validation below.
-      let body: ReturnType<typeof setRolePolicyRequestSchema.parse>;
-      try {
-        body = setRolePolicyRequestSchema.parse(JSON.parse(rawBody));
-      } catch (error) {
-        if (error instanceof SyntaxError) {
-          logger.warn(
-            {
-              event: 'role_policy.put.invalid_json',
-              actorUserId: userId,
-            },
-            { roleId },
-          );
-          throw new DomainError({
-            code: 'INVALID_JSON',
-            message: 'Request body is not valid JSON',
-            httpStatus: 400,
-          });
-        }
-        throw error;
-      }
+      // R-INPUT-002 / D-CAP-037-A: helper throws INVALID_JSON before the
+      // D1 batch, so no idempotency_records row is written on malformed
+      // bodies (a corrected retry with the same Idempotency-Key succeeds).
+      const body = parseJsonBody(rawBody, setRolePolicyRequestSchema, {
+        event: 'role_policy.put.invalid_json',
+        actorUserId: userId,
+      });
 
       const now = sqliteTimestamp(systemClock.now());
 

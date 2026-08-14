@@ -175,6 +175,26 @@ describe('POST /api/v1/setup/claim', () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // CAP-031 / R-INPUT-002: malformed JSON returns 400 INVALID_JSON
+  // via parseJsonBody (R-INPUT-002). /setup/claim has no authenticated
+  // userId, so actorUserId is omitted from the warn log (TS2379).
+  // -----------------------------------------------------------------------
+  it('returns 400 INVALID_JSON when body is malformed JSON', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'setup-claim-invalid-json-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_JSON');
+  });
+
   describe('already complete', () => {
     beforeEach(async () => {
       await resetAndMigrate();

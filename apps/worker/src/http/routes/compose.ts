@@ -43,6 +43,7 @@ import {
   replayAfterRace,
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
+import { parseJsonBody } from '../middleware/parse-json-body';
 
 const SEND_OPERATION =
   'POST /api/v1/mailboxes/:mailboxId/messages/send';
@@ -120,9 +121,13 @@ export function composeRoutes(): Hono<AppEnv> {
         return replayResponse(existing);
       }
 
-      // Parse the body with the closed contract schema. composeRequestSchema
-      // applies defaults for cc / subject / htmlBody / textBody.
-      const body = composeRequestSchema.parse(JSON.parse(rawBody));
+      // Parse + validate via helper. R-INPUT-002: malformed JSON returns
+      // 400 INVALID_JSON before the D1 batch lands (no idempotency record,
+      // so a corrected retry with the same Idempotency-Key succeeds).
+      const body = parseJsonBody(rawBody, composeRequestSchema, {
+        event: 'messages.send.invalid_json',
+        actorUserId: userId,
+      });
 
       // Look up the mailbox so we can construct the from address and verify
       // it exists. findMailboxById returns the full localPart@domain.name.
