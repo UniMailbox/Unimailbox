@@ -28,7 +28,12 @@ import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
 import { processOutboundJob } from './process-outbound-job';
 import { claimOutboundJob } from './job-repository';
 import { reclaimStaleJobs } from './reclaim-stale-jobs';
-import { parseProviderKey, type OutboundProviderAdapter } from '@unimailbox/contracts';
+import {
+  parseProviderKey,
+  RetryableProviderError,
+  TerminalProviderError,
+  type OutboundProviderAdapter,
+} from '@unimailbox/contracts';
 
 // The test wrangler.test.jsonc pins CREDENTIAL_ENCRYPTION_KEY to 64 'a's.
 const ENCRYPTION_KEY = 'a'.repeat(64);
@@ -56,6 +61,7 @@ function makeMockAdapter(
 interface SeedOptions {
   readonly status?: 'queued' | 'sending' | 'sent' | 'failed';
   readonly attempts?: number;
+  readonly maxAttempts?: number;
   readonly lockedAt?: string | null;
   readonly lockedBy?: string | null;
 }
@@ -90,8 +96,8 @@ async function seedJob(opts: SeedOptions = {}): Promise<{ jobId: string; message
     ).bind(connectionId, credentialId, now, now),
     env.DB.prepare(
       `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, locked_at, locked_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 3, ?, ?, ?, ?)`,
-    ).bind(jobId, messageId, connectionId, opts.status ?? 'queued', opts.attempts ?? 0, opts.lockedAt ?? null, opts.lockedBy ?? null, now, now),
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(jobId, messageId, connectionId, opts.status ?? 'queued', opts.attempts ?? 0, opts.maxAttempts ?? 3, opts.lockedAt ?? null, opts.lockedBy ?? null, now, now),
   ]);
 
   return { jobId, messageId };
@@ -315,6 +321,143 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
     expect(job?.locked_by).toBeNull();
   });
 
+  it('B4: TerminalProviderError (4xx) marks the job failed on the first attempt, not after burning the budget (D-CAP-028-A)', async () => {
+    const { jobId } = await seedJob({ attempts: 0 });
+    const adapter = makeMockAdapter(async () => {
+      throw new TerminalProviderError({
+        message: 'Brevo send failed: 400 {"code":"invalid_parameter"}',
+        httpStatus: 400,
+      });
+    });
+
+    // No try/catch: a terminal failure must resolve (job acked, not retried).
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      adapter,
+      lockedBy: 'worker-a',
+    });
+
+    const job = await fetchJob(jobId);
+    expect(job?.status).toBe('failed');
+    // B4 / D-CAP-028-A: the attempts budget is bypassed. A 4xx is terminal
+    // immediately — retrying identical payload would never succeed.
+    expect(job?.attempts).toBe(0);
+    // The error code is the stable provider-error code; the message records
+    // the underlying 4xx for the operator's audit trail.
+    expect(job?.error_code).toBe('TERMINAL_PROVIDER_ERROR');
+    expect(job?.error_message).toMatch(/400/);
+    expect(job?.locked_by).toBeNull();
+  });
+
+  it('B5: RetryableProviderError (5xx) routes through the attempts budget', async () => {
+    const { jobId } = await seedJob({ attempts: 0 });
+    const adapter = makeMockAdapter(async () => {
+      throw new RetryableProviderError({
+        message: 'Brevo send failed: 503',
+        httpStatus: 503,
+      });
+    });
+
+    let caught: unknown;
+    try {
+      await processOutboundJob(jobId, {
+        db: env.DB,
+        encryptionKey: ENCRYPTION_KEY,
+        adapter,
+        lockedBy: 'worker-a',
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    // Rethrown for queue retry.
+    expect(caught).toBeInstanceOf(RetryableProviderError);
+    const job = await fetchJob(jobId);
+    expect(job?.status).toBe('queued');
+    expect(job?.attempts).toBe(1);
+    expect(job?.error_code).toBe('SEND_FAILED'); // generic retryable code
+    expect(job?.locked_by).toBeNull();
+  });
+
+  it('B6: TerminalProviderError wins over the attempts budget even on a high-attempts row', async () => {
+    const { jobId } = await seedJob({ attempts: 2 });
+    const adapter = makeMockAdapter(async () => {
+      throw new TerminalProviderError({
+        message: 'Brevo send failed: 401 unauthorized',
+        httpStatus: 401,
+      });
+    });
+
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      adapter,
+      lockedBy: 'worker-a',
+    });
+
+    const job = await fetchJob(jobId);
+    // 401 must NOT burn the remaining attempt. Terminal takes precedence.
+    expect(job?.status).toBe('failed');
+    expect(job?.attempts).toBe(2);
+    expect(job?.error_code).toBe('TERMINAL_PROVIDER_ERROR');
+  });
+
+  // CAP-029 QA M5 review-triage: the previous B6 only covered a typed
+  // TerminalProviderError. An SDK error that is neither Retryable nor
+  // TerminalProviderError (e.g. a bare Error from fetch's TypeError when
+  // DNS resolution fails AFTER the typed-error paths) must still take the
+  // existing `SEND_FAILED` fallback — retries up to the budget, then
+  // terminal. This is the "unknown error" branch in the steps-3–9 catch.
+  it('B6b: an untyped SDK error (raw Error) routes through the SEND_FAILED fallback path', async () => {
+    const { jobId } = await seedJob({ attempts: 0, maxAttempts: 2 });
+    const adapter = makeMockAdapter(async () => {
+      // A bare Error — NOT a RetryableProviderError, NOT a TerminalProviderError.
+      // Simulates a SDK or runtime error that bypasses the typed taxonomy.
+      throw new Error('upstream SDK blew up: ECONNRESET in keep-alive');
+    });
+
+    let caught: unknown;
+    try {
+      await processOutboundJob(jobId, {
+        db: env.DB,
+        encryptionKey: ENCRYPTION_KEY,
+        adapter,
+        lockedBy: 'worker-a',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    // Fallback is retryable: the consumer rethrows so the queue can retry.
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toMatch(/ECONNRESET/);
+
+    const job = await fetchJob(jobId);
+    expect(job?.status).toBe('queued');
+    expect(job?.attempts).toBe(1);
+    // SEND_FAILED is the closed-catalog code for non-typed failures.
+    expect(job?.error_code).toBe('SEND_FAILED');
+  });
+
+  it('B6c: an untyped SDK error on the last attempt goes terminal with SEND_FAILED', async () => {
+    const { jobId } = await seedJob({ attempts: 1, maxAttempts: 2 });
+    const adapter = makeMockAdapter(async () => {
+      throw new Error('parse failed: missing closing brace');
+    });
+
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      adapter,
+      lockedBy: 'worker-a',
+    });
+
+    const job = await fetchJob(jobId);
+    expect(job?.status).toBe('failed');
+    expect(job?.attempts).toBe(1); // terminal path does not increment
+    expect(job?.error_code).toBe('SEND_FAILED');
+  });
+
   it('throws when the job does not exist', async () => {
     const adapter = makeMockAdapter(async () => ({
       providerMessageId: 'x',
@@ -526,10 +669,48 @@ describe('processOutboundJob post-send write failure (CAP-028 F2 — R-OUTBOUND-
       acceptedAt: new Date().toISOString(),
     }));
 
+    // CAP-029 M3 review-triage: the precise SQL of the post-send
+// `updateMessageStatus` statement. Matched as a full string (whitespace-
+// normalised) so a future change that adds `provider_event_time` to another
+// statement cannot silently re-route that statement through the failing
+// proxy. Update this constant when `updateMessageStatus` is refactored.
+const UPDATE_MESSAGE_STATUS_SQL = `UPDATE messages
+          SET status = ?,
+              provider_event_time = ?,
+              sent_at = COALESCE(?, sent_at),
+              updated_at = ?
+        WHERE id = ?
+          AND (
+            provider_event_time IS NULL
+            OR provider_event_time < ?
+            OR (
+              provider_event_time = ?
+              AND CASE status
+                    WHEN 'failed' THEN 100
+                    WHEN 'bounced' THEN 100
+                    WHEN 'complained' THEN 100
+                    WHEN 'delivered' THEN 80
+                    WHEN 'delayed' THEN 60
+                    WHEN 'queued' THEN 40
+                    WHEN 'sending' THEN 30
+                    WHEN 'sent' THEN 20
+                    WHEN 'draft' THEN 10
+                    ELSE -1
+                  END < ?
+            )
+          )`;
+
+function normalizeSql(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
     // Same delegating-Proxy seam as the message-vanished test: every call
-    // forwards to real D1 except the ONE post-send `UPDATE messages ... SET
-    // 'sent'` statement, whose run() throws. The query string is unique to
-    // the success path, so no arming flag is needed — the pre-send reads and
+    // forwards to real D1 except the ONE post-send `updateMessageStatus`
+    // statement (CAP-029 D-CAP-028-D — the only `messages` row writer for
+    // status transitions outside inbound-mail). We detect it by exact
+    // SQL match (whitespace-normalised) so a future change that adds
+    // `provider_event_time` to another statement cannot silently re-route
+    // that statement through the failing proxy. The pre-send reads and
     // the claim still hit the real binding.
     const realDb = env.DB;
     const wrapStmt = (stmt: unknown): unknown =>
@@ -553,7 +734,11 @@ describe('processOutboundJob post-send write failure (CAP-028 F2 — R-OUTBOUND-
         if (prop !== 'prepare') return Reflect.get(target, prop, receiver);
         return (query: string) => {
           const stmt = target.prepare(query);
-          if (query.includes("UPDATE messages SET status = ?, sent_at = ?")) {
+          // CAP-029 M3 review-triage: full-statement identity match
+          // (whitespace-normalised) rather than the previous substring
+          // `provider_event_time = ?` which silently tripped any future
+          // statement that referenced the column.
+          if (normalizeSql(query) === normalizeSql(UPDATE_MESSAGE_STATUS_SQL)) {
             return wrapStmt(stmt);
           }
           return stmt;

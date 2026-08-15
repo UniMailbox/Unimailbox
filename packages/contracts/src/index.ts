@@ -108,6 +108,148 @@ export interface OutboundProviderAdapter {
 }
 
 // ---------------------------------------------------------------------------
+// Message status — CAP-029 webhook ordering.
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed enum of message status values. Mirrors the CHECK constraint on
+ * `messages.status` (migration 0006_messages.sql).
+ *
+ * Used as the input to `statusRank()` so R-MESSAGE-007 ordering is defined
+ * in one place — the contract layer, not magic numbers in a repository.
+ *
+ * R-MESSAGE-007: webhook status updates are applied only if the new
+ * provider_event_time is strictly newer than the stored value, or equal with
+ * a strictly higher status rank. The rank is the single tie-breaker.
+ */
+export const messageStatusSchema = z.enum([
+  'draft',
+  'queued',
+  'sending',
+  'sent',
+  'delivered',
+  'delayed',
+  'bounced',
+  'complained',
+  'failed',
+]);
+
+export type MessageStatus = z.infer<typeof messageStatusSchema>;
+
+/**
+ * R-MESSAGE-007 status rank. Terminal states (`failed`, `bounced`,
+ * `complained`) tie for the highest rank; non-terminal states rank by
+ * progression through the lifecycle (`delivered` > `delayed` > `queued` >
+ * `sending` > `sent`). The relative ordering of `delivered` and `sent`
+ * reflects that a confirmed delivery is "more resolved" than a queued send
+ * — a stored `sent` row can be later upgraded to `delivered` on tie.
+ *
+ * Higher number = higher rank. Equality is allowed; strict-greater decides.
+ */
+// CAP-029 Arch M1 / Security M3 review-triage: STATUS_RANK_TABLE is now
+// exported as a readonly array of [status, rank] pairs so the guard test
+// in packages/contracts/src/index.test.ts can pin it against the SQL CASE
+// in apps/worker/src/modules/messages/message-repository.ts. The shape
+// (array of pairs) makes drift detectable: an `expect(STATUS_RANK_TABLE).toEqual(EXPECTED_PAIRS)`
+// fails loudly when either side moves.
+export const STATUS_RANK_TABLE: ReadonlyArray<readonly [MessageStatus, number]> = [
+  ['failed', 100],
+  ['bounced', 100],
+  ['complained', 100],
+  ['delivered', 80],
+  ['delayed', 60],
+  ['queued', 40],
+  ['sending', 30],
+  ['sent', 20],
+  ['draft', 10],
+];
+
+export function statusRank(status: MessageStatus): number {
+  // Look up by status — the array form above is the source of truth, this
+  // O(n) lookup is fine for the (small) closed enum.
+  const entry = STATUS_RANK_TABLE.find(([s]) => s === status);
+  if (!entry) {
+    throw new Error(`statusRank: unknown status ${String(status)}`);
+  }
+  return entry[1];
+}
+
+// ---------------------------------------------------------------------------
+// Provider adapter error taxonomy — CAP-029 D-CAP-028-A.
+// ---------------------------------------------------------------------------
+
+/**
+ * Discriminated error kinds thrown by an OutboundProviderAdapter. The
+ * interface declares the shape so the queue-consumer use case
+ * (process-outbound-job.ts) can branch on `kind` instead of guessing from
+ * the HTTP status. Adapters translate HTTP responses into these kinds at
+ * the SDK boundary; the queue consumer never sees an SDK error.
+ *
+ * R-OUTBOUND-008: a `terminal` error marks the job failed immediately —
+ * not after max_attempts retries. A `retryable` error keeps the existing
+ * attempts-budget logic.
+ */
+export type ProviderErrorKind = 'retryable' | 'terminal';
+
+/**
+ * Common shape for the two provider error types. Carries the HTTP status
+ * (when applicable) and chains the underlying SDK error via `cause` per the
+ * ES2022 Error chain (Q4 decision in CAP-029 task.md). R-LOG-001 is preserved:
+ * the chain carries the message and stack, never bodies or API keys.
+ */
+interface ProviderErrorOptions {
+  readonly message: string;
+  readonly httpStatus?: number;
+  readonly cause?: unknown;
+}
+
+function chainCause(options: ProviderErrorOptions): { cause: unknown } | undefined {
+  return options.cause !== undefined ? { cause: options.cause } : undefined;
+}
+
+export class RetryableProviderError extends Error {
+  readonly kind: ProviderErrorKind = 'retryable';
+  readonly httpStatus: number | undefined;
+  // `cause` is inherited from Error.prototype; do NOT redeclare it as a class
+  // field — with `useDefineForClassFields: true` (TS default for ES2022 +
+  // module ESNext) the field declaration would shadow Error's instance
+  // assignment and reset `cause` to `undefined`.
+
+  constructor(options: ProviderErrorOptions) {
+    super(options.message, chainCause(options));
+    this.name = 'RetryableProviderError';
+    this.httpStatus = options.httpStatus;
+  }
+}
+
+export class TerminalProviderError extends Error {
+  readonly kind: ProviderErrorKind = 'terminal';
+  readonly httpStatus: number | undefined;
+  // `cause` is inherited from Error.prototype; see RetryableProviderError.
+
+  constructor(options: ProviderErrorOptions) {
+    super(options.message, chainCause(options));
+    this.name = 'TerminalProviderError';
+    this.httpStatus = options.httpStatus;
+  }
+}
+
+/**
+ * Type-guard helper: returns true when `error` is a recognised provider
+ * error (`RetryableProviderError` or `TerminalProviderError`). The
+ * queue-consumer use case uses this to decide whether to take the typed
+ * fast-path or fall back to the existing SEND_FAILED path (B6 acceptance).
+ */
+export function isProviderError(
+  error: unknown,
+): error is RetryableProviderError | TerminalProviderError {
+  return (
+    error instanceof RetryableProviderError ||
+    error instanceof TerminalProviderError
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Installation state — see docs/rebuild/05-target-architecture/api-design.md
 // ---------------------------------------------------------------------------
 

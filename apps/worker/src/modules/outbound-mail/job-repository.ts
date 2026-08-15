@@ -107,11 +107,24 @@ export interface UpdateJobStatusInput {
  * The three branches are mutually exclusive — passing both providerMessageId
  * and errorCode is a caller bug; providerMessageId wins (success path).
  *
- * NOTE (CAP-028): this function does NOT predicate on `locked_by`. It remains
- * the unconditional status writer used by code paths that have not yet taken
- * a lease (compose inserts + idempotency replay). The lease-aware writes
- * below — `markOutboundJobSent`, `markOutboundJobRetryable`,
- * `markOutboundJobTerminal` — are the writes that gate on `locked_by`.
+ * **CAP-028 / C1 adjudication.** This function remains the single
+ * unconditional status writer inside the module. Two distinct consumers:
+ *
+ *   1. Code paths that have not yet taken a lease (compose inserts,
+ *      idempotency replay). For these there is no `locked_by` to predicate
+ *      against — the row is being inserted or the lease has already been
+ *      released and a new owner will claim.
+ *   2. Admin / migration scripts that need to update `status` outside the
+ *      queue flow (e.g. draining stuck `sending` leases).
+ *
+ * The queue consumer does **not** call this function. The lease-aware
+ * writes below — `markOutboundJobSent`, `markOutboundJobRetryable`,
+ * `markOutboundJobTerminal` — are the writes that gate on `locked_by` and
+ * are the only ones invoked from `process-outbound-job`. CAP-028 review
+ * triage (D-CAP-028-C) explicitly chose **document, do not consolidate** —
+ * splitting the unconditional writer off into a separate helper would
+ * duplicate SQL for no behavioural benefit, since the consumer path is
+ * already routed through the lease-aware functions.
  */
 export async function updateJobStatus(
   db: Database,

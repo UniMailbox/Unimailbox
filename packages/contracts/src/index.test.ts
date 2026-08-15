@@ -25,6 +25,8 @@ import {
   messageDetailSchema,
   composeRecipientSchema,
   composeRequestSchema,
+  messageStatusSchema,
+  STATUS_RANK_TABLE,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -1133,5 +1135,93 @@ describe('composeRequestSchema', () => {
       htmlBody: 'a'.repeat(1_000_001),
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('messageStatusSchema — R-MESSAGE-007 closed enum', () => {
+  it('accepts every documented message status', () => {
+    for (const s of [
+      'draft',
+      'queued',
+      'sending',
+      'sent',
+      'delivered',
+      'delayed',
+      'bounced',
+      'complained',
+      'failed',
+    ] as const) {
+      expect(messageStatusSchema.parse(s)).toBe(s);
+    }
+  });
+
+  it('rejects any value outside the closed enum', () => {
+    for (const s of ['read', 'opened', 'clicked', '', 'DELIVERED', 'sent ']) {
+      const result = messageStatusSchema.safeParse(s);
+      expect(result.success).toBe(false);
+    }
+  });
+
+  // CAP-029 Code L1 review-triage: zod never accepts these at runtime, but
+  // a future maintainer tightening the schema should keep the rejections.
+  it('rejects null', () => {
+    expect(messageStatusSchema.safeParse(null).success).toBe(false);
+  });
+  it('rejects undefined', () => {
+    expect(messageStatusSchema.safeParse(undefined).success).toBe(false);
+  });
+  it('rejects 0', () => {
+    expect(messageStatusSchema.safeParse(0).success).toBe(false);
+  });
+  it('rejects a positive integer', () => {
+    expect(messageStatusSchema.safeParse(42).success).toBe(false);
+  });
+  it('rejects an empty object', () => {
+    expect(messageStatusSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('STATUS_RANK_TABLE — R-MESSAGE-007 rank guard (CAP-029 Arch M1 / Security M3)', () => {
+  // CAP-029 Arch M1 / Security M3 review-triage: STATUS_RANK_TABLE (the
+  // contracts-side closed enum) MUST stay in sync with the SQL CASE in
+  // apps/worker/src/modules/messages/message-repository.ts (the rank-aware
+  // UPDATE predicate). A drift here is a silent ordering bug — the contracts
+  // side would say one rank order, the SQL would apply another. This test
+  // pins both sides to the same set of {status, rank} pairs without importing
+  // the SQL fragment (which would couple this package to worker-only types).
+  //
+  // When you add a status: also add it here. When you change a rank: also
+  // change it in the SQL CASE.
+  const EXPECTED_PAIRS: ReadonlyArray<readonly [string, number]> = [
+    ['failed', 100],
+    ['bounced', 100],
+    ['complained', 100],
+    ['delivered', 80],
+    ['delayed', 60],
+    ['queued', 40],
+    ['sending', 30],
+    ['sent', 20],
+    ['draft', 10],
+  ];
+
+  it('every status in messageStatusSchema appears in STATUS_RANK_TABLE', () => {
+    const ranked = new Set(STATUS_RANK_TABLE.map(([status]) => status));
+    for (const s of messageStatusSchema.options) {
+      expect(ranked.has(s)).toBe(true);
+    }
+  });
+
+  it('the ranks match the documented ordering exactly', () => {
+    expect(STATUS_RANK_TABLE).toEqual(EXPECTED_PAIRS);
+  });
+
+  it('higher-rank numbers correspond to terminal-ness first, then recency-of-life', () => {
+    // Terminal failures all share the top rank (100), not just one terminal value.
+    const terminalRanks = STATUS_RANK_TABLE
+      .filter(([s]) => s === 'failed' || s === 'bounced' || s === 'complained')
+      .map(([, rank]) => rank);
+    expect(terminalRanks).toHaveLength(3);
+    expect(new Set(terminalRanks).size).toBe(1);
+    expect(terminalRanks[0]).toBe(100);
   });
 });

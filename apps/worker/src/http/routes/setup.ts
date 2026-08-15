@@ -15,6 +15,7 @@ import {
   setupAdministratorRequestSchema,
   setupDomainRequestSchema,
   setupBrevoRequestSchema,
+  isProviderError,
 } from '@unimailbox/contracts';
 import {
   claimSetup,
@@ -706,10 +707,34 @@ export function setupRoutes(): Hono<AppEnv> {
 
     try {
       const encryptionKey = await readSecret(c.env.CREDENTIAL_ENCRYPTION_KEY);
-      const result = await runOutboundSmokeTest(
-        { db: c.env.DB, encryptionKey, adapter: brevoAdapter },
-        { clock: systemClock, ids: systemIds },
-      );
+      let result: Awaited<ReturnType<typeof runOutboundSmokeTest>>;
+      try {
+        result = await runOutboundSmokeTest(
+          { db: c.env.DB, encryptionKey, adapter: brevoAdapter },
+          { clock: systemClock, ids: systemIds },
+        );
+      } catch (error) {
+        // CAP-029 D-CAP-028-A: provider errors now carry typed
+        // RetryableProviderError / TerminalProviderError. The smoke-test
+        // route surfaces every provider failure as 502 PROVIDER_SEND_FAILED
+        // so the operator gets a single, actionable error code regardless
+        // of the upstream HTTP status (4xx is terminal to the queue, but
+        // here it is still "send failed from the operator's perspective").
+        // CAP-029 L3 review-triage: attach the original error as `cause`
+        // so the audit / log stream retains the underlying message and
+        // stack for triage. The HTTP-layer envelope remains R-SECRET-003
+        // compliant (the message is generic; the body / API key never
+        // appear in the response).
+        if (isProviderError(error)) {
+          throw new DomainError({
+            code: 'PROVIDER_SEND_FAILED',
+            message: 'Brevo send failed',
+            httpStatus: 502,
+            cause: error,
+          });
+        }
+        throw error;
+      }
 
       // Settle the pending record with the actual response
       const successBody = JSON.stringify({ data: result });

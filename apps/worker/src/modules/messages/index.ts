@@ -4,14 +4,23 @@
 //
 // R-INBOUND-008: Message + recipients + mailbox_messages inserted in one D1 batch
 // R-MESSAGE-005: isRead persists per user (message-read-repository).
+// R-MESSAGE-007: webhook status updates apply iff newer (or equal+higher-rank).
+//   The single `messages` row writer is updateMessageStatus — outbound-mail
+//   must use it (D-CAP-028-D).
 
 export {
   prepareCreateMessage,
   prepareCreateRecipient,
   prepareCreateMailboxMessage,
   createMessageWithRelations,
+  updateMessageStatus,
 } from './message-repository';
-export type { CreateMessageInput, CreateRecipientInput, CreateMailboxMessageInput } from './message-repository';
+export type {
+  CreateMessageInput,
+  CreateRecipientInput,
+  CreateMailboxMessageInput,
+  UpdateMessageStatusInput,
+} from './message-repository';
 
 export {
   listMessagesByMailbox,

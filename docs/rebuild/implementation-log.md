@@ -10,6 +10,64 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-15 — CAP-029: Webhook ordering — rank-aware status updates + IDOR closure
+
+Closed the long-standing gap that webhook-driven status updates could clobber a higher-rank state (a `delivered` arriving after `bounced`), that `provider_message_id` collisions across connections were exploitable as a cross-tenant IDOR (R-AUTHZ-004), and that Brevo response bodies could leak into the queue consumer's logger via `error.message` (R-SECRET-003 / R-LOG-001). CAP-029 introduces a rank-aware writer, a closed error taxonomy, and two migrations that pin the ordering invariant in SQL.
+
+### What changed
+
+**Migrations** — `migrations/`:
+
+- `0011_message_event_time.sql` (new) — adds `messages.provider_event_time INTEGER` (nullable ms epoch) + index `(provider_event_time)` for range queries + inline R-MESSAGE-007 rationale comment ("newer-or-equal on tie breaks in favour of higher status rank"). Verify file: `0011_message_event_time.verify.sql` asserts column + index + nullable shape.
+- `0012_webhook_event_time.sql` (new) — adds `webhook_deliveries.event_time INTEGER` (nullable ms epoch) to mirror the inbound timestamp the processor uses for the rank predicate. Verify file: `0012_webhook_event_time.verify.sql` asserts column + nullable shape.
+
+**Domain** — `packages/contracts/src/index.ts`:
+
+- `STATUS_RANK_TABLE: ReadonlyArray<readonly [MessageStatus, number]>` (lines 155-165) — closed rank table for the seven message statuses. Tuple order is `[status, rank]`, pinned by `packages/contracts/src/index.test.ts:1184-1227` which destructures `[s, rank]` accordingly. Order: `failed ≈ bounced ≈ complained` (terminal) > `delivered` > `delayed` > `queued` > `sending` > `sent`.
+- `RetryableProviderError` / `TerminalProviderError` classes (lines 210-235) with `kind: 'retryable' | 'terminal'` discriminator and closed-catalog `code: 'RETRYABLE_PROVIDER_ERROR' | 'TERMINAL_PROVIDER_ERROR'`. The cause chain is preserved via `super(message, chainCause(options))` — the inline comment at lines 213-216 documents the `useDefineForClassFields: true` shadowing trap (a redeclared `cause` class field would reset the prototype assignment to `undefined` under ES2022).
+- `SEND_FAILED` added to `ERROR_CODES` (CAP-032 catalog) — emitted by the outbound queue consumer on terminal send failure.
+
+**Repository** — `apps/worker/src/modules/messages/message-repository.ts`:
+
+- `updateMessageStatus(db, messageId, newStatus, providerEventTime, expectedPreviousStatus?)` (lines 193-245) — single D1 statement with a rank-aware SQL CASE predicate inside the `WHERE` clause. Equal `provider_event_time` + lower rank → reject; equal + same rank → reject (idempotent); newer event → apply regardless of rank (so a late `delivered` after `failed` is honoured, but a late `sent` after `delivered` is not). Doc-comment at lines 178-182 records "D1 serialises per row" as the rationale for the no-batch shape today — the future batching work is tracked as **D-CAP-029-A**.
+- Reached from `process-outbound-job.ts:270-274` via `updateMessageStatus(...)` imported from `modules/messages/index.ts`. The previous direct `UPDATE messages` is gone — `outbound-mail` now consumes the messages module through its index only, never touching the table directly (D-CAP-028-D closure).
+
+**Webhook processor** — `apps/worker/src/modules/outbound-mail/webhook-processor.ts`:
+
+- `mapEventToMessageStatus(event)` (lines 50-67) — closed mapping from Brevo event types to `MessageStatus`. Returns `null` for unknown events; the caller (lines 166-182) branches on `if (status !== null)` so unknown events still record a `webhook_deliveries` row but skip the messages UPDATE.
+- `extractBrevoEventTimeMs(raw, fallback)` (lines 230-261) — format-based timestamp discriminator. `SECONDS_MS_THRESHOLD = 1e10` (year 2286 sentinel) discriminates integer ms from integer seconds; `!Number.isInteger(raw)` rejects fractional values; the string path uses `Date.parse` and rejects `NaN-Infinity` and `<= 0`; other types (boolean, bigint, object, undefined, null) route to server fallback with `source: 'server'`. Worker-pool coverage at `webhooks.worker.test.ts:538-652` exercises all six input shapes.
+
+**Webhook repository** — `apps/worker/src/modules/outbound-mail/webhook-repository.ts`:
+
+- `findJobByProviderMessageId(db, connectionId, providerMessageId)` (lines 139-150) — connection-scoped SQL: `WHERE provider_message_id = ? AND provider_connection_id = ?`. Closes R-AUTHZ-004: a collision across connections no longer lets a malicious actor on connection A clobber connection B's message status. Regression test `webhooks.worker.test.ts:458-529` seeds two connections, forces the collision (`expect(collision?.n).toBe(2)`), posts to A only, and asserts message A flips to `delivered` while message B remains `sent`.
+
+**Brevo adapter** — `apps/worker/src/integrations/providers/brevo.ts`:
+
+- 5xx/429 vs 4xx classification (lines 160-197): `status === 429` → `RetryableProviderError` (lines 177-183); other `status >= 400 && status < 500` → `TerminalProviderError` (lines 184-190); 5xx and anything outside 4xx/5xx not yet classified → `RetryableProviderError` (lines 192-196); fetch rejection → `RetryableProviderError` (lines 150-158).
+- `errorMessage` is `` `Brevo send failed: status ${status}` `` only (line 171) — **no body interpolation**. Body is attached via `{ cause: body ? new Error(...) : undefined }` at lines 168-170, 179-181, 191-193. Empty body → no cause. Closes R-SECRET-003 / R-LOG-001: bodies can carry PII (recipient addresses) and `xkeysib-…` secret prefixes that must never land in the worker log stream.
+- Regression tests at `brevo.test.ts:39-87` (body NOT in `err.message`, IS in `err.cause`), `:89-122` (429 → retryable, body on cause), `:189-215` (empty body → no cause), `:217-245` (fetch rejection → retryable).
+
+### Review round
+
+The original slice went through four independent reviewers (architecture, code, QA, security). Findings were consolidated into the review-triage table and resolved in a fix slice (D6/D7 deferrals recorded for atomicity and chain-walking). After the fix slice, fresh security + code reviewers re-reviewed the H/M fixes.
+
+- **Code re-review** (2026-08-15): ACCEPT WITH FIXES. **1 MEDIUM** — M1: webhook-delivery INSERT and `messages` UPDATE are not in a single D1 batch (`webhook-processor.ts:166-198`). A worker crash between them leaves an applied status change with no `webhook_deliveries` audit row. Fix shape: wrap both calls in `db.batch([...])`; trade-off accepted is that the boolean from `updateMessageStatus` cannot drive the "applied or rejected" log line — instead the delivery row's `event_time` + `event_type` are logged and operators correlate via `messages.status` history. Recorded as **D-CAP-029-A** in the ledger, not blocking CAP-029 (the atomicity invariant is out of scope; CAP-029 owns the ordering invariant). **1 LOW** — L1: `extractBrevoEventTimeMs` is not exported for testing in isolation. Deferred until a second provider surfaces a different timestamp format (Rule of Three).
+- **Security re-review** (2026-08-15): ACCEPT WITH FIXES. H1 (R-AUTHZ-004 cross-tenant IDOR closed via connection-scoped SQL at `webhook-repository.ts:146`) + H2 (R-SECRET-003 body on `cause` not on `message`; `useDefineForClassFields` shadowing trap intact) + M1 (429 split from terminal 4xx branch) all verified fixed with file:line evidence. **1 LOW** — L1: `process-outbound-job.ts:340` logs `error.message` only; the body sits on `cause` and is safe today, but a future chain-walking logger helper could re-leak it. Recorded as **D-CAP-029-B** in the ledger.
+
+### Gates
+
+Orchestrator-run, post-fix-slice, post-re-review: typecheck ✓, lint ✓, test:unit 340/340 (+16 since CAP-038), test:worker 534/534 (+71), build ✓, scaffold doctor 10/10.
+
+**Grep verification** (post-slice):
+
+- `git grep -n "UPDATE messages" -- 'apps/worker/src/'` → 3 legitimate hits (`message-repository.ts:185` doc comment, `message-repository.ts:207` writer, `process-outbound-job.worker.test.ts:677` test SQL constant). The previous direct UPDATE at `process-outbound-job.ts` is gone.
+- `git grep -n "updateJobStatus" -- 'apps/worker/src/'` → 4 legitimate hits (2 imports/exports, 1 define, 1 call in `queue.worker.test.ts`).
+- `git grep -n "code: 'INVALID_REQUEST'" -- 'apps/worker/src/'` → 0 hits (CAP-038 closed the catalog entry).
+
+Resolves D-CAP-028-A (cross-tenant IDOR on `findJobByProviderMessageId`), D-CAP-028-C (rank-aware writer without direct table access from outbound-mail), D-CAP-028-D (`process-outbound-job.ts` direct UPDATE replaced by `updateMessageStatus` call through `modules/messages/index.ts`).
+
+---
+
 ## 2026-08-15 — CAP-038: Remove deprecated `INVALID_REQUEST` catalog entry
 
 Closed the CAP-032 migration window. The `INVALID_REQUEST` code was deprecated during

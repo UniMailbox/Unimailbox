@@ -35,6 +35,9 @@ import type {
   ProviderRuntimeContext,
   SendProviderMessage,
 } from '@unimailbox/contracts';
+import {
+  TerminalProviderError,
+} from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 import { systemIds } from '../../platform/ids';
 import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
@@ -42,6 +45,7 @@ import { sqliteTimestamp } from '../../platform/idempotency';
 import { importEncryptionKey, decrypt } from '../../platform/crypto';
 import { systemClock, type Clock } from '../../platform/clock';
 import { logger } from '../../platform/logger';
+import { updateMessageStatus } from '../messages';
 import {
   claimOutboundJob,
   getOutboundJob,
@@ -236,10 +240,24 @@ export async function processOutboundJob(
     sendResult = await adapter.send(ctx, sendMsg);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    // The only error code we trust is a DomainError's stable `code` field
-    // (closed catalog, CAP-032). Anything else — provider SDK errors, a
-    // DOMException's legacy numeric `code`, library strings like
-    // 'ECONNRESET' — is not in the catalog and becomes 'SEND_FAILED'.
+
+    // CAP-029 D-CAP-028-A + B3: a typed TerminalProviderError short-circuits
+    // the attempts budget — retrying an identical 4xx payload will never
+    // succeed, so we mark the job failed on the first attempt instead of
+    // burning `max_attempts` retries. The error code is recorded verbatim
+    // ('TERMINAL_PROVIDER_ERROR' is stable for the audit trail); the
+    // underlying provider HTTP status (when carried) goes in the message
+    // via the underlying error's message, not as a separate column.
+    if (error instanceof TerminalProviderError) {
+      await markOutboundJobTerminal(db, jobId, lockedBy, 'TERMINAL_PROVIDER_ERROR', message);
+      return;
+    }
+
+    // The only error code we trust from the remaining failure modes is a
+    // DomainError's stable `code` field (closed catalog, CAP-032). Anything
+    // else — a RetryableProviderError, an SDK error, a DOMException's legacy
+    // numeric `code`, library strings like 'ECONNRESET' — is not in the
+    // catalog and becomes 'SEND_FAILED'.
     const code = error instanceof DomainError ? error.code : 'SEND_FAILED';
 
     // R-OUTBOUND-008: retryable vs terminal is decided by the attempts
@@ -269,9 +287,23 @@ export async function processOutboundJob(
   // idempotency key (R-OUTBOUND-004), so no double-delivery.
   try {
     const now = sqliteTimestamp(new Date());
-    await db.prepare(
-      'UPDATE messages SET status = ?, sent_at = ?, updated_at = ? WHERE id = ?',
-    ).bind('sent', now, now, claimed.message_id).run();
+    const nowMs = Date.now();
+    // CAP-029 D-CAP-028-D: the messages row write is the public messages-
+    // module surface. updateMessageStatus owns the rank-aware predicate
+    // (R-MESSAGE-007) so an out-of-order webhook arriving mid-send cannot
+    // clobber the 'sent' status. sent_at is supplied by this call (Q3
+    // decision: updateMessageStatus owns sent_at to keep `messages` row
+    // writes consolidated inside the messages module).
+    // CAP-029 L2 review-triage: capture the boolean return so the
+    // divergence warn below can name which surface rejected the write
+    // (cross-module = message row rejected by rank-aware predicate too).
+    const messageAdvanced = await updateMessageStatus(db, {
+      messageId: claimed.message_id,
+      status: 'sent',
+      providerEventTimeMs: nowMs,
+      sentAt: now,
+      now,
+    });
 
     // R-OUTBOUND-007 / R-OUTBOUND-009: the predicate locked_by = lockedBy
     // makes this write a no-op if a reclaim stole the row mid-send. The
@@ -279,15 +311,22 @@ export async function processOutboundJob(
     // CAP-028 review triage) — the row was resolved by whoever stole the
     // lock and the provider did report success, so throwing here would
     // re-drive an already-resolved job.
-    const advanced = await markOutboundJobSent(db, jobId, lockedBy, sendResult.providerMessageId);
-    if (!advanced) {
-      // R-LOG-001: job ID only — no bodies, no provider payload.
+    const jobAdvanced = await markOutboundJobSent(db, jobId, lockedBy, sendResult.providerMessageId);
+    if (!jobAdvanced || !messageAdvanced) {
+      // CAP-029 L2 review-triage: a single combined warn names which
+      // surface(s) rejected the write so an operator triaging a "lock
+      // stolen before success write" can see whether the message-row
+      // write was also rejected (cross-module divergence) or succeeded
+      // (intra-module only). R-LOG-001: job ID + boolean flags only —
+      // no bodies, no provider payload, no stack traces.
       logger.warn(
         { event: 'outbound.job_sent_divergence' },
         {
           source: 'process-outbound-job',
           jobId,
           reason: 'lock stolen before success write; row resolved elsewhere',
+          jobAdvanced,
+          messageAdvanced,
         },
       );
     }

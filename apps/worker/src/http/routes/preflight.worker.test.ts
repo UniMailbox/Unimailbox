@@ -97,7 +97,7 @@ describe('POST /api/v1/setup/preflight', () => {
       });
 
       const body = await response.json();
-      expect(body.data.schemaVersion).toBe('0010');
+      expect(body.data.schemaVersion).toBe('0012');
     });
 
     it('returns the success envelope { data: T }', async () => {

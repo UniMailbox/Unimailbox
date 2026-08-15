@@ -55,9 +55,18 @@ async function computeHmac(body: string, secret: string): Promise<string> {
 async function seedConnectionAndMessage(
   overrides: { webhookSecret: string | null } = { webhookSecret: WEBHOOK_SECRET },
 ): Promise<{ connectionId: string; messageId: string }> {
-  await seedInstallationState({ status: 'complete', currentStep: 'complete' });
-
+  // INSERT OR IGNORE because some tests (notably the CAP-029 cross-tenant
+  // IDOR regression test) seed two independent connections inside one test
+  // — the second call would otherwise trip the PK on installation_state.
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  await env.DB
+    .prepare(
+      `INSERT OR IGNORE INTO installation_state (id, status, current_step, schema_version, updated_at, created_at)
+       VALUES (1, 'complete', 'complete', 1, ?, ?)`,
+    )
+    .bind(now, now)
+    .run();
+
   const credentialId = crypto.randomUUID();
   const connectionId = crypto.randomUUID();
   const messageId = crypto.randomUUID();
@@ -282,5 +291,363 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
       .bind(connectionId)
       .first<{ event_type: string }>();
     expect(delivery?.event_type).toBe('bounce');
+  });
+});
+
+describe('POST /api/v1/webhooks ordering (CAP-029 / R-MESSAGE-007)', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+  });
+
+  /**
+   * Returns the stored message status, provider_event_time, and the last
+   * webhook_delivery row's event_time + event_time_source — the trio an
+   * operator inspects when triaging a mis-ordering incident.
+   */
+  async function readState(messageId: string, connectionId: string) {
+    const message = await env.DB
+      .prepare(
+        'SELECT status, provider_event_time FROM messages WHERE id = ?',
+      )
+      .bind(messageId)
+      .first<{ status: string; provider_event_time: number | null }>();
+    const delivery = await env.DB
+      .prepare(
+        'SELECT event_type, event_time, event_time_source FROM webhook_deliveries WHERE connection_id = ? ORDER BY created_at DESC LIMIT 1',
+      )
+      .bind(connectionId)
+      .first<{
+        event_type: string;
+        event_time: number | null;
+        event_time_source: string | null;
+      }>();
+    return { message, delivery };
+  }
+
+  async function postEvent(
+    connectionId: string,
+    event: Record<string, unknown>,
+  ): Promise<Response> {
+    const body = JSON.stringify(event);
+    const signature = await computeHmac(body, WEBHOOK_SECRET);
+    return SELF.fetch(
+      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
+      {
+        method: 'POST',
+        body,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': signature,
+        },
+      },
+    );
+  }
+
+  it('A2: a strictly newer event of any rank wins over an older one (event-time gate)', async () => {
+    const { connectionId, messageId } = await seedConnectionAndMessage();
+
+    // First, a bounce at t=100 (terminal, rank 100).
+    const tBounce = 100_000;
+    const r1 = await postEvent(connectionId, {
+      event: 'bounce',
+      messageId: PROVIDER_MESSAGE_ID,
+      ts: tBounce / 1000,
+    });
+    expect(r1.status).toBe(200);
+    let state = await readState(messageId, connectionId);
+    expect(state.message?.status).toBe('bounced');
+    expect(state.message?.provider_event_time).toBe(tBounce);
+    expect(state.delivery?.event_time_source).toBe('provider');
+
+    // Then a delivered at t=200 (newer, lower rank). The contract is: a
+    // strictly newer event wins regardless of rank. The equal-time +
+    // lower-rank gate is the only rejection case.
+    const tDelivered = 200_000;
+    const r2 = await postEvent(connectionId, {
+      event: 'delivered',
+      messageId: PROVIDER_MESSAGE_ID,
+      ts: tDelivered / 1000,
+    });
+    expect(r2.status).toBe(200);
+    state = await readState(messageId, connectionId);
+    expect(state.message?.status).toBe('delivered');
+    expect(state.message?.provider_event_time).toBe(tDelivered);
+  });
+
+  it('A3: an older delivered after a terminal bounced is rejected (older event)', async () => {
+    const { connectionId, messageId } = await seedConnectionAndMessage();
+
+    // First, a terminal bounce at t=200.
+    const tBounce = 200_000;
+    await postEvent(connectionId, {
+      event: 'bounce',
+      messageId: PROVIDER_MESSAGE_ID,
+      ts: tBounce / 1000,
+    });
+    let state = await readState(messageId, connectionId);
+    expect(state.message?.status).toBe('bounced');
+
+    // Now an older delivered at t=100 — this is the canonical out-of-order
+    // case the predicate must reject. The earlier delivered arrived before
+    // the bounce but the bounce is newer.
+    const tDelivered = 100_000;
+    const r = await postEvent(connectionId, {
+      event: 'delivered',
+      messageId: PROVIDER_MESSAGE_ID,
+      ts: tDelivered / 1000,
+    });
+    expect(r.status).toBe(200); // webhook itself is fine; it just doesn't apply
+    state = await readState(messageId, connectionId);
+    expect(state.message?.status).toBe('bounced'); // unchanged
+    expect(state.message?.provider_event_time).toBe(tBounce); // unchanged
+  });
+
+  it('A4: equal-time + lower-rank event is rejected (terminal-state promotion gate)', async () => {
+    const { connectionId, messageId } = await seedConnectionAndMessage();
+
+    // Two events with the same timestamp. First, delivered. Then a bounce at
+    // the same instant — should win because bounced is terminal (rank 100)
+    // and delivered is rank 80.
+    const t = 300_000;
+    await postEvent(connectionId, {
+      event: 'delivered',
+      messageId: PROVIDER_MESSAGE_ID,
+      ts: t / 1000,
+    });
+    let state = await readState(messageId, connectionId);
+    expect(state.message?.status).toBe('delivered');
+    expect(state.message?.provider_event_time).toBe(t);
+
+    // Bounce at the SAME instant — terminal-state promotion must apply.
+    const r = await postEvent(connectionId, {
+      event: 'bounce',
+      messageId: PROVIDER_MESSAGE_ID,
+      ts: t / 1000,
+    });
+    expect(r.status).toBe(200);
+    state = await readState(messageId, connectionId);
+    expect(state.message?.status).toBe('bounced');
+    expect(state.message?.provider_event_time).toBe(t);
+  });
+
+  it('A5: webhook without ts/time falls back to server clock and the audit row records server source', async () => {
+    const { connectionId, messageId } = await seedConnectionAndMessage();
+
+    const r = await postEvent(connectionId, {
+      event: 'delivered',
+      messageId: PROVIDER_MESSAGE_ID,
+    });
+    expect(r.status).toBe(200);
+    const state = await readState(messageId, connectionId);
+    expect(state.message?.status).toBe('delivered');
+    expect(state.delivery?.event_time_source).toBe('server');
+    // The message row stores the server-side ts too.
+    expect(state.message?.provider_event_time).toBeGreaterThan(0);
+    expect(state.message?.provider_event_time).toBe(Number(state.delivery?.event_time));
+  });
+
+  // CAP-029 H1 Security review-triage (R-AUTHZ-004 cross-tenant IDOR):
+  // when two distinct provider connections both have an outbound_jobs row
+  // that shares the same `provider_message_id` (a realistic collision:
+  // Brevo IDs are global, and two tenants could in principle reuse an ID
+  // string — though ours are UUIDs and shouldn't collide in practice, the
+  // lookup must not silently trust the global), a webhook to connection A
+  // must not update the message row owned by connection B. Before the fix
+  // the repository's `findJobByProviderMessageId` queried by message id
+  // alone — the first match won, regardless of connection.
+  it('cross-tenant: webhook to connection A does NOT update the message owned by connection B when provider_message_id collides', async () => {
+    // Two independent connections with their own messages and their own
+    // outbound_jobs rows — both carrying the SAME provider_message_id.
+    const { connectionId: connectionIdA, messageId: messageIdA } = await seedConnectionAndMessage();
+    const { connectionId: connectionIdB, messageId: messageIdB } = await seedConnectionAndMessage();
+
+    // Both jobs carry the same provider_message_id. The fix must scope the
+    // lookup to the receiving connection.
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE outbound_jobs SET provider_message_id = ? WHERE message_id = ?`,
+      ).bind(PROVIDER_MESSAGE_ID, messageIdA),
+      env.DB.prepare(
+        `UPDATE outbound_jobs SET provider_message_id = ? WHERE message_id = ?`,
+      ).bind(PROVIDER_MESSAGE_ID, messageIdB),
+    ]);
+
+    // Sanity: confirm the collision is in place — both jobs have the same id.
+    const collision = await env.DB
+      .prepare(
+        `SELECT COUNT(*) AS n FROM outbound_jobs WHERE provider_message_id = ?`,
+      )
+      .bind(PROVIDER_MESSAGE_ID)
+      .first<{ n: number }>();
+    expect(collision?.n).toBe(2);
+
+    // POST a webhook to connection A. The signature is computed for A's secret.
+    const body = JSON.stringify({
+      event: 'delivered',
+      messageId: PROVIDER_MESSAGE_ID,
+    });
+    const signatureA = await computeHmac(body, WEBHOOK_SECRET);
+    const responseA = await SELF.fetch(
+      `http://localhost/api/v1/webhooks/brevo/${connectionIdA}`,
+      {
+        method: 'POST',
+        body,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': signatureA,
+        },
+      },
+    );
+    expect(responseA.status).toBe(200);
+
+    // Message A flipped 'sent' → 'delivered' — the legitimate owner.
+    const messageA = await env.DB
+      .prepare('SELECT status FROM messages WHERE id = ?')
+      .bind(messageIdA)
+      .first<{ status: string }>();
+    expect(messageA?.status).toBe('delivered');
+
+    // Message B is unchanged — the IDOR is closed. A pre-fix implementation
+    // would have flipped B too because the lookup ignored connection_id.
+    const messageB = await env.DB
+      .prepare('SELECT status FROM messages WHERE id = ?')
+      .bind(messageIdB)
+      .first<{ status: string }>();
+    expect(messageB?.status).toBe('sent');
+
+    // Audit trail: only connection A has a delivery row.
+    const deliveriesA = await env.DB
+      .prepare('SELECT COUNT(*) AS n FROM webhook_deliveries WHERE connection_id = ?')
+      .bind(connectionIdA)
+      .first<{ n: number }>();
+    const deliveriesB = await env.DB
+      .prepare('SELECT COUNT(*) AS n FROM webhook_deliveries WHERE connection_id = ?')
+      .bind(connectionIdB)
+      .first<{ n: number }>();
+    expect(deliveriesA?.n).toBe(1);
+    expect(deliveriesB?.n).toBe(0);
+  });
+
+  // CAP-029 H1 Code review-triage: extractBrevoEventTimeMs used to apply a
+  // magnitude heuristic (`> 1e12 ? ms : s*1000`) which silently misclassified
+  // microseconds, nanoseconds, and "post-2286 seconds" values. The fix
+  // discriminates by *format* (integer + threshold, ISO string, fallback).
+  // Exercised through the public API: the resulting `provider_event_time`
+  // on the messages row and `event_time` on the delivery row reveal which
+  // path fired.
+  describe('extractBrevoEventTimeMs — format-based discrimination', () => {
+    it('integer seconds (≤ 10^10) are multiplied by 1000', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      const SECONDS = 1_700_000_000; // 2023-11-14 in seconds
+      const MS = SECONDS * 1000;
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        ts: SECONDS,
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.message?.provider_event_time).toBe(MS);
+      expect(state.delivery?.event_time).toBe(MS);
+      expect(state.delivery?.event_time_source).toBe('provider');
+    });
+
+    it('integer ms (> 10^10) are passed through unchanged', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      const MS = 1_700_000_000_000; // post-2286 seconds would also land here
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        ts: MS,
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.message?.provider_event_time).toBe(MS);
+      expect(state.delivery?.event_time).toBe(MS);
+      expect(state.delivery?.event_time_source).toBe('provider');
+    });
+
+    it('integer 0 is rejected and falls back to server time', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        ts: 0,
+      });
+      const state = await readState(messageId, connectionId);
+      // Server fallback — value is Date.now() at request time, > 0.
+      expect(state.delivery?.event_time_source).toBe('server');
+      expect(state.message?.provider_event_time).toBeGreaterThan(0);
+      // The fallback path stores the server time, not 0.
+      expect(state.message?.provider_event_time).not.toBe(0);
+    });
+
+    it('fractional numbers are rejected and fall back to server time', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        ts: 1_700_000_000.5,
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.delivery?.event_time_source).toBe('server');
+      expect(state.message?.provider_event_time).toBeGreaterThan(0);
+    });
+
+    it('boolean is rejected and falls back to server time', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        ts: true,
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.delivery?.event_time_source).toBe('server');
+    });
+
+    it('null is rejected and falls back to server time', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        ts: null,
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.delivery?.event_time_source).toBe('server');
+    });
+
+    it('object is rejected and falls back to server time', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        ts: { foo: 'bar' },
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.delivery?.event_time_source).toBe('server');
+    });
+
+    it('ISO 8601 string is parsed as provider-supplied ms', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      const ISO = '2026-08-15T12:00:00.000Z';
+      const MS = Date.parse(ISO);
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        time: ISO,
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.delivery?.event_time_source).toBe('provider');
+      expect(state.message?.provider_event_time).toBe(MS);
+    });
+
+    it('non-ISO string is rejected and falls back to server time', async () => {
+      const { connectionId, messageId } = await seedConnectionAndMessage();
+      await postEvent(connectionId, {
+        event: 'delivered',
+        messageId: PROVIDER_MESSAGE_ID,
+        time: 'not-a-date',
+      });
+      const state = await readState(messageId, connectionId);
+      expect(state.delivery?.event_time_source).toBe('server');
+    });
   });
 });

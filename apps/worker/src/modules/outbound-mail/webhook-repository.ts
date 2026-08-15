@@ -1,9 +1,14 @@
 // webhook-repository — webhook_deliveries + provider_connections.webhook_secret.
-// CAP-024. Owner: outbound-mail module. Private file — export through
-// modules/outbound-mail/index.ts.
+// CAP-024 + CAP-029. Owner: outbound-mail module. Private file — export
+// through modules/outbound-mail/index.ts.
 //
 // R-INBOUND-SIGNATURE: signature verification runs before JSON parse. This
 // repository owns the connection lookup that supplies the HMAC key.
+//
+// CAP-029: the delivery row now records the canonical event_time (provider
+// first, server fallback) so the audit trail can answer "what time did
+// Brevo observe this event" and "was this status update applied or
+// rejected by the rank predicate".
 
 import type { Database } from '../../platform/database';
 import { DomainError } from '../../platform/errors';
@@ -14,6 +19,18 @@ export interface WebhookDeliveryInput {
   readonly eventType: string;
   readonly rawPayload: string;
   readonly messageId: string | null;
+  /**
+   * Epoch-ms timestamp of the event per the provider (or server fallback).
+   * Recorded for the audit trail; the actual ordering decision is made
+   * inside updateMessageStatus when a matching message exists.
+   */
+  readonly eventTimeMs: number;
+  /**
+   * Where the eventTimeMs value came from. 'provider' = `ts`/`time` in the
+   * payload; 'server' = we fell back to Date.now() because the provider
+   * did not include one.
+   */
+  readonly eventTimeSource: 'provider' | 'server';
   readonly createdAt: string;
 }
 
@@ -35,7 +52,7 @@ export async function createWebhookDelivery(
 ): Promise<void> {
   await db
     .prepare(
-      'INSERT INTO webhook_deliveries (id, connection_id, event_type, raw_payload, message_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO webhook_deliveries (id, connection_id, event_type, raw_payload, message_id, status, event_time, event_time_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
     .bind(
       input.id,
@@ -44,6 +61,8 @@ export async function createWebhookDelivery(
       input.rawPayload,
       input.messageId,
       'processed',
+      input.eventTimeMs,
+      input.eventTimeSource,
       input.createdAt,
     )
     .run();
@@ -104,19 +123,29 @@ export async function ensureWebhookSecret(
 
 /**
  * Finds an outbound job by the provider message id Brevo echoes back in
- * webhook events. Returns the associated message_id so the processor can
- * update message status. Returns null when no job matches (e.g. event for
- * a message sent outside this system).
+ * webhook events, scoped to the receiving connection. Returns the
+ * associated message_id so the processor can update message status.
+ * Returns null when no job matches (e.g. event for a message sent outside
+ * this system, or — critically — a job owned by a DIFFERENT connection).
+ *
+ * The connection_id scope is mandatory: without it, a webhook arriving at
+ * connection A whose `messageId` collides with (or was guessed from) a
+ * job belonging to connection B would update the wrong message row
+ * (R-AUTHZ-004 — IDOR via cross-tenant lookup). Provider message ids
+ * are provider-assigned and not guaranteed globally unique across all
+ * Brevo accounts; scoping to the receiving connection closes the
+ * cross-tenant lookup hole.
  */
 export async function findJobByProviderMessageId(
   db: Database,
+  connectionId: string,
   providerMessageId: string,
 ): Promise<{ message_id: string } | null> {
   return db
     .prepare(
-      'SELECT message_id FROM outbound_jobs WHERE provider_message_id = ? LIMIT 1',
+      'SELECT message_id FROM outbound_jobs WHERE provider_message_id = ? AND provider_connection_id = ? LIMIT 1',
     )
-    .bind(providerMessageId)
+    .bind(providerMessageId, connectionId)
     .first<{ message_id: string }>();
 }
 
