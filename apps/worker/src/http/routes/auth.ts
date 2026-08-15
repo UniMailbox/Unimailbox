@@ -119,8 +119,12 @@ export function authRoutes(): Hono<AppEnv> {
       ? (rawBodyJson as { code: string }).code
       : '';
     if (!code) {
+      // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
+      // registration code is extracted before schema.parse so the
+      // actorId hash can be computed before the replay lookup. A
+      // missing field is a 400 validation error.
       throw new DomainError({
-        code: 'INVALID_REQUEST',
+        code: 'VALIDATION_ERROR',
         message: 'code is required',
         httpStatus: 400,
       });
@@ -324,8 +328,12 @@ export function authRoutes(): Hono<AppEnv> {
       ? (rawBodyJson as { email: string }).email
       : '';
     if (!email) {
+      // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
+      // email is extracted before schema.parse so the actorId hash
+      // can be computed before the replay lookup. A missing field
+      // is a 400 validation error.
       throw new DomainError({
-        code: 'INVALID_REQUEST',
+        code: 'VALIDATION_ERROR',
         message: 'email is required',
         httpStatus: 400,
       });
@@ -526,8 +534,12 @@ export function authRoutes(): Hono<AppEnv> {
       ? (rawBodyJson as { refreshToken: string }).refreshToken
       : '';
     if (!refreshToken) {
+      // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
+      // refreshToken is extracted before schema.parse so the actorId
+      // hash can be computed before the replay lookup. A missing
+      // field is a 400 validation error.
       throw new DomainError({
-        code: 'INVALID_REQUEST',
+        code: 'VALIDATION_ERROR',
         message: 'refreshToken is required',
         httpStatus: 400,
       });

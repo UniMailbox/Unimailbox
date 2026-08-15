@@ -21,6 +21,9 @@ export type Env = {
 export type AppEnv = {
   Bindings: Env;
   Variables: {
+    /** UUIDv4 request correlation id (CAP-032 / R-API-001). Set by
+     *  http/middleware/request-id.ts before any other middleware. */
+    requestId?: string;
     userId?: string;
     /** Idempotency-Key header (CAP-027 / ADR-004). Set by
      *  http/middleware/idempotency.ts after format validation. */

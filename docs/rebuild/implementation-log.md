@@ -10,6 +10,94 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-15 — CAP-032: Stable error model — closed catalog + canonical envelope
+
+Closed the long-standing gap that error responses had no stable machine-readable `code`: routes
+returned generic shapes (`{ error: '...' }` text strings, hand-rolled 404s, `ContentfulStatusCode`
+leaks), the catalog lived in a dead branch (`http/errors.ts`), and the `requestId` was a
+per-locale stub. CAP-032 fixes the **shape**, the **catalog**, the **middleware**, and the
+**audit-ability** of every `/api/v1/*` response in one slice.
+
+### What changed
+
+**Catalog** — `apps/worker/src/platform/errors.ts`:
+
+- Closed `ERROR_CODES = { ... } as const satisfies Readonly<Record<string, string>>` (R-API-002);
+  `ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES]` is the closed union. Adding a code
+  is a deliberate catalog edit, not a string at a call site.
+- `DomainError` carries `code: ErrorCode` + `httpStatus?: HttpStatusCode` (F1 — local literal
+  union, framework-neutral; `platform/*` no longer depends on Hono's `ContentfulStatusCode`).
+- `HttpErrorBody` is the canonical envelope shape `{ error: { code, message, requestId } }` with
+  all three fields required by the type system (R-API-001).
+
+**Middleware** — `apps/worker/src/http/middleware/error.ts`:
+
+- Single `envelope(code, message, httpStatus, requestId)` helper is the **only** place that
+  emits the canonical envelope (single source of truth — F3 refactor). `requestId` flows from
+  the middleware-set `c.get('requestId')` once, not twice (Arch L3).
+- `EmittableErrorCode = Exclude<ErrorCode, 'INVALID_REQUEST'>` + call-site runtime narrowing
+  `INVALID_REQUEST → VALIDATION_ERROR` belt-and-braces — the envelope helper cannot be tricked
+  into resurrecting a retired code (Code M1).
+- Four branches — `ZodError → VALIDATION_ERROR 400`, `DomainError → err.httpStatus`,
+  `SyntaxError → VALIDATION_ERROR 400` (defence in depth; D-CAP-031-D), unknown → `INTERNAL 500`
+  with `console.error('[error-middleware] unhandled error:', err)` carrying the R-LOG-001
+  redaction comment (Code L6).
+
+**Request-id middleware** — `apps/worker/src/http/middleware/request-id.ts`:
+
+- Real implementation: generates a UUIDv4, sets `c.set('requestId', id)`, propagates
+  `X-Request-Id` to the response header. AC5 fallback `<unknown>` sentinel is defence in depth
+  for the case where middleware did not run (Code L3).
+- New test file `request-id.test.ts` covers UUIDv4 regex + AC4 cross-check that the envelope
+  `requestId` matches the `X-Request-Id` header.
+
+**Route fixes** (12 sites total):
+
+- `admin-blocklist.ts:51` — hand-rolled 404 replaced with typed `DomainError({ code:
+  'BLOCKLIST_ENTRY_NOT_FOUND', httpStatus: 404 })`.
+- `auth.ts:127, 336, 542` — three reclassified sites now throw `VALIDATION_ERROR` (D-CAP-031-C
+  / Fix 9). The messages carry field context; finer-grained codes deferred per **D-CAP-032-A**
+  (QA M2 decision — see ledger).
+- `parse-json-body.ts` (`Invalid_json` shape) + every `/api/v1/*` route's `INVALID_JSON` guard
+  coexist with `error.ts`'s SyntaxError fallback (D-CAP-031-D).
+
+**Tests** — unit + worker:
+
+- `errors.test.ts` (AC1 catalog enum, AC2 reconciliation, AC3 `@ts-expect-error` demo).
+- `error.test.ts` (zod + domain + syntax + unknown envelope shape, AC5 fallback + positive,
+  console.error spy tightened to tag assertion).
+- `request-id.test.ts` (UUIDv4 regex, AC4 header matches body).
+- Per-route envelope-shape assertions on `webhooks.worker.test.ts` (4 sites), audit-events +
+  setup-status new error-path tests (F8 / QA M1).
+- `admin-blocklist.worker.test.ts` — replay test renamed "replay returns identical envelope
+  shape with fresh requestId" with explanatory comment (Code M2).
+
+**Deferred** — captured in ledger §Deferred items:
+
+- **D-CAP-032-A** — generic `VALIDATION_ERROR` reclassification for the three auth.ts sites
+  accepted; messages carry field context; the catalog stays small. CAP-034 / next-phase input-
+  error granularity is the natural owner if finer-grained codes are needed.
+- **D-CAP-032-B** → **CAP-038** tracks the `INVALID_REQUEST` catalog entry removal (Code L5).
+- **D-CAP-032-D** — `RATE_LIMITED` / `LOCK_CONTENTION` declared in catalog as `catalogued but
+  unused`; no route emits 429/503 today (the live mappings are 400/401/403/404/409/413/502).
+
+**Reviews** — three reviewers (architecture + code + qa) ran in parallel: 0 BLOCKER / 0 HIGH /
+6 MEDIUM / 12 LOW total. **Fix slice** (12 items F1–F8) implemented per
+`work/archive/2026-08/CAP-032/fix-slice-task.md`. **Triage**: 12 FIX (in slice) / 2
+ORCHESTRATOR (D-CAP-032-A, CAP-038) / 1 DROP (Code L4 verified correct).
+
+**Gates** (orchestrator-run, post-fix-slice, verified independently): typecheck ✓, lint ✓,
+test:unit 324/324 (+1 from F6 positive AC5 case), test:worker 463/463 (+2 from F8 audit-events +
+setup-status tests), build ✓, scaffold doctor 10/10. **Grep verification**: `grep -rn
+"hono/utils/http-status" apps/worker/src/` → empty; `grep -rn "code: 'NOT_FOUND'" apps/worker/src/`
+→ empty; `grep -rn "code: 'INVALID_REQUEST'" apps/worker/src/` → 1 hit (the deliberate narrowing
+comment in `error.ts:85`).
+
+Resolves D-CAP-008-C, D-CAP-032-B (partial — type-level only, `INVALID_REQUEST` catalog entry
+itself deferred to CAP-038).
+
+---
+
 ## 2026-08-14 — CAP-031: request validation + 1 MB body limit on all `/api/v1/*`
 
 Codified the long-standing gap that `JSON.parse(rawBody)` was duplicated at every route, with no

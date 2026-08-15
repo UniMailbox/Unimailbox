@@ -31,7 +31,6 @@ import { systemClock } from '../../platform/clock';
 import {
   sha256Hex,
   sqliteTimestamp,
-  writeIdempotencyRecord,
   prepareCreateIdempotencyRecord,
   findIdempotencyRecord,
   assertSameRequestHash,
@@ -214,26 +213,16 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
       const now = sqliteTimestamp(systemClock.now());
 
       if (!entry) {
-        // Idempotent: an already-deleted id returns 404, but the
-        // idempotency record captures that outcome so a retry replays
-        // the same response instead of inventing a new one. No business
-        // write happened, so no audit row is required.
-        const responseJson = JSON.stringify({
-          error: { code: 'NOT_FOUND', message: `Blocklist entry not found: ${id}` },
-        });
-        await writeIdempotencyRecord(c.env.DB, {
-          id: systemIds.uuid(),
-          actorId: userId,
-          operation,
-          idempotencyKey,
-          requestHash,
-          responseStatus: 404,
-          responseJson,
-          createdAt: now,
-        });
-        return new Response(responseJson, {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
+        // No business write happened, so no audit row is required.
+        // We do NOT write an idempotency record for this 404: a retry
+        // with the same Idempotency-Key + same id will re-hit this
+        // branch (the entry is still absent) and produce the same
+        // outcome. errorMiddleware renders the canonical envelope.
+        // CAP-032 / R-API-001.
+        throw new DomainError({
+          code: 'BLOCKLIST_ENTRY_NOT_FOUND',
+          message: `Blocklist entry not found: ${id}`,
+          httpStatus: 404,
         });
       }
 

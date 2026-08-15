@@ -150,5 +150,16 @@ describe('GET /api/v1/setup/status', () => {
       // And no other top-level keys.
       expect(Object.keys(body)).toEqual(['data']);
     });
+
+    // CAP-032 / R-API-001 / QA M1: the route has no error branch in
+    // production. Assert the response never carries an error envelope —
+    // a future change that introduces an error path will fail this test
+    // unless it adds the corresponding canonical envelope shape.
+    it('never emits an error envelope (body.error === undefined)', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/setup/status');
+      expect(response.status).toBe(200);
+      const body = await response.json() as { error?: unknown };
+      expect(body.error).toBeUndefined();
+    });
   });
 });

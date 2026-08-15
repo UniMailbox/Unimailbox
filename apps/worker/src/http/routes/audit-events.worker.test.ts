@@ -19,6 +19,10 @@ const ENCRYPTION_KEY = 'a'.repeat(64);
 const WEBHOOK_SECRET = 'a'.repeat(64);
 const PROVIDER_MESSAGE_ID = '<202601011200.abc@example.com>';
 
+// UUIDv4 regex — reused from request-id.test.ts so the format check stays
+// in one place. AC4 / CAP-032.
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 // ---------------------------------------------------------------------------
 // Shared seeding helpers (same patterns as mailboxes/compose/webhooks tests)
 // ---------------------------------------------------------------------------
@@ -444,5 +448,30 @@ Body text.`;
       expect(webhookEvent?.resource_id).toBe(messageId);
       expect(webhookEvent?.actor_user_id).toBeNull();
     });
+  });
+
+  // CAP-032 / R-API-001 / QA M1: error path emits the canonical envelope.
+  // /api/v1/setup/claim with a wrong installation token throws a typed
+  // DomainError (SETUP_CLAIM_INVALID_TOKEN, 401) — same shape every other
+  // route returns. Asserts status, code, message, requestId, and the
+  // X-Request-Id header mirroring the envelope.
+  it('canonical error envelope on a thrown DomainError (R-API-001)', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/setup/claim', {
+      method: 'POST',
+      body: JSON.stringify({ token: 'definitely-not-the-real-token' }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-audit-envelope-key',
+      },
+    });
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+    expect(body.error.code).toBe('SETUP_CLAIM_INVALID_TOKEN');
+    expect(body.error.message).toEqual(expect.any(String));
+    expect(body.error.requestId).toMatch(UUID_V4_REGEX);
+    expect(response.headers.get('X-Request-Id')).toBe(body.error.requestId);
   });
 });

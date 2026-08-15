@@ -20,6 +20,10 @@ import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 const WEBHOOK_SECRET = 'a'.repeat(64); // 64-char hex secret, matches production entropy.
 const PROVIDER_MESSAGE_ID = '<202601011200.abc@example.com>';
 
+// UUIDv4 regex — reused from request-id.test.ts so the format check stays
+// in one place. AC4 / CAP-032.
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 /**
  * Computes HMAC-SHA256(body, secret) as a lowercase hex string — the exact
  * shape webhook-processor recomputes and constant-time compares against.
@@ -156,8 +160,11 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
-    expect(json.error.code).toBe('WEBHOOK_SIGNATURE_INVALID');
+    const responseBody = (await response.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+    expect(responseBody.error.code).toBe('WEBHOOK_SIGNATURE_INVALID');
+    expect(responseBody.error.requestId).toMatch(UUID_V4_REGEX);
 
     // No delivery row should have been written for a rejected payload.
     const count = await env.DB
@@ -181,8 +188,11 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     );
 
     expect(response.status).toBe(401);
-    const json = await response.json();
-    expect(json.error.code).toBe('WEBHOOK_SIGNATURE_MISSING');
+    const responseBody = (await response.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+    expect(responseBody.error.code).toBe('WEBHOOK_SIGNATURE_MISSING');
+    expect(responseBody.error.requestId).toMatch(UUID_V4_REGEX);
   });
 
   it('unknown connectionId → 404 WEBHOOK_CONNECTION_NOT_FOUND', async () => {
@@ -205,8 +215,11 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     );
 
     expect(response.status).toBe(404);
-    const json = await response.json();
-    expect(json.error.code).toBe('WEBHOOK_CONNECTION_NOT_FOUND');
+    const responseBody = (await response.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+    expect(responseBody.error.code).toBe('WEBHOOK_CONNECTION_NOT_FOUND');
+    expect(responseBody.error.requestId).toMatch(UUID_V4_REGEX);
   });
 
   it('connection without webhook_secret → 409 WEBHOOK_NOT_CONFIGURED', async () => {
@@ -228,8 +241,11 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     );
 
     expect(response.status).toBe(409);
-    const json = await response.json();
-    expect(json.error.code).toBe('WEBHOOK_NOT_CONFIGURED');
+    const responseBody = (await response.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+    expect(responseBody.error.code).toBe('WEBHOOK_NOT_CONFIGURED');
+    expect(responseBody.error.requestId).toMatch(UUID_V4_REGEX);
   });
 
   it('bounce event → message status "bounced"', async () => {

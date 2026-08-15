@@ -597,7 +597,7 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     expect(row).toBeNull();
   });
 
-  it('returns 404 NOT_FOUND when id does not exist', async () => {
+  it('returns 404 BLOCKLIST_ENTRY_NOT_FOUND when id does not exist', async () => {
     const response = await SELF.fetch(
       'http://localhost/api/v1/admin/blocklist/00000000-0000-4000-8000-000000000099',
       {
@@ -611,10 +611,15 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
 
     expect(response.status).toBe(404);
     const body = await response.json();
-    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error.code).toBe('BLOCKLIST_ENTRY_NOT_FOUND');
+    // CAP-032 / R-API-001: every error envelope carries `requestId`.
+    expect(body.error.requestId).toEqual(expect.any(String));
+    // X-Request-Id response header mirrors the envelope's requestId
+    // (CAP-032 / D-CAP-032-A).
+    expect(response.headers.get('X-Request-Id')).toEqual(body.error.requestId);
   });
 
-  it('replays 404 response when retrying the same delete of a non-existent id', async () => {
+  it('replay returns identical envelope shape with fresh requestId', async () => {
     const idempotencyKey = 'blocklist-del-replay-' + crypto.randomUUID();
     const fakeId = '00000000-0000-4000-8000-000000000099';
 
@@ -630,7 +635,9 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     );
 
     expect(firstResponse.status).toBe(404);
-    const firstJson = await firstResponse.json();
+    const firstJson = (await firstResponse.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
 
     const secondResponse = await SELF.fetch(
       `http://localhost/api/v1/admin/blocklist/${fakeId}`,
@@ -644,8 +651,17 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     );
 
     expect(secondResponse.status).toBe(404);
-    const secondJson = await secondResponse.json();
-    expect(secondJson).toEqual(firstJson);
+    const secondJson = (await secondResponse.json()) as {
+      error: { code: string; message: string; requestId: string };
+    };
+
+    // After 404 simplification, replay yields a fresh requestId but identical
+    // envelope shape — assert shape, not bytes.
+    expect(secondJson.error.code).toBe(firstJson.error.code);
+    expect(secondJson.error.code).toBe('BLOCKLIST_ENTRY_NOT_FOUND');
+    expect(secondJson.error.message).toBe(firstJson.error.message);
+    expect(secondJson.error.requestId).toEqual(expect.any(String));
+    expect(secondJson.error.requestId).not.toBe(firstJson.error.requestId);
   });
 
   it('returns 401 without authentication', async () => {
@@ -692,44 +708,62 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
   });
 
-  it('returns 409 IDEMPOTENCY_KEY_REUSED when same key against different ids', async () => {
+  it('uses the path id to namespace idempotency records (CAP-027 / R-AUTHZ-004)', async () => {
+    // The DELETE operation string embeds the path id so two DELETEs
+    // against different ids do NOT share an idempotency record. We
+    // prove this by issuing two successful DELETEs against two
+    // different ids using the same Idempotency-Key — neither request
+    // is rejected as IDEMPOTENCY_KEY_REUSED. CAP-032 no longer
+    // captures 404 responses in idempotency_records (see notes on
+    // routes/admin-blocklist.ts:216), so we exercise the namespace
+    // through successful operations instead.
     const idempotencyKey = 'blocklist-del-reuse-' + crypto.randomUUID();
 
-    // First: delete a non-existent id (captures 404 in idempotency record).
-    const first = await SELF.fetch(
-      'http://localhost/api/v1/admin/blocklist/00000000-0000-4000-8000-000000000099',
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': idempotencyKey,
-        },
+    // Seed two entries.
+    const seedA = await SELF.fetch('http://localhost/api/v1/admin/blocklist', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'from', pattern: 'reuse-a' }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'blocklist-reuse-seed-a-' + crypto.randomUUID(),
       },
-    );
+    });
+    const { data: a } = await seedA.json();
 
-    expect(first.status).toBe(404);
-
-    // Same key + different path id → hash differs (body hash is sha256(""),
-    // path is part of the URL not the body) — same hash, but the
-    // server treats the second request as a fresh request against a
-    // different id. assertSameRequestHash does not fail since the body
-    // is identical, but the lookup is by (actor, operation, idempotency_key).
-    // For DELETE the operation string includes the path-id placeholder so
-    // different ids hit different records.
-    const second = await SELF.fetch(
-      'http://localhost/api/v1/admin/blocklist/00000000-0000-4000-8000-000000000098',
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': idempotencyKey,
-        },
+    const seedB = await SELF.fetch('http://localhost/api/v1/admin/blocklist', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'from', pattern: 'reuse-b' }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'blocklist-reuse-seed-b-' + crypto.randomUUID(),
       },
-    );
+    });
+    const { data: b } = await seedB.json();
 
-    // Different `:id` → operation string differs → fresh record, second
-    // request also returns 404. Verify two separate records exist.
-    expect(second.status).toBe(404);
+    const first = await SELF.fetch(`http://localhost/api/v1/admin/blocklist/${a.id}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+    expect(first.status).toBe(200);
+
+    // Same key + different `:id` → operation string differs → fresh
+    // record, NOT 409 IDEMPOTENCY_KEY_REUSED.
+    const second = await SELF.fetch(`http://localhost/api/v1/admin/blocklist/${b.id}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+    expect(second.status).toBe(200);
+
+    // Two separate records with the same Idempotency-Key, distinguished
+    // by their operation string.
     const count = await env.DB
       .prepare(
         `SELECT COUNT(*) as n FROM idempotency_records
