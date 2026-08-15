@@ -10,6 +10,85 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-15 — CAP-038: Remove deprecated `INVALID_REQUEST` catalog entry
+
+Closed the CAP-032 migration window. The `INVALID_REQUEST` code was deprecated during
+CAP-032 (see D-CAP-032-B) after the three `auth.ts` call sites were reclassified to
+`VALIDATION_ERROR`; the `EmittableErrorCode = Exclude<ErrorCode, 'INVALID_REQUEST'>`
+type alias + runtime narrowing were belt-and-braces defences that prevented
+accidental emission during the window. CAP-038 deletes the entry, the defences, and
+the migration-window test assertion in one slice — the catalog union no longer
+carries a code that no route emits.
+
+### What changed
+
+**Catalog** — `apps/worker/src/platform/errors.ts`:
+
+- `ERROR_CODES.INVALID_REQUEST` deleted; the preceding "Deprecated — migration
+  window only" comment deleted; the catalog-header "3. Deprecated" bullet deleted
+  (the post-slice catalog has two buckets, not three: Live + Catalogued-but-unused).
+- After the deletion, `ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES]`
+  is a tighter closed union — R-API-002 enforced more strongly.
+
+**Middleware** — `apps/worker/src/http/middleware/error.ts`:
+
+- `EmittableErrorCode` type alias deleted (`:28-34`); `envelope()` parameter retyped
+  to `ErrorCode` directly (`:45`). With the catalog entry gone, `err.code` is
+  already `ErrorCode` and no longer contains `'INVALID_REQUEST'` — the alias was
+  defending against a state that no longer holds.
+- Runtime narrowing `err.code === 'INVALID_REQUEST' ? 'VALIDATION_ERROR' :
+  err.code` + the preceding "The envelope helper refuses to emit 'INVALID_REQUEST'…"
+  comment block deleted at `:82-90`. `envelope()` now passes `err.code` straight
+  through.
+
+**Tests** — `apps/worker/src/platform/errors.test.ts`:
+
+- AC1 "migration-window" test repurposed to "AC1: every catalogued-but-unused code
+  and canonical envelope code is present in the catalog" (`:50`). The catalog-shape
+  loop at `:11-21` tests SHAPE (every entry well-formed), not SET (which codes
+  exist); this named test pins 5 high-value codes (`BODY_TOO_LARGE`, `INTERNAL`,
+  `VALIDATION_ERROR`, `RATE_LIMITED`, `LOCK_CONTENTION`) so a future contributor
+  removing one breaks a named test rather than slipping past the shape check. AC3
+  `@ts-expect-error` demo at `:23-34` untouched (uses `'R-AUTHZ-004'`, not
+  `INVALID_REQUEST`).
+
+### Review round
+
+Architecture + code in parallel (no business behaviour change; QA / security /
+frontend skipped per `.claude/skills/review-capability` §1). Both reviewers
+returned ACCEPT WITH FIXES.
+
+- **Code reviewer**: 1 MEDIUM (M1) — the AC1 test's title still claimed
+  "migration-window code is present in the catalog" after the slice, but the
+  assertions were now redundant with the catalog-shape test. Recommended either
+  delete the redundant test or repurpose it to assert the catalogue-but-unused
+  codes the inline comment actually named.
+- **Architecture reviewer**: 1 MEDIUM (M1) — same finding, different fix
+  proposal. Recommended renaming the title only and keeping the existing
+  assertions (`BODY_TOO_LARGE` / `INTERNAL` / `VALIDATION_ERROR`) because they
+  add genuine churn protection the catalog-shape loop cannot provide (SHAPE vs
+  SET distinction).
+- **Orchestrator decision** (per `.claude/rules/agent-collaboration.md` §Conflict
+  handling): architecture reviewer's option 1 wins. The catalog-shape loop
+  iterates entries and checks each is a string equal to its key, but does not pin
+  which codes exist — `entries.length >= 40` still passes if `BODY_TOO_LARGE` is
+  removed. A named test asserting `BODY_TOO_LARGE` IS additive. Fix landed inline
+  (5-line edit to `errors.test.ts:50-58`) and gates re-verified. **1 LOW**
+  (architecture) — pre-existing "two buckets" header comment imprecision, not
+  introduced by this slice; recorded for a future cleanup pass.
+
+### Gates
+
+Orchestrator-run, post-fix: typecheck ✓, lint ✓, test:unit 324/324,
+test:worker 463/463, build ✓, scaffold doctor 10/10.
+
+**Grep verification** (post-slice): `grep -rn "INVALID_REQUEST" apps/worker/src/
+--include='*.ts'` → 0 hits.
+
+Resolves D-CAP-032-B. Closes the CAP-032 migration window completely.
+
+---
+
 ## 2026-08-15 — CAP-032: Stable error model — closed catalog + canonical envelope
 
 Closed the long-standing gap that error responses had no stable machine-readable `code`: routes

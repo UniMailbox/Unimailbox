@@ -47,16 +47,18 @@ describe('CAP-032 — closed error code catalog', () => {
     expect(env.error.requestId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('AC1: every documented migration-window code is present in the catalog', () => {
-    // Codes the catalog discipline says we must keep present even before
-    // first use (D-CAP-032-D — 429 / 503 status mappings).
+  it('AC1: every catalogued-but-unused code and canonical envelope code is present in the catalog', () => {
+    // The earlier catalog-shape test proves every entry is well-formed
+    // but does not pin which codes exist. This test pins high-value
+    // codes so a future contributor removing one breaks a named test
+    // rather than slipping past the shape check.
+    //   - Catalogued-but-unused (D-CAP-032-D) — 429 / 503 mappings.
+    //   - Canonical envelope codes — the most-used errors in 400 / 413 / 500.
     expect(ERROR_CODES.BODY_TOO_LARGE).toBe('BODY_TOO_LARGE');
     expect(ERROR_CODES.INTERNAL).toBe('INTERNAL');
-    // Migration window — INVALID_REQUEST is deprecated; VALIDATION_ERROR
-    // replaces it. Validate the deprecated entry is still present for the
-    // window.
-    expect(ERROR_CODES.INVALID_REQUEST).toBe('INVALID_REQUEST');
     expect(ERROR_CODES.VALIDATION_ERROR).toBe('VALIDATION_ERROR');
+    expect(ERROR_CODES.RATE_LIMITED).toBe('RATE_LIMITED');
+    expect(ERROR_CODES.LOCK_CONTENTION).toBe('LOCK_CONTENTION');
   });
 });
 

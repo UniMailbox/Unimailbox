@@ -26,14 +26,6 @@ import { DomainError } from '../../platform/errors';
 import type { ErrorCode, HttpStatusCode } from '../../platform/errors';
 
 /**
- * Codes the envelope helper is allowed to emit. Explicitly excludes
- * `'INVALID_REQUEST'` (the deprecated migration-window entry) so the
- * envelope cannot be tricked into resurrecting a retired code (Arch L4 /
- * Code M1).
- */
-type EmittableErrorCode = Exclude<ErrorCode, 'INVALID_REQUEST'>;
-
-/**
  * Resolve the request correlation id for the envelope. Falls back to a
  * sentinel string when the middleware did not run (defence in depth — AC5).
  */
@@ -50,7 +42,7 @@ function resolveRequestId(c: Context<AppEnv>): string {
  * cannot drift (Arch L3 / QA L1).
  */
 function envelope(
-  code: EmittableErrorCode,
+  code: ErrorCode,
   message: string,
   httpStatus: HttpStatusCode,
   requestId: string,
@@ -80,15 +72,7 @@ export const errorMiddleware: ErrorHandler<AppEnv> = (err, c) => {
   // Handle DomainError (application errors with known HTTP status)
   if (err instanceof DomainError) {
     const status = err.httpStatus ?? 500;
-    // The envelope helper refuses to emit `'INVALID_REQUEST'` (the
-    // deprecated migration-window code). No call site throws it today
-    // (verified by `grep -rn "code: 'INVALID_REQUEST'" apps/worker/src/`
-    // returning only the catalog definition), but if a stale throw
-    // slipped through we'd rather emit a current code than resurrect a
-    // retired one. Narrow at the call site rather than cast.
-    const code: EmittableErrorCode =
-      err.code === 'INVALID_REQUEST' ? 'VALIDATION_ERROR' : err.code;
-    return envelope(code, err.message, status, resolveRequestId(c));
+    return envelope(err.code, err.message, status, resolveRequestId(c));
   }
 
   // Handle SyntaxError (JSON parsing failures).

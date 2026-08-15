@@ -10,17 +10,12 @@
 // (per .claude/rules/coding.md §Errors). Routes `throw new DomainError(...)`
 // and the middleware renders the canonical envelope.
 //
-// Codes in this catalog fall into three buckets:
+// Codes in this catalog fall into two buckets:
 //
 //   1. **Live** — emitted by at least one route or module today.
 //   2. **Catalogued but unused** — declared for future use (D-CAP-032-D).
 //      Today no site throws `429` / `503`; .claude/rules/architecture.md
 //      §API conventions documents them; the catalog records the mapping.
-//   3. **Deprecated** — `INVALID_REQUEST` is being phased out in favour of
-//      `VALIDATION_ERROR`. It is retained in the catalog only for the duration
-//      of CAP-032's migration window (the three auth.ts sites are removed in
-//      this slice; nothing else uses it). A follow-up capability will delete
-//      it.
 
 /**
  * HTTP status codes that the error catalog can emit. Framework-neutral:
@@ -50,9 +45,6 @@ export const ERROR_CODES = {
   REFRESH_TOKEN_EXPIRED: 'REFRESH_TOKEN_EXPIRED',
   INVALID_JSON: 'INVALID_JSON',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
-
-  // Deprecated — migration window only; remove in a follow-up capability.
-  INVALID_REQUEST: 'INVALID_REQUEST',
 
   // Idempotency (400 / 409)
   IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',

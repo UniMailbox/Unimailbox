@@ -1,0 +1,59 @@
+# CAP-038 — Architecture Review
+
+> Location: `work/reviews/CAP-038-architecture-review.md`
+
+**Reviewer:** architecture-reviewer (`general-purpose`) · **Date:** 2026-08-15 · **Base:** `f08924a`
+
+**Status:** ACCEPT WITH FIXES
+
+## Summary
+
+The slice is architecturally sound. It is a strict deletion: a deprecated catalog entry, its deprecation comment, the type-level `Exclude` narrowing that defended against accidental emission, the runtime belt-and-braces ternary that would have re-mapped any stale throw, and the matching test assertion. After the deletion, `ErrorCode` is a tighter closed union (R-API-002 is enforced *more* strongly than before, not less), and the `Exclude` narrowing becomes correctly redundant — `.claude/rules/coding.md` §Abstraction discipline applies: the alias existed to defend against a state that no longer holds, so removing it is the right move, not a regression.
+
+The only finding is a small comment-staleness drift in the surviving migration-window test title, which now describes a bucket that no longer exists.
+
+## Acceptance criteria — QA reviews only
+
+N/A (architecture review, not QA).
+
+## BLOCKER
+
+*(none — an empty BLOCKER section is a legitimate result)*
+
+## HIGH
+
+*(none — see `Summary` for the architectural soundness reasoning)*
+
+## MEDIUM
+
+### M1 — `errors.test.ts:50` test title still claims a "migration-window code" that no longer exists
+
+- **Where:** `apps/worker/src/platform/errors.test.ts:50`
+- **Violates:** `.claude/rules/agent-collaboration.md` §Handoff format ("report assumptions explicitly"; the same principle applies to test names — a name that misrepresents what the test proves is the cheapest form of architectural drift). Also adjacent to `.claude/rules/coding.md` §Comments ("comment *why*, not *what*" — a test name is the *what*; if it lies, it lies to the next reader).
+- **Failure scenario:** A future engineer reading the suite sees the title "every documented migration-window code is present in the catalog" and concludes (a) that migration-window codes are still a concept, and (b) that this test is the one guarding them. They grep the suite for `migration-window` and find this test, read the body, and discover three unrelated assertions (`BODY_TOO_LARGE`, `INTERNAL`, `VALIDATION_ERROR`) — none of which are migration-window entries. They either (a) trust the title and add a new assertion for the next migration-window code, recreating the same drift CAP-038 just deleted, or (b) lose trust in the test names and audit every test individually, which costs review time on every future capability.
+- **Fix:** Rename the test to match what it actually asserts post-slice. Two options, ranked:
+  1. **(preferred)** Rename to `it('AC1: every catalogued-but-unused code plus the canonical envelope codes are present in the catalog', () => { ... })` — accurate and explicit.
+  2. Or split: keep the live/catalogued-but-unused assertions as a single test with the above title, and delete the test entirely if the slice author considers the assertions redundant with AC1's earlier "non-empty object of string entries" test (`errors.test.ts:11-21`).
+
+  Either is a one-line change; option 1 preserves the existing proof that `BODY_TOO_LARGE` and `INTERNAL` survive any future catalog churn, which is still useful.
+
+## LOW
+
+### L1 — pre-existing "two buckets" header comment slightly imprecise
+
+- **Where:** `apps/worker/src/platform/errors.ts:13`
+- **Not introduced by this slice:** The header was previously "three buckets" and is now "two buckets". The wording is mechanically correct, but it loses one nuance: bucket 2 (catalogued-but-unused) is described in terms of `429` / `503` status mappings only, while the actual post-slice catalog has more than those two codes in this bucket (e.g., `WEBHOOK_CONNECTION_NOT_FOUND`, `WEBHOOK_NOT_CONFIGURED` are arguably also catalogued-but-unused — the comment overstates the bucket as "declared for future use, specifically the 429/503 mapping"). This is **not a CAP-038 finding** — the comment existed before the slice and the slice did not change its content (only the count). Recording it so a future cleanup pass can address it; do not block CAP-038 on it.
+
+## Not verified
+
+- **Quality gate runs.** Per `.claude/rules/agent-collaboration.md` §Result validation, gate results belong to the orchestrator at acceptance. I did not run `pnpm typecheck`, `pnpm test:unit`, `pnpm test:worker`, `pnpm lint`, `pnpm build`, or `pnpm scaffold doctor`. Static review confirms the changes are mechanically consistent — the `ErrorCode` union derivation `(typeof ERROR_CODES)[keyof typeof ERROR_CODES]` guarantees at the type level that `err.code` cannot be `'INVALID_REQUEST'` once the catalog entry is deleted, and `envelope()`'s `code: ErrorCode` parameter inherits that guarantee — so typecheck should pass without further work. The orchestrator must run the gates before accepting.
+- **`apps/worker/dist/**`.** Build artifacts are regenerated by `pnpm build`; I did not inspect them. The task explicitly places them out of scope.
+- **Test runtime behaviour.** I did not execute `errors.test.ts` or `error.test.ts`. Static analysis confirms the surviving assertions are still satisfiable (all three catalog keys still exist), and the deleted assertion is the only `INVALID_REQUEST`-shaped one. No reason to expect failure.
+
+## Required fixes
+
+1. **M1** — Rename the test at `apps/worker/src/platform/errors.test.ts:50` so the title no longer references "migration-window" (the concept this slice deleted).
+
+---
+
+No BLOCKER. No HIGH. One MEDIUM (test-name drift) and one LOW (pre-existing comment imprecision, not introduced by this slice). The slice itself is clean — closed-catalog enforcement is strengthened, the defensive `Exclude` narrowing is correctly removed because the state it defended against no longer holds, and no architectural rule is violated.
