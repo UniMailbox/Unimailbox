@@ -1,21 +1,30 @@
-// process-outbound-job — CAP-023 queue consumer use case.
+// process-outbound-job — CAP-023 + CAP-028 queue consumer use case.
 // Owner: outbound-mail module. Private file — export through
 // modules/outbound-mail/index.ts.
 //
 // This is the seam between the Cloudflare Queue plumbing (entrypoints/queue.ts)
 // and the actual send. It is intentionally callable directly from tests so the
-// happy / failure / idempotent-skip paths can be exercised without queue
-// plumbing (per .claude/rules/testing.md §Failure paths).
+// happy / failure / idempotent-skip / stale-worker paths can be exercised
+// without queue plumbing (per .claude/rules/testing.md §Failure paths).
 //
-// Flow:
-//   read job → (skip if already 'sent')
-//   → read message + recipients + provider_connection + encrypted_credential
-//   → decrypt API key (R-SECRET-002, ADR-007)
-//   → mark job 'sending'
-//   → build SendProviderMessage (R-OUTBOUND-004: idempotencyKey = message id)
-//   → call adapter.send(ctx, msg)
-//   → on success: message.status = 'sent', job.status = 'sent'
-//   → on failure: job.status = 'failed', attempts++, rethrow (caller decides retry)
+// CAP-028 flow (replaces the unconditional 'sending' write of CAP-023):
+//   1. claimOutboundJob with a per-invocation UUID (lockedBy) — R-OUTBOUND-007.
+//      On null: throw DomainError(LOCK_CONTENTION). The queue consumer's catch
+//      block calls msg.retry(); the lease expiry is the eventual backstop.
+//   2. read everything else, decrypt the API key (R-SECRET-002, ADR-007).
+//   3. adapter.send — R-OUTBOUND-004: provider idempotency key = message id.
+//   4. success  → markOutboundJobSent (predicate locked_by = lockedBy)
+//   5. retryable → if attempts+1 >= max_attempts, markOutboundJobTerminal,
+//                  else markOutboundJobRetryable. Use case rethrows for retry.
+//   6. terminal  → markOutboundJobTerminal, do NOT rethrow (job is acked).
+//
+// Steps 3–9 share one failure path: a failure anywhere AFTER the claim but
+// BEFORE the send result exists (missing message/connection/credential,
+// decrypt failure, provider error) goes through the same retryable/terminal
+// decision (R-OUTBOUND-008), so no post-claim failure can strand the row in
+// 'sending' with a held lease and no attempts increment. The success writes
+// (steps 10–11) are deliberately OUTSIDE that catch — see the comment at the
+// post-send block (CAP-028 F2).
 //
 // The adapter is supplied by the caller (dependency inversion) so tests can
 // pass a mock without reaching into module internals.
@@ -26,13 +35,38 @@ import type {
   ProviderRuntimeContext,
   SendProviderMessage,
 } from '@unimailbox/contracts';
+import { DomainError } from '../../platform/errors';
+import { systemIds } from '../../platform/ids';
+import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
+import { sqliteTimestamp } from '../../platform/idempotency';
 import { importEncryptionKey, decrypt } from '../../platform/crypto';
-import { getOutboundJob, updateJobStatus } from './job-repository';
+import { systemClock, type Clock } from '../../platform/clock';
+import { logger } from '../../platform/logger';
+import {
+  claimOutboundJob,
+  getOutboundJob,
+  markOutboundJobRetryable,
+  markOutboundJobSent,
+  markOutboundJobTerminal,
+  type OutboundJobRow,
+} from './job-repository';
 
 export interface ProcessJobDeps {
   readonly db: Database;
   readonly encryptionKey: string;
   readonly adapter: OutboundProviderAdapter;
+  /**
+   * Per-invocation UUID stamping the lock. Optional — when the queue
+   * consumer does not pass one, `processOutboundJob` generates a fresh
+   * UUID via `systemIds.uuid()`. Tests inject a deterministic UUID.
+   */
+  readonly lockedBy?: string;
+  /**
+   * Clock used for the lease-until computation. Optional — defaults to
+   * `systemClock`. Tests inject a fixed clock
+   * (.claude/rules/testing.md §Determinism).
+   */
+  readonly clock?: Clock;
 }
 
 /** Message columns read from the messages table for sending. */
@@ -65,132 +99,208 @@ interface CredentialRow {
 }
 
 /**
- * Processes a single outbound job: looks everything up, decrypts the API key,
- * sends via the supplied adapter, and updates message + job status.
+ * Processes a single outbound job: claims it atomically, looks everything up,
+ * decrypts the API key, sends via the supplied adapter, and updates the row
+ * via a lock-holding write.
  *
  * @param jobId — UUID of the outbound_jobs row
- * @param deps — db, the decrypted CREDENTIAL_ENCRYPTION_KEY, and the adapter
- * @throws Error if the job, message, connection, or credential cannot be found
- *         (the queue consumer logs and retries / acks accordingly)
- * @throws the underlying provider error after recording it on the job
+ * @param deps — db, the decrypted CREDENTIAL_ENCRYPTION_KEY, the adapter, and
+ *              optional per-invocation `lockedBy` UUID (defaults to a
+ *              freshly-generated UUID) and `clock` (defaults to `systemClock`)
+ * @throws DomainError(LOCK_CONTENTION) if the row is not in 'queued' status
+ *         (already sending/sent/failed or no live lease available). The
+ *         queue consumer's catch path is responsible for retry semantics.
+ * @throws Error if the job does not exist (before any write)
+ * @throws the underlying provider or pre-send error after recording it on
+ *         the job (retryable path; the terminal path resolves instead)
  */
 export async function processOutboundJob(
   jobId: string,
   deps: ProcessJobDeps,
 ): Promise<void> {
   const { db, encryptionKey, adapter } = deps;
+  const lockedBy = deps.lockedBy ?? systemIds.uuid();
+  const clock = deps.clock ?? systemClock;
 
   // 1. Read job. A job that is already 'sent' is a redelivery — skip silently.
-  // This keeps the consumer idempotent under at-least-once delivery.
-  const job = await getOutboundJob(db, jobId);
-  if (!job) {
+  // This keeps the consumer idempotent under at-least-once delivery (R-OUTBOUND-009).
+  const precheckJob = await getOutboundJob(db, jobId);
+  if (!precheckJob) {
     throw new Error(`Outbound job not found: ${jobId}`);
   }
-  if (job.status === 'sent') {
+  if (precheckJob.status === 'sent') {
     return;
   }
 
-  // 2. Read message. We only select the columns we need to build the send.
-  const msg = await db.prepare(
-    'SELECT from_address, from_name, subject, html_body, text_body, message_id_header, in_reply_to_header, references_header FROM messages WHERE id = ?',
-  ).bind(job.message_id).first<MessageRow>();
-  if (!msg) {
-    throw new Error(`Message not found: ${job.message_id}`);
+  // 2. Claim the row atomically (R-OUTBOUND-007). The lease expiry is
+  // computed from the injected clock so the claim and any later comparison
+  // against it use the same instant.
+  const leaseUntil = sqliteTimestamp(new Date(clock.unixMs() + OUTBOX_LEASE_TTL_MS));
+  const claimed: OutboundJobRow | null = await claimOutboundJob(db, jobId, lockedBy, leaseUntil);
+  if (!claimed) {
+    // Either another worker holds a live lease (LOCK_CONTENTION — the queue's
+    // msg.retry() is the right backoff) or the row is already in a terminal
+    // state (R-OUTBOUND-009 — the precheck above catches the 'sent' case but
+    // a 'failed' mid-flight by the reclaim path can also surface here).
+    throw new DomainError({
+      code: 'LOCK_CONTENTION',
+      message: 'Outbound job is not claimable: leased or terminal',
+    });
   }
 
-  // 3. Read recipients. bcc is intentionally not loaded — outbound providers
-  // strip it anyway and we never want to leak bcc addresses to 'to'/'cc'
-  // recipients via the provider payload.
-  const recipientsResult = await db.prepare(
-    "SELECT address, display_name, type FROM message_recipients WHERE message_id = ? AND type IN ('to', 'cc')",
-  ).bind(job.message_id).all<RecipientRow>();
-  const recipients = recipientsResult.results ?? [];
-
-  // 4. Read provider connection.
-  const conn = await db.prepare(
-    'SELECT credential_id, provider_key FROM provider_connections WHERE id = ?',
-  ).bind(job.provider_connection_id).first<ConnectionRow>();
-  if (!conn) {
-    throw new Error(`Provider connection not found: ${job.provider_connection_id}`);
-  }
-
-  // 5. Read encrypted credential by ID.
-  const cred = await db.prepare(
-    'SELECT ciphertext, iv, auth_tag FROM encrypted_credentials WHERE id = ?',
-  ).bind(conn.credential_id).first<CredentialRow>();
-  if (!cred) {
-    throw new Error(`Credential not found: ${conn.credential_id}`);
-  }
-
-  // 6. Decrypt the API key. R-SECRET-002: the plaintext lives only for the
-  // lifetime of this request — it goes into the adapter context and nowhere
-  // else. We do not cache it (ADR-007 §caching).
-  const key = await importEncryptionKey(encryptionKey);
-  const apiKey = await decrypt(
-    {
-      ciphertext: new Uint8Array(cred.ciphertext),
-      iv: new Uint8Array(cred.iv),
-      authTag: new Uint8Array(cred.auth_tag),
-    },
-    key,
-  );
-
-  // 7. Mark the job 'sending' before we hit the provider so an observer can
-  // tell the two states apart.
-  await updateJobStatus(db, jobId, 'sending');
-
-  // 8. Build the provider-neutral payload.
-  const toRecipients = recipients.filter((r) => r.type === 'to');
-  const ccRecipients = recipients.filter((r) => r.type === 'cc');
-
-  const sendMsg: SendProviderMessage = {
-    // R-OUTBOUND-004: provider calls use the canonical message ID as their
-    // idempotency key so a redelivery cannot double-send.
-    idempotencyKey: job.message_id,
-    from: {
-      address: msg.from_address,
-      ...(msg.from_name ? { displayName: msg.from_name } : {}),
-    },
-    to: toRecipients.map((r) => ({
-      address: r.address,
-      ...(r.display_name ? { displayName: r.display_name } : {}),
-    })),
-    cc: ccRecipients.map((r) => ({
-      address: r.address,
-      ...(r.display_name ? { displayName: r.display_name } : {}),
-    })),
-    bcc: [],
-    subject: msg.subject ?? '',
-    html: msg.html_body ?? '',
-    text: msg.text_body ?? '',
-    ...(msg.message_id_header ? { messageId: msg.message_id_header } : {}),
-    ...(msg.in_reply_to_header ? { inReplyTo: msg.in_reply_to_header } : {}),
-    references: msg.references_header ?? '',
-    attachments: [],
-  };
-
-  const ctx: ProviderRuntimeContext = { env: { BREVO_API_KEY: apiKey } };
-
-  // 9. Send. On success, advance both the message and the job. On failure,
-  // record the error on the job and re-throw so the queue consumer can
-  // apply its retry policy.
+  // Steps 3–9 share one try/catch: any failure after the claim (missing
+  // message/connection/credential, decrypt failure, provider error) goes
+  // through the same retryable/terminal decision so the row can never be
+  // stranded in 'sending' with a held lease and no attempts increment.
+  let sendResult: Awaited<ReturnType<OutboundProviderAdapter['send']>>;
   try {
-    const result = await adapter.send(ctx, sendMsg);
+    // 3. Read message. We only select the columns we need to build the send.
+    const msg = await db.prepare(
+      'SELECT from_address, from_name, subject, html_body, text_body, message_id_header, in_reply_to_header, references_header FROM messages WHERE id = ?',
+    ).bind(claimed.message_id).first<MessageRow>();
+    if (!msg) {
+      throw new Error(`Message not found: ${claimed.message_id}`);
+    }
 
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    await db.prepare(
-      'UPDATE messages SET status = ?, sent_at = ?, updated_at = ? WHERE id = ?',
-    ).bind('sent', now, now, job.message_id).run();
+    // 4. Read recipients. bcc is intentionally not loaded — outbound providers
+    // strip it anyway and we never want to leak bcc addresses to 'to'/'cc'
+    // recipients via the provider payload.
+    const recipientsResult = await db.prepare(
+      "SELECT address, display_name, type FROM message_recipients WHERE message_id = ? AND type IN ('to', 'cc')",
+    ).bind(claimed.message_id).all<RecipientRow>();
+    const recipients = recipientsResult.results ?? [];
 
-    await updateJobStatus(db, jobId, 'sent', { providerMessageId: result.providerMessageId });
+    // 5. Read provider connection.
+    const conn = await db.prepare(
+      'SELECT credential_id, provider_key FROM provider_connections WHERE id = ?',
+    ).bind(claimed.provider_connection_id).first<ConnectionRow>();
+    if (!conn) {
+      throw new Error(`Provider connection not found: ${claimed.provider_connection_id}`);
+    }
+
+    // 6. Read encrypted credential by ID.
+    const cred = await db.prepare(
+      'SELECT ciphertext, iv, auth_tag FROM encrypted_credentials WHERE id = ?',
+    ).bind(conn.credential_id).first<CredentialRow>();
+    if (!cred) {
+      throw new Error(`Credential not found: ${conn.credential_id}`);
+    }
+
+    // 7. Decrypt the API key. R-SECRET-002: the plaintext lives only for the
+    // lifetime of this request — it goes into the adapter context and nowhere
+    // else. We do not cache it (ADR-007 §caching).
+    const key = await importEncryptionKey(encryptionKey);
+    const apiKey = await decrypt(
+      {
+        ciphertext: new Uint8Array(cred.ciphertext),
+        iv: new Uint8Array(cred.iv),
+        authTag: new Uint8Array(cred.auth_tag),
+      },
+      key,
+    );
+
+    // 8. Build the provider-neutral payload.
+    const toRecipients = recipients.filter((r) => r.type === 'to');
+    const ccRecipients = recipients.filter((r) => r.type === 'cc');
+
+    const sendMsg: SendProviderMessage = {
+      // R-OUTBOUND-004: provider calls use the canonical message ID as their
+      // idempotency key so a redelivery cannot double-send.
+      idempotencyKey: claimed.message_id,
+      from: {
+        address: msg.from_address,
+        ...(msg.from_name ? { displayName: msg.from_name } : {}),
+      },
+      to: toRecipients.map((r) => ({
+        address: r.address,
+        ...(r.display_name ? { displayName: r.display_name } : {}),
+      })),
+      cc: ccRecipients.map((r) => ({
+        address: r.address,
+        ...(r.display_name ? { displayName: r.display_name } : {}),
+      })),
+      bcc: [],
+      subject: msg.subject ?? '',
+      html: msg.html_body ?? '',
+      text: msg.text_body ?? '',
+      ...(msg.message_id_header ? { messageId: msg.message_id_header } : {}),
+      ...(msg.in_reply_to_header ? { inReplyTo: msg.in_reply_to_header } : {}),
+      references: msg.references_header ?? '',
+      attachments: [],
+    };
+
+    const ctx: ProviderRuntimeContext = { env: { BREVO_API_KEY: apiKey } };
+
+    // 9. Send. Declared outside the try so the success writes below can read
+    // it without widening the steps-3–9 catch to cover them.
+    sendResult = await adapter.send(ctx, sendMsg);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    // Narrow without `any`: the only code we trust here is a DomainError's
-    // stable `code` field. Anything else becomes 'SEND_FAILED'.
-    const code = error instanceof Error && 'code' in error
-      ? String((error as Record<string, unknown>).code)
-      : 'SEND_FAILED';
-    await updateJobStatus(db, jobId, 'failed', { errorCode: code, errorMessage: message });
+    // The only error code we trust is a DomainError's stable `code` field
+    // (closed catalog, CAP-032). Anything else — provider SDK errors, a
+    // DOMException's legacy numeric `code`, library strings like
+    // 'ECONNRESET' — is not in the catalog and becomes 'SEND_FAILED'.
+    const code = error instanceof DomainError ? error.code : 'SEND_FAILED';
+
+    // R-OUTBOUND-008: retryable vs terminal is decided by the attempts
+    // counter only. If the next attempt would reach max_attempts, mark
+    // terminal (no retry, no rethrow → queue acks).
+    const nextAttempts = claimed.attempts + 1;
+    const isTerminal = nextAttempts >= claimed.max_attempts;
+
+    if (isTerminal) {
+      await markOutboundJobTerminal(db, jobId, lockedBy, code, message);
+      // Do NOT rethrow — terminal failure means the queue should ack.
+      return;
+    }
+
+    await markOutboundJobRetryable(db, jobId, lockedBy, code, message);
+    throw error;
+  }
+
+  // Steps 10–11 — the success writes. These sit OUTSIDE the steps-3–9 catch
+  // on purpose (CAP-028 F2): the send already succeeded, so a failure here is
+  // bookkeeping, not a send failure. Routing it into the retryable/terminal
+  // path would burn an attempt (or write `failed`!) on a send that succeeded
+  // and would never fire the divergence warn. Instead: log the failure and
+  // rethrow without any attempts logic — the row stays `sending` with this
+  // worker's lease held, and the lease-expiry + cron reclaim path recovers
+  // it. The resend on the recovered attempt is deduped by the provider
+  // idempotency key (R-OUTBOUND-004), so no double-delivery.
+  try {
+    const now = sqliteTimestamp(new Date());
+    await db.prepare(
+      'UPDATE messages SET status = ?, sent_at = ?, updated_at = ? WHERE id = ?',
+    ).bind('sent', now, now, claimed.message_id).run();
+
+    // R-OUTBOUND-007 / R-OUTBOUND-009: the predicate locked_by = lockedBy
+    // makes this write a no-op if a reclaim stole the row mid-send. The
+    // boolean return surfaces that divergence as a warn (adjudicated at
+    // CAP-028 review triage) — the row was resolved by whoever stole the
+    // lock and the provider did report success, so throwing here would
+    // re-drive an already-resolved job.
+    const advanced = await markOutboundJobSent(db, jobId, lockedBy, sendResult.providerMessageId);
+    if (!advanced) {
+      // R-LOG-001: job ID only — no bodies, no provider payload.
+      logger.warn(
+        { event: 'outbound.job_sent_divergence' },
+        {
+          source: 'process-outbound-job',
+          jobId,
+          reason: 'lock stolen before success write; row resolved elsewhere',
+        },
+      );
+    }
+  } catch (error) {
+    // R-LOG-001: job ID only — no bodies, no provider payload.
+    logger.error(
+      { event: 'outbound.job_post_send_write_failed' },
+      {
+        source: 'process-outbound-job',
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    );
     throw error;
   }
 }

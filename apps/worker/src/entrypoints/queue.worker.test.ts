@@ -156,7 +156,7 @@ describe('processOutboundJob', () => {
     expect(job?.attempts).toBe(0);
   });
 
-  it('marks the job failed and increments attempts when the adapter throws', async () => {
+  it('re-queues the job with attempts+1 and rethrows when the adapter throws (R-OUTBOUND-008 retryable path)', async () => {
     const { jobId, messageId } = await seedJob();
 
     const adapter = makeMockAdapter(async () => {
@@ -180,7 +180,9 @@ describe('processOutboundJob', () => {
       .prepare('SELECT status, error_code, error_message, attempts FROM outbound_jobs WHERE id = ?')
       .bind(jobId)
       .first<{ status: string; error_code: string | null; error_message: string | null; attempts: number }>();
-    expect(job?.status).toBe('failed');
+    // CAP-028: a first failure on a fresh attempts budget is retryable — the
+    // row goes back to 'queued' (attempts 0 + 1 = 1 < max 3), not 'failed'.
+    expect(job?.status).toBe('queued');
     expect(job?.error_message).toBe('Brevo 503');
     expect(job?.attempts).toBe(1);
 

@@ -1,4 +1,4 @@
-// apps/worker/src/modules/outbound-mail/index.ts — CAP-014, CAP-023, CAP-025.
+// apps/worker/src/modules/outbound-mail/index.ts — CAP-014, CAP-023, CAP-025, CAP-028.
 // Public API for the outbound-mail module. Exports the repository
 // functions, the queue-consumer use case, and their input types.
 //
@@ -20,12 +20,22 @@ export {
   prepareCreateOutboundJob,
   getOutboundJob,
   updateJobStatus,
+  claimOutboundJob,
+  markOutboundJobSent,
+  markOutboundJobRetryable,
+  markOutboundJobTerminal,
+  reclaimStaleOutboundJobs,
+  findOrphanedQueuedJobs,
+  isJobTerminal,
   type CreateJobInput,
   type OutboundJobRow,
   type UpdateJobStatusInput,
+  type ReclaimResult,
 } from './job-repository';
 
 export { processOutboundJob, type ProcessJobDeps } from './process-outbound-job';
+
+export { reclaimStaleJobs, type OutboundJobEnqueuer } from './reclaim-stale-jobs';
 
 export {
   createWebhookDelivery,

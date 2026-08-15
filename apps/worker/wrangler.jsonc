@@ -65,11 +65,12 @@
     ]
   },
 
-  // ---- Triggers — scheduled handler (no crons yet) ----
+  // ---- Triggers — scheduled handler ----
   // CAP-001 ships the `scheduled` handler in `entrypoints/scheduled.ts`.
-  // The first cron target lands with the maintenance module.
+  // CAP-028: the outbound-job reclaim runs every 2 minutes (see
+  // apps/worker/src/platform/outbox-config.ts for the lease TTL).
   "triggers": {
-    "crons": []
+    "crons": ["*/2 * * * *"]
   },
 
   // ---- Secrets Store — secrets the Worker reads via env.<name> ----

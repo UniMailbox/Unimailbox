@@ -1544,3 +1544,25 @@ became the control-plane entry point.
 Verification: 24/24 PASS for the end-to-end harness; 20/20 PASS for the destructive-commands
 audit harness; 10/10 PASS for the role-detection harness. The Main Session can recover project
 state via the procedure in `CLAUDE.md` without spawning any subagent.
+
+## 2026-08-15 — CAP-028: Durable outbox — lease, attempts, reclaim
+
+Closes the CAP-023→CAP-028 gap: an outbound job now survives a consumer crash mid-send.
+`claimOutboundJob` takes the row `queued → sending` atomically with a 60s lease and a
+per-invocation `lockedBy` UUID; every lock-holding write predicates on `locked_by = ?` so a
+stale worker is a no-op. The scheduled dispatcher (every 2 min) reclaims expired leases
+(`attempts >= max_attempts` → `failed RECLAIM_EXHAUSTED`, else → `queued`, never
+attempts++), re-enqueues each reclaimed ID, and sweeps `queued` rows older than 5 min whose
+enqueue was lost. `processOutboundJob` runs all pre-send steps in one retryable/terminal
+catch and isolates the post-success writes (failure → `outbound.job_post_send_write_failed`
++ raw rethrow; lease expiry + reclaim recovers; R-OUTBOUND-004 dedupes the resend).
+
+Process trail: 3-way parallel review (architecture + code + qa) surfaced 1 BLOCKER + 5 HIGH;
+fix round 1 closed all; fresh re-reviews surfaced F1 (failed re-enqueue orphans a `queued`
+row — HIGH) and F2 (post-success write failures burned attempts on a succeeded send —
+MEDIUM), both introduced by round 1; fix round 2 closed both plus F3–F5; scoped verification
+re-review confirmed closure with tests that fail on pre-fix code. All adjudications in
+`work/archive/2026-08/CAP-028/task.md` §Decisions. Deferrals recorded as D-CAP-028-A..D
+(adapter error taxonomy → CAP-029; reclaim N+1; `updateJobStatus` retention; pre-existing
+cross-module `messages` write). Gates (orchestrator-run): typecheck ✓, lint ✓, unit 324/324,
+worker 505/505, build ✓, doctor 10/10.
