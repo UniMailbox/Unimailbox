@@ -48,11 +48,30 @@
       "bucket_name": "unimailbox-attachments",
     },
   ],
+  "ai": {
+    "binding": "AI",
+  },
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "unimailbox-messages",
+    },
+  ],
+  "ai_gateway": [
+    {
+      "binding": "AI_GATEWAY",
+      "name": "unimailbox-mcp",
+    },
+  ],
   "queues": {
     "producers": [
       {
         "binding": "OUTBOUND_QUEUE",
         "queue": "unimailbox-outbound",
+      },
+      {
+        "binding": "INBOX_INDEX_QUEUE",
+        "queue": "unimailbox-inbox-index",
       },
     ],
     "consumers": [
@@ -63,8 +82,29 @@
         "max_retries": 5,
         "dead_letter_queue": "unimailbox-outbound-dead",
       },
+      {
+        "queue": "unimailbox-inbox-index",
+        "max_batch_size": 25,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "dead_letter_queue": "unimailbox-inbox-index-dead",
+      },
     ],
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MAILBOX_AGENT",
+        "class_name": "MailboxAgent",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MailboxAgent"],
+    },
+  ],
   "triggers": {
     "crons": ["* * * * *", "0 * * * *", "17 3 * * *"],
   },
@@ -97,11 +137,30 @@
           "bucket_name": "unimailbox-preview-attachments",
         },
       ],
+      "ai": {
+        "binding": "AI",
+      },
+      "vectorize": [
+        {
+          "binding": "VECTORIZE",
+          "index_name": "unimailbox-preview-messages",
+        },
+      ],
+      "ai_gateway": [
+        {
+          "binding": "AI_GATEWAY",
+          "name": "unimailbox-mcp",
+        },
+      ],
       "queues": {
         "producers": [
           {
             "binding": "OUTBOUND_QUEUE",
             "queue": "unimailbox-preview-outbound",
+          },
+          {
+            "binding": "INBOX_INDEX_QUEUE",
+            "queue": "unimailbox-preview-inbox-index",
           },
         ],
         "consumers": [
@@ -112,8 +171,29 @@
             "max_retries": 5,
             "dead_letter_queue": "unimailbox-preview-outbound-dead",
           },
+          {
+            "queue": "unimailbox-preview-inbox-index",
+            "max_batch_size": 25,
+            "max_batch_timeout": 5,
+            "max_retries": 5,
+            "dead_letter_queue": "unimailbox-preview-inbox-index-dead",
+          },
         ],
       },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "MAILBOX_AGENT",
+            "class_name": "MailboxAgent",
+          },
+        ],
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["MailboxAgent"],
+        },
+      ],
     },
   },
 }

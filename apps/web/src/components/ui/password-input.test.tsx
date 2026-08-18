@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import { createTestI18n } from "../../i18n/test-instance";
 import { PasswordInput } from "./password-input";
 
-function renderPasswordInput(overrides: Partial<React.ComponentProps<typeof PasswordInput>> = {}) {
+function renderPasswordInput(
+  overrides: Partial<React.ComponentProps<typeof PasswordInput>> = {},
+) {
   return render(
     <I18nextProvider i18n={createTestI18n("en")}>
       <PasswordInput

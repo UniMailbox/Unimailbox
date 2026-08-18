@@ -1,6 +1,7 @@
 import type { EndpointDefinition } from "./common/endpoint";
 import { attachmentEndpoints } from "./attachments";
 import { administrationEndpoints } from "./administration";
+import { agentTokenEndpoints } from "./agent-tokens";
 import { authEndpoints } from "./auth";
 import { draftEndpoints } from "./drafts";
 import { mailboxEndpoints } from "./mailboxes";
@@ -14,4 +15,5 @@ export const endpoints = {
   drafts: draftEndpoints,
   attachments: attachmentEndpoints,
   administration: administrationEndpoints,
+  agentTokens: agentTokenEndpoints,
 } as const satisfies Record<string, Record<string, EndpointDefinition>>;

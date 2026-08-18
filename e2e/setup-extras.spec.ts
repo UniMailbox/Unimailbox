@@ -335,7 +335,12 @@ test("administrator selects a domain provider and sends a provider test", async 
   await page
     .getByRole("button", { name: /Send test email|发送测试邮件/u })
     .click();
+  // Scope to the sonner toaster so we disambiguate from any prior success
+  // toast still on screen (e.g. the "Apply change" toast above).
   await expect(
-    page.getByText(/accepted the test email|已接受发送/u),
+    page
+      .locator("[data-sonner-toaster]")
+      .getByText(/accepted the test email|已接受发送/u)
+      .last(),
   ).toBeVisible();
 });

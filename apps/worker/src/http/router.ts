@@ -11,6 +11,7 @@ import {
   LoginSchema,
   MailboxCreateSchema,
   MailboxMemberSchema,
+  PERMISSION_KEYS,
   ProviderConnectionSchema,
   RegisterSchema,
   SendMessageSchema,
@@ -21,6 +22,7 @@ import type { MiddlewareHandler } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
 import type { AdminApplicationService } from "../modules/administration";
+import type { AgentTokenApplicationService } from "../modules/agent-tokens";
 import type { InstallationService } from "../modules/installation";
 import type { IdentityApplicationService } from "../modules/identity/application";
 import type { MailboxApplicationService } from "../modules/mailboxes";
@@ -37,6 +39,7 @@ import type { HttpAppBindings } from "./bindings";
 import type { CloudflareSettingsService } from "../modules/administration/cloudflare-settings";
 import type { InfrastructureSettingsService } from "../modules/administration/infrastructure-settings";
 import { captureWorkerHttpError } from "../platform/sentry";
+import { handleMcpRequest } from "../entrypoints/mcp";
 
 export interface HttpAppContext {
   installation: Pick<InstallationService, "getStatus">;
@@ -53,6 +56,7 @@ export interface HttpAppContext {
   drafts: DraftApplicationService;
   webhooks: WebhookApplicationService;
   admin: AdminApplicationService;
+  agentTokens: AgentTokenApplicationService;
   logger: Logger;
 }
 
@@ -66,9 +70,42 @@ function success<T>(data: T, init?: ResponseInit): Response {
 }
 
 function isBootstrapSafePath(path: string): boolean {
-  return (
-    path === "/health" || path === "/setup" || path.startsWith("/api/v1/setup/")
-  );
+  if (path === "/health" || path === "/setup") return true;
+  if (path.startsWith("/api/v1/setup/")) return true;
+  // MCP discovery is part of the deployment's public contract;
+  // clients cache it before authenticating and operators run it
+  // before installation finishes. Without this carve-out the PRM
+  // metadata would 503 until the bootstrap is complete.
+  if (path.startsWith("/.well-known/")) return true;
+  return false;
+}
+
+const AgentTokenCreateInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  scopes: z.array(z.enum(PERMISSION_KEYS)).min(1).max(PERMISSION_KEYS.length),
+  expires_at: z
+    .union([z.string().min(1), z.number().int().positive()])
+    .nullable()
+    .optional(),
+});
+
+/**
+ * Derive the deployment origin from request headers so the
+ * `.well-known/*` documents remain portable behind the Cloudflare edge.
+ *
+ * `X-Forwarded-Host` wins when present — Cloudflare's CDN always sets
+ * it to the host the client used to reach the worker, and `Host` only
+ * reflects the Worker route binding. Local `wrangler dev` does not
+ * inject `X-Forwarded-Host`, so we fall back to `Host`; the request
+ * URL itself is the last resort for the vitest-pool-workers harness,
+ * which synthesizes neither header.
+ */
+function discoverOrigin(request: Request): string {
+  const protocol = request.headers.get("x-forwarded-proto") ?? "https";
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const host = forwardedHost ?? request.headers.get("host");
+  if (host) return `${protocol}://${host}`;
+  return new URL(request.url).origin;
 }
 
 function parseBearer(header: string | undefined): string | null {
@@ -152,6 +189,101 @@ export function createHttpApp(createContext: HttpContextFactory) {
   app.get("/health", async (context) =>
     success(await context.get("appContext").health.check()),
   );
+
+  // MCP discovery surface (PR #8). Three `.well-known/*` documents are
+  // declared per the 2026-07-28 MCP specification and the OAuth
+  // 2.1 metadata family (RFC 9728, RFC 8414). The endpoints are
+  // unconditionally reachable — discovery MUST NOT be gated by the
+  // `MCP_ENABLED` flag, because clients cache the metadata before
+  // authenticating. Origin derivation prefers `X-Forwarded-Host` so the
+  // document survives the Cloudflare edge, falling back to `Host` for
+  // local development where the proxy header is absent.
+  app.get("/.well-known/oauth-protected-resource", (context) => {
+    const origin = discoverOrigin(context.req.raw);
+    return Response.json({
+      resource: `${origin}/mcp`,
+      authorization_servers: [`${origin}/oauth`],
+      scopes_supported: [...PERMISSION_KEYS],
+      bearer_methods_supported: ["header"],
+    });
+  });
+
+  // v1 ships a placeholder authorization server: the metadata is well
+  // formed and points at the `/.well-known/oauth-authorization-server`
+  // endpoints we plan to implement, but the actual authorize/token flow
+  // lands in a follow-up. `status: "experimental"` advertises the gap to
+  // clients that introspect the document instead of probing the
+  // endpoints.
+  app.get("/.well-known/oauth-authorization-server", (context) => {
+    const origin = discoverOrigin(context.req.raw);
+    return Response.json({
+      status: "experimental",
+      issuer: origin,
+      authorization_endpoint: `${origin}/oauth/authorize`,
+      token_endpoint: `${origin}/oauth/token`,
+      registration_endpoint: `${origin}/oauth/register`,
+      scopes_supported: [...PERMISSION_KEYS],
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      token_endpoint_auth_methods_supported: ["none"],
+      code_challenge_methods_supported: ["S256"],
+      // RFC 8707 Resource Indicators — every token is bound to the
+      // `/mcp` endpoint, so a leaked token cannot be replayed against
+      // an unrelated resource server under the same deployment.
+      resource_documentation: `${origin}/mcp`,
+    });
+  });
+
+  // Native MCP discovery document. Lets clients learn the transport
+  // type and auth scheme without parsing the PRM. Mirrors the
+  // `mcp.json` shape used by the official MCP registry.
+  app.get("/.well-known/mcp.json", (context) => {
+    const origin = discoverOrigin(context.req.raw);
+    return Response.json({
+      name: "unimailbox",
+      version: "0.1.0",
+      transport: "streamable-http",
+      endpoint: `${origin}/mcp`,
+      auth_methods: ["bearer"],
+      scopes_supported: [...PERMISSION_KEYS],
+    });
+  });
+
+  // First-party MCP Streamable HTTP endpoint. Mounted as a sub-route on
+  // the existing Hono router so it shares the bootstrap gate, request-id
+  // header, and CORS handling with the REST surface. The SDK's
+  // `WebStandardStreamableHTTPServerTransport` consumes the raw `Request`
+  // directly, so we unwrap the Hono context once and re-enter the
+  // standard fetch handler. Disabled by default — operators flip the
+  // `MCP_ENABLED` global before this route becomes reachable.
+  app.all("/mcp", async (context) => {
+    // Hono's `executionCtx` getter throws under vitest-pool-workers'
+    // `app.request` harness because the test pool does not pass an
+    // ExecutionContext. Production requests always have one. We probe
+    // safely with try/catch and pass `undefined` when the context is
+    // absent (createAppContext ignores it anyway).
+    let execCtx: ExecutionContext | undefined;
+    try {
+      execCtx = (context as unknown as { executionCtx?: ExecutionContext })
+        .executionCtx;
+    } catch {
+      execCtx = undefined;
+    }
+    const response = await handleMcpRequest(
+      context.req.raw,
+      context.env,
+      execCtx as ExecutionContext<unknown> | undefined,
+    );
+    // The MCP transport owns its own response headers; only stamp the
+    // request-id if the transport did not already do so.
+    if (!response.headers.has("x-request-id")) {
+      response.headers.set(
+        "x-request-id",
+        context.get("requestId") ?? crypto.randomUUID(),
+      );
+    }
+    return response;
+  });
 
   app.get("/setup", (context) => context.redirect("/login", 307));
 
@@ -312,6 +444,13 @@ export function createHttpApp(createContext: HttpContextFactory) {
       { status: 201 },
     ),
   );
+  app.get("/api/v1/mailboxes/:mailbox_id/agent", async (context) => {
+    const mailboxId = context.req.param("mailbox_id");
+    const namespace = context.env.MAILBOX_AGENT;
+    if (!namespace) return new Response("agent unavailable", { status: 503 });
+    const stub = namespace.get(namespace.idFromName(mailboxId));
+    return stub.fetch(context.req.raw);
+  });
   app.get("/api/v1/mailboxes/:id", async (context) =>
     success(
       await context
@@ -651,6 +790,46 @@ export function createHttpApp(createContext: HttpContextFactory) {
       303,
     ),
   );
+
+  // PR #8 — agent token REST surface. Three endpoints under
+  // `/api/v1/agent_tokens` mirror the public MCP contract:
+  //
+  // - GET    /api/v1/agent_tokens        list the calling user's tokens
+  // - POST   /api/v1/agent_tokens        issue a new scoped token
+  // - DELETE /api/v1/agent_tokens/:id    revoke (soft delete)
+  //
+  // Permission gating lives in `AgentTokenApplicationService` so the
+  // contracts stay consistent with the existing `user.manage`-gated
+  // admin surface; calling a method without the permission yields a
+  // `PERMISSION_DENIED` 403 before any database round-trip.
+  app.use("/api/v1/agent_tokens", requireAuth());
+  app.use("/api/v1/agent_tokens/*", requireAuth());
+  app.get("/api/v1/agent_tokens", async (context) =>
+    success(
+      await context
+        .get("appContext")
+        .agentTokens.list(context.get("principal")),
+    ),
+  );
+  app.post("/api/v1/agent_tokens", async (context) => {
+    const input = AgentTokenCreateInputSchema.parse(await context.req.json());
+    const { view, plaintext } = await context
+      .get("appContext")
+      .agentTokens.create(context.get("principal"), input);
+    return success(
+      { ...view, plaintext_token: plaintext, token: plaintext },
+      { status: 201 },
+    );
+  });
+  app.delete("/api/v1/agent_tokens/:tokenId", async (context) => {
+    await context
+      .get("appContext")
+      .agentTokens.revoke(
+        context.get("principal"),
+        context.req.param("tokenId"),
+      );
+    return context.body(null, 204);
+  });
 
   app.use("/api/v1/admin", requireAuth());
   app.use("/api/v1/admin/*", requireAuth());

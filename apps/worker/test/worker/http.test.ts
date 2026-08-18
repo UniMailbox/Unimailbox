@@ -50,6 +50,7 @@ function context(overrides: Partial<HttpAppContext> = {}): HttpAppContext {
     drafts: {} as HttpAppContext["drafts"],
     webhooks: {} as HttpAppContext["webhooks"],
     admin: {} as HttpAppContext["admin"],
+    agentTokens: {} as HttpAppContext["agentTokens"],
     logger: {
       info: vi.fn(),
       warn: vi.fn(),

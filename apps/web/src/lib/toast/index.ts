@@ -48,8 +48,7 @@ export function useAppToaster() {
     [t],
   );
   const toastSuccessWithTranslation = useCallback(
-    (message?: ReactNode) =>
-      toast.success(message ?? t("toast.title.success")),
+    (message?: ReactNode) => toast.success(message ?? t("toast.title.success")),
     [t],
   );
   const toastInfoWithTranslation = useCallback(
@@ -66,9 +65,7 @@ export function useAppToaster() {
 export { useApiErrorToast };
 
 export type ToastMessages<TData = unknown, TVariables = unknown> = {
-  success?:
-    | ReactNode
-    | ((data: TData, variables: TVariables) => ReactNode);
+  success?: ReactNode | ((data: TData, variables: TVariables) => ReactNode);
   error?: ReactNode | ((error: unknown) => ReactNode);
   pending?: ReactNode;
 };
@@ -97,10 +94,12 @@ export function withToast<
       if (messages.success) {
         const message =
           typeof messages.success === "function"
-            ? (messages.success as (
-                data: TData,
-                variables: TVariables,
-              ) => ReactNode)(data, variables)
+            ? (
+                messages.success as (
+                  data: TData,
+                  variables: TVariables,
+                ) => ReactNode
+              )(data, variables)
             : messages.success;
         toast.success(message);
       }

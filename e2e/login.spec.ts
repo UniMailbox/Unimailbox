@@ -31,10 +31,12 @@ test("login route surfaces an accessible credential form", async ({
     page.getByRole("heading", { name: uiLocale.copy.loginTitle }),
   ).toBeVisible();
   await expect(page.getByLabel(uiLocale.copy.email)).toBeEditable();
-  await expect(page.getByLabel(uiLocale.copy.password)).toHaveAttribute(
-    "autocomplete",
-    "current-password",
-  );
+  await expect(
+    page.getByRole("textbox", {
+      name: uiLocale.copy.password,
+      exact: true,
+    }),
+  ).toHaveAttribute("autocomplete", "current-password");
 });
 
 test("keyboard-only login focus sequence", async ({ page, uiLocale }) => {
@@ -44,7 +46,10 @@ test("keyboard-only login focus sequence", async ({ page, uiLocale }) => {
   await expectKeyboardFocusSequence(page, [
     page.getByRole("link", { name: "UniMailbox" }),
     page.getByLabel(uiLocale.copy.email),
-    page.getByLabel(uiLocale.copy.password),
+    page.getByRole("textbox", {
+      name: uiLocale.copy.password,
+      exact: true,
+    }),
     page.getByRole("button", { name: uiLocale.copy.submit }),
   ]);
 });
@@ -137,7 +142,10 @@ test("login form posts credentials and routes to the inbox", async ({
 
   await page.getByLabel(uiLocale.copy.email).fill("initial-admin@example.com");
   await page
-    .getByLabel(uiLocale.copy.password)
+    .getByRole("textbox", {
+      name: uiLocale.copy.password,
+      exact: true,
+    })
     .fill("correct horse battery staple");
   await page.getByRole("button", { name: uiLocale.copy.submit }).click();
 

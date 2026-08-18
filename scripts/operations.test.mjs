@@ -5,7 +5,10 @@ const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const runbook = readFileSync(
-  new URL("../../.skills/runbooks/attachment-storage-migration.md", import.meta.url),
+  new URL(
+    "../../.skills/runbooks/attachment-storage-migration.md",
+    import.meta.url,
+  ),
   "utf8",
 );
 const deployment = readFileSync(

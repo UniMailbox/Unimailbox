@@ -50,7 +50,9 @@ export function PasswordInput({
         value={value}
       />
       <button
-        aria-label={visible ? t("actions.hidePassword") : t("actions.showPassword")}
+        aria-label={
+          visible ? t("actions.hidePassword") : t("actions.showPassword")
+        }
         aria-pressed={visible}
         onClick={() => setVisible((current) => !current)}
         type="button"

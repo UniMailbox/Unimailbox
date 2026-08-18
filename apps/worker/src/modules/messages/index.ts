@@ -411,6 +411,10 @@ export class MessageApplicationService {
       }
       return JSON.parse(afterConflict.response_json) as typeof response;
     }
+    this.context.env.INBOX_INDEX_QUEUE?.send({
+      mailbox_id: sender.id,
+      message_id: messageId,
+    }).catch(() => undefined);
     if (providerJobId) {
       try {
         await new OutboundJobService(this.context).dispatch(providerJobId);

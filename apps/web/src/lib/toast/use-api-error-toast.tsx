@@ -33,7 +33,10 @@ export function useApiErrorToast(
   }, [enabled, error, t]);
 }
 
-export function apiErrorToast(error: unknown, t: (key: string) => string): void {
+export function apiErrorToast(
+  error: unknown,
+  t: (key: string) => string,
+): void {
   if (error instanceof ApiClientError) {
     reportApiError(error);
     toast.error(t("toast.title.error"), {

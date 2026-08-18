@@ -32,8 +32,7 @@
   /* Typography & neutrals */
   --ink: #17241f;
   --muted: #69736e;
-  --sans:
-    "Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif;
+  --sans: "Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif;
   --mono: "SFMono-Regular", "Cascadia Code", ui-monospace, monospace;
 
   /* Paper / canvas / lines */
@@ -2708,5 +2707,112 @@ svg {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* PR #8 — agent token management */
+.scope-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.scope-chip code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.scope-chip-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.agent-token-list {
+  display: grid;
+  gap: 14px;
+}
+.agent-token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+.agent-token-row strong {
+  display: block;
+  font-weight: 600;
+}
+.agent-token-row small {
+  color: var(--muted);
+  display: block;
+  margin-top: 2px;
+}
+.agent-token-scopes {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-token-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.agent-token-meta div {
+  display: grid;
+  gap: 2px;
+}
+.agent-token-meta dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.agent-token-meta dd {
+  margin: 0;
+  font-size: 13px;
+}
+.issued-token {
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 18px;
+}
+.issued-token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+}
+.issued-token-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--muted-surface);
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .agent-token-row {
+    grid-template-columns: 1fr;
+  }
+  .agent-token-meta {
+    grid-template-columns: 1fr;
+  }
+  .issued-token-row {
+    grid-template-columns: 1fr;
   }
 }

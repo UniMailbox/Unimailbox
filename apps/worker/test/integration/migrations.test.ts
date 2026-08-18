@@ -49,9 +49,9 @@ describe("D1 migration chain", () => {
        WHERE role_id = '00000000-0000-4000-8000-000000000001'`,
     ).first<number>("count");
 
-    expect(permissions).toBe(22);
+    expect(permissions).toBe(25);
     expect(roles).toBe(2);
-    expect(administratorPermissions).toBe(22);
+    expect(administratorPermissions).toBe(25);
     const globalMessageReaders = await env.DB.prepare(
       `SELECT role_id FROM role_permissions
        WHERE permission_key = 'message.read_all' ORDER BY role_id`,

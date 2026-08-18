@@ -5,6 +5,7 @@ import { handleQueueBatch } from "./entrypoints/queue";
 import { handleScheduledTask } from "./entrypoints/scheduled";
 import type { UniMailboxQueueJob, Env } from "./platform/config";
 import { createWorkerSentryOptions } from "./platform/sentry";
+import { MailboxAgent } from "./modules/agent/mailbox-agent-do";
 
 const handler = {
   fetch: handleHttpRequest,
@@ -17,3 +18,5 @@ export default Sentry.withSentry<Env, UniMailboxQueueJob>(
   (env: Env) => createWorkerSentryOptions(env),
   handler,
 );
+
+export { MailboxAgent };

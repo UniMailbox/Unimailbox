@@ -18,6 +18,7 @@ import {
   Trash2,
   Users,
   Webhook,
+  Bot,
 } from "lucide-react";
 import {
   ADMIN_RESOURCE_PERMISSIONS,
@@ -134,6 +135,11 @@ const SETTINGS_NAVIGATION: ReadonlyArray<{
     id: "preferences",
     labelKey: "settings:tabs.preferences",
     icon: Palette,
+  },
+  {
+    id: "mcp",
+    labelKey: "settings:tabs.mcp",
+    icon: Bot,
   },
 ];
 

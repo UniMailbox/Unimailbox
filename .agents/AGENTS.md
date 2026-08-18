@@ -26,13 +26,13 @@ owes the dependencies and state-ownership boundaries in
 
 ## 2. Roster
 
-| Subagent | Role | Read | Write | Verify |
-| --- | --- | --- | --- | --- |
-| [explorer](explorer.md) | Read-only repository search | ✓ | ✗ | n/a |
-| [planner](planner.md) | Implementation planning (steps, risks, file map) | ✓ | ✗ | n/a |
-| [general-purpose](general-purpose.md) | Multi-purpose research + targeted code edits | ✓ | ✓ (scoped) | ✓ |
-| [code-reviewer](code-reviewer.md) | TS / change-quality review | ✓ | ✗ (advise only) | ✓ |
-| [web-architect](web-architect.md) | Frontend platform/architecture guidance | ✓ | ✗ (advise only) | ✓ |
+| Subagent                              | Role                                             | Read | Write           | Verify |
+| ------------------------------------- | ------------------------------------------------ | ---- | --------------- | ------ |
+| [explorer](explorer.md)               | Read-only repository search                      | ✓    | ✗               | n/a    |
+| [planner](planner.md)                 | Implementation planning (steps, risks, file map) | ✓    | ✗               | n/a    |
+| [general-purpose](general-purpose.md) | Multi-purpose research + targeted code edits     | ✓    | ✓ (scoped)      | ✓      |
+| [code-reviewer](code-reviewer.md)     | TS / change-quality review                       | ✓    | ✗ (advise only) | ✓      |
+| [web-architect](web-architect.md)     | Frontend platform/architecture guidance          | ✓    | ✗ (advise only) | ✓      |
 
 ## 3. Coordination protocol
 

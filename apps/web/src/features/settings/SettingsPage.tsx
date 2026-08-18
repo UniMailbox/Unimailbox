@@ -26,6 +26,7 @@ import {
   mailboxMemberSettingsMutationOptions,
   mailboxMembersQueryOptions,
 } from "./api";
+import { McpSettingsPage } from "./McpSettingsPage";
 
 export type { SettingsSection } from "./sections";
 type Member = EndpointResponse<typeof mailboxEndpoints.listMembers>[number];
@@ -444,6 +445,8 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
             </FormRoot>
           </section>
         </div>
+      ) : section === "mcp" ? (
+        <McpSettingsPage />
       ) : (
         <Preferences />
       )}

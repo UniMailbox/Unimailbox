@@ -1,6 +1,8 @@
 {
   "api": {
     "ADMINISTRATOR_ALREADY_EXISTS": "管理员已存在。",
+    "AGENT_TOKEN_ALREADY_REVOKED": "该代理令牌已被撤销。",
+    "AGENT_TOKEN_NOT_FOUND": "未找到代理令牌。",
     "ATTACHMENT_ALREADY_CONSUMED": "此附件已被使用。",
     "ATTACHMENT_NOT_FOUND": "未找到附件。",
     "ATTACHMENT_OBJECT_MISMATCH": "此附件不属于请求的邮件。",

@@ -4,14 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const stylesPath = resolve(
-  here,
-  "..",
-  "apps",
-  "web",
-  "src",
-  "styles.css",
-);
+const stylesPath = resolve(here, "..", "apps", "web", "src", "styles.css");
 
 /**
  * Find CSS literal colours sitting inside a `:root { ... }` declaration vs.
@@ -63,9 +56,7 @@ describe("styles.css colour tokens", () => {
       declared.add(match[1]);
     }
     const used = new Set();
-    for (const match of source.matchAll(
-      /var\(\s*--([a-zA-Z][\w-]*)\s*\)/gu,
-    )) {
+    for (const match of source.matchAll(/var\(\s*--([a-zA-Z][\w-]*)\s*\)/gu)) {
       used.add(match[1]);
     }
     // Tokens provided at runtime by Radix / shadcn are exempt from the

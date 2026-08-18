@@ -108,6 +108,9 @@ export const PERMISSION_KEYS = [
   "webhook_event.read",
   "webhook_event.delete",
   "analytics.read",
+  "ai.read",
+  "ai.write",
+  "schedule.write",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];

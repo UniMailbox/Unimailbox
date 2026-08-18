@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@sentry/cloudflare": "10.69.0",
     "@unimailbox/config": "workspace:*",
     "@unimailbox/contracts": "workspace:*",

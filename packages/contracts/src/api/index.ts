@@ -9,6 +9,7 @@ export * from "./common/endpoint";
 export * from "./common/envelope";
 export * from "./common/errors";
 export * from "./common/pagination";
+export * from "./agent-tokens";
 export * from "./auth";
 export * from "./attachments";
 export * from "./administration";

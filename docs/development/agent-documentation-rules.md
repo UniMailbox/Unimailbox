@@ -16,15 +16,15 @@ Documents are classified by lifecycle and authority, not by author:
 
 ## 2. Where to put each kind of file
 
-| Kind | Path |
-| --- | --- |
-| Current architecture / contracts / wiring | `docs/architecture/`, `docs/api/` |
-| Developer workflow, conventions, run-rules | `docs/development/` |
-| Deployment, operations, runbooks | `docs/operations/` |
-| Long-term architectural decisions | `docs/adr/ADR-NNN-*.md` |
-| Non-trivial Agent task | `.agent/tasks/<id>/{context,plan,research,decisions,result}.md` |
-| Dated reports (audits, contract diffs, perf baselines) | `artifacts/reports/YYYY-MM-DD-*.md` |
-| Throwaway analysis, debugging, prompts | `.agent/scratch/` (gitignored) |
+| Kind                                                   | Path                                                            |
+| ------------------------------------------------------ | --------------------------------------------------------------- |
+| Current architecture / contracts / wiring              | `docs/architecture/`, `docs/api/`                               |
+| Developer workflow, conventions, run-rules             | `docs/development/`                                             |
+| Deployment, operations, runbooks                       | `docs/operations/`                                              |
+| Long-term architectural decisions                      | `docs/adr/ADR-NNN-*.md`                                         |
+| Non-trivial Agent task                                 | `.agent/tasks/<id>/{context,plan,research,decisions,result}.md` |
+| Dated reports (audits, contract diffs, perf baselines) | `artifacts/reports/YYYY-MM-DD-*.md`                             |
+| Throwaway analysis, debugging, prompts                 | `.agent/scratch/` (gitignored)                                  |
 
 ## 3. Source-of-truth rule
 

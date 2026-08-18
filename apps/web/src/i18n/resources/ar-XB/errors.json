@@ -1,6 +1,8 @@
 {
   "api": {
     "ADMINISTRATOR_ALREADY_EXISTS": "[Ëřřøř]",
+    "AGENT_TOKEN_ALREADY_REVOKED": "[Ëřřøř]",
+    "AGENT_TOKEN_NOT_FOUND": "[Ëřřøř]",
     "ATTACHMENT_ALREADY_CONSUMED": "[Ëřřøř]",
     "ATTACHMENT_NOT_FOUND": "[Ëřřøř]",
     "ATTACHMENT_OBJECT_MISMATCH": "[Ëřřøř]",

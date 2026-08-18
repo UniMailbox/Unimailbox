@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 import {
   administrationEndpoints,
+  agentTokenEndpoints,
   authEndpoints,
   mailboxEndpoints,
   type EndpointRequest,
@@ -21,6 +22,7 @@ export const settingsKeys = {
   cloudflare: () => [...settingsKeys.all, "cloudflare"] as const,
   checkpoints: () => [...settingsKeys.cloudflare(), "checkpoints"] as const,
   infrastructure: () => [...settingsKeys.all, "infrastructure"] as const,
+  agentTokens: () => [...settingsKeys.all, "agentTokens"] as const,
 };
 
 function idempotencyHeaders() {
@@ -224,6 +226,52 @@ export function mailboxMemberSettingsMutationOptions(queryClient: QueryClient) {
         queryKey: ["mail", "mailboxes", input.mailboxId.trim(), "members"],
       });
       await queryClient.invalidateQueries({ queryKey: ["mail", "mailboxes"] });
+    },
+  });
+}
+
+/**
+ * PR #8 — agent token management.
+ *
+ * The create mutation returns a response object that contains a
+ * one-time `plaintext_token`; the caller must surface it in the UI and
+ * never persist it. We do NOT cache the response in the standard list
+ * query — the plaintext leaks if we do — so the caller is responsible
+ * for showing it before invalidating the list cache.
+ */
+export function agentTokenListQueryOptions() {
+  return queryOptions({
+    queryKey: settingsKeys.agentTokens(),
+    queryFn: () => apiClient.request(agentTokenEndpoints.list, {}),
+  });
+}
+
+export function agentTokenCreateMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (
+      body: EndpointRequest<typeof agentTokenEndpoints.create>["body"],
+    ) =>
+      apiClient.request(agentTokenEndpoints.create, {
+        body,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: settingsKeys.agentTokens(),
+      });
+    },
+  });
+}
+
+export function agentTokenRevokeMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (tokenId: string) =>
+      apiClient.request(agentTokenEndpoints.revoke, {
+        params: { tokenId },
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: settingsKeys.agentTokens(),
+      });
     },
   });
 }

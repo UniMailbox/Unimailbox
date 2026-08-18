@@ -32,6 +32,7 @@ describe("authenticated navigation model", () => {
       "account",
       "mailboxes",
       "preferences",
+      "mcp",
     ]);
     expect(groups[2]?.children.map((item) => item.id)).toContain("users");
     expect(isNavigationGroupActive(groups[1]!, "/settings/preferences")).toBe(

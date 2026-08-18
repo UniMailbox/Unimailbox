@@ -10,6 +10,7 @@ import { ProviderRegistry } from "./integrations/providers";
 import type { HttpAppContext } from "./http/router";
 import { TokenService } from "./modules/identity";
 import { IdentityApplicationService } from "./modules/identity/application";
+import { AgentTokenApplicationService } from "./modules/agent-tokens";
 import { InstallationService } from "./modules/installation";
 import { D1InstallationRepository } from "./modules/installation/infrastructure/d1-installation.repository";
 import { HealthService } from "./modules/maintenance";
@@ -39,6 +40,12 @@ export interface AppContext extends HttpAppContext {
   credentials: CredentialCipher;
   attachmentStore: AttachmentStore;
   storageBackend: StorageBackend;
+  /**
+   * HMAC-signed cursor codec used by both the REST mail list endpoints
+   * and the MCP read tools. Exposed so MCP resources can mint cursors
+   * that the REST surface will accept verbatim.
+   */
+  cursors: CursorCodec;
 }
 
 export async function createAppContext(
@@ -82,8 +89,10 @@ export async function createAppContext(
   const drafts = new DraftApplicationService(partialContext, mailboxes);
   const webhooks = new WebhookApplicationService(partialContext);
   const admin = new AdminApplicationService(partialContext, cursors);
+  const agentTokens = new AgentTokenApplicationService(env);
   return {
     ...partialContext,
+    cursors,
     installation,
     health,
     settings: new CloudflareSettingsService(
@@ -108,5 +117,6 @@ export async function createAppContext(
     drafts,
     webhooks,
     admin,
+    agentTokens,
   };
 }

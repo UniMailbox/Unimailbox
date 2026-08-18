@@ -200,7 +200,9 @@ describe("remote migration bootstrap", () => {
       expect(scenario.result.stdout).toContain(
         '"event":"migration.verify_comment_prefix"',
       );
-      expect(scenario.result.stdout).toContain("starts with a SQL line comment");
+      expect(scenario.result.stdout).toContain(
+        "starts with a SQL line comment",
+      );
     } finally {
       writeFileSync(verifyPath, originalVerifySql);
       if (scenario) cleanupScenario(scenario);

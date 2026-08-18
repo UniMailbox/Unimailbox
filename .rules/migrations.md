@@ -46,7 +46,7 @@ preview or production.
   `migration_verified` and must equal `1` when the migration is valid,
   or `0` when it is not.
 - The pattern `SELECT CASE WHEN (...) THEN 1 ELSE 0 END AS
-  migration_verified;` is the canonical template.
+migration_verified;` is the canonical template.
 - The last statement must be `PRAGMA foreign_key_check;`. No
   exception. It guarantees the runner sees a structural error in the
   same execution as the assertion.

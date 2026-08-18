@@ -1,6 +1,8 @@
 {
   "api": {
     "ADMINISTRATOR_ALREADY_EXISTS": "An administrator already exists.",
+    "AGENT_TOKEN_ALREADY_REVOKED": "This agent token has already been revoked.",
+    "AGENT_TOKEN_NOT_FOUND": "Agent token not found.",
     "ATTACHMENT_ALREADY_CONSUMED": "This attachment has already been used.",
     "ATTACHMENT_NOT_FOUND": "Attachment not found.",
     "ATTACHMENT_OBJECT_MISMATCH": "This attachment does not belong to the requested message.",

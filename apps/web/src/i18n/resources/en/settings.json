@@ -5,14 +5,16 @@
     "mailboxes": "Mailboxes",
     "cloudflare": "Cloudflare Mail",
     "storage": "Infrastructure",
-    "preferences": "Language & region"
+    "preferences": "Language & region",
+    "mcp": "Model context"
   },
   "tabs": {
     "account": "Account security",
     "mailboxes": "Mailboxes",
     "cloudflare": "Cloudflare Mail",
     "storage": "Storage & runtime",
-    "preferences": "Language & region"
+    "preferences": "Language & region",
+    "mcp": "Model context tokens"
   },
   "preferences": {
     "heading": "Language & region",
@@ -132,5 +134,35 @@
       "missing": "Not configured",
       "error": "Action required"
     }
+  },
+  "mcp": {
+    "heading": "Model context tokens",
+    "description": "Issue scoped, long-lived credentials for external AI agents that connect to the first-party MCP server. Each token inherits a subset of your permissions and can be revoked at any time.",
+    "listHeading": "Active tokens",
+    "listEmpty": "You have not issued any agent tokens yet.",
+    "loading": "Loading tokens",
+    "formHeading": "Issue a new token",
+    "nameLabel": "Token name",
+    "namePlaceholder": "Cursor on my laptop",
+    "scopesLabel": "Scopes",
+    "expiresLabel": "Expires at (optional)",
+    "expiresPlaceholder": "2026-12-31T00:00:00Z",
+    "submit": "Issue token",
+    "revoke": "Revoke",
+    "confirmRevoke": "Revoke this token? It will stop working immediately and cannot be undone.",
+    "scopesSummary": "{{count}} scope",
+    "scopesSummary_other": "{{count}} scopes",
+    "createdAt": "Created",
+    "lastUsedAt": "Last used",
+    "expiresAt": "Expires",
+    "revokedAt": "Revoked",
+    "never": "never",
+    "statusActive": "Active",
+    "statusRevoked": "Revoked",
+    "plaintextHeading": "Token issued — copy it now",
+    "plaintextWarning": "This is the only time the plaintext token is shown. Store it in a secret manager before navigating away. If you lose it, issue a new token.",
+    "plaintextCopy": "Copy token",
+    "plaintextCopied": "Copied to clipboard",
+    "dismiss": "Done"
   }
 }

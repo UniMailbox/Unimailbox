@@ -1,6 +1,7 @@
 import type { UniMailboxQueueJob, Env } from "../platform/config";
 import { createAppContext } from "../app-context";
 import { processOutboundJob } from "../modules/outbound-mail";
+import { handleIndexBatch } from "../modules/agent/indexer";
 import { captureWorkerQueueError } from "../platform/sentry";
 
 export async function handleQueueBatch(
@@ -8,6 +9,15 @@ export async function handleQueueBatch(
   env: Env,
   context: ExecutionContext,
 ): Promise<void> {
+  const indexBatch: MessageBatch<{ mailbox_id: string; message_id: string }> =
+    batch as unknown as MessageBatch<{
+      mailbox_id: string;
+      message_id: string;
+    }>;
+  if (indexBatch.queue === "unimailbox-inbox-index") {
+    await handleIndexBatch(indexBatch, env);
+    return;
+  }
   const appContext = await createAppContext(env, context);
   for (const message of batch.messages) {
     try {

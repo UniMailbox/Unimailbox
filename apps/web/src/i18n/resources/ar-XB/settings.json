@@ -5,14 +5,16 @@
     "mailboxes": "[‮Màïľɓöxëš‬]",
     "cloudflare": "[‮Çľöüďƒľàřë Màïľ‬]",
     "storage": "[‮Ïñƒřàšţřüçţüřë‬]",
-    "preferences": "[‮Ľàñğüàğë & řëğïöñ‬]"
+    "preferences": "[‮Ľàñğüàğë & řëğïöñ‬]",
+    "mcp": "[‮Möðëľ çöñţëxţ‬]"
   },
   "tabs": {
     "account": "[‮Àççöüñţ šëçüřïţÿ‬]",
     "mailboxes": "[‮Màïľɓöxëš‬]",
     "cloudflare": "[‮Çľöüďƒľàřë Màïľ‬]",
     "storage": "[‮Šţöřàğë & řüñţïmë‬]",
-    "preferences": "[‮Ľàñğüàğë & řëğïöñ‬]"
+    "preferences": "[‮Ľàñğüàğë & řëğïöñ‬]",
+    "mcp": "[‮Möðëľ çöñţëxţ ţöķëñš‬]"
   },
   "preferences": {
     "heading": "[‮Ľàñğüàğë & řëğïöñ‬]",
@@ -136,5 +138,35 @@
       "missing": "[‮Ñöţ çöñƒïğüřëď‬]",
       "error": "[‮Àçţïöñ řëqüïřëď‬]"
     }
+  },
+  "mcp": {
+    "heading": "[‮Möðëľ çöñţëxţ ţöķëñš‬]",
+    "description": "[‮Ïššüë šçöþëď, ľöñğ-ľïvëð çřëðëñţïàľš ƒöř ëxţëřñàľ ÀÏ àğëñţš.‬]",
+    "listHeading": "[‮Àçţïvë ţöķëñš‬]",
+    "listEmpty": "[‮Ñö àğëñţ ţöķëñš ÿëţ.‬]",
+    "loading": "[‮Ľöàðïñğ ţöķëñš‬]",
+    "formHeading": "[‮Ïššüë à ñëŵ ţöķëñ‬]",
+    "nameLabel": "[‮Ţöķëñ ñàmë‬]",
+    "namePlaceholder": "[‮Çüřšöř öñ mÿ ľàþţöþ‬]",
+    "scopesLabel": "[‮Šçöþëš‬]",
+    "expiresLabel": "[‮Ëxþïřëš àţ (öþţïöñàľ)‬]",
+    "expiresPlaceholder": "[‮2026-12-31T00:00:00Z‬]",
+    "submit": "[‮Ïššüë ţöķëñ‬]",
+    "revoke": "[‮Řëvökë‬]",
+    "confirmRevoke": "[‮Řëvökë ţħïš ţöķëñ? Ïţ ŵïľľ šţöþ ŵöřķïñğ ïmmëðïàţëľÿ.‬]",
+    "scopesSummary": "[‮{{count}} šçöþë‬]",
+    "scopesSummary_other": "[‮{{count}} šçöþëš‬]",
+    "createdAt": "[‮Çřëàţëð‬]",
+    "lastUsedAt": "[‮Ľàšţ üšëð‬]",
+    "expiresAt": "[‮Ëxþïřëš‬]",
+    "revokedAt": "[‮Řëvökëð‬]",
+    "never": "[‮ñëvëř‬]",
+    "statusActive": "[‮Àçţïvë‬]",
+    "statusRevoked": "[‮Řëvökëð‬]",
+    "plaintextHeading": "[‮Ţöķëñ ïššüëð — çöþÿ ïţ ñöŵ‬]",
+    "plaintextWarning": "[‮Ţħïš ïš ţħë öñľÿ ţïmë ţħë þľàïñţëxţ ţöķëñ ïš šħöŵñ. Šţöřë ïţ ïñ à šëçřëţ màñàğëř.‬]",
+    "plaintextCopy": "[‮Çöþÿ ţöķëñ‬]",
+    "plaintextCopied": "[‮Çöþïëð ţö çľïþɓöàřð‬]",
+    "dismiss": "[‮Ðöñë‬]"
   }
 }

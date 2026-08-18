@@ -54,15 +54,15 @@ describe("theme color preferences", () => {
     expect(document.documentElement.style.getPropertyValue("--forest")).toMatch(
       /^#[0-9a-f]{6}$/u,
     );
-    expect(document.documentElement.style.getPropertyValue("--forest-deep")).toBe(
-      themePalette("#2563eb").forestDeep,
-    );
+    expect(
+      document.documentElement.style.getPropertyValue("--forest-deep"),
+    ).toBe(themePalette("#2563eb").forestDeep);
     expect(document.documentElement.style.getPropertyValue("--mint")).toBe(
       themePalette("#2563eb").mint,
     );
-    expect(document.documentElement.style.getPropertyValue("--theme-focus")).toBe(
-      themePalette("#2563eb").focus,
-    );
+    expect(
+      document.documentElement.style.getPropertyValue("--theme-focus"),
+    ).toBe(themePalette("#2563eb").focus);
     expect(
       document.documentElement.style.getPropertyValue("--theme-focus-soft"),
     ).toBe(themePalette("#2563eb").focusSoft);
@@ -101,12 +101,10 @@ describe("theme color preferences", () => {
   it("does not recolour semantic error or success tokens when the brand changes", () => {
     document.documentElement.style.setProperty("--danger", "#a3342d");
     document.documentElement.style.setProperty("--success-text", "#17553f");
-    const dangerBefore = document.documentElement.style.getPropertyValue(
-      "--danger",
-    );
-    const successTextBefore = document.documentElement.style.getPropertyValue(
-      "--success-text",
-    );
+    const dangerBefore =
+      document.documentElement.style.getPropertyValue("--danger");
+    const successTextBefore =
+      document.documentElement.style.getPropertyValue("--success-text");
 
     applyThemeColor("#ff0000");
 

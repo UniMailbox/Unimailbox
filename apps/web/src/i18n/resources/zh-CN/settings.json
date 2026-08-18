@@ -5,14 +5,16 @@
     "mailboxes": "邮箱",
     "cloudflare": "Cloudflare 邮件",
     "storage": "基础设施",
-    "preferences": "语言与地区"
+    "preferences": "语言与地区",
+    "mcp": "模型上下文"
   },
   "tabs": {
     "account": "账户安全",
     "mailboxes": "邮箱",
     "cloudflare": "Cloudflare 邮件",
     "storage": "存储与运行时",
-    "preferences": "语言与地区"
+    "preferences": "语言与地区",
+    "mcp": "模型上下文令牌"
   },
   "preferences": {
     "heading": "语言与地区",
@@ -128,5 +130,35 @@
     "verify": "验证 R2 写入访问",
     "verified": "R2 写入、读取和清理探测已通过。",
     "state": { "ok": "就绪", "missing": "未配置", "error": "需要处理" }
+  },
+  "mcp": {
+    "heading": "模型上下文令牌",
+    "description": "为连接到第一方 MCP 服务器的外部 AI 代理签发限定权限的长寿命凭据。每个令牌继承你的部分权限子集，并可随时撤销。",
+    "listHeading": "活跃令牌",
+    "listEmpty": "你尚未签发任何代理令牌。",
+    "loading": "正在加载令牌",
+    "formHeading": "签发新令牌",
+    "nameLabel": "令牌名称",
+    "namePlaceholder": "我的笔记本上的 Cursor",
+    "scopesLabel": "权限范围",
+    "expiresLabel": "过期时间（可选）",
+    "expiresPlaceholder": "2026-12-31T00:00:00Z",
+    "submit": "签发令牌",
+    "revoke": "撤销",
+    "confirmRevoke": "撤销该令牌？它将立即失效且无法撤销。",
+    "scopesSummary": "{{count}} 个权限",
+    "scopesSummary_other": "{{count}} 个权限",
+    "createdAt": "创建于",
+    "lastUsedAt": "最近使用",
+    "expiresAt": "过期",
+    "revokedAt": "撤销于",
+    "never": "从不",
+    "statusActive": "活跃",
+    "statusRevoked": "已撤销",
+    "plaintextHeading": "令牌已签发 — 请立即复制",
+    "plaintextWarning": "这是明文令牌唯一一次显示。在离开此页面前请将其存入密钥管理器。如果丢失，请签发新令牌。",
+    "plaintextCopy": "复制令牌",
+    "plaintextCopied": "已复制到剪贴板",
+    "dismiss": "完成"
   }
 }
