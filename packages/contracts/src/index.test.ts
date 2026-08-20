@@ -1486,12 +1486,17 @@ describe('ALLOWED_*_TRANSITIONS — CAP-030 direction guard', () => {
     it('draft is unreachable in the job domain (no entry in jobs map)', () => {
       // 'draft' is not a key in ALLOWED_JOB_TRANSITIONS, so the .get()
       // returns undefined and the helper short-circuits to false.
-      expect(canTransition('job', 'draft', 'sent')).toBe(false);
-      expect(canTransition('job', 'queued', 'draft')).toBe(false);
+      // D-CAP-030-A: 'draft' is a MessageStatus-only value; the test
+      // casts it to OutboundJobStatus to assert the runtime guard rather
+      // than the compile-time rejection that the new overloads enforce.
+      expect(canTransition('job', 'draft' as OutboundJobStatus, 'sent')).toBe(false);
+      expect(canTransition('job', 'queued', 'draft' as OutboundJobStatus)).toBe(false);
     });
 
     it('delivered is unreachable in the job domain', () => {
-      expect(canTransition('job', 'sent', 'delivered')).toBe(false);
+      // D-CAP-030-A: 'delivered' is messages-only; cast documents the
+      // intent (the runtime result is what matters in this test).
+      expect(canTransition('job', 'sent', 'delivered' as OutboundJobStatus)).toBe(false);
     });
   });
 

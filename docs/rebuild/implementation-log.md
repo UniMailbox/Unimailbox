@@ -10,6 +10,39 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-20 — D-CAP-030-A: TS overloads on `canTransition` / `assertCanTransition`
+
+CAP-030 deferred **D-CAP-030-A** (Security L1 + Code L3): the `from as MessageStatus` / `from as OutboundJobStatus` casts inside `Map.get()` are a type-system escape hatch. The runtime behaviour is correct (the `?? false` fallback yields a conservative false when the lookup misses), but a caller passing `domain: 'job'` with `'draft'` (messages-only) was a silent no-op rather than a compile-time error.
+
+### What changed
+
+**Contracts** — `packages/contracts/src/index.ts:305-422`:
+
+- `canTransition` now exposes two public overloads (`domain: 'message' → MessageStatus`, `domain: 'job' → OutboundJobStatus`); the broad-union signature is the internal `canTransitionImpl`. A caller passing `domain: 'job'` with `'draft'` is now a compile-time error.
+- `assertCanTransition` mirrors the same overload pattern and calls `canTransitionImpl` directly so the union `domain` from the implementation signature never needs to match the public overloads.
+- The original JSDoc (which documented the `domain` discriminator as load-bearing) is restored and now also documents the overload split; the per-function `assertCanTransition` JSDoc preserves the D-CAP-030-G programmer-error pattern note.
+
+**Tests** — `packages/contracts/src/index.test.ts:1486-1501`:
+
+- The three pre-existing tests that exercise the messages-only values `'draft'` and `'delivered'` against the job domain now cast the literals explicitly (`'draft' as OutboundJobStatus`, `'delivered' as OutboundJobStatus`) so they continue to assert the runtime-false behaviour while documenting that the compile-time rejection is the new contract.
+
+### Gates (orchestrator-run)
+
+| Gate | Result |
+|---|---|
+| `pnpm typecheck` | clean (overload recursion resolved via `canTransitionImpl`) |
+| `pnpm test:unit` | 340/340 |
+| `pnpm test:worker` | 534/534 |
+| `pnpm lint` | 0 errors |
+| `pnpm scaffold doctor` | 10/10 |
+| `pnpm build` | clean |
+
+### Process
+
+Single-chore commit (`chore(CAP-030): tighten canTransition with TS overloads (D-CAP-030-A)`); no review round required because the change is a localised type-system tightening on a function already at LOW severity. Three remaining CAP-030 follow-ups (D-CAP-030-B direction-guard comment propagation, D-CAP-030-C `OutboundJobStatus` adoption on internal writer signatures, D-CAP-030-D deleted-test provenance) are still open.
+
+---
+
 ## 2026-08-20 — CAP-039: Deployment substrate
 
 The Worker now actually deploys. A single `pnpm build` produces an artefact that serves the real Vite-built web bundle, drains the outbound queue CAP-023/CAP-029 enqueue to, and applies remote migrations in pending-only mode — so a repeat deploy is a safe no-op. Closes the four Phase 0/1 BLOCKERs that pointed at this contract (`setup-gate redirects to a route the Worker does not serve`, `built web application not connected to the deployed Worker`, `producer binding but no consumer declaration`, `remote deploy replays every SQL migration`).

@@ -310,15 +310,43 @@ export const ALLOWED_JOB_TRANSITIONS: ReadonlyMap<
  * discriminator is load-bearing (CAP-030 D-CAP-030-B: `sending → queued`
  * is allowed for jobs but forbidden for messages).
  *
- * Thin wrapper over `ALLOWED_*_TRANSITIONS.get(from)?.has(to)` — provided
- * as a single import so a future tightening (logging, telemetry) can be
- * added without touching every call site.
- *
- * The `domain` argument is a closed literal union, so unknown values are
- * a TypeScript error. The `switch` is exhaustive; an unhandled case would
- * be a compile-time defect, not a runtime gap.
+ * The public API is split into two overloads (D-CAP-030-A) so a caller
+ * passing `domain: 'job'` with a messages-only `from` value (e.g. `'draft'`)
+ * is rejected at compile time instead of silently returning `false` via the
+ * `?? false` fallback. The internal `canTransitionImpl` keeps the broad
+ * union so `assertCanTransition` (which already takes the union) can
+ * dispatch without a cast; callers outside this module see only the
+ * strict overloads.
  */
 export function canTransition(
+  domain: 'message',
+  from: MessageStatus,
+  to: MessageStatus,
+): boolean;
+export function canTransition(
+  domain: 'job',
+  from: OutboundJobStatus,
+  to: OutboundJobStatus,
+): boolean;
+export function canTransition(
+  domain: 'message' | 'job',
+  from: MessageStatus | OutboundJobStatus,
+  to: MessageStatus | OutboundJobStatus,
+): boolean;
+export function canTransition(
+  domain: 'message' | 'job',
+  from: MessageStatus | OutboundJobStatus,
+  to: MessageStatus | OutboundJobStatus,
+): boolean {
+  return canTransitionImpl(domain, from, to);
+}
+
+/**
+ * Internal implementation — keeps the broad union so the inner `switch`
+ can resolve `from`/`to` without a cast at every callsite. Not exported;
+ `assertCanTransition` is the only consumer.
+ */
+function canTransitionImpl(
   domain: 'message' | 'job',
   from: MessageStatus | OutboundJobStatus,
   to: MessageStatus | OutboundJobStatus,
@@ -345,13 +373,31 @@ export function canTransition(
  * D-CAP-030-G: a typed `DomainError` is intentionally NOT thrown here —
  * the closed error catalog (CAP-032) is for user-facing conditions, and
  * a direction violation is never one of those.
+ *
+ * Domain overloads mirror `canTransition` (D-CAP-030-A): passing a
+ * messages-only `from` with `domain: 'job'` is a compile-time error.
  */
+export function assertCanTransition(
+  domain: 'message',
+  from: MessageStatus,
+  to: MessageStatus,
+): void;
+export function assertCanTransition(
+  domain: 'job',
+  from: OutboundJobStatus,
+  to: OutboundJobStatus,
+): void;
+export function assertCanTransition(
+  domain: 'message' | 'job',
+  from: MessageStatus | OutboundJobStatus,
+  to: MessageStatus | OutboundJobStatus,
+): void;
 export function assertCanTransition(
   domain: 'message' | 'job',
   from: MessageStatus | OutboundJobStatus,
   to: MessageStatus | OutboundJobStatus,
 ): void {
-  if (!canTransition(domain, from, to)) {
+  if (!canTransitionImpl(domain, from, to)) {
     throw new Error(
       `assertCanTransition(${domain}): ${String(from)} → ${String(to)} is not an allowed lifecycle transition`,
     );
