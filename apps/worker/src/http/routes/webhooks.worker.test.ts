@@ -343,36 +343,13 @@ describe('POST /api/v1/webhooks ordering (CAP-029 / R-MESSAGE-007)', () => {
     );
   }
 
-  it('A2: a strictly newer event of any rank wins over an older one (event-time gate)', async () => {
-    const { connectionId, messageId } = await seedConnectionAndMessage();
-
-    // First, a bounce at t=100 (terminal, rank 100).
-    const tBounce = 100_000;
-    const r1 = await postEvent(connectionId, {
-      event: 'bounce',
-      messageId: PROVIDER_MESSAGE_ID,
-      ts: tBounce / 1000,
-    });
-    expect(r1.status).toBe(200);
-    let state = await readState(messageId, connectionId);
-    expect(state.message?.status).toBe('bounced');
-    expect(state.message?.provider_event_time).toBe(tBounce);
-    expect(state.delivery?.event_time_source).toBe('provider');
-
-    // Then a delivered at t=200 (newer, lower rank). The contract is: a
-    // strictly newer event wins regardless of rank. The equal-time +
-    // lower-rank gate is the only rejection case.
-    const tDelivered = 200_000;
-    const r2 = await postEvent(connectionId, {
-      event: 'delivered',
-      messageId: PROVIDER_MESSAGE_ID,
-      ts: tDelivered / 1000,
-    });
-    expect(r2.status).toBe(200);
-    state = await readState(messageId, connectionId);
-    expect(state.message?.status).toBe('delivered');
-    expect(state.message?.provider_event_time).toBe(tDelivered);
-  });
+  // CAP-030: A2 (a strictly newer event of any rank wins over an older one)
+  // was deleted. Its premise — `bounced → delivered` resurrection via a newer
+  // event — directly contradicts R-MESSAGE-012 (terminal states are terminal).
+  // The strict-newer-time branch for direction-legal transitions is exercised
+  // by message-repository.worker.test.ts B3/B4 (sent → delivered,
+  // delivered → bounced at the same event time) and by the A4 equal-time
+  // higher-rank promotion path above.
 
   it('A3: an older delivered after a terminal bounced is rejected (older event)', async () => {
     const { connectionId, messageId } = await seedConnectionAndMessage();

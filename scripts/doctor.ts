@@ -1,16 +1,79 @@
 #!/usr/bin/env node
-// scripts/doctor.ts — CAP-003. Exits 0 if all 10 structural checks pass.
+// scripts/doctor.ts — CAP-003. Exits 0 if all 13 structural checks pass.
 // See work/active/CAP-003-scaffold-doctor/task.md. Doctor reports; does
 // not fix. No remote calls, no imports from apps/worker/src/*.
+//
+// CAP-039 adds three new checks for the deployment substrate:
+//   - web-assets-binding — apps/worker/wrangler.jsonc declares an `assets`
+//     block whose directory resolves to apps/web/dist/.
+//   - queue-consumer-topology — every queue in queues.producers[] has a
+//     matching entry in queues.consumers[] and vice versa, with
+//     max_retries present.
+//   - migration-strategy-pending-only — wrangler.jsonc.d1_databases[].migrations_dir
+//     is unset and no top-level apply_migrations is set; the pending-only
+//     deploy path is the authority.
+//
+// The three new checks expose pure evaluators (evaluateWebAssetsBinding,
+// evaluateQueueConsumerTopology, evaluateMigrationStrategyPendingOnly) so
+// scripts/doctor.test.ts can drive them against synthetic wrangler.jsonc
+// fixtures without mutating the repo's real config files.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, dirname, sep } from 'node:path';
 
 const REPO = resolve(new URL('..', import.meta.url).pathname);
-type R = { name: string; ok: boolean; detail?: string }; type Ck = () => Promise<R>;
+export type R = { name: string; ok: boolean; detail?: string }; type Ck = () => Promise<R>;
 
 function readJsonc(p: string): unknown {
-  const s = readFileSync(p, 'utf-8');
-  return JSON.parse(s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''));
+  return JSON.parse(stripJsoncComments(readFileSync(p, 'utf-8')));
+}
+
+// CAP-039 D5: a proper character-based JSONC comment stripper. The
+// previous regex-based stripper matched `/*` and `*/` inside JSON
+// strings, which broke wrangler configs that legitimately contain
+// `"run_worker_first": ["/api/*"]` (block-comment opener inside a
+// string) and `"crons": ["*/2 * * * *"]` (block-comment closer inside
+// a string). The regex ate everything between them. This walker skips
+// comments only outside strings and correctly preserves escape
+// sequences in strings.
+function stripJsoncComments(src: string): string {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    // String literal — copy verbatim, honouring escapes so the embedded
+    // `"` / `\` sequences survive intact.
+    if (ch === '"') {
+      out += ch;
+      i++;
+      while (i < src.length) {
+        const c = src[i];
+        if (c === '\\' && i + 1 < src.length) {
+          out += c + src[i + 1];
+          i += 2;
+          continue;
+        }
+        out += c;
+        if (c === '"') { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    // Line comment — skip until newline (preserve the newline).
+    if (ch === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    // Block comment — skip until matching `*/`.
+    if (ch === '/' && src[i + 1] === '*') {
+      i += 2;
+      while (i + 1 < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
 }
 function readJson<T>(p: string): T { return JSON.parse(readFileSync(p, 'utf-8')) as T; }
 function walk(d: string): string[] {
@@ -22,7 +85,7 @@ function walk(d: string): string[] {
   return out;
 }
 
-const BINDS = ['DB','ATTACHMENTS','SETUP_SESSION','CACHE','OUTBOUND','INSTALLATION_TOKEN','CREDENTIAL_ENCRYPTION_KEY','ENVIRONMENT'];
+const BINDS = ['DB','ATTACHMENTS','SETUP_SESSION','CACHE','OUTBOUND','ASSETS','INSTALLATION_TOKEN','CREDENTIAL_ENCRYPTION_KEY','ENVIRONMENT'];
 async function checkWranglerBindings(): Promise<R> {
   const w = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
   const have = new Set<string>();
@@ -31,6 +94,17 @@ async function checkWranglerBindings(): Promise<R> {
   for (const x of (w['kv_namespaces'] as Array<{binding:string}>|undefined ?? [])) have.add(x.binding);
   for (const x of ((w['queues'] as {producers?:Array<{binding:string}>}|undefined)?.producers ?? [])) have.add(x.binding);
   for (const x of (w['secrets_store_secrets'] as Array<{binding:string}>|undefined ?? [])) have.add(x.binding);
+  // CAP-039: `assets` block adds a binding too. Wrangler produces an
+  // ASSETS Fetcher binding from `assets: { binding: "ASSETS" }`. The
+  // block is either a single object or an array of objects in wrangler 4.x.
+  const assets = w['assets'];
+  if (Array.isArray(assets)) {
+    for (const a of assets) {
+      if (a && typeof a === 'object' && 'binding' in a) have.add((a as {binding:string}).binding);
+    }
+  } else if (assets && typeof assets === 'object' && 'binding' in assets) {
+    have.add((assets as {binding:string}).binding);
+  }
   for (const k of Object.keys((w['vars'] as Record<string,unknown>|undefined) ?? {})) have.add(k);
   const envBody = readFileSync(join(REPO, 'apps/worker/src/platform/env.ts'), 'utf-8').match(/type\s+Env\s*=\s*\{([\s\S]*?)\}/)?.[1] ?? '';
   const envKeys = new Set<string>();
@@ -210,11 +284,151 @@ async function checkTestsCoverContracts(): Promise<R> {
   return { name: 'tests-cover-contracts', ok: true };
 }
 
+// ---------------------------------------------------------------------
+// CAP-039 — three new checks. Pure evaluators over a parsed wrangler.jsonc
+// shape; the async check* wrappers read the on-disk files and delegate to
+// them so scripts/doctor.test.ts can drive the evaluators with synthetic
+// fixtures.
+
+// (a) web-assets-binding — `assets: { directory, binding }` block exists;
+// the directory resolves to apps/web/dist/ (relative or absolute), the
+// binding is the expected ASSETS string, and the not_found_handling is
+// the documented "single-page-application" so the platform performs the
+// SPA fallback.
+export function evaluateWebAssetsBinding(
+  w: Record<string, unknown>,
+  repoRoot: string = REPO,
+): R {
+  const assets = w['assets'];
+  if (!assets || typeof assets !== 'object') {
+    return { name: 'web-assets-binding', ok: false, detail: 'apps/worker/wrangler.jsonc is missing the top-level `assets` block' };
+  }
+  const a = assets as { directory?: string; binding?: string; not_found_handling?: string };
+  if (a.binding !== 'ASSETS') {
+    return { name: 'web-assets-binding', ok: false, detail: `assets.binding must be "ASSETS" (got ${JSON.stringify(a.binding)})` };
+  }
+  if (typeof a.directory !== 'string' || a.directory.length === 0) {
+    return { name: 'web-assets-binding', ok: false, detail: 'assets.directory must be set to a non-empty path' };
+  }
+  // Resolve relative to apps/worker/wrangler.jsonc (wrangler 4.x behaviour).
+  const wranglerDir = join(repoRoot, 'apps/worker');
+  const resolvedDir = resolve(wranglerDir, a.directory);
+  const expectedDir = resolve(repoRoot, 'apps/web/dist');
+  if (resolvedDir !== expectedDir) {
+    return { name: 'web-assets-binding', ok: false, detail: `assets.directory resolves to ${resolvedDir}, expected ${expectedDir}` };
+  }
+  if (a.not_found_handling !== 'single-page-application') {
+    return { name: 'web-assets-binding', ok: false, detail: `assets.not_found_handling must be "single-page-application" (got ${JSON.stringify(a.not_found_handling)})` };
+  }
+  return { name: 'web-assets-binding', ok: true };
+}
+
+async function checkWebAssetsBinding(): Promise<R> {
+  const w = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
+  return evaluateWebAssetsBinding(w);
+}
+
+// (b) queue-consumer-topology — every entry in queues.producers[] has a
+// matching queue name in queues.consumers[] and vice versa. The producer
+// must be a binding on the Worker; the consumer must declare max_retries
+// (D1 — `max_retries: 5`). `dead_letter_queue` is allowed but optional
+// (Q1).
+//
+// Topology parity between wrangler.jsonc and wrangler.test.jsonc is
+// verified by COUNT, not name — the test pool legitimately runs against
+// queue names like `test-outbound`, but a producer-only or consumer-only
+// drift between the two files indicates a forgotten binding or a missing
+// queue consumer that the worker-pool tests wouldn't catch.
+type _Consumer = { queue: string; max_retries?: number; dead_letter_queue?: string };
+type _Producer = { queue: string };
+const _collectQueues = (cfg: Record<string, unknown>): { producers: _Producer[]; consumers: _Consumer[] } => {
+  const q = cfg['queues'] as { producers?: _Producer[]; consumers?: _Consumer[] } | undefined;
+  return {
+    producers: q?.producers ?? [],
+    consumers: q?.consumers ?? [],
+  };
+};
+
+export function evaluateQueueConsumerTopology(prodCfg: Record<string, unknown>, testCfg: Record<string, unknown>): R {
+  const prod = _collectQueues(prodCfg);
+  const cons = _collectQueues(prodCfg);
+  const consSet = new Set(cons.consumers.map((c) => c.queue));
+  const prodSet = new Set(prod.producers.map((p) => p.queue));
+
+  const missingConsumer = prod.producers.map((p) => p.queue).filter((p) => !consSet.has(p));
+  const missingProducer = cons.consumers.map((c) => c.queue).filter((q) => !prodSet.has(q));
+  const missingRetries = cons.consumers.filter((c) => typeof c.max_retries !== 'number');
+  const bad: string[] = [];
+  if (missingConsumer.length) bad.push(`producers without matching consumer: ${missingConsumer.join(', ')}`);
+  if (missingProducer.length) bad.push(`consumers without matching producer: ${missingProducer.join(', ')}`);
+  if (missingRetries.length) bad.push(`consumers missing max_retries: ${missingRetries.map((c) => c.queue).join(', ')}`);
+
+  const tprod = _collectQueues(testCfg);
+  const tcons = _collectQueues(testCfg);
+  if (tprod.producers.length !== prod.producers.length) bad.push(`wrangler.test.jsonc has ${tprod.producers.length} producers; wrangler.jsonc has ${prod.producers.length}`);
+  if (tcons.consumers.length !== cons.consumers.length) bad.push(`wrangler.test.jsonc has ${tcons.consumers.length} consumers; wrangler.jsonc has ${cons.consumers.length}`);
+
+  // CAP-039 D6 — disjointness assertion. Queue names in `wrangler.jsonc`
+  // and queue names in `wrangler.test.jsonc` must be disjoint: each
+  // queue appears in exactly one config, never both. A rename in one
+  // config that wasn't propagated to the other (e.g. someone adds a
+  // queue to wrangler.test.jsonc using the production name, so the
+  // test pool drains production-side messages) is caught here. Count
+  // parity alone misses this because each config still declares the
+  // same number of queues. Producers and consumers within a single
+  // config are already matched by name above; the disjointness check
+  // looks at the union of producers and consumers on each side and
+  // asserts no overlap.
+  const prodAll = new Set([
+    ...prod.producers.map((p) => p.queue),
+    ...cons.consumers.map((c) => c.queue),
+  ]);
+  const testAll = new Set([
+    ...tprod.producers.map((p) => p.queue),
+    ...tcons.consumers.map((c) => c.queue),
+  ]);
+  const overlap = [...prodAll].filter((q) => testAll.has(q));
+  if (overlap.length) bad.push(`queue name drift: ${overlap.join(', ')} appears in both wrangler.jsonc and wrangler.test.jsonc (rename one)`);
+
+  if (bad.length) return { name: 'queue-consumer-topology', ok: false, detail: bad.join('; ') };
+  return { name: 'queue-consumer-topology', ok: true };
+}
+
+async function checkQueueConsumerTopology(): Promise<R> {
+  const w = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
+  const wt = readJsonc(join(REPO, 'apps/worker/wrangler.test.jsonc')) as Record<string, unknown>;
+  return evaluateQueueConsumerTopology(w, wt);
+}
+
+// (c) migration-strategy-pending-only — wrangler.jsonc.d1_databases[i].migrations_dir
+// is unset (or every entry's migrations_dir is absent) and no top-level
+// `apply_migrations: true` is set. Pending-only deploy is the sole
+// authority. If either reappears the operator can quietly lose track of
+// which path is migrating the production DB.
+export function evaluateMigrationStrategyPendingOnly(w: Record<string, unknown>): R {
+  if (w['apply_migrations'] === true) {
+    return { name: 'migration-strategy-pending-only', ok: false, detail: 'top-level `apply_migrations: true` is set — remove it; deploy.ts:runRemoteMigrations is the sole authority' };
+  }
+  const dbs = (w['d1_databases'] as Array<Record<string, unknown>> | undefined) ?? [];
+  for (const [i, db] of dbs.entries()) {
+    if ('migrations_dir' in db && db['migrations_dir']) {
+      return { name: 'migration-strategy-pending-only', ok: false, detail: `d1_databases[${i}].migrations_dir is set to ${JSON.stringify(db['migrations_dir'])} — remove it; deploy.ts:runRemoteMigrations is the sole authority` };
+    }
+  }
+  return { name: 'migration-strategy-pending-only', ok: true };
+}
+
+async function checkMigrationStrategyPendingOnly(): Promise<R> {
+  const w = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
+  return evaluateMigrationStrategyPendingOnly(w);
+}
+
 const CHECKS: ReadonlyArray<Ck> = [
   checkWranglerBindings, checkWranglerCompat, checkMigrationsPresent,
   checkMigrationsOrdered, checkSchemaVersion, checkModuleDependencyZones,
   checkEslintBoundaryRules, checkTsconfigStrict, checkHarnessNoPlaceholders,
-  checkTestsCoverContracts,
+  checkTestsCoverContracts, checkWebAssetsBinding, checkQueueConsumerTopology,
+  checkMigrationStrategyPendingOnly,
 ];
 async function main(): Promise<void> {
   const results: R[] = [];

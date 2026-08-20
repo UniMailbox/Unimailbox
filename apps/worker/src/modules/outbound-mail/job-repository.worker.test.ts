@@ -17,6 +17,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
+import { ALLOWED_JOB_TRANSITIONS, canTransition } from '@unimailbox/contracts';
 import {
   claimOutboundJob,
   getOutboundJob,
@@ -314,5 +315,107 @@ describe('getOutboundJob', () => {
 
   it('returns null for a missing job', async () => {
     expect(await getOutboundJob(env.DB, 'missing-job-id')).toBeNull();
+  });
+});
+
+// -------------------------------------------------------------------
+// CAP-030 AC #9 — direction guard pinned against the lease-aware writers.
+//
+// Each lease-aware writer has a hard-coded `status = '...'` predicate that
+// is the FROM-state of its only legal `to`. These tests prove, against real
+// D1, that the predicate matches the direction table declared in
+// ALLOWED_JOB_TRANSITIONS (`packages/contracts`). If a future writer
+// widens its SQL predicate to a multi-status `IN (...)` clause, the
+// matching direction table entry must widen in the same change.
+//
+// Pin strategy: each test
+//   (a) inspects `ALLOWED_JOB_TRANSITIONS` / `canTransition` to confirm the
+//       expected from/to pair is allowed in the contract, AND
+//   (b) invokes the writer against the matching seed state and asserts the
+//       row advances, so a SQL-level regression that drops the predicate
+//       still fails the test.
+// -------------------------------------------------------------------
+
+describe('CAP-030 AC #9 — direction guard pinned to lease-aware writers', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await seedInstallationState({ status: 'complete', currentStep: 'complete' });
+  });
+
+  it('claimOutboundJob: queued → sending is in ALLOWED_JOB_TRANSITIONS and the writer advances the row', async () => {
+    // (a) Direction table check.
+    expect(canTransition('job', 'queued', 'sending')).toBe(true);
+    expect(ALLOWED_JOB_TRANSITIONS.get('queued')?.has('sending')).toBe(true);
+
+    // (b) Writer behaviour: a 'queued' row is claimed to 'sending' (AC1 happy path).
+    const jobId = await seedJob({ status: 'queued' });
+    const claimed = await claimOutboundJob(env.DB, jobId, 'worker-a', LEASE_UNTIL);
+    expect(claimed?.status).toBe('sending');
+    const row = await fetchJob(jobId);
+    expect(row?.status).toBe('sending');
+    expect(row?.locked_by).toBe('worker-a');
+  });
+
+  it('markOutboundJobSent: sending → sent is in ALLOWED_JOB_TRANSITIONS and the writer advances the row', async () => {
+    // (a) Direction table check.
+    expect(canTransition('job', 'sending', 'sent')).toBe(true);
+    expect(ALLOWED_JOB_TRANSITIONS.get('sending')?.has('sent')).toBe(true);
+
+    // (b) Writer behaviour: a 'sending' row with a matching lock advances
+    // to 'sent' (AC3 happy path).
+    const jobId = await seedJob({ status: 'sending', lockedAt: FUTURE, lockedBy: 'worker-a' });
+    const advanced = await markOutboundJobSent(env.DB, jobId, 'worker-a', 'brevo-123');
+    expect(advanced).toBe(true);
+    const row = await fetchJob(jobId);
+    expect(row?.status).toBe('sent');
+    expect(row?.provider_message_id).toBe('brevo-123');
+    expect(row?.locked_at).toBeNull();
+    expect(row?.locked_by).toBeNull();
+  });
+
+  it('markOutboundJobRetryable: sending → queued (retry reset, R-OUTBOUND-008) is in ALLOWED_JOB_TRANSITIONS and the writer advances the row', async () => {
+    // (a) Direction table check. This is the CAP-030 D-CAP-030-B edge: retry
+    // reset is the documented semantic, not a regression. A reviewer who
+    // tries to "tighten" the direction table to exclude it should fail
+    // this test.
+    expect(canTransition('job', 'sending', 'queued')).toBe(true);
+    expect(ALLOWED_JOB_TRANSITIONS.get('sending')?.has('queued')).toBe(true);
+
+    // (b) Writer behaviour: a 'sending' row with a matching lock re-queues
+    // to 'queued' and bumps attempts (AC4 happy path).
+    const jobId = await seedJob({
+      status: 'sending',
+      attempts: 1,
+      lockedAt: FUTURE,
+      lockedBy: 'worker-a',
+    });
+    await markOutboundJobRetryable(env.DB, jobId, 'worker-a', 'SEND_FAILED', 'Brevo 503');
+    const row = await fetchJob(jobId);
+    expect(row?.status).toBe('queued');
+    expect(row?.attempts).toBe(2);
+    expect(row?.locked_at).toBeNull();
+    expect(row?.locked_by).toBeNull();
+  });
+
+  it('markOutboundJobTerminal: sending → failed is in ALLOWED_JOB_TRANSITIONS and the writer advances the row', async () => {
+    // (a) Direction table check. R-OUTBOUND-008/009: terminal failure.
+    expect(canTransition('job', 'sending', 'failed')).toBe(true);
+    expect(ALLOWED_JOB_TRANSITIONS.get('sending')?.has('failed')).toBe(true);
+
+    // (b) Writer behaviour: a 'sending' row with a matching lock advances
+    // to 'failed' (AC5 happy path).
+    const jobId = await seedJob({
+      status: 'sending',
+      attempts: 2,
+      lockedAt: FUTURE,
+      lockedBy: 'worker-a',
+    });
+    await markOutboundJobTerminal(env.DB, jobId, 'worker-a', 'SEND_FAILED', 'final failure');
+    const row = await fetchJob(jobId);
+    expect(row?.status).toBe('failed');
+    expect(row?.error_code).toBe('SEND_FAILED');
+    expect(row?.attempts).toBe(2); // terminal write does not increment
+    expect(row?.locked_at).toBeNull();
+    expect(row?.locked_by).toBeNull();
   });
 });

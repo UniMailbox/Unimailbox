@@ -13,6 +13,8 @@ Anything a future agent needs must be in the repository before your turn ends.
 Owns coordination and acceptance, not implementation volume. Responsibilities:
 
 - Determine current phase and next capability from `docs/rebuild/capability-ledger.md`.
+- Reconcile the ledger's active CAP with `work/active/`, Git status, and the actual code path before
+  selecting more work. Fix state drift before implementation.
 - Write the capability contract at `work/active/CAP-NNN-slug/task.md` before delegating.
 - Assign file ownership and scoped reading lists.
 - Delegate implementation and **independent** review.
@@ -98,6 +100,11 @@ The orchestrator does not take a subagent's word for anything checkable:
 - Claimed files changed → verify with `git status`/`git diff`.
 - Claimed tests pass → run them.
 - Claimed acceptance criteria met → check against `task.md`.
+- Claimed feature or phase complete → trace the browser/API/entrypoint/configuration path that makes
+  it usable. An exported handler without a trigger and a built asset without serving configuration
+  are both incomplete.
+- Claimed external pattern followed → verify the pinned commit, inspected files, adaptation, and
+  rejected assumptions recorded under `.claude/rules/reference-implementations.md`.
 
 A subagent reporting COMPLETE on unrun tests is a process failure, not a small one.
 

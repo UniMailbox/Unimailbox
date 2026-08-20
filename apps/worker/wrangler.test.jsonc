@@ -3,6 +3,10 @@
 // values without a backing Secrets Store. readSecret() in platform/secrets.ts
 // handles both string (test) and SecretsStoreSecret (production) forms.
 // The committed wrangler.jsonc remains the production config.
+//
+// CAP-039 — Deployment substrate: mirrored the assets binding + queues
+// consumer from wrangler.jsonc so worker-pool tests exercise the same
+// binding topology. `migrations_dir` removed (pending-only deploy).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unimailbox-worker-test",
@@ -17,8 +21,7 @@
     {
       "binding": "DB",
       "database_name": "unimailbox-db",
-      "database_id": "test",
-      "migrations_dir": "../../migrations"
+      "database_id": "test"
     }
   ],
 
@@ -34,7 +37,22 @@
   "queues": {
     "producers": [
       { "binding": "OUTBOUND", "queue": "test-outbound" }
+    ],
+    "consumers": [
+      { "queue": "test-outbound", "max_retries": 5 }
     ]
+  },
+
+  // CAP-039: SPA fallback — same shape as production. The test pool
+  // serves assets from the real `apps/web/dist` build so SPA fallback
+  // tests run against the actual hashed bundle. CAP-039 D5: mirrors
+  // production's `run_worker_first` so worker-pool tests exercise the
+  // same routing precedence the deployed Worker has.
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
   },
 
   "triggers": { "crons": ["*/2 * * * *"] },

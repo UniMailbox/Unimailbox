@@ -30,10 +30,10 @@ Moving to a different runtime.
 ## Acceptance criteria
 
 ```text
-[x] p95 /inbox < 300 ms over 10-minute sustained load.
-[x] Inbound handler < 5 s p95 for 5 MB messages.
-[x] Cold-start budget < 50 ms.
-[x] Cache hit rate > 90% for settings.
+[ ] p95 /inbox < 300 ms over 10-minute sustained load.
+[ ] Inbound handler < 5 s p95 for 5 MB messages.
+[ ] Cold-start budget < 50 ms.
+[ ] Cache hit rate > 90% for settings.
 ```
 
 ## Key technical decisions

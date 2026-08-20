@@ -669,17 +669,21 @@ describe('processOutboundJob post-send write failure (CAP-028 F2 — R-OUTBOUND-
       acceptedAt: new Date().toISOString(),
     }));
 
-    // CAP-029 M3 review-triage: the precise SQL of the post-send
-// `updateMessageStatus` statement. Matched as a full string (whitespace-
-// normalised) so a future change that adds `provider_event_time` to another
-// statement cannot silently re-route that statement through the failing
-// proxy. Update this constant when `updateMessageStatus` is refactored.
+    // CAP-029 M3 review-triage + CAP-030 direction guard: the precise SQL of the
+// post-send `updateMessageStatus` statement. Matched as a full string
+// (whitespace-normalised) so a future change that adds `provider_event_time`
+// to another statement cannot silently re-route that statement through the
+// failing proxy. The CAP-030 direction clause
+// `AND status IN (SELECT value FROM json_each(?))` now sits alongside the
+// CAP-029 rank CASE in the WHERE — both must be present for the proxy to
+// match. Update this constant when `updateMessageStatus` is refactored.
 const UPDATE_MESSAGE_STATUS_SQL = `UPDATE messages
           SET status = ?,
               provider_event_time = ?,
               sent_at = COALESCE(?, sent_at),
               updated_at = ?
         WHERE id = ?
+          AND status IN (SELECT value FROM json_each(?))
           AND (
             provider_event_time IS NULL
             OR provider_event_time < ?

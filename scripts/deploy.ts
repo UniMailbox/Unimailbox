@@ -182,6 +182,58 @@ function parseWranglerSingle<T>(
   return { ok: true, data: batch.result[0] as T };
 }
 
+// F12: CAP-039 — wrangler's --json output for a SELECT is the documented
+// batch shape `[{ results: [...], success: true, meta: {...} }]`. We
+// mirror `scripts/db-migrate.ts:parseWranglerJson` + `extractColumn` so the
+// remote runner applies the same parse discipline as the local one.
+// Unlike `parseWranglerList`, this accepts either `success: true` or
+// `success: false` — a missing `d1_migrations` table returns success=false
+// with `error` set, and we want to treat that as "empty applied set" so
+// the ghost check can run (it's a no-op when applied is empty).
+function parseWranglerJson(
+  r: { status: number | null; stdout: string },
+  source: string,
+): { ok: true; data: unknown } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(r.stdout);
+  } catch (e) {
+    return { ok: false, error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+  }
+  if (!Array.isArray(parsed)) {
+    return { ok: false, error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+  }
+  for (const batch of parsed) {
+    if (batch && typeof batch === 'object' && (batch as { success?: unknown }).success === false) {
+      const err = (batch as { error?: unknown }).error;
+      return { ok: false, error: `wrangler batch reported success=false: ${typeof err === 'string' ? err : JSON.stringify(err)}` };
+    }
+    if (!batch || typeof batch !== 'object' || !('results' in batch)) {
+      return { ok: false, error: `wrangler batch missing 'results' key (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+    }
+  }
+  return { ok: true, data: parsed };
+}
+
+function extractColumn(parsed: unknown, col: string): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(parsed)) return out;
+  for (const batch of parsed) {
+    if (batch && typeof batch === 'object' && 'results' in batch) {
+      const results = (batch as { results: unknown }).results;
+      if (Array.isArray(results)) {
+        for (const r of results) {
+          if (r && typeof r === 'object' && col in r) {
+            const v = (r as Record<string, unknown>)[col];
+            if (typeof v === 'string') out.push(v);
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------
 // Auth check
 // ---------------------------------------------------------------------
@@ -574,8 +626,99 @@ const resolveConfig = (state: ResourceState): void => {
 };
 
 // ---------------------------------------------------------------------
-// Remote migrations
+// Remote migrations — CAP-039: pending-only
 // ---------------------------------------------------------------------
+// Reads the remote `d1_migrations` table via `wrangler d1 execute --remote
+// --command 'SELECT name FROM d1_migrations ORDER BY name' --json`,
+// compares against the on-disk migrations directory, and applies only the
+// pending ones. A repeat deploy on a fully-migrated DB is a no-op: the
+// script logs `No pending migrations (N already applied).` and exits 0 —
+// the same dialect `scripts/db-migrate.ts:124` uses for local, so local
+// and remote runners speak the same language.
+//
+// Wrangler's --json output for a SELECT is the documented batch shape:
+//   [{ results: [...], success: true, meta: {...} }]
+// On a fresh DB the table doesn't exist; wrangler reports success=false
+// with an `error` field, which the ghost-check path turns into an empty
+// applied set — no migrations would be "ghost" because applied is empty.
+
+// CAP-039 — pure function that the test suite drives. Given the sorted
+// on-disk migration filenames and the sorted applied names from the
+// remote `d1_migrations` table, returns:
+//   - ghost: applied names that are NOT on disk (a real migration was
+//     deleted; the operator must restore it before any further deploy)
+//   - pending: on-disk names not yet applied
+// Both lists are subsets of the union; no entry is duplicated.
+export interface PendingMigrationDecision {
+  ghost: string[];
+  pending: string[];
+}
+export const computePendingMigrations = (
+  onDisk: readonly string[],
+  applied: readonly string[],
+): PendingMigrationDecision => {
+  const onDiskSet = new Set(onDisk);
+  const appliedSet = new Set(applied);
+  const ghost: string[] = [];
+  for (const a of applied) {
+    if (!onDiskSet.has(a)) ghost.push(a);
+  }
+  const pending: string[] = [];
+  for (const f of onDisk) {
+    if (!appliedSet.has(f)) pending.push(f);
+  }
+  return { ghost, pending };
+};
+
+// CAP-039 — the no-op log line, exposed so scripts/deploy.test.ts can
+// assert local and remote runners share the same dialect (AC #11). The
+// string matches `scripts/db-migrate.ts:124` byte-for-byte.
+export const NO_PENDING_LOG_FORMAT = 'No pending migrations';
+
+const readRemoteApplied = (): string[] => {
+  const r = wrangler([
+    'd1', 'execute', 'DB',
+    '--config', RESOLVED_CONFIG_PATH,
+    '--remote',
+    '--command', 'SELECT name FROM d1_migrations ORDER BY name',
+    '--json',
+  ]);
+  if (r.status !== 0) {
+    // wrangler reported a non-zero exit; treat as empty so the pending
+    // set is everything. The on-disk list itself is the ghost guard.
+    return [];
+  }
+  const parsed = parseWranglerJson(r, 'remote-applied');
+  if (!parsed.ok) {
+    // Mirror scripts/db-migrate.ts:98-101: a missing `d1_migrations`
+    // table on a fresh DB is the expected path — the wrangler batch
+    // reports `success: false` with `error: no such table: d1_migrations`,
+    // which we treat as an empty applied set so all migrations become
+    // pending. Any other parse failure (JSON parse error, missing
+    // `results` key on a successful batch) is a hard error and we bail.
+    const freshDb = parsed.error.includes('no such table: d1_migrations');
+    if (!freshDb) {
+      console.error(`Failed to parse remote d1_migrations: ${parsed.error}`);
+      process.exit(r.status ?? 1);
+    }
+    return [];
+  }
+  return extractColumn(parsed.data, 'name');
+};
+
+// CAP-039 D7 — extract the parse discipline so scripts/deploy.test.ts
+// can drive it with hand-crafted inputs. Given wrangler's stdout string,
+// returns the list of applied migration names (empty array on a
+// "no such table: d1_migrations" failure; throws on any other parse
+// failure so the caller can decide whether to swallow it).
+export const parseAppliedMigrationNames = (raw: string): string[] => {
+  const parsed = parseWranglerJson({ status: 0, stdout: raw }, 'remote-applied-test');
+  if (parsed.ok) return extractColumn(parsed.data, 'name');
+  const freshDb = parsed.error.includes('no such table: d1_migrations');
+  if (freshDb) return [];
+  throw new Error(parsed.error);
+};
+
 const runRemoteMigrations = (): void => {
   console.log('Running remote migrations…');
   if (dryRun) {
@@ -590,9 +733,35 @@ const runRemoteMigrations = (): void => {
 
   // List migration files (F6: use shared MIGRATION_FILE regex)
   const migrationsDir = resolve(REPO, 'migrations');
-  const files = readdirSync(migrationsDir).filter((f: string) => MIGRATION_FILE.test(f));
+  const files = readdirSync(migrationsDir).filter((f: string) => MIGRATION_FILE.test(f)).sort();
 
-  for (const file of files.sort()) {
+  // Read the remote applied set — exit 1 on parse failure (handled inside).
+  const applied = readRemoteApplied();
+
+  // Compute the (ghost, pending) split — ghost is a hard error,
+  // pending is the work list.
+  const { ghost, pending } = computePendingMigrations(files, applied);
+
+  // Ghost check — mirror `scripts/db-migrate.ts:103-110`.
+  if (ghost.length > 0) {
+    console.error(`Migration file(s) missing from disk but recorded in d1_migrations:`);
+    for (const g of ghost) console.error(`  ${g}`);
+    console.error(`Refusing to apply. Restore the missing file(s) before re-running.`);
+    process.exit(1);
+  }
+
+  if (pending.length === 0) {
+    // Mirror `scripts/db-migrate.ts:124` so local + remote share the same
+    // no-op log line.
+    console.log(`No pending migrations (${files.length} already applied).`);
+    return;
+  }
+
+  for (const file of pending) {
+    if (!MIGRATION_FILE.test(file)) {
+      console.error(`Refusing migration filename: ${file} (must match /\\d{4}_[A-Za-z0-9_-]+\\.sql\\$/).`);
+      process.exit(1);
+    }
     console.log(`  Applying ${file}…`);
     const result = wrangler([
       'd1', 'execute', 'DB',

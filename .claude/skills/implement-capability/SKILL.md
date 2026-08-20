@@ -10,6 +10,7 @@ Procedure for taking one capability from the ledger to accepted, reviewed, docum
 
 - A capability ID and name from `docs/rebuild/capability-ledger.md` whose status is `Pending`.
 - The current phase file in `docs/rebuild/08-roadmap/`.
+- `docs/rebuild/execution-plan.md` when the capability is part of the recovery gate.
 
 ## PRECHECK
 
@@ -20,6 +21,7 @@ Abort and report if any is false:
       criteria are open.)
 - [ ] `work/active/` holds no other capability, or holds one with disjoint file ownership.
 - [ ] `git status` is clean, or its dirt is understood and intentional.
+- [ ] The ledger active CAP, `work/active/` CAP, branch, and modified-file ownership agree.
 - [ ] No unresolved BLOCKER in `work/reviews/` for a dependency.
 
 ---
@@ -43,6 +45,10 @@ Create `work/active/CAP-NNN-slug/task.md` from `.claude/templates/capability-tas
   demonstrable behaviour.
 - **File ownership** — exact paths per agent. One writer per file.
 - **Reading list** — the scoped doc set each subagent gets.
+- **Reference implementation** — pinned repository/commit/files, adopt/adapt/reject decision, or
+  an explicit `None`.
+- **Delivery path** — how a user/runtime event reaches the slice, including assets, Worker
+  entrypoint, binding/trigger, persistence, and visible result where applicable.
 
 Skip the workspace only for a genuinely single-file capability requiring no delegation.
 
@@ -52,6 +58,10 @@ Name the layers this slice touches, in dependency order: domain → migration �
 route → contract schema → client → tests. Confirm each new module edge against the dependency table
 in `.claude/rules/architecture.md` *before* writing code. An edge not in that table needs the
 orchestrator's decision, not the implementer's.
+
+If an external reference is used, follow `.claude/rules/reference-implementations.md`. Pin the
+commit, inspect the complete integration seam (application code plus build/runtime config), and
+name the upstream assumptions that Unimailbox rejects.
 
 ### 4 — Implement
 
@@ -77,6 +87,10 @@ pnpm scaffold doctor && pnpm lint && pnpm typecheck && pnpm test:unit && pnpm te
 Then re-read each acceptance criterion and confirm it individually. Then scan your own diff for the
 legacy anti-patterns in `.claude/rules/architecture.md`.
 
+For delivery-affecting work, also inspect the generated artifact and runtime configuration. A local
+build does not prove that the Worker serves it; an exported queue/email handler does not prove that
+Wrangler routes events to it. Run the contract's fresh-deploy/repeat-deploy or browser smoke gate.
+
 ### 7 — Implementer handoff
 
 Report in the format in `.claude/agents/implementer.md`. Exact changed paths. Verbatim test results.
@@ -95,6 +109,7 @@ deferral is a dropped finding. Re-run the gates after any fix.
 ### 10 — Persist repository memory
 
 - Update the capability's ledger row: status, date, evidence, deferrals.
+- Update `docs/rebuild/execution-plan.md` if sequencing, dependencies, or recovery boundaries changed.
 - Append to `docs/rebuild/implementation-log.md`.
 - Answer the documentation update gate (`.claude/rules/documentation.md`): did this invalidate a
   doc, add a business rule, add an architectural constraint, change the API contract, change the
@@ -116,6 +131,9 @@ Per `.claude/rules/git.md`, and only if the user has asked for commits.
 Do not mark the capability done unless every line is true:
 
 - [ ] All acceptance criteria demonstrated, each with named evidence.
+- [ ] Reference provenance and adaptation decisions recorded when an external implementation was used.
+- [ ] Delivery path verified at the contract's required level: artifact, route, trigger, binding,
+      migration, and browser/runtime behavior as applicable.
 - [ ] All six quality gates pass, run and observed by the orchestrator.
 - [ ] Architecture, code, and QA reviews complete; no open BLOCKER or HIGH.
 - [ ] Every implemented `R-*` rule has a test named for it.

@@ -34,12 +34,12 @@ Search, bulk operations, advanced admin features.
 ## Acceptance criteria
 
 ```text
-[x] User uploads 5 MB PDF → attaches to compose → sends → recipient downloads.
-[x] User saves draft → closes browser → reopens → draft is on server.
-[x] Owner shares mailbox with viewer → viewer reads; viewer cannot delete.
-[x] Two users star the same message; starring one does not affect the other.
-[x] Attachment upload row is consumed in same transaction as message insert.
-[x] Unused upload expires after 1 hour and is cleaned by scheduled job.
+[ ] User uploads 5 MB PDF → attaches to compose → sends → recipient downloads.
+[ ] User saves draft → closes browser → reopens → draft is on server.
+[ ] Owner shares mailbox with viewer → viewer reads; viewer cannot delete.
+[ ] Two users star the same message; starring one does not affect the other.
+[ ] Attachment upload row is consumed in same transaction as message insert.
+[ ] Unused upload expires after 1 hour and is cleaned by scheduled job.
 ```
 
 ## Key technical decisions

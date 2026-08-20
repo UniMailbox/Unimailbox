@@ -1,10 +1,10 @@
 # Unimailbox
 
 Greenfield rebuild of the Unimailbox mail product on a Cloudflare Workers
-stack. This repository is **CAP-001** — the monorepo scaffold + toolchain.
-No business code has been written yet; subsequent capabilities in
-[`docs/rebuild/08-roadmap/`](./docs/rebuild/08-roadmap/) lay the application on
-top of this scaffold.
+stack. The repository now contains setup, identity, tenancy, inbound,
+outbound, webhook, audit, and reliability backend slices through the active
+Phase 2 work. The browser application and deployable delivery path are still
+being recovered; do not infer product readiness from green local tests.
 
 For the entry point for agents and the execution model, see
 [`CLAUDE.md`](./CLAUDE.md).
@@ -43,6 +43,11 @@ docs/rebuild/       Design specification
 
 ## Status
 
-This README is intentionally minimal — the design spec is the source of
-truth, not this file. See `docs/rebuild/capability-ledger.md` for the
-authoritative execution state.
+Current work is CAP-030 (lifecycle direction guards). Local quality gates are
+green, but Phase 0 and Phase 1 delivery verification are reopened because the
+setup/client routes, static asset integration, queue consumer configuration,
+repeat-safe remote migrations, and preview business loop are not yet complete.
+
+- [`docs/rebuild/capability-ledger.md`](./docs/rebuild/capability-ledger.md) — authoritative status
+- [`docs/rebuild/execution-plan.md`](./docs/rebuild/execution-plan.md) — ordered recovery plan
+- [`docs/rebuild/11-agentic-inbox-adaptation.md`](./docs/rebuild/11-agentic-inbox-adaptation.md) — pinned reference patterns and adaptation boundaries

@@ -8,7 +8,7 @@ update any matching logic here too.
 
 | Hook | Event | Purpose | Blocking |
 | --- | --- | --- | --- |
-| `session-context.sh` | `SessionStart` | Inject a small execution-state context (current phase, active workspace, recent log, git state) so a fresh session can orient without re-reading the whole repo | No |
+| `session-context.sh` | `SessionStart` | Inject current phase, ledger active/next capability, active workspace, recent log, Git state, and ledger/workspace drift so a fresh session can orient without trusting stale prose | No |
 | `protect-destructive-commands.sh` | `PreToolUse` (Bash) | Block high-confidence irreversible shell operations (`rm -rf .`, `git reset --hard`, `git clean -fdx`, force-push to main/master/production, `DROP DATABASE`/`DROP SCHEMA`) | Yes — exit 2 |
 | `protect-root-pollution.sh` | `PreToolUse` (Write, Edit, MultiEdit) | Block new files at the repository root whose name matches the governance rule's forbidden patterns (`PLAN.md`, `NOTES*.md`, `DEBUG.txt`, etc.). Use `work/`, `.tmp/`, or the explicit allowlist instead | Yes — exit 2 |
 | `subagent-start-context.sh` | `SubagentStart` | Inject repository guardrails + a role-specific reminder into every specialised subagent. Common block + per-role appendix (implementer / reviewer / architect / QA / security / investigator / frontend / explore) | No |
@@ -51,7 +51,7 @@ Hooks write one line per invocation to `.tmp/claude-hooks/hooks.log`:
 
 ```
 2026-08-11T07:30:00Z session-context.sh session-start begin
-2026-08-11T07:30:00Z session-context.sh session-start end phase='Phase 0 — Foundation' active='CAP-001-monorepo-scaffold' branch='master'
+2026-08-19T07:30:00Z session-context.sh session-start end phase='2 — Reliable Business Loop' active='CAP-030-lifecycle-direction' branch='cap/CAP-020-026-business-loop' drift=''
 2026-08-11T07:30:05Z protect-destructive-commands.sh destructive-guard BLOCKED: rm -rf of root, home, or current/parent directory :: rm -rf .
 ```
 
@@ -90,6 +90,9 @@ echo '{"task_description":"CAP-001 done","status":"DONE"}' \
 
 # Session context (no input needed, generates its own)
 .claude/hooks/session-context.sh
+
+# State helpers (the current phase must come from the Current state table, not the first phase heading)
+bash -c 'source .claude/hooks/lib/project-state.sh; ps_current_phase; ps_state_drift'
 ```
 
 Replace `/path/to/repo` with the absolute path of the repository root.

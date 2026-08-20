@@ -26,7 +26,15 @@ import {
   composeRecipientSchema,
   composeRequestSchema,
   messageStatusSchema,
+  outboundJobStatusSchema,
+  type MessageStatus,
+  type OutboundJobStatus,
   STATUS_RANK_TABLE,
+  ALLOWED_MESSAGE_TRANSITIONS,
+  ALLOWED_JOB_TRANSITIONS,
+  canTransition,
+  assertCanTransition,
+  allowedFromForMessageStatus,
 } from './index';
 
 describe('emailAddressSchema', () => {
@@ -1223,5 +1231,367 @@ describe('STATUS_RANK_TABLE — R-MESSAGE-007 rank guard (CAP-029 Arch M1 / Secu
     expect(terminalRanks).toHaveLength(3);
     expect(new Set(terminalRanks).size).toBe(1);
     expect(terminalRanks[0]).toBe(100);
+  });
+});
+
+describe('ALLOWED_*_TRANSITIONS — CAP-030 direction guard', () => {
+  // CAP-030 D-CAP-030-D: the direction tables are the *policy*; the SQL
+  // predicate in `updateMessageStatus` and the hard-coded `status = '...'`
+  // predicates in the lease-aware writers are the *enforcement*. A drift
+  // here would silently widen (or narrow) the lifecycle without an SQL
+  // change to match. Pin both maps to literal expected sets — the worker
+  // tests verify the enforcement side.
+  //
+  // When you add a status: add it here, add it to ALLOWED_*_TRANSITIONS,
+  // and update the SQL CASE / WHERE clauses that depend on it. The two
+  // pins (this one and the worker-pool direction tests) catch drift in
+  // either direction.
+
+  const EXPECTED_MESSAGE_TRANSITIONS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+    ['draft', ['queued', 'sent']],
+    ['queued', ['sending', 'sent', 'delayed', 'failed', 'bounced', 'complained']],
+    ['sending', ['sent', 'delayed', 'failed', 'bounced', 'complained']],
+    ['sent', ['delivered', 'delayed', 'failed', 'bounced', 'complained']],
+    ['delivered', ['failed', 'bounced', 'complained']],
+    ['delayed', ['sent', 'delivered', 'failed', 'bounced', 'complained']],
+    ['bounced', []],
+    ['complained', []],
+    ['failed', []],
+  ];
+
+  const EXPECTED_JOB_TRANSITIONS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
+    ['queued', ['sending']],
+    ['sending', ['sent', 'queued', 'failed']],
+    ['sent', []],
+    ['delayed', []],
+    ['bounced', []],
+    ['complained', []],
+    ['failed', []],
+  ];
+
+  function mapToPairs<K, V>(map: ReadonlyMap<K, ReadonlySet<V>>): ReadonlyArray<readonly [K, ReadonlyArray<V>]> {
+    return [...map.entries()].map(([k, v]) => [k, [...v]] as const);
+  }
+
+  it('every status in messageStatusSchema appears in ALLOWED_MESSAGE_TRANSITIONS', () => {
+    for (const s of messageStatusSchema.options) {
+      expect(ALLOWED_MESSAGE_TRANSITIONS.has(s)).toBe(true);
+    }
+  });
+
+  it('every status in outboundJobStatusSchema appears in ALLOWED_JOB_TRANSITIONS', () => {
+    for (const s of outboundJobStatusSchema.options) {
+      expect(ALLOWED_JOB_TRANSITIONS.has(s)).toBe(true);
+    }
+  });
+
+  it('ALLOWED_MESSAGE_TRANSITIONS matches the documented policy exactly', () => {
+    expect(mapToPairs(ALLOWED_MESSAGE_TRANSITIONS)).toEqual(EXPECTED_MESSAGE_TRANSITIONS);
+  });
+
+  it('ALLOWED_JOB_TRANSITIONS matches the documented policy exactly', () => {
+    expect(mapToPairs(ALLOWED_JOB_TRANSITIONS)).toEqual(EXPECTED_JOB_TRANSITIONS);
+  });
+
+  it('terminal states have empty allowed-from set on both maps (R-MESSAGE-012 / R-OUTBOUND-009)', () => {
+    for (const terminal of ['failed', 'bounced', 'complained'] as const) {
+      const messageFrom = ALLOWED_MESSAGE_TRANSITIONS.get(terminal);
+      expect(messageFrom, `ALLOWED_MESSAGE_TRANSITIONS missing ${terminal}`).toBeDefined();
+      expect([...(messageFrom as ReadonlySet<MessageStatus>)]).toEqual([]);
+      const jobFrom = ALLOWED_JOB_TRANSITIONS.get(terminal as OutboundJobStatus);
+      expect(jobFrom, `ALLOWED_JOB_TRANSITIONS missing ${terminal}`).toBeDefined();
+      expect([...(jobFrom as ReadonlySet<OutboundJobStatus>)]).toEqual([]);
+    }
+  });
+
+  describe('canTransition — allowed transitions (forward path + legal branches)', () => {
+    // Forward path: draft → queued → sending → sent → delivered.
+    // Plus the documented legal branches (delayed recovery, terminal
+    // promotion, D-CAP-030-F sent → delayed).
+    const ALLOWED_MESSAGES: ReadonlyArray<readonly [MessageStatus, MessageStatus]> = [
+      ['draft', 'queued'],
+      ['draft', 'sent'],
+      ['queued', 'sending'],
+      ['queued', 'sent'],
+      ['queued', 'delayed'],
+      ['queued', 'failed'],
+      ['queued', 'bounced'],
+      ['queued', 'complained'],
+      ['sending', 'sent'],
+      ['sending', 'delayed'],
+      ['sending', 'failed'],
+      ['sending', 'bounced'],
+      ['sending', 'complained'],
+      ['sent', 'delivered'],
+      ['sent', 'delayed'], // D-CAP-030-F
+      ['sent', 'failed'],
+      ['sent', 'bounced'],
+      ['sent', 'complained'],
+      ['delivered', 'failed'],
+      ['delivered', 'bounced'],
+      ['delivered', 'complained'],
+      ['delayed', 'sent'],
+      ['delayed', 'delivered'],
+      ['delayed', 'failed'],
+      ['delayed', 'bounced'],
+      ['delayed', 'complained'],
+    ];
+    for (const [from, to] of ALLOWED_MESSAGES) {
+      it(`messages: ${from} → ${to}`, () => {
+        expect(canTransition('message', from, to)).toBe(true);
+      });
+    }
+
+    const ALLOWED_JOBS: ReadonlyArray<readonly [OutboundJobStatus, OutboundJobStatus]> = [
+      ['queued', 'sending'],
+      // R-OUTBOUND-008 retry reset (D-CAP-030-B).
+      ['sending', 'queued'],
+      ['sending', 'sent'],
+      ['sending', 'failed'],
+    ];
+    for (const [from, to] of ALLOWED_JOBS) {
+      it(`jobs: ${from} → ${to}`, () => {
+        expect(canTransition('job', from, to)).toBe(true);
+      });
+    }
+  });
+
+  describe('canTransition — forbidden transitions (regressions in non-terminal states)', () => {
+    // A regression is a `from` with a higher rank than `to` (the rank
+    // guard would accept), but a direction violation (the policy
+    // disallows it). These are the cases CAP-030 closes.
+    const FORBIDDEN_MESSAGES: ReadonlyArray<readonly [MessageStatus, MessageStatus]> = [
+      // sent (rank 20) → queued (rank 40) — rank guard would accept on
+      // equal time + lower rank. Direction guard rejects (AC #8).
+      ['sent', 'queued'],
+      // sent → draft — both ranks below 20; direction guard rejects.
+      ['sent', 'draft'],
+      // queued → draft — no forward path.
+      ['queued', 'draft'],
+      // queued → sending → sent forward path; queued → sent is allowed
+      // (covered above); queued → delivered would skip the send step.
+      ['queued', 'delivered'],
+      // delivered → sent — terminal correction, not a regression. Even
+      // though sent < delivered in rank, the direction table blocks it.
+      ['delivered', 'sent'],
+      // delayed → queued — rank guard would accept; direction rejects.
+      ['delayed', 'queued'],
+      // delayed → draft — no path.
+      ['delayed', 'draft'],
+      // draft → anything other than queued or sent (R-MESSAGE-010).
+      ['draft', 'sending'],
+      ['draft', 'delivered'],
+      ['draft', 'failed'],
+      ['draft', 'bounced'],
+      ['draft', 'delayed'],
+      ['draft', 'complained'],
+    ];
+    for (const [from, to] of FORBIDDEN_MESSAGES) {
+      it(`messages: ${from} → ${to}`, () => {
+        expect(canTransition('message', from, to)).toBe(false);
+      });
+    }
+  });
+
+  describe('canTransition — forbidden transitions out of terminal states', () => {
+    // R-MESSAGE-012 / R-OUTBOUND-009: terminal is terminal. The empty
+    // allowed-from set makes resurrection a closed invariant — even
+    // on a strictly-newer event time.
+    const TERMINAL_MESSAGES: ReadonlyArray<MessageStatus> = ['failed', 'bounced', 'complained'];
+    const ALL_TARGETS_MESSAGES: ReadonlyArray<MessageStatus> = [
+      'draft',
+      'queued',
+      'sending',
+      'sent',
+      'delivered',
+      'delayed',
+    ];
+    for (const from of TERMINAL_MESSAGES) {
+      for (const to of ALL_TARGETS_MESSAGES) {
+        it(`messages: ${from} → ${to}`, () => {
+          expect(canTransition('message', from, to)).toBe(false);
+        });
+      }
+    }
+
+    const TERMINAL_JOBS: ReadonlyArray<OutboundJobStatus> = ['failed', 'bounced', 'complained', 'sent'];
+    const ALL_TARGETS_JOBS: ReadonlyArray<OutboundJobStatus> = [
+      'queued',
+      'sending',
+      'sent',
+      'delayed',
+      'failed',
+      'bounced',
+      'complained',
+    ];
+    for (const from of TERMINAL_JOBS) {
+      for (const to of ALL_TARGETS_JOBS) {
+        // Skip self (e.g. sent → sent) — not in the table, returns false,
+        // but the test reads cleaner if we omit it.
+        if (from === to) continue;
+        it(`jobs: ${from} → ${to}`, () => {
+          expect(canTransition('job', from, to)).toBe(false);
+        });
+      }
+    }
+  });
+
+  describe('canTransition — forbidden transitions on jobs', () => {
+    const FORBIDDEN_JOBS: ReadonlyArray<readonly [OutboundJobStatus, OutboundJobStatus]> = [
+      // sent is terminal (R-OUTBOUND-009).
+      ['sent', 'queued'],
+      ['sent', 'sending'],
+      ['sent', 'failed'],
+      ['sent', 'bounced'],
+      ['sent', 'complained'],
+      // delayed has no path forward or back today (D-CAP-030-C).
+      ['delayed', 'queued'],
+      ['delayed', 'sending'],
+      ['delayed', 'sent'],
+      ['delayed', 'failed'],
+      // queued can only advance to sending.
+      ['queued', 'sent'],
+      ['queued', 'failed'],
+      ['queued', 'bounced'],
+      ['queued', 'complained'],
+    ];
+    for (const [from, to] of FORBIDDEN_JOBS) {
+      it(`jobs: ${from} → ${to}`, () => {
+        expect(canTransition('job', from, to)).toBe(false);
+      });
+    }
+  });
+
+  describe('canTransition — domain discriminator is load-bearing', () => {
+    // The two domains share many status values but have different
+    // direction policies. CAP-030 D-CAP-030-B: `sending → queued` is
+    // allowed for jobs (R-OUTBOUND-008 retry reset) but forbidden for
+    // messages (no forward path). Without the domain argument, the
+    // caller could not express this difference.
+    it('sending → queued: jobs allow, messages forbid', () => {
+      expect(canTransition('job', 'sending', 'queued')).toBe(true);
+      expect(canTransition('message', 'sending', 'queued')).toBe(false);
+    });
+
+    it('sent → queued: messages forbid (regression), jobs forbid (terminal)', () => {
+      expect(canTransition('message', 'sent', 'queued')).toBe(false);
+      expect(canTransition('job', 'sent', 'queued')).toBe(false);
+    });
+
+    it('failed → sent: both domains forbid (terminal)', () => {
+      expect(canTransition('message', 'failed', 'sent')).toBe(false);
+      expect(canTransition('job', 'failed', 'sent')).toBe(false);
+    });
+
+    it('draft is unreachable in the job domain (no entry in jobs map)', () => {
+      // 'draft' is not a key in ALLOWED_JOB_TRANSITIONS, so the .get()
+      // returns undefined and the helper short-circuits to false.
+      // D-CAP-030-A: 'draft' is a MessageStatus-only value; the test
+      // casts it to OutboundJobStatus to assert the runtime guard rather
+      // than the compile-time rejection that the new overloads enforce.
+      expect(canTransition('job', 'draft' as OutboundJobStatus, 'sent')).toBe(false);
+      expect(canTransition('job', 'queued', 'draft' as OutboundJobStatus)).toBe(false);
+    });
+
+    it('delivered is unreachable in the job domain', () => {
+      // D-CAP-030-A: 'delivered' is messages-only; cast documents the
+      // intent (the runtime result is what matters in this test).
+      expect(canTransition('job', 'sent', 'delivered' as OutboundJobStatus)).toBe(false);
+    });
+  });
+
+  describe('assertCanTransition', () => {
+    it('does not throw when the transition is allowed (messages)', () => {
+      expect(() => assertCanTransition('message', 'queued', 'sending')).not.toThrow();
+    });
+
+    it('does not throw when the transition is allowed (jobs, retry reset)', () => {
+      expect(() => assertCanTransition('job', 'sending', 'queued')).not.toThrow();
+    });
+
+    it('throws plain Error with `domain`, `from`, `to` in the message (D-CAP-030-G)', () => {
+      expect(() => assertCanTransition('message', 'sent', 'queued')).toThrowError(
+        /assertCanTransition\(message\): sent → queued is not an allowed lifecycle transition/,
+      );
+    });
+
+    it('forbidden messages-side transition: failed → sent (terminal)', () => {
+      expect(() => assertCanTransition('message', 'failed', 'sent')).toThrowError(
+        /assertCanTransition\(message\): failed → sent/,
+      );
+    });
+
+    it('forbidden jobs-side transition: queued → sent (only `sending` is allowed)', () => {
+      expect(() => assertCanTransition('job', 'queued', 'sent')).toThrowError(
+        /assertCanTransition\(job\): queued → sent/,
+      );
+    });
+
+    it('messages-side vs jobs-side: same (from, to), different verdict, different error', () => {
+      // sending → queued is allowed in jobs, forbidden in messages.
+      // The error message must carry the domain so the caller sees the
+      // disambiguation context.
+      expect(() => assertCanTransition('message', 'sending', 'queued')).toThrowError(
+        /\(message\): sending → queued/,
+      );
+    });
+  });
+
+  describe('allowedFromForMessageStatus — SQL IN-clause input', () => {
+    it('returns the FROM-set for queued (target reachable only from draft)', () => {
+      // Inverse of the message direction table for `to = 'queued'`.
+      expect([...allowedFromForMessageStatus('queued')]).toEqual(['draft']);
+    });
+
+    it('returns the FROM-set for sent (reachable from draft, queued, sending, delayed)', () => {
+      // Insertion order: draft, queued, sending, sent, delivered, delayed,
+      // bounced, complained, failed. Skipping non-FROM entries, the
+      // match order is: draft, queued, sending, delayed.
+      expect([...allowedFromForMessageStatus('sent')]).toEqual([
+        'draft',
+        'queued',
+        'sending',
+        'delayed',
+      ]);
+    });
+
+    it('returns the FROM-set for delivered (reachable from sent, delayed)', () => {
+      expect([...allowedFromForMessageStatus('delivered')]).toEqual(['sent', 'delayed']);
+    });
+
+    it('returns the FROM-set for the terminal targets — every non-terminal state can fail', () => {
+      // Failed/bounced/complained are reachable from every non-terminal
+      // status (R-MESSAGE-006: "or terminal"). The inverse function
+      // surfaces those sources for the SQL IN-clause.
+      expect([...allowedFromForMessageStatus('failed')]).toEqual([
+        'queued',
+        'sending',
+        'sent',
+        'delivered',
+        'delayed',
+      ]);
+      expect([...allowedFromForMessageStatus('bounced')]).toEqual([
+        'queued',
+        'sending',
+        'sent',
+        'delivered',
+        'delayed',
+      ]);
+      expect([...allowedFromForMessageStatus('complained')]).toEqual([
+        'queued',
+        'sending',
+        'sent',
+        'delivered',
+        'delayed',
+      ]);
+    });
+
+    it('returns empty array for `draft` — no FROM state can transition into it', () => {
+      // The only writer that produces `draft` is INSERT (bypasses the
+      // direction guard, see compose.ts comment). No FROM-state is
+      // permitted, so the SQL IN-clause yields an empty row set, and
+      // any UPDATE targeting `draft` is rejected.
+      expect([...allowedFromForMessageStatus('draft')]).toEqual([]);
+    });
   });
 });

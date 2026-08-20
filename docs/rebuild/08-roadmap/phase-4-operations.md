@@ -35,17 +35,17 @@ Full-text search across attachments; provider sync for Resend/CF (those are adde
 ## Acceptance criteria
 
 ```text
-[x] Admin searches for "test" in subject across all mailboxes.
-[x] Admin bulk-deletes 50 messages in one request with idempotency.
-[x] Outbound dispatcher cron recovers 5 stuck jobs.
-[x] Operator runbook executes successfully against a staging deployment.
-[x] Setup repair session allows re-running only the upgraded step.
-[x] Migration script dry-run produces a report with row counts.
-[x] Migration script real-run transforms 100% of legacy users, mailboxes, and messages without data loss.
-[x] Migration script is idempotent: re-running produces zero additional inserts.
-[x] Migration script is cursor-based: a crash mid-run resumes from the last checkpoint.
-[x] After migration, the new system can authenticate a legacy user (after password reset).
-[x] After migration, a legacy inbox is viewable in the new client.
+[ ] Admin searches for "test" in subject across all mailboxes.
+[ ] Admin bulk-deletes 50 messages in one request with idempotency.
+[ ] Outbound dispatcher cron recovers 5 stuck jobs.
+[ ] Operator runbook executes successfully against a staging deployment.
+[ ] Setup repair session allows re-running only the upgraded step.
+[ ] Migration script dry-run produces a report with row counts.
+[ ] Migration script real-run transforms 100% of legacy users, mailboxes, and messages without data loss.
+[ ] Migration script is idempotent: re-running produces zero additional inserts.
+[ ] Migration script is cursor-based: a crash mid-run resumes from the last checkpoint.
+[ ] After migration, the new system can authenticate a legacy user (after password reset).
+[ ] After migration, a legacy inbox is viewable in the new client.
 ```
 
 ## Key technical decisions

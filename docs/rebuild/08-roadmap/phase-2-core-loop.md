@@ -28,13 +28,13 @@ Still no drafts, attachments, sharing.
 ## Acceptance criteria
 
 ```text
-[x] Replaying /messages/send with same Idempotency-Key returns same message id.
-[x] /messages/send with same key + different body returns 409.
-[x] Outbound job survives consumer crash mid-send (attempts++, lock expires, re-queued).
-[x] Webhook arriving before send-complete is queued, not lost.
-[x] No /api/v1/* endpoint accepts a request > 1 MB.
-[x] All audit events are queryable by actor and resource.
-[x] All endpoints return JSON error body with stable code.
+[ ] Replaying /messages/send with same Idempotency-Key returns same message id.
+[ ] /messages/send with same key + different body returns 409.
+[ ] Outbound job survives consumer crash mid-send (attempts++, lock expires, re-queued).
+[ ] Webhook arriving before send-complete is queued, not lost.
+[ ] No /api/v1/* endpoint accepts a request > 1 MB.
+[ ] All audit events are queryable by actor and resource.
+[ ] All endpoints return JSON error body with stable code.
 ```
 
 ## Key technical decisions
