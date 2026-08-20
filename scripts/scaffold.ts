@@ -56,7 +56,7 @@ if (SUBCOMMAND === 'deploy') {
 console.error(`Unknown subcommand: ${SUBCOMMAND ?? '(none)'}`);
 console.error('Usage: pnpm scaffold <subcommand>');
 console.error('Subcommands:');
-console.error('  doctor              — 10 structural checks');
+console.error('  doctor              — 13 structural checks');
 console.error('  db:migrate [--verify|--reset]');
 console.error('  deploy [--force-secrets|--dry-run|--skip-migrate]');
 process.exit(1);

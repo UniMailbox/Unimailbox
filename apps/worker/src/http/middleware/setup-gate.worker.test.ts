@@ -6,6 +6,12 @@
 // IMPORTANT: SELF.fetch follows redirects by default. Tests that assert a 302
 // must pass { redirect: 'manual' } to observe the redirect response itself,
 // not the response from the followed redirect target.
+//
+// CAP-039 — Deployment substrate: the SPA fallback now serves
+// `apps/web/dist/index.html` for any non-API GET. /setup is still exempt
+// from the gate, but the response is the SPA shell (200 HTML), not 404.
+// Tests that previously asserted 404 for "/setup is exempt" now assert
+// 200 HTML — that's a stronger proof the gate exempts the path.
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF } from 'cloudflare:test';
@@ -66,16 +72,26 @@ describe('setup-gate middleware', () => {
       expect(body).toEqual({ ok: true, surface: 'router' });
     });
 
-    it('/setup is exempt — returns 404 (no handler yet, not 302)', async () => {
+    it('/setup is exempt — returns 200 HTML app shell (SPA fallback)', async () => {
       const response = await SELF.fetch('http://localhost/setup');
-      expect(response.status).toBe(404);
+      // CAP-039: the SPA fallback now serves index.html for /setup
+      // because the gate exempts it. The 200 HTML proves the path
+      // bypassed the gate; the absence of Location proves it was not
+      // redirected.
+      expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+      const ct = response.headers.get('Content-Type') ?? '';
+      expect(ct).toMatch(/text\/html/);
     });
 
-    it('/setup/anything is exempt — returns 404', async () => {
+    it('/setup/anything is exempt — returns 200 HTML app shell (SPA fallback)', async () => {
       const response = await SELF.fetch('http://localhost/setup/dashboard');
-      expect(response.status).toBe(404);
+      // Same as above — /setup/* is exempt and the SPA fallback serves
+      // index.html for any path under it.
+      expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+      const ct = response.headers.get('Content-Type') ?? '';
+      expect(ct).toMatch(/text\/html/);
     });
 
     // CAP-007 added GET /api/v1/setup/status — it now returns 200 instead of
@@ -115,11 +131,14 @@ describe('setup-gate middleware', () => {
 
     it('GET / does NOT redirect — returns 200 HTML app shell', async () => {
       const response = await SELF.fetch('http://localhost/');
+      // CAP-039: the SPA fallback serves the real Vite-built
+      // index.html now. The lowercase `<!doctype html>` is the live
+      // bundle's exact text.
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('text/html');
       expect(response.headers.get('Location')).toBeNull();
       const text = await response.text();
-      expect(text).toContain('<!DOCTYPE html>');
+      expect(text).toContain('<!doctype html>');
       expect(text).toContain('<title>Unimailbox</title>');
     });
 
@@ -130,10 +149,14 @@ describe('setup-gate middleware', () => {
       expect(body).toEqual({ ok: true, surface: 'router' });
     });
 
-    it('/setup is still exempt — returns 404', async () => {
+    it('/setup is still exempt — returns 200 HTML app shell (SPA fallback)', async () => {
       const response = await SELF.fetch('http://localhost/setup');
-      expect(response.status).toBe(404);
+      // CAP-039: SPA fallback serves index.html for /setup now that
+      // the hand-written HTML shell is gone.
+      expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+      const ct = response.headers.get('Content-Type') ?? '';
+      expect(ct).toMatch(/text\/html/);
     });
   });
 
@@ -143,10 +166,14 @@ describe('setup-gate middleware', () => {
       await seedInstallationState({ status: 'setup', currentStep: 'claim' });
     });
 
-    it('/setup/step1 is exempt', async () => {
+    it('/setup/step1 is exempt (SPA fallback returns 200 HTML)', async () => {
       const response = await SELF.fetch('http://localhost/setup/step1');
-      expect(response.status).toBe(404);
+      // CAP-039: SPA fallback serves index.html for any path under
+      // /setup because the gate exempts the whole subtree.
+      expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+      const ct = response.headers.get('Content-Type') ?? '';
+      expect(ct).toMatch(/text\/html/);
     });
 
     it('/api/v1/setup/preflight is exempt (401, not 302)', async () => {
@@ -183,14 +210,20 @@ describe('setup-gate middleware', () => {
       expect(response.headers.get('Location')).toBe('/setup');
     });
 
-    it('exact /setup match is exempt', async () => {
+    it('exact /setup match is exempt (SPA fallback returns 200 HTML)', async () => {
       const response = await SELF.fetch('http://localhost/setup');
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
       expect(response.headers.get('Location')).toBeNull();
+      const ct = response.headers.get('Content-Type') ?? '';
+      expect(ct).toMatch(/text\/html/);
     });
 
-    it('/api/v1/setup with trailing slash is exempt', async () => {
+    it('/api/v1/setup with trailing slash is exempt (no such route → SPA fallback)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/');
+      // /api/v1/setup/ is matched by the apiV1 sub-app. Without a route
+      // at the bare path, Hono returns 404 from inside the sub-app —
+      // not the SPA fallback, which only mounts at GET * on the parent
+      // router. The exempt-path check still holds: no Location header.
       expect(response.status).toBe(404);
       expect(response.headers.get('Location')).toBeNull();
     });

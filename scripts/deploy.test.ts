@@ -9,7 +9,7 @@
 //
 // Tests import the real functions from deploy.ts — no duplicated logic.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -19,6 +19,9 @@ import {
   loadResourceState,
   saveResourceState,
   computeSecretAction,
+  computePendingMigrations,
+  parseAppliedMigrationNames,
+  NO_PENDING_LOG_FORMAT,
   type ResourceState,
 } from './deploy.js';
 
@@ -245,6 +248,121 @@ describe('scripts/deploy.ts — pure logic', () => {
       expect(loaded.secrets?.installationToken).toBe(true);
       expect(loaded.secrets?.credentialEncryptionKey).toBe(false);
       expect(loaded.kvSetupSessionId).toBeUndefined();
+    });
+  });
+
+  // CAP-039 — Pending-only migration logic. The pure function
+  // `computePendingMigrations` is the testable kernel of
+  // `scripts/deploy.ts:runRemoteMigrations`. The four cases below match
+  // AC #10: (a) empty applied → all, (b) full applied → zero,
+  // (c) partial → only gap, (d) ghost → exit 1.
+  describe('computePendingMigrations (CAP-039)', () => {
+    it('case (a): empty applied → all on-disk are pending', () => {
+      const onDisk = ['0001_initial.sql', '0002_users.sql', '0003_messages.sql'];
+      const applied: string[] = [];
+      const { ghost, pending } = computePendingMigrations(onDisk, applied);
+      expect(ghost).toEqual([]);
+      expect(pending).toEqual(onDisk);
+    });
+
+    it('case (b): full applied → zero pending (repeat deploy is a no-op)', () => {
+      const onDisk = ['0001_initial.sql', '0002_users.sql', '0003_messages.sql'];
+      const applied = [...onDisk];
+      const { ghost, pending } = computePendingMigrations(onDisk, applied);
+      expect(ghost).toEqual([]);
+      expect(pending).toEqual([]);
+    });
+
+    it('case (c): partial applied → only the gap is pending', () => {
+      const onDisk = ['0001_initial.sql', '0002_users.sql', '0003_messages.sql', '0004_outbound.sql'];
+      const applied = ['0001_initial.sql', '0002_users.sql'];
+      const { ghost, pending } = computePendingMigrations(onDisk, applied);
+      expect(ghost).toEqual([]);
+      expect(pending).toEqual(['0003_messages.sql', '0004_outbound.sql']);
+    });
+
+    it('case (d): ghost — applied has a name that is not on disk', () => {
+      const onDisk = ['0001_initial.sql', '0002_users.sql'];
+      const applied = ['0001_initial.sql', '0002_users.sql', '0099_ghost.sql'];
+      const { ghost, pending } = computePendingMigrations(onDisk, applied);
+      expect(ghost).toEqual(['0099_ghost.sql']);
+      // Pending list still contains everything not in applied — but the
+      // ghost check in runRemoteMigrations exits before we get to apply
+      // them, so callers must gate on `ghost.length === 0` first.
+      expect(pending).toEqual([]);
+    });
+
+    it('preserves the on-disk order in the pending list', () => {
+      const onDisk = ['0003_third.sql', '0001_first.sql', '0002_second.sql'];
+      const applied: string[] = [];
+      const { pending } = computePendingMigrations(onDisk, applied);
+      // Pending keeps input order — runRemoteMigrations sorts the input
+      // before calling, but the function itself is order-stable so a
+      // caller that pre-sorts gets deterministic output.
+      expect(pending).toEqual(['0003_third.sql', '0001_first.sql', '0002_second.sql']);
+    });
+  });
+
+  // CAP-039 AC #11 — the no-op log line in the remote runner uses the
+  // same dialect as the local `scripts/db-migrate.ts:124`. Asserting
+  // the prefix means a future regression in either runner shows up in
+  // CI before it bites an operator.
+  describe('no-op log line (CAP-039 AC #11)', () => {
+    it('NO_PENDING_LOG_FORMAT starts with the db-migrate.ts prefix', () => {
+      expect(NO_PENDING_LOG_FORMAT).toBe('No pending migrations');
+    });
+
+    it('db-migrate.ts uses the same prefix', () => {
+      // Resolve db-migrate.ts relative to this test file.
+      const dbMigratePath = resolve(__dirname, 'db-migrate.ts');
+      const src = readFileSync(dbMigratePath, 'utf-8');
+      // Look for the literal log line — `console.log(\`No pending migrations (...)\`)`.
+      expect(src).toContain('No pending migrations');
+      // And confirm it is followed by `(${migrations.length} already applied)`
+      // so the format is the same dialect the deploy script mirrors.
+      expect(src).toMatch(/No pending migrations\s*\(\$\{migrations\.length\}\s*already applied\)/);
+    });
+  });
+
+  // CAP-039 D7 / post-review MEDIUM — the parse-failure path of
+  // `readRemoteApplied` is the fresh-DB entry point. Without this test
+  // a future refactor could regress to exiting 1 on the missing-table
+  // case and silently break every first deploy. Mirrors the local
+  // runner's behaviour (`scripts/db-migrate.ts:98-101`).
+  describe('parseAppliedMigrationNames (CAP-039 D7)', () => {
+    it('returns parsed names on a successful wrangler batch', () => {
+      const raw = JSON.stringify([
+        {
+          results: [{ name: '0001_initial.sql' }, { name: '0002_users.sql' }],
+          success: true,
+          meta: {},
+        },
+      ]);
+      expect(parseAppliedMigrationNames(raw)).toEqual(['0001_initial.sql', '0002_users.sql']);
+    });
+
+    it('returns [] when wrangler reports success=false on a missing d1_migrations table (fresh DB)', () => {
+      const raw = JSON.stringify([
+        {
+          success: false,
+          error: 'D1_EXEC_ERROR: no such table: d1_migrations',
+        },
+      ]);
+      expect(parseAppliedMigrationNames(raw)).toEqual([]);
+    });
+
+    it('throws on an unrelated parse failure (not the fresh-DB case)', () => {
+      // Malformed JSON — the runner must NOT swallow this, otherwise a
+      // genuine parse regression would silently treat the remote DB
+      // as un-migrated.
+      expect(() => parseAppliedMigrationNames('{not json')).toThrow(/JSON\.parse failed/);
+    });
+
+    it('throws on a success=false batch with a non-fresh-DB error', () => {
+      const raw = JSON.stringify([
+        { success: false, error: 'D1_EXEC_ERROR: some other error' },
+      ]);
+      expect(() => parseAppliedMigrationNames(raw)).toThrow(/some other error/);
     });
   });
 });

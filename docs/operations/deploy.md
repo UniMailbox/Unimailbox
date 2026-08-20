@@ -42,7 +42,7 @@ What happens:
    - Secrets Store: `unimailbox-secrets`
 3. **Secret generation** — creates `INSTALLATION_TOKEN` and `CREDENTIAL_ENCRYPTION_KEY`
 4. **Config resolution** — generates `.wrangler.resolved.jsonc` (gitignored)
-5. **Remote migrations** — applies all migrations in `migrations/` to the remote D1 database
+5. **Remote migrations** — applies only the migrations that have not yet been recorded in the remote `d1_migrations` table (CAP-039, pending-only)
 6. **Worker deploy** — deploys using `wrangler deploy --config .wrangler.resolved.jsonc`
 7. **Resource state** — saves resource IDs to `.cloudflare-resources.json` (gitignored)
 
@@ -57,6 +57,23 @@ ENVIRONMENT=preview pnpm scaffold deploy
 ```
 
 No resources are recreated. Only the worker is re-deployed.
+
+**Repeat deploys are safe.** `runRemoteMigrations` reads the remote `d1_migrations` table, compares it against the on-disk `migrations/` directory, and applies only the gap. On a fully-migrated database the script logs:
+
+```
+No pending migrations (N already applied).
+```
+
+This is the same dialect `pnpm scaffold db:migrate` uses for the local database (CAP-004). If a migration file is recorded in the remote `d1_migrations` table but is missing from disk (a "ghost" migration), the script exits 1 with the offending file names — restore the missing file before re-running.
+
+## Build before deploy
+
+`pnpm scaffold deploy` does **not** run `pnpm build` automatically. Build the worker + web bundle first so `apps/web/dist/` is populated and the wrangler `assets` block (CAP-039) can serve the live Vite output:
+
+```bash
+pnpm build
+ENVIRONMENT=preview pnpm scaffold deploy
+```
 
 ## Flags
 

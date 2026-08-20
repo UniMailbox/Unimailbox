@@ -430,14 +430,18 @@ describe('GET /', () => {
     it('returns 200 with HTML content', async () => {
       const response = await SELF.fetch('http://localhost/');
 
+      // CAP-039: SPA fallback serves the real Vite-built index.html.
+      // The shell references the hashed JS bundle
+      // (`/assets/index-<hash>.js`); the literal `/assets/index.js`
+      // it used to ship is gone.
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toContain('text/html');
 
       const text = await response.text();
-      expect(text).toContain('<!DOCTYPE html>');
+      expect(text).toContain('<!doctype html>');
       expect(text).toContain('<title>Unimailbox</title>');
       expect(text).toContain('<div id="root"></div>');
-      expect(text).toContain('<script type="module" src="/assets/index.js"></script>');
+      expect(text).toMatch(/<script type="module"[^>]+src="\/assets\/index-[A-Za-z0-9_-]+\.js"/);
     });
 
     it('returns the minimal HTML app shell', async () => {
@@ -445,15 +449,17 @@ describe('GET /', () => {
 
       const text = await response.text();
 
-      // Verify the HTML structure
-      expect(text).toMatch(/<!DOCTYPE html>/);
-      expect(text).toMatch(/<html>/);
+      // Verify the HTML structure. The `<!doctype html>` is lowercase
+      // because that is what Vite emits; the hashed script tag replaces
+      // the legacy `/assets/index.js` literal.
+      expect(text).toMatch(/<!doctype html>/);
+      expect(text).toMatch(/<html/);
       expect(text).toMatch(/<head>/);
       expect(text).toMatch(/<title>Unimailbox<\/title>/);
       expect(text).toMatch(/<\/head>/);
       expect(text).toMatch(/<body>/);
       expect(text).toMatch(/<div id="root"><\/div>/);
-      expect(text).toMatch(/<script type="module" src="\/assets\/index\.js"><\/script>/);
+      expect(text).toMatch(/<script type="module"[^>]+src="\/assets\/index-[A-Za-z0-9_-]+\.js"/);
       expect(text).toMatch(/<\/body>/);
       expect(text).toMatch(/<\/html>/);
     });

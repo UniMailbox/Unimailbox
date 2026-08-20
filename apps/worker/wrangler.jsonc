@@ -5,6 +5,10 @@
 // NOTE: wrangler.test.jsonc mirrors the binding topology for worker-pool tests
 // (replacing secrets_store_secrets with vars). When you add a binding here,
 // add it there too — the two files must stay in lockstep.
+//
+// CAP-039 — Deployment substrate: declared the `assets` binding so a single
+// `pnpm build` produces a Worker that serves the Vite-built web bundle and
+// a queue consumer that drains the outbound queue CAP-023 produces.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unimailbox-worker",
@@ -23,12 +27,14 @@
   },
 
   // ---- D1 — primary relational store ----
+  // CAP-039: `migrations_dir` removed; deploy.ts applies migrations in
+  // pending-only mode (`scripts/deploy.ts:runRemoteMigrations`) so wrangler
+  // deploy never replays the full migrations directory.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "unimailbox-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
-      "migrations_dir": "../../migrations"
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
     }
   ],
 
@@ -53,16 +59,43 @@
   ],
 
   // ---- Queue — outbound dispatch ----
-  // The consumer + producer block for the outbound queue lands with CAP-023.
-  // CAP-001 declares the producer binding only; the consumer + dead-letter
-  // queue pairing will be added when the outbound-mail module ships.
+  // CAP-039: declared the consumer so the deployed Worker drains the
+  // outbound queue that CAP-023/CAP-029 enqueue to. max_retries = 5
+  // (D1) — Worker-side error taxonomy already short-circuits permanent
+  // failures, so 5 leaves room for transient 5xx/429 without exhausting
+  // retries on a brief Brevo outage.
   "queues": {
     "producers": [
       {
         "binding": "OUTBOUND",
         "queue": "unimailbox-outbound"
       }
+    ],
+    "consumers": [
+      {
+        "queue": "unimailbox-outbound",
+        "max_retries": 5
+      }
     ]
+  },
+
+  // ---- Assets — Vite-built web bundle ----
+  // CAP-039: SPA fallback. wrangler's `not_found_handling` returns
+  // index.html for any non-API GET the asset binding can't resolve
+  // (see D2 — Worker-side manual fallback rejected). `directory` is
+  // relative to this file (apps/worker/wrangler.jsonc), per wrangler 4.x.
+  // CAP-039 D5: `run_worker_first` with the value `/api/star` enforces the
+  // API-never-reaches-assets invariant at the Cloudflare platform layer.
+  // Without this flag, the `not_found_handling: "single-page-application"`
+  // rewrite fires on browser navigations to unknown paths and would
+  // return the SPA shell for e.g. an unknown route under the api prefix.
+  // With it set, the Worker always handles api-prefixed requests first;
+  // the router's `startsWith('/api/v1')` guard is now belt-and-braces.
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
   },
 
   // ---- Triggers — scheduled handler ----

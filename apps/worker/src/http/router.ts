@@ -13,6 +13,13 @@
 //     it mounts `/api/v1/webhooks/*` only.
 // `requestId`, `setupGate`, and `authn` are still applied globally to
 // both sub-apps because those policies are not body-size related.
+//
+// CAP-039 — Deployment substrate: the hand-written HTML shell that
+// referenced `/assets/index.js` (a path that no longer exists after Vite
+// hashed the bundle) is gone. SPA fallback is provided by the wrangler
+// `assets` block + `not_found_handling: "single-page-application"`; the
+// router mounts the catch-all AFTER `/api/v1` sub-apps so non-API GETs
+// fall through to `env.ASSETS` and `/api/v1/*` always reaches the API.
 
 import { Hono } from 'hono';
 import { requestId } from './middleware/request-id';
@@ -44,18 +51,6 @@ export function buildRouter(): Hono<AppEnv> {
 
   // R-SETUP-003: /healthz is exempt from the setup gate and always reachable.
   router.get('/healthz', (c) => c.json({ ok: true, surface: 'router' }));
-
-  // GET / — serves the minimal HTML app shell when installation is complete.
-  // The setup gate (setup-gate middleware) ensures this is only reachable
-  // when installation_state.status === 'complete'. Before that, it redirects
-  // to /setup.
-  router.get('/', (c) => {
-    // Minimal HTML shell — the setup gate ensures this is only reachable
-    // when installation_state.status === 'complete'.
-    return c.html(
-      '<!DOCTYPE html><html><head><title>Unimailbox</title></head><body><div id="root"></div><script type="module" src="/assets/index.js"></script></body></html>',
-    );
-  });
 
   // CAP-031 / R-API-005: `/api/v1/*` body-size enforcement. Mounted on the
   // `/api/v1` path so every sub-app route chained below it inherits the
@@ -98,6 +93,30 @@ export function buildRouter(): Hono<AppEnv> {
 
   router.route('/api/v1', apiV1);
   router.route('/api/v1', webhookV1);
+
+  // CAP-039: SPA fallback. Mounted AFTER the /api/v1 sub-apps so /api/v1/*
+  // never reaches the asset binding. The wrangler `assets` block +
+  // `not_found_handling: "single-page-application"` already serves
+  // `index.html` for any non-API GET the binding can't resolve, so the
+  // router only needs to forward GET / explicitly. Unknown non-API GETs
+  // that don't match `/` fall through to a catch-all that forwards to
+  // ASSETS so the platform's SPA fallback can rewrite them.
+  router.get('/', (c) => c.env.ASSETS.fetch(new URL('/', c.req.url)));
+  router.get('*', async (c) => {
+    // Only forward GETs; HEAD/POST/etc. fall through to a 404 (the
+    // non-API contract for non-GET client requests doesn't exist today,
+    // and exposing env.ASSETS to them would leak a write surface).
+    if (c.req.method !== 'GET') {
+      return c.notFound();
+    }
+    // `/api/v1/*` is owned by the apiV1/webhookV1 sub-apps. A path under
+    // it that has no matching route (e.g. `/api/v1/setup/`) is a real
+    // 404, not a client route — never forward to the asset binding.
+    if (c.req.path.startsWith('/api/v1')) {
+      return c.notFound();
+    }
+    return c.env.ASSETS.fetch(c.req.raw);
+  });
 
   return router;
 }

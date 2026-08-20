@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@11.20.0",
   "scripts": {
-    "build": "pnpm --filter @unimailbox/worker run build && pnpm --filter @unimailbox/web run build",
+    "build": "pnpm --filter @unimailbox/web run build && pnpm --filter @unimailbox/worker run build",
     "build:worker": "pnpm --filter @unimailbox/worker run build",
     "build:web": "pnpm --filter @unimailbox/web run build",
     "lint": "eslint .",

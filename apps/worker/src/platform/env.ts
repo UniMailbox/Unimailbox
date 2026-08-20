@@ -5,12 +5,18 @@
 // Per docs/rebuild/05-target-architecture/module-boundaries.md:41, this
 // type is consumed by `buildAppContext(env: Env, ...)` and is the only
 // thing the entrypoint hands the composition root.
+//
+// `ASSETS` is the binding the wrangler `assets` block produces (CAP-039);
+// the platform's `not_found_handling: "single-page-application"` returns
+// `index.html` for any non-API GET, so the Worker-side `http/router.ts`
+// only mounts a catch-all for `/` itself.
 export type Env = {
   DB: D1Database;
   ATTACHMENTS: R2Bucket;
   SETUP_SESSION: KVNamespace;
   CACHE: KVNamespace;
   OUTBOUND: Queue;
+  ASSETS: Fetcher;
   INSTALLATION_TOKEN: SecretsStoreSecret;
   CREDENTIAL_ENCRYPTION_KEY: SecretsStoreSecret;
   ENVIRONMENT?: string;
