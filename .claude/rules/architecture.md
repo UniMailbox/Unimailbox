@@ -63,6 +63,17 @@ not the admin module's symbols. The implementations are wired in `app-context.ts
 root), mirroring the outbound provider registry pattern (ADR-002). `inbound-mail` never imports
 from `modules/admin/*` directly.
 
+The `outbound-mail → admin` edge is the WRITE counterpart to those read seams (CAP-040). It
+exists because the webhook route handler (`http/routes/webhooks.ts`) must fold an
+`audit_events` INSERT into the same D1 batch as the business writes (R-AUDIT-001 +
+D-CAP-029-A), and the outbound-mail module cannot import the admin module directly. The seam
+declares `AuditEventWriter` (and its input type, the closed `AuditAction` enum) in
+`packages/contracts/admin/audit.ts`. The implementation lives in
+`apps/worker/src/modules/admin/audit-event-writer.ts` and is wired in `app-context.ts`.
+`outbound-mail` (and any route that uses it) consumes `ctx.auditEventWriter` from `AppContext`,
+never `modules/admin/*` directly. The same composition-root pattern applies: every reverse
+direction (admin → outbound-mail) is still forbidden.
+
 **Forbidden — a reviewer must block on any of these:**
 
 - Domain code importing infrastructure. Domain depends only on `platform/` and `contracts/`.

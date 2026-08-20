@@ -919,3 +919,13 @@ export {
   type RolePolicyRow,
   type RolePolicyReader,
 } from './admin/role-policy';
+
+// CAP-040: cross-module audit-event write seam (outbound-mail → admin via
+// contracts). Same pattern as BlocklistReader / RolePolicyReader above.
+export {
+  auditActionSchema,
+  type AuditAction,
+  type AuditEventInput,
+  type AuditEventWriter,
+  type D1StatementLike,
+} from './admin/audit';

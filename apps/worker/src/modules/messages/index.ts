@@ -14,6 +14,10 @@ export {
   prepareCreateMailboxMessage,
   createMessageWithRelations,
   updateMessageStatus,
+  // CAP-040 / D-CAP-029-A: callers batching messages UPDATE into a
+  // db.batch([...]) use this to fold the row write into the same
+  // transaction as their audit / delivery rows.
+  prepareUpdateMessageStatus,
 } from './message-repository';
 export type {
   CreateMessageInput,

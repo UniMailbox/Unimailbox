@@ -1,6 +1,6 @@
 // webhook-processor — verify HMAC-SHA256 signature, parse, update message
-// status, persist a webhook_deliveries row. CAP-024 + CAP-029. Owner:
-// outbound-mail module. Private file — export through
+// status, persist a webhook_deliveries row. CAP-024 + CAP-029 + CAP-040.
+// Owner: outbound-mail module. Private file — export through
 // modules/outbound-mail/index.ts.
 //
 // R-INBOUND-SIGNATURE (.claude/rules/architecture.md §API conventions,
@@ -14,6 +14,14 @@
 // cannot clobber a newer status. Event timestamps prefer the provider-
 // supplied value (Q1 decision: provider first, server fallback). The
 // audit row records which source drove the ordering.
+//
+// CAP-040 / D-CAP-029-A: the processor is now a builder, not a writer.
+// It returns a `VerifyAndProcessEventResult` carrying prepared statements
+// (messages UPDATE when a job exists, webhook_deliveries INSERT always,
+// plus the resolved messageId / providerMessageId) so the route handler
+// can fold the audit row into the same `db.batch([...])`. The legacy
+// behaviour (in-line write) has been removed; tests pass through the new
+// `db.batch(statements)` seam.
 
 import type { Database } from '../../platform/database';
 import { constantTimeCompare } from '../../platform/crypto';
@@ -21,11 +29,11 @@ import { DomainError } from '../../platform/errors';
 import { systemIds } from '../../platform/ids';
 import { sqliteTimestamp } from '../../platform/idempotency';
 import type { MessageStatus } from '@unimailbox/contracts';
-import { updateMessageStatus } from '../messages';
+import { prepareUpdateMessageStatus } from '../messages';
 import {
-  createWebhookDelivery,
   findJobByProviderMessageId,
   getProviderConnection,
+  prepareCreateWebhookDelivery,
 } from './webhook-repository';
 
 export interface VerifyAndProcessEventInput {
@@ -66,18 +74,40 @@ function mapEventToMessageStatus(event: string | undefined): MessageStatus | nul
   }
 }
 
+/**
+ * CAP-040 / D-CAP-029-A: `verifyAndProcessEvent` now returns prepared
+ * statements instead of writing. The caller (the route handler) appends
+ * its own audit-event prepared statement to the same array and runs
+ * `db.batch([...])` — so the messages UPDATE, webhook_deliveries INSERT,
+ * and audit_events INSERT are all atomic in one D1 transaction.
+ *
+ * `preparedStatements.statements` is intentionally an array (not a single
+ * statement) so the route handler can append additional prepared
+ * statements before dispatching the batch.
+ */
 export interface VerifyAndProcessEventResult {
   readonly messageId: string | null;
+  readonly providerMessageId: string | null;
+  readonly preparedStatements: {
+    readonly statements: ReadonlyArray<D1PreparedStatement>;
+  };
 }
 
 /**
  * Verifies the HMAC-SHA256 signature of `rawBody` against the connection's
  * stored `webhook_secret`, parses the JSON only after verification succeeds,
- * updates the matching message's status (if any), and stores a
- * webhook_deliveries row.
+ * resolves the canonical message id (when the provider-supplied event
+ * messageId matches an outbound_jobs row), and BUILDS the prepared
+ * statements the route handler will batch:
  *
- * Returns `{ messageId }` so the caller (route handler) can emit an audit
- * event — the outbound-mail module cannot depend on admin per architecture rules.
+ *   - messages UPDATE (only when the messageId resolves; the statements
+ *     entry is omitted otherwise)
+ *   - webhook_deliveries INSERT (always)
+ *
+ * The audit row is NOT included — the route handler adds it so the
+ * outbound-mail module stays out of the admin module (architecture edge
+ * `outbound-mail → admin` via the contracts seam `AuditEventWriter`,
+ * CAP-040 / D-CAP-029-A).
  *
  * Throws DomainError on any failure (unknown connection, missing or invalid
  * signature, unconfigured secret). The HTTP error middleware maps these to
@@ -149,55 +179,68 @@ export async function verifyAndProcessEvent(
   //    server fallback when neither `ts` nor `time` is present.
   const eventTime = extractBrevoEventTimeMs(event);
 
-  // 5. Update message status when the event references a known message.
-  //    CAP-029 / R-MESSAGE-007: the write goes through the messages-module
-  //    public surface (updateMessageStatus) which carries the rank-aware
-  //    predicate. A late 'delivered' after 'bounced' is rejected by the
-  //    predicate; a 'bounced' after a 'delivered' that arrived later is
-  //    also rejected (the rank + event-time gate covers both orderings).
-  //    R-AUTHZ-004: the lookup is scoped to the receiving connection so a
-  //    webhook arriving at connection A whose messageId collides with a
-  //    job owned by connection B cannot update the wrong message row.
-  //    CAP-029 M1 / L2: when `mapEventToMessageStatus` returns null (an
-  //    event name we don't recognise), we still set `messageId` so the
-  //    delivery row links to the message, but we skip the status update
-  //    — a diagnostic event like `opened` or `proxy_open` must not be
-  //    promoted to a high-rank status by accident.
+  // 5. Resolve the canonical message id. CAP-029 / R-MESSAGE-007 / R-AUTHZ-004:
+  //    the lookup is scoped to the receiving connection so a webhook arriving
+  //    at connection A whose messageId collides with a job owned by
+  //    connection B cannot update the wrong message row.
+  //
+  //    CAP-040: when the lookup MISSES (early-event case — the consumer has
+  //    not yet written provider_message_id to outbound_jobs), we persist
+  //    the delivery row with `message_id = NULL` and rely on
+  //    `reconcileWebhookDeliveries` to back-fill once the canonical id is
+  //    known. The delivery row itself is durable; the link to the message
+  //    is just deferred.
   let messageId: string | null = null;
-  if (event.messageId) {
-    const job = await findJobByProviderMessageId(db, connectionId, event.messageId);
+  const providerMessageId =
+    typeof event.messageId === 'string' ? event.messageId : null;
+  if (providerMessageId) {
+    const job = await findJobByProviderMessageId(db, connectionId, providerMessageId);
     if (job) {
       messageId = job.message_id;
-      const status = mapEventToMessageStatus(event.event);
-      if (status !== null) {
-        const now = sqliteTimestamp(new Date());
-        await updateMessageStatus(db, {
-          messageId,
-          status,
-          providerEventTimeMs: eventTime.value,
-          now,
-        });
-      }
     }
   }
 
-  // 6. Persist the delivery row. The raw payload is the exact bytes Brevo
-  //    sent — preserved verbatim for audit / replay. event_time is the
-  //    provider (or server) timestamp computed above so an operator can
-  //    audit ordering decisions after the fact.
-  const now = sqliteTimestamp(new Date());
-  await createWebhookDelivery(db, {
-    id: systemIds.uuid(),
-    connectionId,
-    eventType: event.event ?? 'unknown',
-    rawPayload: rawBody,
-    messageId,
-    eventTimeMs: eventTime.value,
-    eventTimeSource: eventTime.source,
-    createdAt: now,
-  });
+  // 6. Build the prepared statements. The messages UPDATE is conditional —
+  //    we only emit it when both the messageId resolved AND the event maps
+  //    to a known status. The rank-aware predicate lives in SQL (the CASE
+  //    inside the WHERE) and decides whether the UPDATE actually applies
+  //    when the route handler runs the batch.
+  const statements: D1PreparedStatement[] = [];
+  const status = mapEventToMessageStatus(event.event);
+  if (messageId !== null && status !== null) {
+    const now = sqliteTimestamp(new Date());
+    statements.push(
+      prepareUpdateMessageStatus(db, {
+        messageId,
+        status,
+        providerEventTimeMs: eventTime.value,
+        now,
+      }),
+    );
+  }
 
-  return { messageId };
+  // 7. Build the webhook_deliveries INSERT prepared statement. Always
+  //    emitted — the row is durable even when the messages UPDATE is
+  //    conditional or missing.
+  const now = sqliteTimestamp(new Date());
+  statements.push(
+    prepareCreateWebhookDelivery(db, {
+      id: systemIds.uuid(),
+      connectionId,
+      eventType: event.event ?? 'unknown',
+      rawPayload: rawBody,
+      messageId,
+      eventTimeMs: eventTime.value,
+      eventTimeSource: eventTime.source,
+      createdAt: now,
+    }),
+  );
+
+  return {
+    messageId,
+    providerMessageId,
+    preparedStatements: { statements },
+  };
 }
 
 /**

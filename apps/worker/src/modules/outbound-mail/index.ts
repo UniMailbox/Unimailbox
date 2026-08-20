@@ -39,15 +39,21 @@ export { reclaimStaleJobs, type OutboundJobEnqueuer } from './reclaim-stale-jobs
 
 export {
   createWebhookDelivery,
+  prepareCreateWebhookDelivery,
   ensureWebhookSecret,
   getProviderConnection,
+  getWebhookSecretForConnection,
   findJobByProviderMessageId,
+  findUnmatchedDeliveriesByProviderMessageId,
+  prepareBackfillDeliveryMessageId,
   listWebhookDeliveries,
   listProviderConnections,
   type WebhookDeliveryInput,
   type ProviderConnectionForWebhook,
   type WebhookDeliveryRow,
   type ProviderConnectionRow,
+  type WebhookSecretRow,
+  type UnmatchedWebhookDeliveryRow,
 } from './webhook-repository';
 
 export {
@@ -55,3 +61,13 @@ export {
   type VerifyAndProcessEventInput,
   type VerifyAndProcessEventResult,
 } from './webhook-processor';
+
+// CAP-040: early-event reconciliation. Called by processOutboundJob after
+// markOutboundJobSent so any webhook_deliveries row whose message_id is
+// NULL (the event arrived before the consumer wrote provider_message_id)
+// is back-filled and audited.
+export {
+  reconcileWebhookDeliveries,
+  prepareReconciliationStatements,
+  type ReconcileResult,
+} from './reconcile-webhook-deliveries';

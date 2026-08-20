@@ -31,6 +31,7 @@
 
 import type { Database } from '../../platform/database';
 import type {
+  AuditEventWriter,
   OutboundProviderAdapter,
   ProviderRuntimeContext,
   SendProviderMessage,
@@ -54,6 +55,7 @@ import {
   markOutboundJobTerminal,
   type OutboundJobRow,
 } from './job-repository';
+import { reconcileWebhookDeliveries } from './reconcile-webhook-deliveries';
 
 export interface ProcessJobDeps {
   readonly db: Database;
@@ -71,6 +73,20 @@ export interface ProcessJobDeps {
    * (.claude/rules/testing.md §Determinism).
    */
   readonly clock?: Clock;
+  /**
+   * CAP-040 / R-AUDIT-001: per-invocation correlation UUID. The entrypoint
+   * synthesises one and passes it through so every audit row emitted by
+   * this use case (reconciliation back-fill) carries the same requestId.
+   * Optional — when absent the reconciliation writes an audit row with
+   * `request_id = NULL`.
+   */
+  readonly requestId?: string | null;
+  /**
+   * CAP-040 / D-CAP-029-A: cross-module audit writer, looked up off
+   * AppContext by the entrypoint. Required to write the reconciliation
+   * audit row atomically with the back-fill UPDATEs.
+   */
+  readonly auditEventWriter?: AuditEventWriter;
 }
 
 /** Message columns read from the messages table for sending. */
@@ -312,6 +328,45 @@ export async function processOutboundJob(
     // lock and the provider did report success, so throwing here would
     // re-drive an already-resolved job.
     const jobAdvanced = await markOutboundJobSent(db, jobId, lockedBy, sendResult.providerMessageId);
+
+    // CAP-040 / D-CAP-040-ARCH-H1: gate reconciliation on
+    // `sendResult.providerMessageId`, NOT on `jobAdvanced`. The provider has
+    // already accepted the message — the canonical id is real — so even when
+    // a reclaim stole the lock mid-send and `markOutboundJobSent` is a no-op,
+    // any webhook_deliveries row that landed with `message_id = NULL`
+    // (the early-event case) must still be back-filled. Skipping this would
+    // orphan the delivery row forever: a sibling job that re-runs sees a
+    // `sent` job and a `processed` delivery with no message link.
+    //
+    // Idempotent: a second pass with no unmatched rows back-fills nothing;
+    // the audit row is still emitted for traceability.
+    if (sendResult.providerMessageId && deps.auditEventWriter) {
+      try {
+        await reconcileWebhookDeliveries(db, {
+          connectionId: claimed.provider_connection_id,
+          providerMessageId: sendResult.providerMessageId,
+          messageId: claimed.message_id,
+          actorUserId: null,
+          requestId: deps.requestId ?? null,
+          createdAt: now,
+          auditEventWriter: deps.auditEventWriter,
+        });
+      } catch (error) {
+        // R-LOG-001: job ID only — no bodies, no provider payload. The
+        // reconciliation is best-effort: the row stays in `sent` and any
+        // future reconcile pass (e.g. a stuck-but-eventually-completed
+        // sibling job) will catch up. Failing the whole send path on a
+        // reconciliation miss would overstate the impact.
+        logger.warn(
+          { event: 'outbound.reconcile_failed' },
+          {
+            source: 'process-outbound-job',
+            jobId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
     if (!jobAdvanced || !messageAdvanced) {
       // CAP-029 L2 review-triage: a single combined warn names which
       // surface(s) rejected the write so an operator triaging a "lock

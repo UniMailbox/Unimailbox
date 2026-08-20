@@ -29,6 +29,7 @@ import idempotencyRecordsSql from '../../../migrations/0009_idempotency_records.
 import blocklistAndRolePoliciesSql from '../../../migrations/0010_blocklist_and_role_policies.sql?raw';
 import messageEventTimeSql from '../../../migrations/0011_message_event_time.sql?raw';
 import webhookEventTimeSql from '../../../migrations/0012_webhook_event_time.sql?raw';
+import webhookDeliveryMessageIndexSql from '../../../migrations/0013_webhook_delivery_message_index.sql?raw';
 
 // Split migration SQL on semicolons for applyD1Migrations
 // Filters out comment-only lines to avoid passing them as separate statements
@@ -82,6 +83,7 @@ export async function migrationsDb(): Promise<D1Database> {
     { name: '0010_blocklist_and_role_policies', queries: splitSql(blocklistAndRolePoliciesSql) },
     { name: '0011_message_event_time', queries: splitSql(messageEventTimeSql) },
     { name: '0012_webhook_event_time', queries: splitSql(webhookEventTimeSql) },
+    { name: '0013_webhook_delivery_message_index', queries: splitSql(webhookDeliveryMessageIndexSql) },
   ]);
   return mod.env.DB;
 }

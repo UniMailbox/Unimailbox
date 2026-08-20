@@ -15,8 +15,13 @@ import { getObjectStore } from './platform/object-store';
 import { systemClock, type Clock } from './platform/clock';
 import { systemIds, type IdGenerator } from './platform/ids';
 import { logger, type LogFields, type LogContext } from './platform/logger';
-import type { BlocklistReader, RolePolicyReader } from '@unimailbox/contracts';
+import type {
+  AuditEventWriter,
+  BlocklistReader,
+  RolePolicyReader,
+} from '@unimailbox/contracts';
 import {
+  createAuditEventWriter,
   createBlocklistReader,
   createRolePolicyReader,
 } from './modules/admin';
@@ -40,6 +45,11 @@ export interface AppContext {
   // outbound-provider-registry equivalent.
   readonly blocklistReader: BlocklistReader;
   readonly rolePolicyReader: RolePolicyReader;
+  // CAP-040 / D-CAP-029-A: cross-module writer so the webhook route can
+  // fold its audit row into the same D1 batch as the messages UPDATE and
+  // webhook_deliveries INSERT (no unaudited transitions). Mirrors the
+  // BlocklistReader / RolePolicyReader seams.
+  readonly auditEventWriter: AuditEventWriter;
 }
 
 export function buildAppContext(env: Env): AppContext {
@@ -55,5 +65,6 @@ export function buildAppContext(env: Env): AppContext {
     logger,
     blocklistReader: createBlocklistReader(db),
     rolePolicyReader: createRolePolicyReader(db),
+    auditEventWriter: createAuditEventWriter(db),
   };
 }

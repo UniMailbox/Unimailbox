@@ -210,6 +210,27 @@ export async function updateMessageStatus(
   db: Database,
   input: UpdateMessageStatusInput,
 ): Promise<boolean> {
+  const result = await prepareUpdateMessageStatus(db, input).run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+/**
+ * Builds the prepared statement backing `updateMessageStatus` so callers
+ * that batch multiple writes together (CAP-040 / D-CAP-029-A: webhook
+ * messages UPDATE folded into the same `db.batch([...])` as the
+ * webhook_deliveries INSERT and the audit_events INSERT) can call
+ * `.run()` themselves.
+ *
+ * The SQL is byte-for-byte identical to the legacy `updateMessageStatus`
+ * implementation — splitting the SQL into a separate function makes
+ * accidental drift visible: the prepare function is the only writer of
+ * this UPDATE statement, and `updateMessageStatus` becomes a one-line
+ * wrapper.
+ */
+export function prepareUpdateMessageStatus(
+  db: Database,
+  input: UpdateMessageStatusInput,
+): D1PreparedStatement {
   const newRank = statusRank(input.status);
   // CAP-030 D-CAP-030-D-2: compute the FROM-set for the target status
   // once, then bind it as a JSON array. The SQL IN clause reads it via
@@ -226,7 +247,7 @@ export async function updateMessageStatus(
   // The single-D1-statement structure is the predicate — any race between
   // concurrent webhooks for the same message is resolved by SQLite's
   // per-row write serialisation (A6).
-  const result = await db
+  return db
     .prepare(
       `UPDATE messages
           SET status = ?,
@@ -265,7 +286,5 @@ export async function updateMessageStatus(
       input.providerEventTimeMs,
       input.providerEventTimeMs,
       newRank,
-    )
-    .run();
-  return (result.meta?.changes ?? 0) > 0;
+    );
 }

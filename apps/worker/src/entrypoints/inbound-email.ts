@@ -108,6 +108,11 @@ export default {
     const messageId = systemIds.uuid();
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
+    // CAP-040 / R-AUDIT-001: synthesise one correlation UUID for this
+    // inbound message. Threaded through to the audit row so a reader of
+    // audit_events can group all operations of one message together.
+    const requestId = systemIds.uuid();
+
     // Prepare message statement
     const messageInput: CreateMessageInput = {
       id: messageId,
@@ -179,6 +184,7 @@ export default {
       action: 'message.receive',
       resourceType: 'message',
       resourceId: messageId,
+      requestId,
       createdAt: now,
     });
   },

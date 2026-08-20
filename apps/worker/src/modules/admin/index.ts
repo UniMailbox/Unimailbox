@@ -32,3 +32,8 @@ export {
   createRolePolicyReader,
   type SetRolePolicyInput,
 } from './role-policy-repository';
+
+// CAP-040: cross-module write seam for audit_events. Mirrors the
+// BlocklistReader / RolePolicyReader read seams; only the writer is
+// wired through AppContext.
+export { createAuditEventWriter } from './audit-event-writer';

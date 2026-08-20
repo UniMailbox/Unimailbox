@@ -55,6 +55,14 @@ export type NewProviderConnection = typeof providerConnections.$inferInsert;
 // One row per received provider event. Written after signature verification
 // succeeds; raw_payload is the exact bytes Brevo sent so we can replay or
 // audit. Owner: outbound-mail module.
+//
+// CAP-040: a STORED generated column `provider_message_id` mirrors the
+// Brevo messageId parsed from raw_payload. It is the index key for the
+// early-event reconciliation lookup (`webhook_deliveries_provider_message_id_idx`)
+// — when the webhook processor's job-lookup misses (the queue consumer has
+// not yet written `provider_message_id` to `outbound_jobs`), the delivery
+// row is persisted with `message_id = NULL` and reconciled back later.
+// D1 reads the column automatically; the declaration is typing only.
 export const webhookDeliveries = sqliteTable(
   'webhook_deliveries',
   {
@@ -63,6 +71,7 @@ export const webhookDeliveries = sqliteTable(
     eventType: text('event_type').notNull(),
     rawPayload: text('raw_payload').notNull(),
     messageId: text('message_id').references(() => messages.id, { onDelete: 'set null' }),
+    providerMessageId: text('provider_message_id'),
     status: text('status').notNull().default('processed'),
     createdAt: text('created_at').notNull(),
   },

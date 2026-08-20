@@ -59,12 +59,21 @@ export interface OutboundJobEnqueuer {
  *             Production calls pass `new Date()`; tests inject a fixed clock.
  * @param outbound — Queue producer (or structural equivalent) for the
  *             OUTBOUND queue.
+ * @param requestId — CAP-040 / R-AUDIT-001: optional correlation UUID
+ *             synthesised by the cron entrypoint. Currently unused (the
+ *             reclaim path emits no audit rows); threaded through for
+ *             forward compatibility — a future audit-emitting cron target
+ *             will reuse it.
  */
 export async function reclaimStaleJobs(
   db: Database,
   now: Date,
   outbound: OutboundJobEnqueuer,
+  requestId?: string,
 ): Promise<ReclaimResult> {
+  // Reference requestId so the lint does not flag an unused parameter;
+  // a future cron audit target will thread it through.
+  void requestId;
   const cutoff = leaseCutoff(now);
   const result = await reclaimStaleOutboundJobs(db, cutoff);
 
