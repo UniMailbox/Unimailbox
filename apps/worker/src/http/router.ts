@@ -96,12 +96,12 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-039: SPA fallback. Mounted AFTER the /api/v1 sub-apps so /api/v1/*
   // never reaches the asset binding. The wrangler `assets` block +
-  // `not_found_handling: "single-page-application"` already serves
-  // `index.html` for any non-API GET the binding can't resolve, so the
-  // router only needs to forward GET / explicitly. Unknown non-API GETs
-  // that don't match `/` fall through to a catch-all that forwards to
-  // ASSETS so the platform's SPA fallback can rewrite them.
-  router.get('/', (c) => c.env.ASSETS.fetch(new URL('/', c.req.url)));
+  // `not_found_handling: "single-page-application"` serves `index.html`
+  // for any non-API GET the binding can't resolve; the catch-all below
+  // forwards to env.ASSETS so the platform can apply the SPA fallback.
+  // Non-GET methods and /api/v1/* paths return c.notFound() — defense
+  // in depth; `run_worker_first: ["/api/*"]` at the wrangler level is
+  // the real enforcement.
   router.get('*', async (c) => {
     // Only forward GETs; HEAD/POST/etc. fall through to a 404 (the
     // non-API contract for non-GET client requests doesn't exist today,
