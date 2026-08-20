@@ -2,7 +2,9 @@
 
 See `../H-progressive-rebuild-roadmap.md` and `../F-minimal-business-closed-loop.md`.
 
-**Status (2026-08-13):** Code complete and quality-gate verified. Audit: `../phase-1-audit.md`.
+**Status (2026-08-19):** Reopened. Backend slices are implemented and local gates pass, but the
+single web client and preview business loop required by this phase are not delivered. The earlier
+audit remains historical evidence; current status is in `../capability-ledger.md`.
 
 ## Business goal
 
@@ -72,15 +74,16 @@ discrepancy D-1 (this file previously said "23 boxes").
 | `pnpm test:worker` | ✓ | 348 / 348 (26 files) |
 | `pnpm build` | ✓ | worker + web |
 | `pnpm scaffold doctor` | ✓ | 10 / 10 |
-| §F.4 29 boxes | ✓ | each mapped to an artifact |
+| §F.4 29 boxes | reopened | earlier artifact mapping did not prove the missing browser workflow or deploy topology |
 | Operator preview deploy | pending | owner of `Verified` status in the ledger |
 
-## Known Phase 1 limitations (not blocking `Implemented`)
+## Open Phase 1 delivery gaps
 
 - `message_user_state` PK is `(mailbox_message_id)`; multi-user read-state independence is best
   effort. Schema fix is a future capability.
 - Compose endpoint does not enforce `Idempotency-Key` (R-OUTBOUND-005). Deferred to CAP-027.
-- `apps/web/` is a TanStack Router stub with `/` and `/setup` only. The 27-step backend loop is
-  verified end-to-end via worker-pool tests; the React feature pages (`/inbox`, `/admin`,
-  `/compose`, `/admin/webhook-events`) are a follow-up capability once the operator is ready to
-  drive the UI.
+- `apps/web/` is a TanStack Router stub with `/` and `/setup` only. The missing React feature pages
+  and API integration are phase blockers owned by CAP-041–CAP-044, not an optional follow-up.
+- The Worker does not currently serve `/setup` or the Vite build output, the deployed queue has no
+  consumer declaration, and remote migration replay is unsafe. CAP-039 owns this delivery substrate.
+- The 27-step loop still requires CAP-045 evidence from a real preview deployment.

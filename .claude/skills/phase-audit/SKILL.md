@@ -47,6 +47,17 @@ Criteria of the form "no X exists in the codebase" (e.g. *"No use case imports a
 directly"*, *"No provider-specific code outside the integrations package"*) are verified by search
 across the whole tree, not by inspecting the recent diff.
 
+Treat deployment configuration as executable behavior:
+
+- A web `dist/` directory is not evidence until the deployed Worker serves its generated filenames
+  and direct refreshes of nested routes succeed.
+- A `queue`, `email`, or `scheduled` export is not evidence until the matching Wrangler trigger or
+  binding is declared and exercised.
+- A migration runner is not evidence until a fresh apply and a second no-op apply both succeed in
+  the target mode named by the criterion.
+- An API-only path does not satisfy a browser acceptance criterion. Exercise the browser route and
+  its loading, empty, error, success, and unauthorized states.
+
 ### 3 — Audit the invariants, not just the checkboxes
 
 Independently of the phase list:
@@ -56,12 +67,16 @@ Independently of the phase list:
 - Walk the legacy anti-pattern list. Phase-boundary drift is where these reappear.
 - Confirm no secret, token, or message body is logged anywhere.
 - Confirm every state transition writes an audit event.
+- Confirm external references are pinned and adapted per
+  `.claude/rules/reference-implementations.md`; upstream trust assumptions did not leak in.
 
 ### 4 — Audit repository memory
 
 Can a brand-new agent recover state from the repository alone (`CLAUDE.md` §State recovery)? Verify concretely:
 
 - The ledger's statuses match reality.
+- The ledger active CAP agrees with `work/active/`, the branch, and modified-file ownership.
+- The execution plan's next capability agrees with the ledger.
 - The implementation log covers the phase's work.
 - Every decision made during the phase is in a rule, an ADR, or the log — not only in chat history.
 - No stale `work/active/` leftovers, no orphaned investigations, no root-directory pollution.
@@ -109,6 +124,8 @@ Sweeps:
   legacy anti-patterns PASS/FAIL — <instances>
   secret logging       PASS/FAIL
   audit coverage       PASS/FAIL
+  delivery topology    PASS/FAIL — assets, routes, triggers, migrations
+  reference provenance PASS/FAIL — pinned and adapted
 
 Repository memory: RECOVERABLE | GAPS — <what is missing>
 

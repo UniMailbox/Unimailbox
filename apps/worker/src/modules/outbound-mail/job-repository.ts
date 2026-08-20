@@ -191,6 +191,12 @@ export async function claimOutboundJob(
   // Race between two concurrent claims: SQLite serialises the UPDATE, and
   // whichever one runs second finds the row in 'sending' with a fresh
   // locked_at and skips (0 rows updated).
+  // CAP-030 direction guard (D-CAP-030-C): the hard-coded `status='queued'`
+  // predicate is the FROM-state 'queued' for the only legal target 'sending'
+  // (see ALLOWED_JOB_TRANSITIONS.get('queued') in packages/contracts). A
+  // future widening (e.g. adding 'delayed' as a legal FROM-state for 'sending'
+  // to support a deferred-claim path) MUST update the direction table in the
+  // same change so the policy stays in one place.
   const now = sqliteTimestamp(new Date());
   const result = await db
     .prepare(
@@ -221,6 +227,13 @@ export async function claimOutboundJob(
  *
  * R-OUTBOUND-009: the `status = 'sending'` predicate additionally prevents
  * advancing a row that was reclaimed and marked `failed` mid-flight.
+ *
+ * CAP-030 direction guard (D-CAP-030-C): the hard-coded `status='sending'`
+ * predicate is the FROM-state 'sending' for the target 'sent' (see
+ * ALLOWED_JOB_TRANSITIONS.get('sending') in packages/contracts). The
+ * single-status predicate is a strict subset of the direction table —
+ * adding a wider `IN (...)` clause here would be cosmetic, since the only
+ * legal legal `from` for this writer is 'sending'.
  *
  * Returns `true` when the row was advanced, `false` when the predicate
  * matched nothing (stale-worker race — the row was resolved by whoever
@@ -261,6 +274,13 @@ export async function markOutboundJobSent(
  * work pool, with a fresh `attempts` count. The use case rethrows so the
  * queue consumer can apply its retry policy; the reclaim path is the
  * backstop if the consumer dies between the release and the retry.
+ *
+ * CAP-030 direction guard (D-CAP-030-C): the hard-coded
+ * `status='sending'` predicate is the FROM-state 'sending' for the target
+ * 'queued' — retry reset (R-OUTBOUND-008). ALLOWED_JOB_TRANSITIONS
+ * explicitly lists 'queued' as a legal target of 'sending' for this
+ * reason; D-CAP-030-B records the retry reset so a reviewer does not
+ * file it as a regression.
  */
 export async function markOutboundJobRetryable(
   db: Database,
@@ -300,6 +320,11 @@ export async function markOutboundJobRetryable(
  * `attempts` is NOT incremented here — the failed-final-attempt count is
  * already reflected in `attempts` from earlier retryable writes; this
  * just flips the terminal bit.
+ *
+ * CAP-030 direction guard (D-CAP-030-C): the hard-coded
+ * `status='sending'` predicate is the FROM-state 'sending' for the target
+ * 'failed' (R-OUTBOUND-008/009). ALLOWED_JOB_TRANSITIONS.get('sending')
+ * contains 'failed'; `failed` itself is terminal (empty allowed-from set).
  */
 export async function markOutboundJobTerminal(
   db: Database,

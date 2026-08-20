@@ -175,6 +175,210 @@ export function statusRank(status: MessageStatus): number {
 }
 
 // ---------------------------------------------------------------------------
+// Outbound job status — CAP-030 D-CAP-030-E (parity with messageStatusSchema).
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed enum of outbound job status values. Mirrors the CHECK constraint on
+ * `outbound_jobs.status` (migration 0007_outbound_jobs.sql). Defined here
+ * rather than consumed via the Drizzle row type so cross-boundary types come
+ * from `contracts` (`.claude/rules/architecture.md` §Drizzle row types
+ * crossing a module boundary).
+ *
+ * Note: `messages.status` and `outbound_jobs.status` are *not* identical sets
+ * — `messages` has `draft`, `outbound_jobs` does not (a job is created at
+ * `queued` by compose; draft is for a future drafts module). The direction
+ * tables below encode the per-state lifecycles.
+ */
+export const outboundJobStatusSchema = z.enum([
+  'queued',
+  'sending',
+  'sent',
+  'delayed',
+  'bounced',
+  'complained',
+  'failed',
+]);
+
+export type OutboundJobStatus = z.infer<typeof outboundJobStatusSchema>;
+
+// ---------------------------------------------------------------------------
+// Lifecycle direction tables — CAP-030.
+// ---------------------------------------------------------------------------
+
+/**
+ * Allowed lifecycle transitions for `messages.status`. The forward path is
+ * `draft → queued → sending → sent → delivered`, with terminal outcomes
+ * (`failed`, `bounced`, `complained`) reachable from any non-terminal state.
+ *
+ * Per-state rationale:
+ * - `draft` — initial state; no inbound transition. `R-MESSAGE-010` allows
+ *   `draft → queued` (compose path bypasses the direction guard on INSERT)
+ *   and `draft → sent` (a future drafts module's send).
+ * - `queued` — produced by compose; can be claimed (`→ sending`), direct-sent
+ *   (skip-claim path), or fail terminally.
+ * - `sending` — held under a lease; outcomes are success (`sent`), retry
+ *   reset (`queued`, R-OUTBOUND-008 semantics applied at the message level
+ *   for the same event ordering), delay (`delayed`), or terminal.
+ * - `sent` — webhook-driven outcomes. `D-CAP-030-F`: `sent → delayed` is a
+ *   legitimate forward path (provider-side deferral after acceptance).
+ * - `delivered` — confirmed; subsequent events are retroactive terminal
+ *   corrections (`bounced`, `complained`, `failed`).
+ * - `delayed` — recoverable; can resolve to `sent`, `delivered`, or terminal.
+ * - `bounced`, `complained`, `failed` — terminal (`R-MESSAGE-012`-style);
+ *   empty allowed-from set in the direction table AND the rank guard (rank
+ *   100 ties, no equal-time promotion out) makes resurrection impossible
+ *   from any non-newer-event path. Newer events still apply (the strict-
+ *   less-time branch) — see CAP-029 A4.
+ */
+export const ALLOWED_MESSAGE_TRANSITIONS: ReadonlyMap<
+  MessageStatus,
+  ReadonlySet<MessageStatus>
+> = new Map<MessageStatus, ReadonlySet<MessageStatus>>([
+  // R-MESSAGE-010: draft → queued (compose path) and draft → sent (a future
+  // drafts module's send).
+  ['draft', new Set<MessageStatus>(['queued', 'sent'])],
+  // Compose inserts at 'queued'; outcomes from 'queued' cover the claim
+  // path plus direct-send and direct-failure edge cases.
+  ['queued', new Set<MessageStatus>(['sending', 'sent', 'delayed', 'failed', 'bounced', 'complained'])],
+  // The post-claim attempt outcomes. 'sent' (success), 'delayed' (provider
+  // deferral mid-flight), terminal outcomes. 'queued' is intentionally NOT
+  // listed — R-OUTBOUND-008 retry reset applies to outbound_jobs, not messages.
+  ['sending', new Set<MessageStatus>(['sent', 'delayed', 'failed', 'bounced', 'complained'])],
+  // D-CAP-030-F: 'sent → delayed' is a legitimate forward path (provider
+  // temporarily defers after acceptance). Terminal outcomes remain reachable.
+  ['sent', new Set<MessageStatus>(['delivered', 'delayed', 'failed', 'bounced', 'complained'])],
+  // Confirmed delivery; subsequent events are retroactive terminal
+  // corrections only.
+  ['delivered', new Set<MessageStatus>(['failed', 'bounced', 'complained'])],
+  // Recoverable delay; can resolve to 'sent', 'delivered', or terminal.
+  ['delayed', new Set<MessageStatus>(['sent', 'delivered', 'failed', 'bounced', 'complained'])],
+  // R-MESSAGE-012: terminal. Empty set — resurrection is blocked.
+  ['bounced', new Set<MessageStatus>([])],
+  ['complained', new Set<MessageStatus>([])],
+  ['failed', new Set<MessageStatus>([])],
+]);
+
+/**
+ * Allowed lifecycle transitions for `outbound_jobs.status`. Driven by the
+ * lease-aware writers (`claimOutboundJob`, `markOutboundJobSent`,
+ * `markOutboundJobRetryable`, `markOutboundJobTerminal`) and the scheduled
+ * reclaim path. Each writer's hard-coded `status = '...'` predicate already
+ * enforces the legal `from` — this table makes the policy explicit so a
+ * SQL change cannot silently widen it.
+ *
+ * Per-state rationale:
+ * - `queued` — produced by compose; only legal forward is the claim
+ *   (`→ sending`).
+ * - `sending` — held under a lease. Three documented outcomes: success
+ *   (`sent`, R-OUTBOUND-009), retry reset (`queued`, R-OUTBOUND-008),
+ *   terminal failure (`failed`, R-OUTBOUND-008/009). The reclaim path
+ *   (R-OUTBOUND-007) also transitions `sending → queued` for uncrashed
+ *   consumers and `sending → failed` for `RECLAIM_EXHAUSTED`.
+ * - `sent` — terminal (R-OUTBOUND-009). Empty allowed-from set.
+ * - `delayed` — schema permits it (migration 0007 CHECK); no writer today
+ *   advances a row to or from `delayed`. Empty set to make the gap
+ *   explicit (D-CAP-030-C).
+ * - `bounced`, `complained`, `failed` — terminal (R-OUTBOUND-009).
+ */
+export const ALLOWED_JOB_TRANSITIONS: ReadonlyMap<
+  OutboundJobStatus,
+  ReadonlySet<OutboundJobStatus>
+> = new Map<OutboundJobStatus, ReadonlySet<OutboundJobStatus>>([
+  // Only the claim path advances a row out of 'queued'.
+  ['queued', new Set<OutboundJobStatus>(['sending'])],
+  // The three documented lease-aware writer outcomes, plus the reclaim
+  // path's two 'sending → queued' / 'sending → failed' transitions which
+  // are subsumed by the same FROM state.
+  ['sending', new Set<OutboundJobStatus>(['sent', 'queued', 'failed'])],
+  // Terminal.
+  ['sent', new Set<OutboundJobStatus>([])],
+  // No writer exists today to advance a row to or from 'delayed'. The
+  // direction table makes the gap explicit so a future writer must
+  // consciously widen the set.
+  ['delayed', new Set<OutboundJobStatus>([])],
+  ['bounced', new Set<OutboundJobStatus>([])],
+  ['complained', new Set<OutboundJobStatus>([])],
+  ['failed', new Set<OutboundJobStatus>([])],
+]);
+
+/**
+ * Pure direction guard. Returns `true` iff `from → to` is an allowed
+ * lifecycle transition in the named domain. The first argument picks which
+ * direction table is consulted — the two domains share values like
+ * `queued`/`sending`/`sent` but not their transition policy, so the
+ * discriminator is load-bearing (CAP-030 D-CAP-030-B: `sending → queued`
+ * is allowed for jobs but forbidden for messages).
+ *
+ * Thin wrapper over `ALLOWED_*_TRANSITIONS.get(from)?.has(to)` — provided
+ * as a single import so a future tightening (logging, telemetry) can be
+ * added without touching every call site.
+ *
+ * The `domain` argument is a closed literal union, so unknown values are
+ * a TypeScript error. The `switch` is exhaustive; an unhandled case would
+ * be a compile-time defect, not a runtime gap.
+ */
+export function canTransition(
+  domain: 'message' | 'job',
+  from: MessageStatus | OutboundJobStatus,
+  to: MessageStatus | OutboundJobStatus,
+): boolean {
+  switch (domain) {
+    case 'message':
+      return (
+        ALLOWED_MESSAGE_TRANSITIONS.get(from as MessageStatus)?.has(to as MessageStatus) ?? false
+      );
+    case 'job':
+      return (
+        ALLOWED_JOB_TRANSITIONS.get(from as OutboundJobStatus)?.has(to as OutboundJobStatus) ?? false
+      );
+  }
+}
+
+/**
+ * Programmer-error guard. Throws when the transition is not allowed in the
+ * named domain. Same plain-`Error` pattern as `statusRank` above — this is
+ * NOT a user-facing 409, it is a developer invariant. SQL writers must use
+ * `canTransition` (returning boolean) for in-flight rejection; this helper
+ * is for code paths that *should* have already validated.
+ *
+ * D-CAP-030-G: a typed `DomainError` is intentionally NOT thrown here —
+ * the closed error catalog (CAP-032) is for user-facing conditions, and
+ * a direction violation is never one of those.
+ */
+export function assertCanTransition(
+  domain: 'message' | 'job',
+  from: MessageStatus | OutboundJobStatus,
+  to: MessageStatus | OutboundJobStatus,
+): void {
+  if (!canTransition(domain, from, to)) {
+    throw new Error(
+      `assertCanTransition(${domain}): ${String(from)} → ${String(to)} is not an allowed lifecycle transition`,
+    );
+  }
+}
+
+/**
+ * Returns the FROM-statuses that can transition to `to` in the messages
+ * lifecycle. The result feeds the `AND status IN (SELECT value FROM
+ * json_each(?))` clause in `updateMessageStatus` so the rank-aware
+ * predicate is layered behind a direction gate (CAP-030 D-CAP-030-D-2).
+ *
+ * Empty array when no FROM-state is allowed (e.g. `to = 'draft'` — never
+ * a valid target). SQL `IN` over an empty `json_each` returns no rows,
+ * so the predicate evaluates to false; correct behaviour.
+ */
+export function allowedFromForMessageStatus(
+  to: MessageStatus,
+): ReadonlyArray<MessageStatus> {
+  const froms: MessageStatus[] = [];
+  for (const [from, tos] of ALLOWED_MESSAGE_TRANSITIONS) {
+    if (tos.has(to)) froms.push(from);
+  }
+  return froms;
+}
+
+// ---------------------------------------------------------------------------
 // Provider adapter error taxonomy — CAP-029 D-CAP-028-A.
 // ---------------------------------------------------------------------------
 

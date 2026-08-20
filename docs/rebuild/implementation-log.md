@@ -10,6 +10,209 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-20 — CAP-039: Deployment substrate
+
+The Worker now actually deploys. A single `pnpm build` produces an artefact that serves the real Vite-built web bundle, drains the outbound queue CAP-023/CAP-029 enqueue to, and applies remote migrations in pending-only mode — so a repeat deploy is a safe no-op. Closes the four Phase 0/1 BLOCKERs that pointed at this contract (`setup-gate redirects to a route the Worker does not serve`, `built web application not connected to the deployed Worker`, `producer binding but no consumer declaration`, `remote deploy replays every SQL migration`).
+
+### What changed
+
+**Wrangler config** — `apps/worker/wrangler.jsonc` + `apps/worker/wrangler.test.jsonc`:
+
+- New `assets` block: `{ directory: "../web/dist", binding: "ASSETS", not_found_handling: "single-page-application", run_worker_first: ["/api/*"] }`. The `run_worker_first` flag is the load-bearing piece for AC #4 — without it, Cloudflare rewrites 404 responses on browser navigation fetches to `index.html`, which would route `/api/v1/foo` typed in the address bar to the SPA shell. The router's `startsWith('/api/v1')` guard is now strictly belt-and-braces.
+- New `queues.consumers[]` entry `{ queue: "unimailbox-outbound", max_retries: 5 }` (D1) so the deployed Worker actually drains the queue CAP-023 produces.
+- Removed `d1_databases[0].migrations_dir` and confirmed no top-level `apply_migrations` — `wrangler deploy` will never replay migrations; `scripts/deploy.ts` is the sole authority.
+
+**Router** — `apps/worker/src/http/router.ts:97-119`:
+
+- Deleted the hand-written `<script src="/assets/index.js">` HTML shell at the old lines 52-58 (the literal referenced a path the Vite build never produced).
+- Replaced with `router.get('/', (c) => c.env.ASSETS.fetch(...))` and a `router.get('*', ...)` catch-all that forwards GETs to `env.ASSETS`, with explicit guards for non-GET methods (POST/PUT/DELETE → 404, "would leak a write surface") and `/api/v1/*` paths (404 from sub-app's own error handler, never index.html). Routing order: `apiV1`/`webhookV1` sub-apps first, then SPA fallback — the sub-apps win on their paths.
+
+**Env type** — `apps/worker/src/platform/env.ts:19`: added `ASSETS: Fetcher` to the `Env` type.
+
+**Pending-only migrations** — `scripts/deploy.ts`:
+
+- New `parseWranglerJson(r, source)` + `extractColumn(parsed, col)` mirror `scripts/db-migrate.ts:98-101`/`extractColumn` so local and remote runners share the same parse discipline (D7).
+- `readRemoteApplied` now treats `wrangler success: false` on a missing `d1_migrations` table as `[]` (empty applied), not as a hard error — mirrors the local runner's behaviour. The misleading "Success=false from a fresh DB is the expected path" comment was deleted; the new comment at `parseWranglerJson` documents the asymmetry that was there before CAP-039.
+- `runRemoteMigrations` reads remote `d1_migrations` via `wrangler d1 execute DB --config .wrangler.resolved.jsonc --remote --command 'SELECT name FROM d1_migrations ORDER BY name' --json`, applies the set difference against on-disk migrations. Repeat-deploy log line `No pending migrations (N already applied).` byte-for-byte matches `db-migrate.ts:124`.
+- Exported `NO_PENDING_LOG_FORMAT = 'No pending migrations'` (D6) so the deploy test asserts both runners speak the same dialect.
+
+**Doctor** — `scripts/doctor.ts`:
+
+- Three new checks (D3): `web-assets-binding`, `queue-consumer-topology` (count AND name-set disjointness, D6), `migration-strategy-pending-only`.
+- New `stripJsoncComments(src)` character-based walker (the previous regex-based stripper matched `/*` and `*/` inside JSON strings, which broke parsing of `["/api/*"]` and `["*/2 * * * *"]` once `run_worker_first` and the cron trigger landed in the same config). Skips comments only outside strings; preserves escape sequences.
+- New `evaluateWebAssetsBinding(w, repoRoot)` / `evaluateQueueConsumerTopology(prodCfg, testCfg)` / `evaluateMigrationStrategyPendingOnly(w)` exported as pure functions so `apps/worker/scripts/doctor.test.ts` can drive them with synthetic wrangler.jsonc fixtures.
+
+**Tests** — `apps/worker/src/http/router.worker.test.ts` (NEW, 13 tests), `apps/worker/scripts/doctor.test.ts` (extended by 12), `scripts/deploy.test.ts` (extended by 11), `scripts/scaffold.ts:59` (one-line doc drift 10 → 13):
+
+- Worker-pool SPA fallback cases: `GET /`, `GET /setup`, `GET /inbox`, `GET /mailboxes/abc`, `GET /some/deep/nested/path` → 200 with `<div id="root"></div>` (identity test asserts the same shell is reused). `GET /api/v1/setup/status` → JSON envelope; `GET /api/v1/auth/me` → 401 JSON; `POST /unknown` → 404 (only GETs reach the fallback). `GET /assets/index-*.js` regex shape — the previous literal `NZV9_L46` would have failed on the next Vite rebuild.
+- Setup-gate integration: with installation incomplete, `GET /setup` returns the shell, `GET /` 302s to `/setup`.
+- Doctor fixtures: every check has both a passing shape and one-character mutations (missing assets, wrong binding, missing `not_found_handling`, orphan producer/consumer, missing `max_retries`, top-level `apply_migrations: true`, `migrations_dir` set, name-set rename drift).
+- Deploy fixtures: `computePendingMigrations` (a)–(d) (empty applied → all pending; full applied → zero pending; partial → only gap; ghost → exit 1 with ghost list). `parseAppliedMigrationNames` 4 cases (success, fresh-DB missing-table returns `[]`, unrelated parse failure). The byte-for-byte no-op log line asserted against `db-migrate.ts:124`.
+
+**Docs** — `docs/operations/deploy.md` documents the repeat-deploy no-op behaviour.
+
+**Build order** — root `package.json`: web builds first, then worker, so `apps/web/dist/` exists when `wrangler deploy --dry-run` reads it.
+
+### Decisions
+
+D1–D4 are pre-existing and unchanged from the contract draft. **D5–D7 are new** and were promoted during the fix slice (review-round pressure, not implementer foresight):
+
+- **D5** — `run_worker_first: ["/api/*"]` enforces the API-never-reaches-assets invariant at the Cloudflare platform layer. Without it, navigation fetches to `/api/v1/foo` get rewritten to `index.html` regardless of the Worker-side guard.
+- **D6** — `queue-consumer-topology` parity is enforced BOTH by count AND by name-set disjointness. The two configs declare queue names from disjoint sets; rename drift in one config is caught.
+- **D7** — `readRemoteApplied` treats wrangler `success: false` on a missing `d1_migrations` table as empty applied, mirroring `scripts/db-migrate.ts:98-101`. Local and remote runners share the same dialect for this edge case.
+
+### Process trail
+
+4-way parallel review (architecture, code, security, qa) surfaced **2 HIGH + 4 MEDIUM + 5 LOW**. Security came back clean (ACCEPT). QA came back ACCEPT — all 15 ACs PASS — but the architecture reviewer's HIGH (missing `run_worker_first`) and the code reviewer's HIGH (`readRemoteApplied` fresh-DB) were independently surfaced and converged on the same deploy-script/config fix. The single fix-slice implementer (one writer — file set is tightly coupled across wrangler + deploy + doctor) closed all HIGH/MEDIUM + the in-scope LOW doc drift in `scripts/scaffold.ts:59` (10 → 13). 5 LOW findings explicitly out of scope: redundant `router.get('/')`, `cons`/`tcons` naming in `doctor.ts`, HEAD probe handling, header forwarding to ASSETS, stale `scripts/dist/doctor.js` — recorded as D-CAP-039-A through E.
+
+### Gates (orchestrator-run after fix slice)
+
+| Gate | Result |
+|---|---|
+| `pnpm scaffold doctor` | 13/13 |
+| `pnpm lint` | 0 errors / 134 warnings (baseline) |
+| `pnpm typecheck` | clean |
+| `pnpm test:unit` | 484 passed (+5 from baseline 479) |
+| `pnpm test:worker` | 551 passed (baseline 551) |
+| `pnpm build` | clean; `wrangler deploy --dry-run` prints `env.ASSETS` binding + reads 5 files from `apps/web/dist` |
+| `git diff --check` | clean |
+
+CAP-040 (webhook + audit reliability) is now unblocked — `d1_databases[0]` no longer auto-replays migrations, the queue consumer is wired, and the deploy script's failure modes are bounded.
+
+---
+
+## 2026-08-20 — CAP-030: Lifecycle direction — state-machine guards for messages + outbound_jobs
+
+Closed the long-standing gap that the `messages.status` and `outbound_jobs.status` writers carried no SQL-level direction invariant: a buggy or malicious caller could violate the documented lifecycle (e.g. resurrect a `failed` row via a strictly-newer event, or overwrite a `sent` job with `queued`), and the only defence was the rank-aware predicate closed by CAP-029 — which ranks by event time, not by lifecycle semantics. CAP-030 introduces a **direction table** that pins every legal `(from, to)` pair in `packages/contracts` and layers a SQL `AND` predicate on top of the existing rank predicate, so a forbidden transition is rejected at the database boundary regardless of which caller invoked it.
+
+### What changed
+
+**Contracts** — `packages/contracts/src/index.ts`:
+
+- `outboundJobStatusSchema` (closed zod enum, `:193-203`) + `OutboundJobStatus` derived type — mirrors `messageStatusSchema` exactly. The 7-value set matches the `migrations/0007_outbound_jobs.sql` CHECK constraint (`'queued','sending','sent','delayed','bounced','complained','failed'`).
+- `ALLOWED_MESSAGE_TRANSITIONS: ReadonlyMap<MessageStatus, ReadonlySet<MessageStatus>>` (`:234-260`) — 9 entries; terminal sets empty for `failed`/`bounced`/`complained`. The retry-reset and forward-on-delayed paths are encoded explicitly.
+- `ALLOWED_JOB_TRANSITIONS: ReadonlyMap<OutboundJobStatus, ReadonlySet<OutboundJobStatus>>` (`:284-303`) — 7 entries; terminal sets empty for `failed`/`bounced`/`complained` and `sent` (R-OUTBOUND-009). `sending → queued` is the explicit retry reset (R-OUTBOUND-008).
+- `canTransition(domain, from, to): boolean` (`:321-336`) — domain discriminator is load-bearing: `sending → queued` is allowed on jobs, forbidden on messages. The two `as` casts inside `Map.get()` are runtime-safe (`:335` falls back to `false` via `?? false`) but add a deferred D-CAP-030-A to tighten with strict TS overloads.
+- `assertCanTransition(domain, from, to): void` (`:349-359`) — throws plain `new Error(\`assertCanTransition(...)…)` per D-CAP-030-G. This is a programmer-error guard, not a user-facing 409 (same pattern as `statusRank` at `:172`). No `DomainError`, no new catalog entry.
+- `allowedFromForMessageStatus(status): MessageStatus[]` (`:371-379`) — inverse helper that feeds the SQL `IN (SELECT value FROM json_each(?))` clause. Iteration order matches `ALLOWED_MESSAGE_TRANSITIONS` (Map ordering); empty array for `to='draft'` so the IN predicate is provably closed.
+
+**Message writer** — `apps/worker/src/modules/messages/message-repository.ts`:
+
+- `updateMessageStatus` (`:209-271`) now layers a direction predicate **alongside** the rank predicate. The single D1 statement composes:
+  ```sql
+  AND status IN (SELECT value FROM json_each(?))            -- CAP-030 direction guard
+  AND (provider_event_time IS NULL OR provider_event_time < ? OR (...))  -- CAP-029 rank guard
+  ```
+- Bind order: `?1` status, `?2` provider_event_time, `?3` sent_at, `?4` now, `?5` id, `?6` allowedFromJson, `?7` providerEventTimeMs (strict-less), `?8` providerEventTimeMs (equal), `?9` newRank.
+- `allowedFromJson` is `JSON.stringify(allowedFromForMessageStatus(input.status))` (`:221`). SQLite JSON1 `json_each` reads the array; empty array yields zero rows, which is the documented provably-closed behaviour for `to='draft'`.
+- JSDoc at `:174-201` documents the predicate composition (id → direction → rank) and the load-bearing distinction: CAP-029 rejects by rank (event time), CAP-030 rejects by direction (lifecycle). The single D1 statement is still atomic; D1 serialises per-row writes (A6).
+
+**Lease-aware job writers** — `apps/worker/src/modules/outbound-mail/job-repository.ts` (comment-only, no SQL change):
+
+- `claimOutboundJob` (`:194-199`) — `status='queued'` is the FROM-state for the only legal target `sending`. Pinned to `ALLOWED_JOB_TRANSITIONS.get('queued')`.
+- `markOutboundJobSent` (`:231-236`) — `status='sending'` for target `sent`. The single-status predicate is a strict subset of the direction table; widening to `IN (...)` would be cosmetic (D-CAP-030-C).
+- `markOutboundJobRetryable` (`:278-283`) — `status='sending'` for target `queued` (R-OUTBOUND-008 retry reset). `ALLOWED_JOB_TRANSITIONS` explicitly lists `'queued'` as a legal target of `'sending'` so a future reviewer does not file it as a regression.
+- `markOutboundJobTerminal` (`:324-327`) — `status='sending'` for target `failed` (R-OUTBOUND-008/009). `failed` itself is terminal (empty allowed-from set).
+
+**Compose INSERT** — `apps/worker/src/http/routes/compose.ts:177-187`:
+
+- Inline comment explaining the bypass: the `messages` row has no prior state on insert (vacuously true); the `migrations/0006_messages.sql` CHECK on `status` is the safety net. The comment explicitly warns against re-routing the compose write through `updateMessageStatus` — that would break R-OUTBOUND-006's atomic batch (idempotency record + message + mailbox_messages + outbound_job must be one D1 batch, and the direction guard is for UPDATE only).
+
+**Tests** — `packages/contracts/src/index.test.ts:1237-1592` new `describe('ALLOWED_*_TRANSITIONS — CAP-030 direction guard')` block (119 tests):
+
+- Literal pins: `EXPECTED_MESSAGE_TRANSITIONS` and `EXPECTED_JOB_TRANSITIONS` map expected sets; the test asserts each `ALLOWED_*_TRANSITIONS` map matches the literal exactly and the terminal sets are empty.
+- Forward coverage: every non-terminal source × every legal target.
+- Regression coverage: every non-terminal source × every forbidden (regression) target.
+- Terminal-out coverage: every terminal state × every non-terminal target (must reject).
+- Retry-reset asymmetry: `sending → queued` allowed on jobs, forbidden on messages (domain discriminator).
+- `assertCanTransition` happy + error paths (D-CAP-030-G: plain `Error` with `from → to` message).
+- `allowedFromForMessageStatus` round-trip: 6 targets including the empty `draft` case.
+
+**Worker-pool tests** — `apps/worker/src/modules/messages/message-repository.worker.test.ts` (4 new tests, B1–B4):
+
+- B1: `sent → queued` rejected — rank predicate would accept (strictly-newer event time), only direction rejects. Load-bearing for the direction guard.
+- B2: `failed → sent` rejected — terminal violation (R-MESSAGE-012), rank predicate would accept.
+- B3: `sent → delivered` accepted — forward + higher rank, both predicates pass.
+- B4: `delivered → bounced` accepted — retroactive terminal correction (rank tie-breaker); both predicates pass.
+- B1/B2 are the load-bearing pair: each scenario is one where **rank alone would accept**, so the only thing that can fail the test is the direction clause. A future regression that drops the direction clause turns B1/B2 into false-positive accepts.
+
+**Worker-pool tests** — `apps/worker/src/modules/outbound-mail/job-repository.worker.test.ts:339-421` (4 new tests, one per lease-aware writer):
+
+- Each test does (a) a contracts-side `canTransition` + `ALLOWED_JOB_TRANSITIONS.has(from, to)` inspection, AND (b) a real-D1 writer invocation against a seeded row. The pair pins the direction table entry against the SQL — a future SQL regression that drifts the predicate fails the (b) half even though (a) still passes.
+- `markOutboundJobRetryable` test exercises the retry-reset path (D-CAP-030-B): asserts `attempts` bumps from 1→2 and the lock is cleared.
+- `markOutboundJobTerminal` test asserts `attempts` is NOT incremented (the failed-final-attempt count is already in `attempts` from earlier retryable writes) and the lock is cleared.
+
+**Tests deleted** — principled per R-MESSAGE-012:
+
+- `webhooks.worker.test.ts` A2 (`bounced → delivered` on strictly newer event time) — the premise directly contradicts R-MESSAGE-012. Equivalent strict-newer-time coverage retained in B1/B2 (direction rejection) and B3/B4 (direction acceptance with higher rank).
+- `message-repository.worker.test.ts` "newer event of any rank always wins" — same premise. Each deletion has a one-line inline comment with the rationale. Recorded as **D-CAP-030-D** so a future reader of git history knows the deletions are principled, not lost.
+
+### Review round
+
+Architecture review (run before the parallel code/QA/security round) — **ACCEPT** with 1 MEDIUM wording correction and 3 LOW follow-ups. The MEDIUM (D-CAP-030-E wording softened from "fixes drift" to "forward-availability — drift is potential, not actual") is recorded in `task.md:236-237` and in the ledger row.
+
+Three independent reviewers ran in parallel (code, QA, security — none of them wrote the code). Aggregated: **0 BLOCKER / 0 HIGH / 0 MEDIUM / 7 LOW**:
+
+- **Code** (4 LOWs): L1 `reclaimStaleOutboundJobs` lacks the direction-guard comment the four lease-aware writers carry (→ D-CAP-030-B). L2 `OutboundJobStatus` adoption two-step on internal writer signatures (`isJobTerminal`/`updateJobStatus` still type against `OutboundJobRow['status']`; → D-CAP-030-C). L3 `canTransition` overload could be stricter compile-time (→ D-CAP-030-A). L4 B3/B4 prose slightly loose on "load-bearing" framing (deletion rationale → D-CAP-030-D).
+- **QA** (2 LOWs): L1 `process-outbound-job.ts:230` could cross-reference the direction table (→ D-CAP-030-B). L2 D-CAP-030-E wording cautious vs outcome (already softened in `task.md`).
+- **Security** (1 LOW): L1 `canTransition` casts inside `Map.get()` — runtime-safe fallback to `false` via `?? false`; the `'draft is unreachable in the job domain'` test pins the conservative behaviour (→ D-CAP-030-A combined with Code L3).
+
+All LOWs are non-blocking, scoped to follow-up slices, and recorded in the ledger. **No HIGH, no BLOCKER, no MEDIUM** — the capability is accepted as-is.
+
+### Gates
+
+Orchestrator-run, post-slice, post-review: `pnpm scaffold doctor` 10/10 ✓, `pnpm lint` 0 errors (67 pre-existing `no-console` warnings in `scripts/`, none in CAP-030 scope), `pnpm typecheck` ✓, `pnpm test:unit` 459/459 ✓, `pnpm test:worker` 540/540 ✓, `pnpm build` ✓, `git diff --check` clean ✓.
+
+**Grep verification** (post-slice):
+
+- `git grep -n "UPDATE messages" -- 'apps/worker/src/'` → 3 hits (the writer at `message-repository.ts:229`, the doc comment at `:185`, the test SQL constant).
+- `git grep -n "ALLOWED_JOB_TRANSITIONS" -- 'apps/worker/src/'` → 4 writer-comment refs + 4 test refs.
+- `git grep -n "ALLOWED_MESSAGE_TRANSITIONS" -- 'apps/worker/src/'` → 2 test refs (the `index.test.ts` block + `message-repository.ts:220`).
+- `git grep -n "outboundJobStatusSchema" -- 'apps/worker/src/'` → 0 hits outside `packages/contracts/` (the new schema is consumed only by the test block; future adopters will import it).
+- `git grep -n "canTransition" -- 'apps/worker/src/'` → 4 test refs (contracts tests + the worker tests).
+
+### Resolves
+
+- **D-CAP-028-C** — `updateJobStatus` retention is now explicitly documented with the CAP-030 direction pairing (the lease-aware writes are the only path the queue consumer takes; the unconditional writer is retained for compose-insert + idempotency-replay).
+
+### Deferred
+
+- **D-CAP-030-A** — `canTransition` runtime type narrowing (Security L1 + Code L3): tighten with TS overloads or a runtime check that rejects messages-only `from` values when `domain === 'job'`. Wait for the second caller-mismatch before extracting (Rule of Three).
+- **D-CAP-030-B** — Direction-guard comment propagation to `reclaimStaleOutboundJobs` (Code L1) plus `process-outbound-job.ts:230` cross-reference (QA L1). Cosmetic symmetry gap.
+- **D-CAP-030-C** — `OutboundJobStatus` adoption on `isJobTerminal` + `updateJobStatus` (Code L2). Internal-to-module, no current cross-boundary violation.
+- **D-CAP-030-D** — Record the deleted A2 / "newer-event-of-any-rank" tests so a future reader of git history knows the deletions are principled per R-MESSAGE-012 (Code L4).
+
+### Workspace cleanup
+
+`work/active/CAP-030-lifecycle-direction/` and `work/reviews/CAP-030-architecture-review.md` moved to `work/archive/2026-08/CAP-030/` (task.md and architecture-review.md both retained). `work/active/` is now empty (`.gitkeep` only). No commit/push per the active constraints — the ledger, implementation log, and archive are the only files changed in this closure pass.
+
+---
+
+## 2026-08-19 — Project-state recovery and delivery-plan correction
+
+Reconciled the ledger and roadmap against the current code, deployment configuration, active
+workspace, and Git state. CAP-030 is now correctly recorded as in progress. Phase 0 and Phase 1
+delivery status is reopened: `/setup` is unserved, the Vite output is not wired to the Worker, the
+Wrangler queue has no consumer, the remote deploy path replays all migrations, and the web client
+does not implement the business loop.
+
+Added `execution-plan.md` with CAP-039–CAP-045 as the recovery gate and pinned Cloudflare
+`agentic-inbox` commit `48039bb6785af34e592c2966f87cde2b255c4c80` in
+`11-agentic-inbox-adaptation.md`. The reference's Worker/UI integration, Email Routing, R2, API
+client, query, and mailbox UI patterns are reusable; its shared Cloudflare Access trust boundary,
+per-mailbox Durable Object persistence, R2 metadata, and best-effort send lifecycle are explicitly
+rejected for Unimailbox.
+
+Project workflow was tightened in `.claude/`: reference provenance is now a rule and capability
+template section; implementation and phase-audit procedures now verify delivery topology; state
+recovery reads the ledger's Current state table instead of the first Phase heading and reports
+ledger/workspace CAP drift. Future-phase roadmap criteria were reset from pre-checked claims to
+unchecked requirements.
+
+No CAP-030 business source was changed by this recovery update.
+
+---
+
 ## 2026-08-15 — CAP-029: Webhook ordering — rank-aware status updates + IDOR closure
 
 Closed the long-standing gap that webhook-driven status updates could clobber a higher-rank state (a `delivered` arriving after `bounced`), that `provider_message_id` collisions across connections were exploitable as a cross-tenant IDOR (R-AUTHZ-004), and that Brevo response bodies could leak into the queue consumer's logger via `error.message` (R-SECRET-003 / R-LOG-001). CAP-029 introduces a rank-aware writer, a closed error taxonomy, and two migrations that pin the ordering invariant in SQL.

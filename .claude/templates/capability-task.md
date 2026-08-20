@@ -50,6 +50,32 @@ Layers this touches, in dependency order:
 New module dependency edges introduced: `<none>` / `<a → b>` — each must appear in the dependency
 table in `.claude/rules/architecture.md`, or be approved by the orchestrator first.
 
+## Delivery path
+
+Trace the real invocation, not only the module calls:
+
+`<browser / HTTP / email / queue / scheduled>` → `<Worker route or entrypoint>` → `<use case>` →
+`<persistence/provider>` → `<user-visible or operator-visible result>`
+
+- Build/runtime configuration touched: `<paths or none>`
+- Fresh-deploy evidence required: `<yes/no and command/scenario>`
+- Repeat-deploy/idempotency evidence required: `<yes/no and command/scenario>`
+
+## Reference implementation
+
+Use `None` when there is no external reference. Otherwise follow
+`.claude/rules/reference-implementations.md`.
+
+| Field | Value |
+|---|---|
+| Repository + pinned commit | `<URL>@<SHA>` |
+| License | `<license>` |
+| Files inspected | `<exact upstream paths>` |
+| Adopt | `<behavior/pattern>` |
+| Adapt | `<Unimailbox-specific changes>` |
+| Reject | `<upstream assumptions not carried over>` |
+| Attribution needed | `<yes/no; where>` |
+
 ## File ownership
 
 One writer per file. Reading anything is fine; writing outside your list is not.

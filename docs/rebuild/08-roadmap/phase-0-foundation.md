@@ -33,17 +33,17 @@ User-facing routes, message lifecycle, providers.
 ## Acceptance criteria
 
 ```text
-[x] pnpm install works from a clean checkout of the new repo.
-[x] pnpm scaffold doctor exits 0.
-[x] pnpm test:unit passes.
-[x] pnpm test:worker passes.
-[x] pnpm build produces a deployable Worker + web client bundle.
-[x] Deploying to a fresh cloud account succeeds with no manual .env edits.
-[x] First GET / returns 302 to /setup.
-[x] /setup/status returns { currentStep: 'claim' } on a fresh DB.
-[x] /setup/claim with the correct INSTALLATION_TOKEN binds a setup session.
-[x] /setup/claim with the wrong token returns 401.
-[x] /setup/preflight reports each binding present.
+[ ] pnpm install works from a clean checkout of the new repo.
+[ ] pnpm scaffold doctor exits 0.
+[ ] pnpm test:unit passes.
+[ ] pnpm test:worker passes.
+[ ] pnpm build produces a deployable Worker + web client bundle.
+[ ] Deploying to a fresh cloud account succeeds with no manual .env edits.
+[ ] First GET / returns 302 to /setup.
+[ ] /setup/status returns { currentStep: 'claim' } on a fresh DB.
+[ ] /setup/claim with the correct INSTALLATION_TOKEN binds a setup session.
+[ ] /setup/claim with the wrong token returns 401.
+[ ] /setup/preflight reports each binding present.
 ```
 
 ## Key technical decisions

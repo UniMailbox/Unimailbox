@@ -10,7 +10,11 @@
 
 import type { Database } from '../../platform/database';
 import type { ParsedEmail } from '@unimailbox/email-core';
-import { statusRank, type MessageStatus } from '@unimailbox/contracts';
+import {
+  allowedFromForMessageStatus,
+  statusRank,
+  type MessageStatus,
+} from '@unimailbox/contracts';
 
 export interface CreateMessageInput {
   readonly id: string;
@@ -163,13 +167,24 @@ export interface UpdateMessageStatusInput {
 }
 
 /**
- * Updates a message's status with the R-MESSAGE-007 rank-aware predicate.
+ * Updates a message's status with the R-MESSAGE-007 rank-aware predicate
+ * AND the CAP-030 direction guard. Both are layered with `AND`; an update
+ * applies only when *both* predicates match.
  *
- * The single D1 statement encodes the entire ordering rule: an update applies
- * iff the stored `provider_event_time` is NULL (no prior event), strictly
- * less than the incoming event time (this event is newer), or equal to the
- * incoming event time AND the stored status has a strictly lower rank
- * (R-MESSAGE-007 tie-breaker: equal-time terminal-state promotion).
+ * Predicate composition (in WHERE order):
+ *   1. `id = ?` — scopes the row.
+ *   2. `status IN (SELECT value FROM json_each(?))` — CAP-030 direction
+ *      guard: only legal FROM-statuses (per ALLOWED_MESSAGE_TRANSITIONS)
+ *      for the target `status` are accepted. Prevents a buggy / malicious
+ *      caller from resurrecting a terminal row even when the rank-aware
+ *      predicate would permit it (e.g. a strictly-newer event for a
+ *      `failed` row would otherwise promote it — R-MESSAGE-012 is closed
+ *      by this clause, not by the rank check alone).
+ *   3. R-MESSAGE-007 rank-aware ordering — `provider_event_time` NULL /
+ *      strictly newer / equal-time + lower-rank predecessor. Single CASE
+ *      maps each `MessageStatus` to its rank; this SQL CASE must stay in
+ *      sync with `STATUS_RANK_TABLE` (see the worker-pool test that pins
+ *      every status).
  *
  * `sent_at` is written with `COALESCE(?, sent_at)` so a status update that
  * does not carry a `sent_at` (e.g. a webhook `delivered` event) never
@@ -187,14 +202,23 @@ export interface UpdateMessageStatusInput {
  *
  * @param db — Database instance
  * @param input — messageId, new status, provider event time, optional sentAt
- * @returns true when the status was applied; false when the predicate
- *          rejected the update (older or equal-lower-rank event)
+ * @returns true when the status was applied; false when either predicate
+ *          rejected the update (direction violation, older event, or
+ *          equal-time equal-or-higher-rank event)
  */
 export async function updateMessageStatus(
   db: Database,
   input: UpdateMessageStatusInput,
 ): Promise<boolean> {
   const newRank = statusRank(input.status);
+  // CAP-030 D-CAP-030-D-2: compute the FROM-set for the target status
+  // once, then bind it as a JSON array. The SQL IN clause reads it via
+  // json_each (SQLite JSON1 extension, available in D1). An empty array
+  // yields no rows (the IN predicate is false), which is the desired
+  // behaviour for `to = 'draft'` — no source state can transition into
+  // 'draft', so the direction gate is provably closed.
+  const allowedFrom = allowedFromForMessageStatus(input.status);
+  const allowedFromJson = JSON.stringify(allowedFrom);
   // CASE in the WHERE maps each MessageStatus to its rank (STATUS_RANK_TABLE)
   // without duplicating the enum in SQL. statusRank is the single source of
   // truth for the rank — the SQL below must match it. The literal defaults
@@ -210,6 +234,7 @@ export async function updateMessageStatus(
               sent_at = COALESCE(?, sent_at),
               updated_at = ?
         WHERE id = ?
+          AND status IN (SELECT value FROM json_each(?))
           AND (
             provider_event_time IS NULL
             OR provider_event_time < ?
@@ -236,6 +261,7 @@ export async function updateMessageStatus(
       input.sentAt ?? null,
       input.now,
       input.messageId,
+      allowedFromJson,
       input.providerEventTimeMs,
       input.providerEventTimeMs,
       newRank,

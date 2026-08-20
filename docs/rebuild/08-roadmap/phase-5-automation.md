@@ -28,10 +28,10 @@ POP3/IMAP (separate plan), DMARC/SPF/DKIM tooling, anti-spam.
 ## Acceptance criteria
 
 ```text
-[x] Provider registry holds 3 adapters (Brevo, Resend, CF); no business code branches on provider.
-[x] Adding a 4th provider requires only: new file in integrations/, registry entry, schema.
-[x] Telegram forwarding respects per-user opt-in and survives worker restart.
-[x] AI extraction disabled by default; per-user opt-in only.
+[ ] Provider registry holds 3 adapters (Brevo, Resend, CF); no business code branches on provider.
+[ ] Adding a 4th provider requires only: new file in integrations/, registry entry, schema.
+[ ] Telegram forwarding respects per-user opt-in and survives worker restart.
+[ ] AI extraction disabled by default; per-user opt-in only.
 ```
 
 ## Key technical decisions

@@ -1,4 +1,4 @@
-// message-repository.worker.test.ts — CAP-029 / R-MESSAGE-007.
+// message-repository.worker.test.ts — CAP-029 / R-MESSAGE-007 + CAP-030 direction guard.
 //
 // Worker-pool tests for updateMessageStatus, the rank-aware writer that is
 // the single public surface for outbound-mail to transition messages.status
@@ -15,12 +15,22 @@
 //   tie: equal event time + lower rank          → REJECTED
 //   sent_at: once-set is never overwritten (COALESCE)
 //
+// Cases (CAP-030 AC #8 — direction guard):
+//   B1  sent → queued      REJECTED (direction violation; rank would accept on newer event time)
+//   B2  failed → sent       REJECTED (terminal violation; rank would accept on newer event time)
+//   B3  sent → delivered    accepted  (forward + higher rank)
+//   B4  delivered → bounced accepted  (retroactive terminal correction; rank permits at equal time)
+//
 // .claude/rules/testing.md §Mocking: D1 is real (worker pool), no mocks.
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
-import { STATUS_RANK_TABLE } from '@unimailbox/contracts';
+import {
+  STATUS_RANK_TABLE,
+  allowedFromForMessageStatus,
+  type MessageStatus,
+} from '@unimailbox/contracts';
 import { updateMessageStatus } from './message-repository';
 
 const NOW = '2026-01-01 12:00:00';
@@ -173,22 +183,13 @@ describe('updateMessageStatus — R-MESSAGE-007 rank-aware predicate', () => {
     expect(row.status).toBe('bounced');
   });
 
-  it('a newer event of any rank always wins (strict-less-time branch)', async () => {
-    // Seed at 'bounced' (rank 100) with t=200. A strictly-newer event of any
-    // rank applies. This is the recovery path: a terminal-then-resent edge
-    // case where the provider issues a 'sent' confirmation AFTER the bounce.
-    const id = await seedMessage({ status: 'bounced', providerEventTimeMs: 200 });
-    const applied = await updateMessageStatus(env.DB, {
-      messageId: id,
-      status: 'sent',
-      providerEventTimeMs: 300,
-      now: NOW,
-    });
-    expect(applied).toBe(true);
-    const row = await readMessage(id);
-    expect(row.status).toBe('sent');
-    expect(row.provider_event_time).toBe(300);
-  });
+  // CAP-030: the prior "a newer event of any rank always wins (strict-less-time
+  // branch)" test was deleted. Its premise — a strictly-newer event of any rank
+  // applies regardless of direction — directly contradicts R-MESSAGE-012
+  // (terminal states are terminal; resurrection requires a new message). The
+  // strict-newer-time branch is still exercised, but only for direction-legal
+  // transitions: see B3 (sent → delivered, forward + higher rank) and B4
+  // (delivered → bounced, retroactive terminal correction) below.
 
   it('sent_at is never overwritten when a later update omits it (COALESCE)', async () => {
     const id = await seedMessage({ status: 'queued', sentAt: '2026-01-01 12:00:00' });
@@ -227,20 +228,41 @@ describe('updateMessageStatus — R-MESSAGE-007 rank-aware predicate', () => {
     expect(applied).toBe(false);
   });
 
-  // CAP-029 Arch M1 / Security M3 review-triage: the SQL CASE in
-  // `updateMessageStatus` (lines 218–228) must stay in sync with
-  // STATUS_RANK_TABLE in packages/contracts/src/index.ts. The contracts-side
-  // test pins the table to a literal EXPECTED_PAIRS; this test pins the
-  // SQL-side behaviour against the same table. For every [status, rank] pair,
-  // a same-time `delivered` update applies iff rank < 80 (delivered's rank)
-  // and is rejected iff rank >= 80. If you change STATUS_RANK_TABLE, also
-  // change the SQL CASE — these tests will fail loudly in that case.
-  it('SQL CASE rank predicate is consistent with STATUS_RANK_TABLE for every status', async () => {
+  // CAP-029 Arch M1 / Security M3 review-triage + CAP-030 direction guard:
+  // the SQL in `updateMessageStatus` composes TWO predicates against the
+  // contracts-side tables:
+  //
+  //   1. RANK predicate (CAP-029 — the SQL CASE inside the WHERE): a same-time
+  //      update to `delivered` applies iff rank < 80 (delivered's rank). The
+  //      SQL CASE must stay in sync with STATUS_RANK_TABLE.
+  //   2. DIRECTION predicate (CAP-030 — `AND status IN (SELECT value FROM
+  //      json_each(?))`): the seed status must be in
+  //      `allowedFromForMessageStatus('delivered')` = ALLOWED_MESSAGE_TRANSITIONS
+  //      entries whose target set contains 'delivered'.
+  //
+  // For every [status, rank] pair, a same-time `delivered` update applies iff
+  // BOTH predicates accept. The composed behaviour is:
+  //
+  //   sent      (rank 20)   → applies (rank < 80, 'sent' is in allowed-from)
+  //   delayed   (rank 60)   → applies (rank < 80, 'delayed' is in allowed-from)
+  //   draft     (rank 10)   → rejected (rank < 80 but 'draft' is NOT in allowed-from — no path to delivered)
+  //   queued    (rank 40)   → rejected (rank < 80 but 'queued' is NOT in allowed-from — forward only via sending/sent)
+  //   sending   (rank 30)   → rejected (rank < 80 but 'sending' is NOT in allowed-from — forward only via sent/delayed/terminal)
+  //   delivered (rank 80)   → rejected (rank == 80, rank predicate fails)
+  //   failed    (rank 100)  → rejected (rank >= 80)
+  //   bounced   (rank 100)  → rejected (rank >= 80)
+  //   complained(rank 100)  → rejected (rank >= 80)
+  //
+  // If you change STATUS_RANK_TABLE or ALLOWED_MESSAGE_TRANSITIONS, the SQL
+  // CASE and the direction IN-clause must change in lockstep — these tests
+  // will fail loudly in that case.
+  it('rank + direction predicates compose correctly for every status', async () => {
     // Seed installation_state once before the loop — seedMessage() also seeds
     // it but the second INSERT would violate the PK constraint when called
     // multiple times in one test.
     await seedInstallationState({ status: 'complete', currentStep: 'complete' });
     const DELIVERED_RANK = 80;
+    const allowedFrom = new Set<MessageStatus>(allowedFromForMessageStatus('delivered'));
     for (const [seedStatus, rank] of STATUS_RANK_TABLE) {
       const id = crypto.randomUUID();
       await env.DB.prepare(
@@ -257,15 +279,99 @@ describe('updateMessageStatus — R-MESSAGE-007 rank-aware predicate', () => {
       const applied = await updateMessageStatus(env.DB, {
         messageId: id,
         status: 'delivered',
-        providerEventTimeMs: 500, // same time → only rank decides
+        providerEventTimeMs: 500, // same time → only rank + direction decide
         now: NOW,
       });
-      const shouldApply = rank < DELIVERED_RANK;
+      const shouldApply = rank < DELIVERED_RANK && allowedFrom.has(seedStatus as MessageStatus);
       expect(applied, `status=${seedStatus} rank=${rank}`).toBe(shouldApply);
       // Verify the row reflects the outcome — guards against a false-positive
       // where the predicate accepts but the row was not actually updated.
       const row = await readMessage(id);
       expect(row.status, `status=${seedStatus} rank=${rank}`).toBe(shouldApply ? 'delivered' : seedStatus);
     }
+  });
+
+  // -------------------------------------------------------------------
+  // CAP-030 AC #8 — direction guard (CAP-030 §Acceptance criteria).
+  //
+  // Each test seeds the row at a known `from`-status with provider_event_time
+  // set, then issues an updateMessageStatus call whose target either is or is
+  // not in the legal FROM-set declared by ALLOWED_MESSAGE_TRANSITIONS. The
+  // scenarios are constructed so the R-MESSAGE-007 rank-aware predicate alone
+  // would ACCEPT the change — only the new CAP-030 direction clause can
+  // reject it. That asymmetry is the load-bearing part of the test: if a
+  // future regression removes the direction clause, the rank predicate will
+  // silently accept the forbidden transition and these tests fail loudly.
+  // -------------------------------------------------------------------
+
+  it('B1: rejects sent → queued (direction violation; rank predicate would accept on strictly newer event time)', async () => {
+    // 'sent' (rank 20) seeded at t=200. A 'queued' update at t=300 is
+    // strictly newer (rank-predicate strict-less-time branch would ACCEPT).
+    // The CAP-030 direction clause rejects because 'queued' is not in
+    // ALLOWED_MESSAGE_TRANSITIONS.get('sent').
+    const id = await seedMessage({ status: 'sent', providerEventTimeMs: 200 });
+    const applied = await updateMessageStatus(env.DB, {
+      messageId: id,
+      status: 'queued',
+      providerEventTimeMs: 300,
+      now: NOW,
+    });
+    expect(applied).toBe(false);
+    const row = await readMessage(id);
+    expect(row.status).toBe('sent'); // unchanged
+    expect(row.provider_event_time).toBe(200); // unchanged
+  });
+
+  it('B2: rejects failed → sent (terminal violation; rank predicate would accept on strictly newer event time)', async () => {
+    // 'failed' (rank 100) seeded at t=200. A 'sent' update at t=300 is
+    // strictly newer (rank-predicate strict-less-time branch would ACCEPT).
+    // The CAP-030 direction clause rejects because 'failed' has an empty
+    // allowed-from set (R-MESSAGE-012 — terminal, no resurrection).
+    const id = await seedMessage({ status: 'failed', providerEventTimeMs: 200 });
+    const applied = await updateMessageStatus(env.DB, {
+      messageId: id,
+      status: 'sent',
+      providerEventTimeMs: 300,
+      now: NOW,
+    });
+    expect(applied).toBe(false);
+    const row = await readMessage(id);
+    expect(row.status).toBe('failed'); // unchanged
+    expect(row.provider_event_time).toBe(200); // unchanged
+  });
+
+  it('B3: accepts sent → delivered (forward + higher rank)', async () => {
+    // 'sent' (rank 20) seeded at t=500. A 'delivered' (rank 80) update at
+    // the same time applies via the rank tie-breaker ('sent' rank 20 < 80),
+    // AND 'delivered' is in ALLOWED_MESSAGE_TRANSITIONS.get('sent'). Both
+    // predicates accept.
+    const id = await seedMessage({ status: 'sent', providerEventTimeMs: 500 });
+    const applied = await updateMessageStatus(env.DB, {
+      messageId: id,
+      status: 'delivered',
+      providerEventTimeMs: 500,
+      now: NOW,
+    });
+    expect(applied).toBe(true);
+    const row = await readMessage(id);
+    expect(row.status).toBe('delivered');
+  });
+
+  it('B4: accepts delivered → bounced (retroactive terminal correction; rank permits at equal time)', async () => {
+    // 'delivered' (rank 80) seeded at t=500. A 'bounced' (rank 100) update
+    // at the same time applies via the rank tie-breaker (80 < 100), AND
+    // 'bounced' is in ALLOWED_MESSAGE_TRANSITIONS.get('delivered'). The
+    // retroactive terminal-correction path the comment in
+    // ALLOWED_MESSAGE_TRANSITIONS describes.
+    const id = await seedMessage({ status: 'delivered', providerEventTimeMs: 500 });
+    const applied = await updateMessageStatus(env.DB, {
+      messageId: id,
+      status: 'bounced',
+      providerEventTimeMs: 500,
+      now: NOW,
+    });
+    expect(applied).toBe(true);
+    const row = await readMessage(id);
+    expect(row.status).toBe('bounced');
   });
 });

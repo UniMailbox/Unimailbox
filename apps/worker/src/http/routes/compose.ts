@@ -174,6 +174,17 @@ export function composeRoutes(): Hono<AppEnv> {
       // idempotency record is appended to the same batch (R-API-004).
       const statements: D1PreparedStatement[] = [
         // 1. Message row, status 'queued', from the mailbox address.
+        // CAP-030 D-CAP-030-D: this INSERT path intentionally bypasses the
+        // CAP-030 direction guard (`updateMessageStatus`'s
+        // `status IN (SELECT value FROM json_each(?))` clause). The row
+        // has no prior state on insert — there is no `from` to gate — so
+        // the guard is vacuously satisfied. The `messages.status` CHECK
+        // constraint (migration 0006_messages.sql) is the safety net:
+        // 'queued' is the only value this writer produces, and the CHECK
+        // rejects any other literal at the schema layer. Do NOT route
+        // this INSERT through `updateMessageStatus` to "fix" the gap —
+        // the gate is correct as-is and routing it would change the
+        // atomicity semantics (R-OUTBOUND-006 batch).
         c.env.DB.prepare(
           `INSERT INTO messages (
              id, from_address, from_name, subject, html_body, text_body,

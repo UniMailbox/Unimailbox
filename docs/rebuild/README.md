@@ -20,6 +20,9 @@ This folder contains the complete analysis, design, and roadmap for rebuilding C
 - `08-roadmap/` — the phased delivery plan.
 - `09-decisions/` — Architecture Decision Records (ADRs).
 - `10-open-questions.md` — questions still needing operator input.
+- `11-agentic-inbox-adaptation.md` — pinned upstream implementation patterns and what this project
+  adopts, adapts, or rejects.
+- `execution-plan.md` — the ordered recovery and implementation plan.
 
 **Top-level deliverables:**
 
@@ -71,9 +74,9 @@ the ledger's `Known documentation discrepancies` table records each.
 
 | Phase | Status | Exit criteria | When |
 |---|---|---|---|
-| 0 — Foundation | **Audit Complete — Conditional Pass** (10/11 MET) | 11 boxes — `08-roadmap/phase-0-foundation.md` | 2026-08-12 — Audit complete; operator deploy verification pending |
-| 1 — Minimal Loop | **Code complete and quality-gate verified** | 29 boxes — `F-minimal-business-closed-loop.md` §F.4 (H doc says 23) | 2026-08-13 — All 7 phase-1 capabilities implemented (CAP-020–026); audit at `phase-1-audit.md`. Operator preview deploy pending for `Verified` status. |
-| 2 — Reliable Loop | Not started | 7 boxes — `08-roadmap/phase-2-core-loop.md` | — |
+| 0 — Foundation | **Reopened — delivery blockers** | 11 boxes — `08-roadmap/phase-0-foundation.md` | 2026-08-19 — `/setup` is not served, web assets are not wired to the Worker, remote migrations are not repeat-safe, and preview deployment is unverified. |
+| 1 — Minimal Loop | **Reopened — backend implemented, user loop unavailable** | 29 boxes — `F-minimal-business-closed-loop.md` §F.4 (H doc says 23) | 2026-08-19 — backend capabilities exist, but the web client is still a stub and the real browser/email loop has not run. |
+| 2 — Reliable Loop | **In progress — recovery gate active** | 7 boxes — `08-roadmap/phase-2-core-loop.md` | CAP-030 is active; CAP-027/028/029/031/032/035/037/038 are implemented; delivery recovery precedes further expansion. |
 | 3 — Complete Core | Not started | drafts + attachments | — |
 | 4 — Operations + Data Import | Not started | ops tooling + legacy import | — |
 | 5 — Automation | Not started | — | — |
@@ -88,9 +91,9 @@ the ledger is derived from.
 
 ## Process
 
-The rebuild follows two cross-cutting rules. They are defined once, in `.claude/rules/coding.md`
-(Rule of Three) and `.claude/rules/agent-collaboration.md` (Rule of One), and are not restated
-here — see the rules files for the canonical wording.
+The rebuild follows the cross-cutting rules in `.claude/rules/`. Rule of Three and Rule of One are
+defined in `coding.md` and `agent-collaboration.md`. External code-pattern provenance is defined in
+`reference-implementations.md`.
 
 ## Stop-the-line conditions
 

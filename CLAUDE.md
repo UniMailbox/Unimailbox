@@ -27,13 +27,15 @@ User → Main Claude Code session = Project Orchestrator (this conversation) →
 | Where | What |
 |---|---|
 | `CLAUDE.md` | This file. Control-plane entry point. |
-| `.claude/rules/` | Constraints that must always be true. Architecture, security, coding, testing, git, agent-collaboration. |
+| `.claude/rules/` | Constraints that must always be true. Architecture, security, coding, testing, git, collaboration, and external-reference provenance. |
 | `.claude/agents/` | Specialized subagent definitions. |
 | `.claude/skills/` | Reusable procedures: `implement-capability`, `review-capability`, `phase-audit`, `test-business-loop`, `capability-cleanup`. |
 | `.claude/templates/` | Fill-in forms: `capability-task`, `review-report`, `handoff`. |
 | `.claude/hooks/` + `settings.json` | Lifecycle guardrails. No `agent` field — Main Session is the default. |
 | `docs/rebuild/` | Design specification. Stable. |
 | `docs/rebuild/capability-ledger.md` | **Authoritative** execution state. |
+| `docs/rebuild/execution-plan.md` | Ordered recovery/capability sequence; the ledger still owns status. |
+| `docs/rebuild/11-agentic-inbox-adaptation.md` | Pinned reference implementation and adopt/adapt/reject decisions. |
 | `docs/rebuild/implementation-log.md` | Append-only change log. |
 | `work/` | Short-lived artifacts (`active`, `reviews`, `investigations`, `handoffs`, `archive`). |
 | `.tmp/` | Session scratch. Gitignored. |
@@ -59,6 +61,8 @@ match the right handoff format.
 - **Shallow hierarchy.** Default depth is two. Do not chain subagents.
 - **WIP limit: one major capability at a time.** A second requires disjoint file ownership and a
   recorded reason in the ledger.
+- **Implementation truth beats document claims.** A build, exported handler, or checked box is not
+  delivery evidence. Inspect routes, runtime bindings, assets, migrations, and a real user path.
 - **Specialized agents do not redefine architecture.** Subagents propose; the Main Session accepts.
 - **Hooks enforce; rules describe.** If a hook misbehaves, edit the script and the hook README;
   do not bypass it by weakening the rule.
@@ -78,16 +82,23 @@ match the right handoff format.
 2. `.claude/hooks/session-context.sh` fires on `SessionStart` and injects phase + active capability
    + git state.
 3. `docs/rebuild/capability-ledger.md` — phase, done / in-progress / blocked. **Authoritative.**
-   Phase files in `docs/rebuild/08-roadmap/` may carry pre-checked acceptance boxes; trust the
-   ledger, not those checkboxes.
-4. Tail of `docs/rebuild/implementation-log.md` — what changed most recently.
-5. `ls work/active/` — any in-flight contract; read its `task.md`.
-6. `ls work/handoffs/` — any handoff note.
-7. `git status && git log --oneline -10` — uncommitted work and recent history.
-8. The phase file in `docs/rebuild/08-roadmap/`.
+4. `docs/rebuild/execution-plan.md` — why the active/next capability is ordered that way.
+5. `ls work/active/` — any in-flight contract; read its `task.md`. The CAP ID must agree with the
+   ledger; the SessionStart hook reports `STATE DRIFT` when it does not.
+6. Tail of `docs/rebuild/implementation-log.md` — what changed most recently.
+7. `ls work/handoffs/` — any handoff note.
+8. `git status && git log --oneline -10` — uncommitted work and recent history. Compare every
+   modified file with the active task's ownership list.
+9. The phase file in `docs/rebuild/08-roadmap/`.
+10. For any completion or phase claim, inspect the implementation and deploy topology that provide
+    the behavior; do not accept the ledger, audit, or test count as self-proving evidence.
 
 If this sequence cannot answer *what phase, what capability, what is done, what is blocked, what
 is next*, the repository memory is broken — fix that before writing code.
+
+When using Agentic Inbox patterns, follow `.claude/rules/reference-implementations.md` and the pinned
+adaptation decisions in `docs/rebuild/11-agentic-inbox-adaptation.md`. Its authentication and
+per-mailbox persistence choices are not Unimailbox defaults.
 
 ## Low-context protocol
 

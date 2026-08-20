@@ -15,7 +15,7 @@ ps_repo_root() {
 # `|| true` swallows that under `set -euo pipefail` so a freshly-`git init`'-ed repo
 # does not abort the calling script.
 ps_git_branch() {
-  git rev-parse --abbrev-ref HEAD 2>/dev/null || true
+  git -C "$(ps_repo_root)" rev-parse --abbrev-ref HEAD 2>/dev/null || true
 }
 
 # ps_git_dirty — emits a short marker if the working tree has uncommitted changes.
@@ -23,7 +23,7 @@ ps_git_branch() {
 # pattern as ps_git_branch: `git status` returns 128 on a corrupt repo.
 ps_git_dirty() {
   local porcelain
-  porcelain="$(git status --porcelain 2>/dev/null | head -1 || true)"
+  porcelain="$(git -C "$(ps_repo_root)" status --porcelain 2>/dev/null | head -1 || true)"
   if [ -n "${porcelain}" ]; then
     printf 'uncommitted'
   fi
@@ -46,14 +46,95 @@ ps_active_workspace() {
   done
 }
 
-# ps_current_phase — the first "## Phase N — Title" header found in the capability ledger.
-# Returns the heading text, stripped of leading "## ".
+# ps_active_workspace_count — number of capability workspaces. The normal value is 0 or 1.
+ps_active_workspace_count() {
+  local repo count d
+  repo="$(ps_repo_root)"
+  count=0
+  for d in "${repo}/work/active"/*/; do
+    [ -d "${d}" ] || continue
+    [ "$(basename "${d}")" = ".gitkeep" ] && continue
+    count=$(( count + 1 ))
+  done
+  printf '%d' "${count}"
+}
+
+# ps_workspace_cap_id — CAP-NNN parsed from the active workspace name.
+ps_workspace_cap_id() {
+  ps_cap_id_from_text "$(ps_active_workspace)"
+}
+
+# ps_current_phase — value of the **Phase** row in the ledger's Current state table.
+# Do not use the first "## Phase" heading: that is permanently Phase 0 and caused the
+# SessionStart hook to report stale state while Phase 2 was active.
 ps_current_phase() {
   local repo
   repo="$(ps_repo_root)"
   local ledger="${repo}/docs/rebuild/capability-ledger.md"
   [ -f "${ledger}" ] || return 0
-  awk '/^## Phase [0-9]/ { sub(/^## /, ""); print; exit }' "${ledger}" 2>/dev/null
+  awk -F'|' '
+    /^\| \*\*Phase\*\* \|/ {
+      value = $3
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      print value
+      exit
+    }
+  ' "${ledger}" 2>/dev/null
+}
+
+# ps_ledger_state_value <label> — read one row from the ledger's Current state table.
+ps_ledger_state_value() {
+  local label="$1" repo ledger
+  repo="$(ps_repo_root)"
+  ledger="${repo}/docs/rebuild/capability-ledger.md"
+  [ -f "${ledger}" ] || return 0
+  awk -F'|' -v label="${label}" '
+    {
+      key = $2
+      gsub(/\*/, "", key)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      if (key == label) {
+        value = $3
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        print value
+        exit
+      }
+    }
+  ' "${ledger}" 2>/dev/null
+}
+
+ps_ledger_active_capability() {
+  ps_ledger_state_value "Active capability"
+}
+
+ps_ledger_next_capability() {
+  ps_ledger_state_value "Next capability"
+}
+
+ps_ledger_active_cap_id() {
+  ps_cap_id_from_text "$(ps_ledger_active_capability)"
+}
+
+# ps_state_drift — emits semicolon-separated drift findings, or nothing when state agrees.
+ps_state_drift() {
+  local count workspace_cap ledger_cap drift
+  count="$(ps_active_workspace_count)"
+  workspace_cap="$(ps_workspace_cap_id)"
+  ledger_cap="$(ps_ledger_active_cap_id)"
+  drift=""
+
+  if [ "${count}" -gt 1 ]; then
+    drift="${count} active workspaces violate the default WIP limit"
+  fi
+  if [ -n "${workspace_cap}" ] && [ -z "${ledger_cap}" ]; then
+    drift="${drift}${drift:+; }workspace ${workspace_cap} exists but ledger has no CAP active"
+  elif [ -n "${workspace_cap}" ] && [ -n "${ledger_cap}" ] && [ "${workspace_cap}" != "${ledger_cap}" ]; then
+    drift="${drift}${drift:+; }workspace ${workspace_cap} disagrees with ledger ${ledger_cap}"
+  elif [ -z "${workspace_cap}" ] && [ -n "${ledger_cap}" ]; then
+    drift="${drift}${drift:+; }ledger says ${ledger_cap} is active but no matching workspace exists"
+  fi
+
+  printf '%s' "${drift}"
 }
 
 # ps_recent_log — the first heading line of the most recent implementation-log entry.

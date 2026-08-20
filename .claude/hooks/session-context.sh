@@ -16,6 +16,9 @@ hook_log "session-start" "begin"
 phase="$(ps_current_phase)"
 recent="$(ps_recent_log)"
 active="$(ps_active_workspace)"
+ledger_active="$(ps_ledger_active_capability)"
+next="$(ps_ledger_next_capability)"
+drift="$(ps_state_drift)"
 branch="$(ps_git_branch)"
 dirty="$(ps_git_dirty)"
 
@@ -36,6 +39,15 @@ dirty="$(ps_git_dirty)"
   else
     printf 'Active workspace:\n(none — no work/active/<cap>/ directory)\n'
   fi
+  if [ -n "${ledger_active}" ]; then
+    printf '\nLedger active capability:\n%s\n' "${ledger_active}"
+  fi
+  if [ -n "${next}" ]; then
+    printf '\nNext capability:\n%s\n' "${next}"
+  fi
+  if [ -n "${drift}" ]; then
+    printf '\nSTATE DRIFT — fix before implementation:\n%s\n' "${drift}"
+  fi
   if [ -n "${branch}" ]; then
     printf '\nGit:\nbranch %s%s\n' "${branch}" "${dirty:+ (${dirty})}"
   else
@@ -45,10 +57,10 @@ dirty="$(ps_git_dirty)"
     printf '\nMost recent implementation log entry:\n%s\n' "${recent}"
   fi
   printf '\nOrientation: see CLAUDE.md §State recovery — fresh session for the full procedure.\n'
-  printf 'Authoritative status: docs/rebuild/capability-ledger.md (do not trust pre-checked acceptance boxes in phase files; see ledger §Known documentation discrepancies · D-5).\n'
+  printf 'Authoritative status: docs/rebuild/capability-ledger.md; ordered work: docs/rebuild/execution-plan.md.\n'
 } | tee >(cat >&2)
 
-hook_log "session-start" "end phase='${phase}' active='${active}' branch='${branch}'"
+hook_log "session-start" "end phase='${phase}' active='${active}' branch='${branch}' drift='${drift}'"
 
 # SessionStart is informational. Always exit 0 — a session that cannot start is worse than
 # a session that starts with degraded context.
