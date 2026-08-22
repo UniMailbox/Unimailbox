@@ -1,12 +1,12 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ADMINISTRATOR_PERMISSIONS,
   BREVO_PROVIDER_KEY,
   type Principal,
   type ProviderKey,
   type ProviderPlugin,
 } from "@unimailbox/contracts";
+import { TEST_ADMIN_PERMISSIONS } from "@unimailbox/test-kit";
 import { AdminApplicationService } from "../../src/modules/administration";
 import { ProviderRegistry } from "../../src/integrations/providers";
 import { createBrevoProviderPlugin } from "../../src/integrations/brevo";
@@ -16,10 +16,14 @@ import { createAttachmentStore } from "../../src/platform/attachment-store";
 
 const cipher = new CredentialCipher("e".repeat(32));
 
+// Tests in this file exercise admin code paths beyond the M1 surface (e.g.
+// `user.manage`, `message.read_all`, `role.manage`). They need the full
+// permission key set at runtime; production admins only ever get the 5-key
+// MVP grant — see issue #14 / blueprint §3.3, PR #31.
 const administrator: Principal = {
   userId: "11111111-1111-4111-8111-111111111111",
   email: "admin@example.com",
-  permissions: new Set(ADMINISTRATOR_PERMISSIONS),
+  permissions: new Set(TEST_ADMIN_PERMISSIONS),
 };
 
 function service(fetcher = vi.fn()) {
@@ -122,17 +126,26 @@ describe("AdminApplicationService user and role management", () => {
   });
 
   it("creates and updates a custom role", async () => {
+    // Originally exercised `user.read` / `role.read` / `analytics.read`,
+    // which are deferred past M1 (M5 #26, M9 #30). After 0010_mvp_minimum_seed
+    // trimmed the catalog to the 5 MVP keys, we use those keys to keep real
+    // coverage on AdminApplicationService.createRole + updateRole. When M5
+    // re-introduces `user.read` / `role.read`, expand this back to the
+    // 3-permission round-trip.
     const admin = service();
     const role = await admin.createRole(administrator, {
       name: `Auditor-${crypto.randomUUID()}`,
-      description: "Read-only auditor",
-      permissions: ["user.read", "role.read"],
+      description: "MVP read-only auditor",
+      permissions: ["message.read", "settings.read"],
     });
     const updated = await admin.updateRole(administrator, role.id, {
-      description: "Auditor with analytics access",
-      permissions: ["user.read", "analytics.read"],
+      description: "MVP auditor with send-side room",
+      permissions: ["message.send", "settings.manage"],
     });
-    expect(updated.permissions).toEqual(["user.read", "analytics.read"]);
+    expect(updated.permissions).toEqual([
+      "message.send",
+      "settings.manage",
+    ]);
     const all = await env.DB.prepare(
       "SELECT id, name, is_system FROM roles ORDER BY id",
     ).all<{ id: string; name: string; is_system: number }>();
