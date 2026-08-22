@@ -50,14 +50,16 @@ async function seedMessage(
       '', ?, ?, ?,
       ?, ?
     )`,
-  ).bind(
-    id,
-    overrides.status ?? 'sent',
-    overrides.providerEventTimeMs ?? null,
-    overrides.sentAt ?? null,
-    NOW,
-    NOW,
-  ).run();
+  )
+    .bind(
+      id,
+      overrides.status ?? 'sent',
+      overrides.providerEventTimeMs ?? null,
+      overrides.sentAt ?? null,
+      NOW,
+      NOW,
+    )
+    .run();
   return id;
 }
 
@@ -69,8 +71,9 @@ interface MessageRow {
 }
 
 async function readMessage(id: string): Promise<MessageRow> {
-  const row = await env.DB
-    .prepare('SELECT status, provider_event_time, sent_at, updated_at FROM messages WHERE id = ?')
+  const row = await env.DB.prepare(
+    'SELECT status, provider_event_time, sent_at, updated_at FROM messages WHERE id = ?',
+  )
     .bind(id)
     .first<MessageRow>();
   if (!row) throw new Error(`message ${id} not found`);
@@ -275,7 +278,9 @@ describe('updateMessageStatus — R-MESSAGE-007 rank-aware predicate', () => {
           '', ?, 500, NULL,
           ?, ?
         )`,
-      ).bind(id, seedStatus, NOW, NOW).run();
+      )
+        .bind(id, seedStatus, NOW, NOW)
+        .run();
       const applied = await updateMessageStatus(env.DB, {
         messageId: id,
         status: 'delivered',
@@ -287,7 +292,9 @@ describe('updateMessageStatus — R-MESSAGE-007 rank-aware predicate', () => {
       // Verify the row reflects the outcome — guards against a false-positive
       // where the predicate accepts but the row was not actually updated.
       const row = await readMessage(id);
-      expect(row.status, `status=${seedStatus} rank=${rank}`).toBe(shouldApply ? 'delivered' : seedStatus);
+      expect(row.status, `status=${seedStatus} rank=${rank}`).toBe(
+        shouldApply ? 'delivered' : seedStatus,
+      );
     }
   });
 

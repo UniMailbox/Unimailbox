@@ -21,9 +21,7 @@ afterEach(() => {
 
 describe('AdministratorStep', () => {
   it('submits email + password, advances to /setup/domain (happy path)', async () => {
-    const { fetchImpl, calls } = spyFetch([
-      () => jsonResponse({ data: { userId: 'u-1' } }),
-    ]);
+    const { fetchImpl, calls } = spyFetch([() => jsonResponse({ data: { userId: 'u-1' } })]);
     const user = userEvent.setup();
     const { history } = await renderStep({
       fetchImpl,

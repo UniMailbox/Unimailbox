@@ -21,9 +21,7 @@ afterEach(() => {
 
 describe('DomainStep', () => {
   it('submits a domain and advances to /setup/cloudflare-verify', async () => {
-    const { fetchImpl, calls } = spyFetch([
-      () => jsonResponse({ data: { domainId: 'd-1' } }),
-    ]);
+    const { fetchImpl, calls } = spyFetch([() => jsonResponse({ data: { domainId: 'd-1' } })]);
     const user = userEvent.setup();
     const { history } = await renderStep({ fetchImpl, step: <DomainStep /> });
     await user.type(screen.getByLabelText(/^domain$/i), 'mail.example.com');
@@ -35,22 +33,16 @@ describe('DomainStep', () => {
   });
 
   it('displays the lowercased form (R-DATA-001)', async () => {
-    const { fetchImpl } = spyFetch([
-      () => jsonResponse({ data: { domainId: 'd-1' } }),
-    ]);
+    const { fetchImpl } = spyFetch([() => jsonResponse({ data: { domainId: 'd-1' } })]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <DomainStep /> });
     await user.type(screen.getByLabelText(/^domain$/i), 'MAIL.Example.Com');
     // H2 (CAP-041 fix): the previewed normalized form is shown live.
-    expect(screen.getByTestId('domain-normalized').textContent).toContain(
-      'mail.example.com',
-    );
+    expect(screen.getByTestId('domain-normalized').textContent).toContain('mail.example.com');
   });
 
   it('surfaces the machine code via ErrorPanel on 4xx (AC #15)', async () => {
-    const { fetchImpl } = spyFetch([
-      () => errorResponse('DOMAIN_INVALID', 'Bad domain', 400),
-    ]);
+    const { fetchImpl } = spyFetch([() => errorResponse('DOMAIN_INVALID', 'Bad domain', 400)]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <DomainStep /> });
     await user.type(screen.getByLabelText(/^domain$/i), 'mail.example.com');
@@ -60,9 +52,7 @@ describe('DomainStep', () => {
   });
 
   it('on 401 offers a Re-claim button (Security HIGH #2)', async () => {
-    const { fetchImpl } = spyFetch([
-      () => errorResponse('SESSION_EXPIRED', 'Token expired', 401),
-    ]);
+    const { fetchImpl } = spyFetch([() => errorResponse('SESSION_EXPIRED', 'Token expired', 401)]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <DomainStep /> });
     await user.type(screen.getByLabelText(/^domain$/i), 'mail.example.com');

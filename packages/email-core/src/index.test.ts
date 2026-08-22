@@ -152,7 +152,9 @@ Body`;
 
       const parsed = await parseEmail(raw);
 
-      expect(parsed.subject).toBe('This is a very long subject that might be folded across multiple lines');
+      expect(parsed.subject).toBe(
+        'This is a very long subject that might be folded across multiple lines',
+      );
     });
 
     it('handles quoted display names with commas', async () => {

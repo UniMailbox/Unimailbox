@@ -39,14 +39,10 @@ export function adminWebhookRoutes(): Hono<AppEnv> {
    *
    * - Requires authn + requirePermission('webhook_event.read')
    */
-  routes.get(
-    '/admin/webhook-events',
-    requirePermission('webhook_event.read'),
-    async (c) => {
-      const deliveries = await listWebhookDeliveries(c.env.DB);
-      return c.json({ data: { items: deliveries } });
-    },
-  );
+  routes.get('/admin/webhook-events', requirePermission('webhook_event.read'), async (c) => {
+    const deliveries = await listWebhookDeliveries(c.env.DB);
+    return c.json({ data: { items: deliveries } });
+  });
 
   /**
    * GET /api/v1/admin/connections
@@ -61,26 +57,22 @@ export function adminWebhookRoutes(): Hono<AppEnv> {
    *
    * - Requires authn + requirePermission('webhook_event.read')
    */
-  routes.get(
-    '/admin/connections',
-    requirePermission('webhook_event.read'),
-    async (c) => {
-      const connections = await listProviderConnections(c.env.DB);
-      const items = connections.map((conn) => ({
-        id: conn.id,
-        providerKey: conn.provider_key,
-        label: conn.label,
-        status: conn.status,
-        webhookConfigured: conn.webhook_configured === 1,
-        webhookUrl: conn.webhook_configured
-          ? `/api/v1/webhooks/${conn.provider_key}/${conn.id}`
-          : null,
-        createdAt: conn.created_at,
-        updatedAt: conn.updated_at,
-      }));
-      return c.json({ data: { items } });
-    },
-  );
+  routes.get('/admin/connections', requirePermission('webhook_event.read'), async (c) => {
+    const connections = await listProviderConnections(c.env.DB);
+    const items = connections.map((conn) => ({
+      id: conn.id,
+      providerKey: conn.provider_key,
+      label: conn.label,
+      status: conn.status,
+      webhookConfigured: conn.webhook_configured === 1,
+      webhookUrl: conn.webhook_configured
+        ? `/api/v1/webhooks/${conn.provider_key}/${conn.id}`
+        : null,
+      createdAt: conn.created_at,
+      updatedAt: conn.updated_at,
+    }));
+    return c.json({ data: { items } });
+  });
 
   /**
    * POST /api/v1/admin/connections/:id/webhook-secret/reveal

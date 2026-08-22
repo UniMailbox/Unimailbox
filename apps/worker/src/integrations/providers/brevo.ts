@@ -94,10 +94,7 @@ export const brevoAdapter: OutboundProviderAdapter = {
    * @throws {TerminalProviderError} on 4xx (incl. malformed request)
    * @throws {RetryableProviderError} on 5xx, network failure, or malformed response
    */
-  async send(
-    ctx: ProviderRuntimeContext,
-    msg: SendProviderMessage,
-  ): Promise<ProviderSendResult> {
+  async send(ctx: ProviderRuntimeContext, msg: SendProviderMessage): Promise<ProviderSendResult> {
     const apiKey = ctx.env.BREVO_API_KEY;
     if (typeof apiKey !== 'string') {
       // Missing config is terminal — operator error, not a transient failure.
@@ -143,7 +140,7 @@ export const brevoAdapter: OutboundProviderAdapter = {
         headers: {
           'api-key': apiKey,
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          Accept: 'application/json',
         },
         body: JSON.stringify(payload),
       });

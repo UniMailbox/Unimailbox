@@ -82,10 +82,7 @@ const ROLE_PERMISSIONS: ReadonlyArray<{
  * @param db — D1 database binding
  * @param timestamp — ISO datetime string for created_at columns
  */
-export async function seedRolesAndPermissions(
-  db: Database,
-  timestamp: string,
-): Promise<void> {
+export async function seedRolesAndPermissions(db: Database, timestamp: string): Promise<void> {
   const stmts: D1PreparedStatement[] = [];
 
   // Permissions — ID = key (deterministic for idempotent seeding)
@@ -149,9 +146,7 @@ export async function assignRole(
   timestamp: string,
 ): Promise<void> {
   await db
-    .prepare(
-      'INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)',
-    )
+    .prepare('INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)')
     .bind(userId, roleId, timestamp)
     .run();
 }

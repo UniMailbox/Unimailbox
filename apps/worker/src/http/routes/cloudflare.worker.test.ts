@@ -207,27 +207,33 @@ describe('POST /api/v1/setup/cloudflare/dashboard-link', () => {
     it('replays the stored response when same key + same body', async () => {
       const idempotencyKey = 'test-dashboard-link-key-abc123';
 
-      const response1 = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/dashboard-link', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': idempotencyKey,
+      const response1 = await SELF.fetch(
+        'http://localhost/api/v1/setup/cloudflare/dashboard-link',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${sessionToken}`,
+            'Idempotency-Key': idempotencyKey,
+          },
         },
-      });
+      );
 
       expect(response1.status).toBe(200);
       const body1 = await response1.json();
 
       // Second request with same key should replay
-      const response2 = await SELF.fetch('http://localhost/api/v1/setup/cloudflare/dashboard-link', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': idempotencyKey,
+      const response2 = await SELF.fetch(
+        'http://localhost/api/v1/setup/cloudflare/dashboard-link',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${sessionToken}`,
+            'Idempotency-Key': idempotencyKey,
+          },
         },
-      });
+      );
 
       expect(response2.status).toBe(200);
       const body2 = await response2.json();
@@ -404,7 +410,9 @@ describe('POST /api/v1/setup/cloudflare/verify', () => {
       const body = await response.json();
       expect(body).toHaveProperty('error');
       expect(body.error.code).toBe('SETUP_DOMAIN_REQUIRED');
-      expect(body.error.message).toBe('A managed domain must be created before verifying Cloudflare');
+      expect(body.error.message).toBe(
+        'A managed domain must be created before verifying Cloudflare',
+      );
     });
 
     it('returns error envelope { error: { code, message } }', async () => {

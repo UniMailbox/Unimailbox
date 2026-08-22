@@ -18,11 +18,7 @@
 // translation.
 
 import type { Database } from '../../platform/database';
-import type {
-  AuditEventInput,
-  AuditEventWriter,
-  D1StatementLike,
-} from '@unimailbox/contracts';
+import type { AuditEventInput, AuditEventWriter, D1StatementLike } from '@unimailbox/contracts';
 import { prepareCreateAuditEvent } from './audit-event-repository';
 
 /**

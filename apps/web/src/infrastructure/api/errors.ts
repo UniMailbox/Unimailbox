@@ -24,12 +24,7 @@ export class ApiError extends Error {
   readonly status: number;
   readonly requestId?: string;
 
-  constructor(
-    code: string,
-    message: string,
-    status: number,
-    requestId?: string,
-  ) {
+  constructor(code: string, message: string, status: number, requestId?: string) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
@@ -70,12 +65,8 @@ export async function parseErrorBody(response: Response): Promise<{
     ) {
       const err = body.error;
       const code = typeof err.code === 'string' ? err.code : fallback.code;
-      const message =
-        typeof err.message === 'string' ? err.message : fallback.message;
-      const requestId =
-        typeof err.requestId === 'string'
-          ? err.requestId
-          : fallback.requestId;
+      const message = typeof err.message === 'string' ? err.message : fallback.message;
+      const requestId = typeof err.requestId === 'string' ? err.requestId : fallback.requestId;
       return { code, message, requestId };
     }
   } catch {

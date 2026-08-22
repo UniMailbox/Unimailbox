@@ -31,7 +31,9 @@ export const mailboxes = sqliteTable(
   'mailboxes',
   {
     id: text('id').primaryKey(),
-    domainId: text('domain_id').notNull().references(() => managedDomains.id),
+    domainId: text('domain_id')
+      .notNull()
+      .references(() => managedDomains.id),
     ownerUserId: text('owner_user_id').notNull(),
     localPart: text('local_part').notNull(),
     displayName: text('display_name').notNull().default(''),
@@ -41,7 +43,10 @@ export const mailboxes = sqliteTable(
     deletedAt: text('deleted_at'),
   },
   (_table) => ({
-    domainLocalUnique: uniqueIndex('mailboxes_domain_local_unique').on(_table.domainId, _table.localPart),
+    domainLocalUnique: uniqueIndex('mailboxes_domain_local_unique').on(
+      _table.domainId,
+      _table.localPart,
+    ),
     ownerIdx: uniqueIndex('mailboxes_owner_idx').on(_table.ownerUserId),
   }),
 );
@@ -53,7 +58,9 @@ export type NewMailbox = typeof mailboxes.$inferInsert;
 export const mailboxMembers = sqliteTable(
   'mailbox_members',
   {
-    mailboxId: text('mailbox_id').notNull().references(() => mailboxes.id, { onDelete: 'cascade' }),
+    mailboxId: text('mailbox_id')
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: 'cascade' }),
     userId: text('user_id').notNull(),
     role: text('role', { enum: ['viewer', 'sender', 'admin'] }).notNull(),
     createdAt: text('created_at').notNull(),

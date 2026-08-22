@@ -183,14 +183,14 @@ describe('scripts/deploy.ts — pure logic', () => {
     it('rejects unset ENVIRONMENT', () => {
       const result = checkEnvironmentGuard(undefined);
       expect(result.ok).toBe(false);
-      expect(result.error).toContain("(unset)");
+      expect(result.error).toContain('(unset)');
       expect(result.error).toContain("must be non-'local'");
     });
 
     it('rejects local environment', () => {
       const result = checkEnvironmentGuard('local');
       expect(result.ok).toBe(false);
-      expect(result.error).toContain("ENVIRONMENT=local");
+      expect(result.error).toContain('ENVIRONMENT=local');
       expect(result.error).toContain("must be non-'local'");
     });
   });
@@ -274,7 +274,12 @@ describe('scripts/deploy.ts — pure logic', () => {
     });
 
     it('case (c): partial applied → only the gap is pending', () => {
-      const onDisk = ['0001_initial.sql', '0002_users.sql', '0003_messages.sql', '0004_outbound.sql'];
+      const onDisk = [
+        '0001_initial.sql',
+        '0002_users.sql',
+        '0003_messages.sql',
+        '0004_outbound.sql',
+      ];
       const applied = ['0001_initial.sql', '0002_users.sql'];
       const { ghost, pending } = computePendingMigrations(onDisk, applied);
       expect(ghost).toEqual([]);
@@ -359,9 +364,7 @@ describe('scripts/deploy.ts — pure logic', () => {
     });
 
     it('throws on a success=false batch with a non-fresh-DB error', () => {
-      const raw = JSON.stringify([
-        { success: false, error: 'D1_EXEC_ERROR: some other error' },
-      ]);
+      const raw = JSON.stringify([{ success: false, error: 'D1_EXEC_ERROR: some other error' }]);
       expect(() => parseAppliedMigrationNames(raw)).toThrow(/some other error/);
     });
   });

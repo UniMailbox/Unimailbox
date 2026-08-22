@@ -158,7 +158,7 @@ describe('GET /api/v1/setup/status', () => {
     it('never emits an error envelope (body.error === undefined)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/status');
       expect(response.status).toBe(200);
-      const body = await response.json() as { error?: unknown };
+      const body = (await response.json()) as { error?: unknown };
       expect(body.error).toBeUndefined();
     });
   });

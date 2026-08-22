@@ -50,9 +50,7 @@ export async function completeSetup(
   if (admin) {
     stmts.push(
       input.db
-        .prepare(
-          'INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)',
-        )
+        .prepare('INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)')
         .bind(admin.id, 'administrator', now),
     );
   }

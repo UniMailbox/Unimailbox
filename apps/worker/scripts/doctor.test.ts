@@ -13,6 +13,7 @@ import {
   evaluateWebAssetsBinding,
   evaluateQueueConsumerTopology,
   evaluateMigrationStrategyPendingOnly,
+  parseJsonc,
   type R,
 } from '../../scripts/doctor';
 
@@ -26,6 +27,33 @@ describe('pnpm scaffold doctor', () => {
       env: { ...process.env, NODE_NO_WARNINGS: '1' },
     });
     expect(result.status, result.stderr || result.stdout).toBe(0);
+  });
+});
+
+describe('JSONC parsing', () => {
+  it('accepts trailing commas added by the configured formatter', () => {
+    expect(
+      parseJsonc(`{
+        // production-like JSONC
+        "assets": {
+          "run_worker_first": ["/api/*",],
+        },
+      }`),
+    ).toEqual({ assets: { run_worker_first: ['/api/*'] } });
+  });
+
+  it('preserves commas and comment markers inside strings', () => {
+    expect(parseJsonc('{"value":"comma, brace }, // not a comment",}')).toEqual({
+      value: 'comma, brace }, // not a comment',
+    });
+  });
+
+  it('rejects malformed JSONC instead of merging tokens across a block comment', () => {
+    expect(() => parseJsonc('{"max_retries":5/* gap */0}')).toThrow(SyntaxError);
+  });
+
+  it('rejects an unterminated block comment', () => {
+    expect(() => parseJsonc('{"max_retries":5} /*')).toThrow(SyntaxError);
   });
 });
 
@@ -46,9 +74,7 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       producers: [{ queue: 'unimailbox-outbound' }],
       consumers: [{ queue: 'unimailbox-outbound', max_retries: 5 }],
     },
-    d1_databases: [
-      { binding: 'DB', database_name: 'unimailbox-db', database_id: 'abc' },
-    ],
+    d1_databases: [{ binding: 'DB', database_name: 'unimailbox-db', database_id: 'abc' }],
   } as Record<string, unknown>;
 
   const passingTest = {
@@ -72,14 +98,20 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
     });
 
     it('fails when assets.binding is not "ASSETS"', () => {
-      const mutated = { ...passingProd, assets: { ...(passingProd.assets as object), binding: 'WRONG' } };
+      const mutated = {
+        ...passingProd,
+        assets: { ...(passingProd.assets as object), binding: 'WRONG' },
+      };
       const r = evaluateWebAssetsBinding(mutated, repoRoot);
       expect(r.ok).toBe(false);
       expect(r.detail).toContain('WRONG');
     });
 
     it('fails when not_found_handling is missing', () => {
-      const mutated = { ...passingProd, assets: { ...(passingProd.assets as object), not_found_handling: undefined } };
+      const mutated = {
+        ...passingProd,
+        assets: { ...(passingProd.assets as object), not_found_handling: undefined },
+      };
       const r = evaluateWebAssetsBinding(mutated, repoRoot);
       expect(r.ok).toBe(false);
       expect(r.detail).toContain('not_found_handling');
@@ -95,7 +127,10 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
     it('fails when a producer has no matching consumer', () => {
       const mutated = {
         ...passingProd,
-        queues: { producers: [{ queue: 'orphan' }], consumers: [{ queue: 'unimailbox-outbound', max_retries: 5 }] },
+        queues: {
+          producers: [{ queue: 'orphan' }],
+          consumers: [{ queue: 'unimailbox-outbound', max_retries: 5 }],
+        },
       };
       const r = evaluateQueueConsumerTopology(mutated, passingTest);
       expect(r.ok).toBe(false);
@@ -116,7 +151,10 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
     it('fails when a consumer is missing max_retries', () => {
       const mutated = {
         ...passingProd,
-        queues: { producers: [{ queue: 'unimailbox-outbound' }], consumers: [{ queue: 'unimailbox-outbound' }] },
+        queues: {
+          producers: [{ queue: 'unimailbox-outbound' }],
+          consumers: [{ queue: 'unimailbox-outbound' }],
+        },
       };
       const r = evaluateQueueConsumerTopology(mutated, passingTest);
       expect(r.ok).toBe(false);
@@ -168,7 +206,9 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
     it('fails when d1_databases[0].migrations_dir is set', () => {
       const mutated = {
         ...passingProd,
-        d1_databases: [{ ...(passingProd.d1_databases as object[])[0], migrations_dir: '../../migrations' }],
+        d1_databases: [
+          { ...(passingProd.d1_databases as object[])[0], migrations_dir: '../../migrations' },
+        ],
       };
       const r = evaluateMigrationStrategyPendingOnly(mutated);
       expect(r.ok).toBe(false);

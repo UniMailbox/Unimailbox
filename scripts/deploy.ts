@@ -67,15 +67,11 @@ export const checkEnvironmentGuard = (env: string | undefined): { ok: boolean; e
 // ---------------------------------------------------------------------
 const wrangler = (subargs: string[]): { status: number | null; stdout: string } => {
   // Merge stderr into stdout to avoid interleaving JSON with error messages
-  const result = spawnSync(
-    'pnpm',
-    ['exec', 'wrangler', ...subargs],
-    {
-      cwd: WORKER_DIR,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CI: '1' },
-    },
-  );
+  const result = spawnSync('pnpm', ['exec', 'wrangler', ...subargs], {
+    cwd: WORKER_DIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, CI: '1' },
+  });
   const stdout = result.stdout?.toString('utf-8') ?? '';
   const stderr = result.stderr?.toString('utf-8') ?? '';
   return { status: result.status, stdout: stdout + stderr };
@@ -83,17 +79,16 @@ const wrangler = (subargs: string[]): { status: number | null; stdout: string } 
 
 // F2: Wrangler wrapper for secret commands (stdin input, no CI flag)
 // Secrets are piped via stdin to avoid --value CLI flag visibility.
-const wranglerSecret = (subargs: string[], secret: string): { status: number | null; stdout: string } => {
-  const result = spawnSync(
-    'pnpm',
-    ['exec', 'wrangler', ...subargs],
-    {
-      cwd: WORKER_DIR,
-      input: `${secret}\n`,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env }, // no CI=1 — let the prompt fire
-    },
-  );
+const wranglerSecret = (
+  subargs: string[],
+  secret: string,
+): { status: number | null; stdout: string } => {
+  const result = spawnSync('pnpm', ['exec', 'wrangler', ...subargs], {
+    cwd: WORKER_DIR,
+    input: `${secret}\n`,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env }, // no CI=1 — let the prompt fire
+  });
   const stdout = result.stdout?.toString('utf-8') ?? '';
   const stderr = result.stderr?.toString('utf-8') ?? '';
   return { status: result.status, stdout: stdout + stderr };
@@ -114,7 +109,10 @@ export const loadResourceState = (path: string = RESOURCE_STATE_PATH): ResourceS
   }
 };
 
-export const saveResourceState = (state: ResourceState, path: string = RESOURCE_STATE_PATH): void => {
+export const saveResourceState = (
+  state: ResourceState,
+  path: string = RESOURCE_STATE_PATH,
+): void => {
   writeFileSync(path, JSON.stringify(state, null, 2), 'utf-8');
 };
 
@@ -136,21 +134,36 @@ function parseWranglerList<T>(
     parsed = JSON.parse(r.stdout);
   } catch (e) {
     // F4: Include first 200 chars of stdout in parse error for diagnostics
-    return { ok: false, error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   if (!Array.isArray(parsed)) {
-    return { ok: false, error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   // First element is the batch wrapper
   const batch = parsed[0] as WranglerListResult<T> | undefined;
   if (!batch) {
-    return { ok: false, error: `wrangler output missing first element (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `wrangler output missing first element (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   if (batch.success === false) {
-    return { ok: false, error: `wrangler reported success=false: ${batch.error ?? 'unknown error'}` };
+    return {
+      ok: false,
+      error: `wrangler reported success=false: ${batch.error ?? 'unknown error'}`,
+    };
   }
   if (!batch.result || !Array.isArray(batch.result)) {
-    return { ok: false, error: `wrangler batch missing or invalid 'result' field (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `wrangler batch missing or invalid 'result' field (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   return { ok: true, data: batch.result };
 }
@@ -164,20 +177,35 @@ function parseWranglerSingle<T>(
     parsed = JSON.parse(r.stdout);
   } catch (e) {
     // F4: Include first 200 chars of stdout in parse error for diagnostics
-    return { ok: false, error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    return { ok: false, error: `expected JSON array with one element from wrangler (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `expected JSON array with one element from wrangler (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   const batch = parsed[0] as WranglerListResult<T> | undefined;
   if (!batch) {
-    return { ok: false, error: `wrangler output missing first element (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `wrangler output missing first element (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   if (batch.success === false) {
-    return { ok: false, error: `wrangler reported success=false: ${batch.error ?? 'unknown error'}` };
+    return {
+      ok: false,
+      error: `wrangler reported success=false: ${batch.error ?? 'unknown error'}`,
+    };
   }
   if (!batch.result || !Array.isArray(batch.result) || batch.result.length === 0) {
-    return { ok: false, error: `wrangler batch missing or invalid 'result' field (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `wrangler batch missing or invalid 'result' field (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   return { ok: true, data: batch.result[0] as T };
 }
@@ -198,18 +226,30 @@ function parseWranglerJson(
   try {
     parsed = JSON.parse(r.stdout);
   } catch (e) {
-    return { ok: false, error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   if (!Array.isArray(parsed)) {
-    return { ok: false, error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   for (const batch of parsed) {
     if (batch && typeof batch === 'object' && (batch as { success?: unknown }).success === false) {
       const err = (batch as { error?: unknown }).error;
-      return { ok: false, error: `wrangler batch reported success=false: ${typeof err === 'string' ? err : JSON.stringify(err)}` };
+      return {
+        ok: false,
+        error: `wrangler batch reported success=false: ${typeof err === 'string' ? err : JSON.stringify(err)}`,
+      };
     }
     if (!batch || typeof batch !== 'object' || !('results' in batch)) {
-      return { ok: false, error: `wrangler batch missing 'results' key (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+      return {
+        ok: false,
+        error: `wrangler batch missing 'results' key (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+      };
     }
   }
   return { ok: true, data: parsed };
@@ -262,10 +302,21 @@ export const generateSecret = (): string => {
 // Resource provisioning (idempotent)
 // ---------------------------------------------------------------------
 // F3: D1 uses 'uuid' field name, not 'id'
-interface D1Database { uuid: string; name: string }
-interface KvNamespace { id: string; title: string }
-interface Queue { queue_name: string }
-interface SecretsStore { id: string; name: string }
+interface D1Database {
+  uuid: string;
+  name: string;
+}
+interface KvNamespace {
+  id: string;
+  title: string;
+}
+interface Queue {
+  queue_name: string;
+}
+interface SecretsStore {
+  id: string;
+  name: string;
+}
 
 const provisionD1 = (state: ResourceState): ResourceState => {
   console.log('Provisioning D1 database…');
@@ -325,7 +376,9 @@ const provisionR2 = (state: ResourceState): ResourceState => {
   if (result.status !== 0) {
     // F10: Try JSON parse for exact name match, fallback to substring
     const listResult = wrangler(['r2', 'bucket', 'list', '--json']);
-    interface R2Bucket { name: string }
+    interface R2Bucket {
+      name: string;
+    }
     const parsed = parseWranglerList<R2Bucket>(listResult, 'r2-list');
     if (parsed.ok) {
       const existing = parsed.data.find((b) => b.name === 'unimailbox-attachments');
@@ -339,7 +392,9 @@ const provisionR2 = (state: ResourceState): ResourceState => {
     }
     // Fallback to substring match with warning
     if (listResult.stdout.includes('unimailbox-attachments')) {
-      console.log('  Bucket already exists: unimailbox-attachments (detected via substring fallback)');
+      console.log(
+        '  Bucket already exists: unimailbox-attachments (detected via substring fallback)',
+      );
       return { ...state, r2Bucket: 'unimailbox-attachments' };
     }
     console.error(`Failed to create R2 bucket. Exit code: ${result.status}`);
@@ -349,7 +404,11 @@ const provisionR2 = (state: ResourceState): ResourceState => {
   return { ...state, r2Bucket: 'unimailbox-attachments' };
 };
 
-const provisionKv = (state: ResourceState, binding: 'SETUP_SESSION' | 'CACHE', title: string): ResourceState => {
+const provisionKv = (
+  state: ResourceState,
+  binding: 'SETUP_SESSION' | 'CACHE',
+  title: string,
+): ResourceState => {
   console.log(`Provisioning KV namespace: ${binding}…`);
   const existingId = binding === 'SETUP_SESSION' ? state.kvSetupSessionId : state.kvCacheId;
   if (existingId) {
@@ -449,7 +508,9 @@ const provisionSecretsStore = (state: ResourceState): ResourceState => {
     }
   } else {
     // F4: Parse failures must be visible
-    console.error(`Warning: could not parse wrangler list output for secrets-store (${parsed.error}).`);
+    console.error(
+      `Warning: could not parse wrangler list output for secrets-store (${parsed.error}).`,
+    );
     console.error('Proceeding to create. If the Secrets Store already exists, create will fail.');
     console.error('Delete .cloudflare-resources.json and re-run if needed.');
   }
@@ -459,7 +520,13 @@ const provisionSecretsStore = (state: ResourceState): ResourceState => {
     return { ...state, secretsStoreId: '<dry-run-id>' };
   }
 
-  const createResult = wrangler(['secrets-store', 'store', 'create', 'unimailbox-secrets', '--json']);
+  const createResult = wrangler([
+    'secrets-store',
+    'store',
+    'create',
+    'unimailbox-secrets',
+    '--json',
+  ]);
   const created = parseWranglerSingle<SecretsStore>(createResult, 'secrets-store-create');
   if (!created.ok) {
     console.error(`Failed to create Secrets Store: ${created.error}`);
@@ -510,11 +577,19 @@ const setSecrets = (state: ResourceState): ResourceState => {
       console.log('  [dry-run] Would set INSTALLATION_TOKEN');
     } else {
       // F2: Use wranglerSecret wrapper (stdin input, no --value flag)
-      const result = wranglerSecret([
-        'secrets-store', 'secret', 'create', state.secretsStoreId,
-        '--name', 'INSTALLATION_TOKEN',
-        '--scopes', 'workers',
-      ], token);
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'create',
+          state.secretsStoreId,
+          '--name',
+          'INSTALLATION_TOKEN',
+          '--scopes',
+          'workers',
+        ],
+        token,
+      );
       if (result.status !== 0) {
         console.error('Failed to set INSTALLATION_TOKEN');
         process.exit(result.status ?? 1); // F12: propagate status
@@ -528,11 +603,19 @@ const setSecrets = (state: ResourceState): ResourceState => {
       console.log('  [dry-run] Would update INSTALLATION_TOKEN');
     } else {
       // F2: Use wranglerSecret wrapper (stdin input, no --value flag)
-      const result = wranglerSecret([
-        'secrets-store', 'secret', 'update', state.secretsStoreId,
-        '--name', 'INSTALLATION_TOKEN',
-        '--scopes', 'workers',
-      ], token);
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'update',
+          state.secretsStoreId,
+          '--name',
+          'INSTALLATION_TOKEN',
+          '--scopes',
+          'workers',
+        ],
+        token,
+      );
       if (result.status !== 0) {
         console.error('Failed to update INSTALLATION_TOKEN');
         process.exit(result.status ?? 1); // F12: propagate status
@@ -551,11 +634,19 @@ const setSecrets = (state: ResourceState): ResourceState => {
       console.log('  [dry-run] Would set CREDENTIAL_ENCRYPTION_KEY');
     } else {
       // F2: Use wranglerSecret wrapper (stdin input, no --value flag)
-      const result = wranglerSecret([
-        'secrets-store', 'secret', 'create', state.secretsStoreId,
-        '--name', 'CREDENTIAL_ENCRYPTION_KEY',
-        '--scopes', 'workers',
-      ], key);
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'create',
+          state.secretsStoreId,
+          '--name',
+          'CREDENTIAL_ENCRYPTION_KEY',
+          '--scopes',
+          'workers',
+        ],
+        key,
+      );
       if (result.status !== 0) {
         console.error('Failed to set CREDENTIAL_ENCRYPTION_KEY');
         process.exit(result.status ?? 1); // F12: propagate status
@@ -569,11 +660,19 @@ const setSecrets = (state: ResourceState): ResourceState => {
       console.log('  [dry-run] Would update CREDENTIAL_ENCRYPTION_KEY');
     } else {
       // F2: Use wranglerSecret wrapper (stdin input, no --value flag)
-      const result = wranglerSecret([
-        'secrets-store', 'secret', 'update', state.secretsStoreId,
-        '--name', 'CREDENTIAL_ENCRYPTION_KEY',
-        '--scopes', 'workers',
-      ], key);
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'update',
+          state.secretsStoreId,
+          '--name',
+          'CREDENTIAL_ENCRYPTION_KEY',
+          '--scopes',
+          'workers',
+        ],
+        key,
+      );
       if (result.status !== 0) {
         console.error('Failed to update CREDENTIAL_ENCRYPTION_KEY');
         process.exit(result.status ?? 1); // F12: propagate status
@@ -677,10 +776,14 @@ export const NO_PENDING_LOG_FORMAT = 'No pending migrations';
 
 const readRemoteApplied = (): string[] => {
   const r = wrangler([
-    'd1', 'execute', 'DB',
-    '--config', RESOLVED_CONFIG_PATH,
+    'd1',
+    'execute',
+    'DB',
+    '--config',
+    RESOLVED_CONFIG_PATH,
     '--remote',
-    '--command', 'SELECT name FROM d1_migrations ORDER BY name',
+    '--command',
+    'SELECT name FROM d1_migrations ORDER BY name',
     '--json',
   ]);
   if (r.status !== 0) {
@@ -733,7 +836,9 @@ const runRemoteMigrations = (): void => {
 
   // List migration files (F6: use shared MIGRATION_FILE regex)
   const migrationsDir = resolve(REPO, 'migrations');
-  const files = readdirSync(migrationsDir).filter((f: string) => MIGRATION_FILE.test(f)).sort();
+  const files = readdirSync(migrationsDir)
+    .filter((f: string) => MIGRATION_FILE.test(f))
+    .sort();
 
   // Read the remote applied set — exit 1 on parse failure (handled inside).
   const applied = readRemoteApplied();
@@ -759,15 +864,21 @@ const runRemoteMigrations = (): void => {
 
   for (const file of pending) {
     if (!MIGRATION_FILE.test(file)) {
-      console.error(`Refusing migration filename: ${file} (must match /\\d{4}_[A-Za-z0-9_-]+\\.sql\\$/).`);
+      console.error(
+        `Refusing migration filename: ${file} (must match /\\d{4}_[A-Za-z0-9_-]+\\.sql\\$/).`,
+      );
       process.exit(1);
     }
     console.log(`  Applying ${file}…`);
     const result = wrangler([
-      'd1', 'execute', 'DB',
-      '--config', RESOLVED_CONFIG_PATH,
+      'd1',
+      'execute',
+      'DB',
+      '--config',
+      RESOLVED_CONFIG_PATH,
       '--remote',
-      '--file', resolve(migrationsDir, file),
+      '--file',
+      resolve(migrationsDir, file),
     ]);
     if (result.status !== 0) {
       console.error(`Failed to apply migration ${file}`);
@@ -808,7 +919,7 @@ const deploy = async (): Promise<void> => {
         console.error(`  Failed to fetch ${healthzUrl}: status ${response.status}`);
         process.exit(1);
       }
-      const body = await response.json() as { ok: boolean };
+      const body = (await response.json()) as { ok: boolean };
       if (body.ok !== true) {
         console.error(`  Healthz check failed: response.ok is not true`);
         console.error(`  Response body: ${JSON.stringify(body)}`);
@@ -821,7 +932,9 @@ const deploy = async (): Promise<void> => {
     }
   } else {
     console.log('  Deployed (could not extract URL for healthz check)');
-    console.log('  Note: If workers_dev is false, configure a route or custom domain, then verify manually.');
+    console.log(
+      '  Note: If workers_dev is false, configure a route or custom domain, then verify manually.',
+    );
   }
 };
 
@@ -833,11 +946,17 @@ const main = async (env: string): Promise<void> => {
 
   // F5: Confirmation prompt for --force-secrets
   if (forceSecrets && !dryRun) {
-    console.error('\nWARNING: --force-secrets will overwrite INSTALLATION_TOKEN and CREDENTIAL_ENCRYPTION_KEY.');
-    console.error('If CREDENTIAL_ENCRYPTION_KEY is overwritten, all encrypted credentials in the database');
-    console.error('will become permanently undecryptable (ADR-007). A re-encryption maintenance job does');
+    console.error(
+      '\nWARNING: --force-secrets will overwrite INSTALLATION_TOKEN and CREDENTIAL_ENCRYPTION_KEY.',
+    );
+    console.error(
+      'If CREDENTIAL_ENCRYPTION_KEY is overwritten, all encrypted credentials in the database',
+    );
+    console.error(
+      'will become permanently undecryptable (ADR-007). A re-encryption maintenance job does',
+    );
     console.error('not yet exist.\n');
-    console.error('Type \'yes\' to continue: ');
+    console.error("Type 'yes' to continue: ");
 
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {

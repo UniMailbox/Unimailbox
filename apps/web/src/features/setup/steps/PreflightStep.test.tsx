@@ -8,7 +8,13 @@ import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CURRENT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { PreflightStep } from './PreflightStep';
-import { jsonResponse, errorResponse, lastPathname, renderStep, spyFetch } from '../../../test-utils';
+import {
+  jsonResponse,
+  errorResponse,
+  lastPathname,
+  renderStep,
+  spyFetch,
+} from '../../../test-utils';
 
 afterEach(() => {
   cleanup();
@@ -30,9 +36,7 @@ describe('PreflightStep', () => {
     await waitFor(() => {
       expect(screen.getByTestId('binding-d1').getAttribute('data-present')).toBe('true');
     });
-    expect(screen.getByTestId('schema-version').textContent).toContain(
-      CURRENT_SCHEMA_VERSION,
-    );
+    expect(screen.getByTestId('schema-version').textContent).toContain(CURRENT_SCHEMA_VERSION);
   });
 
   it('disables Continue when schemaVersion drifts (AC #6)', async () => {

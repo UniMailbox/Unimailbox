@@ -35,12 +35,8 @@ function emit(level: LogLevel, fields: LogFields, context?: LogContext): void {
 }
 
 export const logger = {
-  debug: (fields: LogFields, context?: LogContext): void =>
-    emit('debug', fields, context),
-  info: (fields: LogFields, context?: LogContext): void =>
-    emit('info', fields, context),
-  warn: (fields: LogFields, context?: LogContext): void =>
-    emit('warn', fields, context),
-  error: (fields: LogFields, context?: LogContext): void =>
-    emit('error', fields, context),
+  debug: (fields: LogFields, context?: LogContext): void => emit('debug', fields, context),
+  info: (fields: LogFields, context?: LogContext): void => emit('info', fields, context),
+  warn: (fields: LogFields, context?: LogContext): void => emit('warn', fields, context),
+  error: (fields: LogFields, context?: LogContext): void => emit('error', fields, context),
 } as const;

@@ -24,9 +24,19 @@
  * (D-CAP-032-D plus the live set).
  */
 export type HttpStatusCode =
-  | 200 | 201 | 204
-  | 400 | 401 | 403 | 404 | 409 | 413 | 429
-  | 500 | 502 | 503;
+  | 200
+  | 201
+  | 204
+  | 400
+  | 401
+  | 403
+  | 404
+  | 409
+  | 413
+  | 429
+  | 500
+  | 502
+  | 503;
 
 /**
  * The canonical error-code catalog.

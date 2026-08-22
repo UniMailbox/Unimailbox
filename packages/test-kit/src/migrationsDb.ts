@@ -56,7 +56,7 @@ function splitSql(sql: string): string[] {
     statements.push(current.trim());
   }
 
-  return statements.filter(s => s.trim());
+  return statements.filter((s) => s.trim());
 }
 
 /**
@@ -83,7 +83,10 @@ export async function migrationsDb(): Promise<D1Database> {
     { name: '0010_blocklist_and_role_policies', queries: splitSql(blocklistAndRolePoliciesSql) },
     { name: '0011_message_event_time', queries: splitSql(messageEventTimeSql) },
     { name: '0012_webhook_event_time', queries: splitSql(webhookEventTimeSql) },
-    { name: '0013_webhook_delivery_message_index', queries: splitSql(webhookDeliveryMessageIndexSql) },
+    {
+      name: '0013_webhook_delivery_message_index',
+      queries: splitSql(webhookDeliveryMessageIndexSql),
+    },
   ]);
   return mod.env.DB;
 }

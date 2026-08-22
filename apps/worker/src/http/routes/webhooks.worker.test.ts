@@ -60,11 +60,10 @@ async function seedConnectionAndMessage(
   // IDOR regression test) seed two independent connections inside one test
   // — the second call would otherwise trip the PK on installation_state.
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  await env.DB
-    .prepare(
-      `INSERT OR IGNORE INTO installation_state (id, status, current_step, schema_version, updated_at, created_at)
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO installation_state (id, status, current_step, schema_version, updated_at, created_at)
        VALUES (1, 'complete', 'complete', 1, ?, ?)`,
-    )
+  )
     .bind(now, now)
     .run();
 
@@ -114,34 +113,29 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     });
     const signature = await computeHmac(body, WEBHOOK_SECRET);
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
 
     expect(response.status).toBe(200);
     const json = await response.json();
     expect(json).toEqual({ data: { ok: true } });
 
     // Message status flipped 'sent' → 'delivered'.
-    const message = await env.DB
-      .prepare('SELECT status FROM messages WHERE id = ?')
+    const message = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
       .bind(messageId)
       .first<{ status: string }>();
     expect(message?.status).toBe('delivered');
 
     // webhook_deliveries row persisted with the raw payload verbatim.
-    const delivery = await env.DB
-      .prepare(
-        'SELECT event_type, raw_payload, message_id, status FROM webhook_deliveries WHERE connection_id = ?',
-      )
+    const delivery = await env.DB.prepare(
+      'SELECT event_type, raw_payload, message_id, status FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionId)
       .first<{ event_type: string; raw_payload: string; message_id: string; status: string }>();
     expect(delivery?.event_type).toBe('delivered');
@@ -157,17 +151,14 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     // Wrong signature: HMAC of a different body.
     const signature = await computeHmac('tampered', WEBHOOK_SECRET);
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
 
     expect(response.status).toBe(401);
     const responseBody = (await response.json()) as {
@@ -177,9 +168,9 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     expect(responseBody.error.requestId).toMatch(UUID_V4_REGEX);
 
     // No delivery row should have been written for a rejected payload.
-    const count = await env.DB
-      .prepare('SELECT COUNT(*) AS n FROM webhook_deliveries')
-      .first<{ n: number }>();
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM webhook_deliveries').first<{
+      n: number;
+    }>();
     expect(count?.n).toBe(0);
   });
 
@@ -188,14 +179,11 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
 
     const body = JSON.stringify({ event: 'delivered', messageId: PROVIDER_MESSAGE_ID });
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': 'application/json' },
+    });
 
     expect(response.status).toBe(401);
     const responseBody = (await response.json()) as {
@@ -238,17 +226,14 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     const body = JSON.stringify({ event: 'delivered', messageId: PROVIDER_MESSAGE_ID });
     const signature = await computeHmac(body, WEBHOOK_SECRET);
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
 
     expect(response.status).toBe(409);
     const responseBody = (await response.json()) as {
@@ -267,28 +252,25 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     });
     const signature = await computeHmac(body, WEBHOOK_SECRET);
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
 
     expect(response.status).toBe(200);
 
-    const message = await env.DB
-      .prepare('SELECT status FROM messages WHERE id = ?')
+    const message = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
       .bind(messageId)
       .first<{ status: string }>();
     expect(message?.status).toBe('bounced');
 
-    const delivery = await env.DB
-      .prepare('SELECT event_type FROM webhook_deliveries WHERE connection_id = ?')
+    const delivery = await env.DB.prepare(
+      'SELECT event_type FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionId)
       .first<{ event_type: string }>();
     expect(delivery?.event_type).toBe('bounce');
@@ -306,16 +288,14 @@ describe('POST /api/v1/webhooks ordering (CAP-029 / R-MESSAGE-007)', () => {
    * operator inspects when triaging a mis-ordering incident.
    */
   async function readState(messageId: string, connectionId: string) {
-    const message = await env.DB
-      .prepare(
-        'SELECT status, provider_event_time FROM messages WHERE id = ?',
-      )
+    const message = await env.DB.prepare(
+      'SELECT status, provider_event_time FROM messages WHERE id = ?',
+    )
       .bind(messageId)
       .first<{ status: string; provider_event_time: number | null }>();
-    const delivery = await env.DB
-      .prepare(
-        'SELECT event_type, event_time, event_time_source FROM webhook_deliveries WHERE connection_id = ? ORDER BY created_at DESC LIMIT 1',
-      )
+    const delivery = await env.DB.prepare(
+      'SELECT event_type, event_time, event_time_source FROM webhook_deliveries WHERE connection_id = ? ORDER BY created_at DESC LIMIT 1',
+    )
       .bind(connectionId)
       .first<{
         event_type: string;
@@ -331,17 +311,14 @@ describe('POST /api/v1/webhooks ordering (CAP-029 / R-MESSAGE-007)', () => {
   ): Promise<Response> {
     const body = JSON.stringify(event);
     const signature = await computeHmac(body, WEBHOOK_SECRET);
-    return SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    return SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
   }
 
   // CAP-030: A2 (a strictly newer event of any rank wins over an older one)
@@ -442,19 +419,20 @@ describe('POST /api/v1/webhooks ordering (CAP-029 / R-MESSAGE-007)', () => {
     // Both jobs carry the same provider_message_id. The fix must scope the
     // lookup to the receiving connection.
     await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE outbound_jobs SET provider_message_id = ? WHERE message_id = ?`,
-      ).bind(PROVIDER_MESSAGE_ID, messageIdA),
-      env.DB.prepare(
-        `UPDATE outbound_jobs SET provider_message_id = ? WHERE message_id = ?`,
-      ).bind(PROVIDER_MESSAGE_ID, messageIdB),
+      env.DB.prepare(`UPDATE outbound_jobs SET provider_message_id = ? WHERE message_id = ?`).bind(
+        PROVIDER_MESSAGE_ID,
+        messageIdA,
+      ),
+      env.DB.prepare(`UPDATE outbound_jobs SET provider_message_id = ? WHERE message_id = ?`).bind(
+        PROVIDER_MESSAGE_ID,
+        messageIdB,
+      ),
     ]);
 
     // Sanity: confirm the collision is in place — both jobs have the same id.
-    const collision = await env.DB
-      .prepare(
-        `SELECT COUNT(*) AS n FROM outbound_jobs WHERE provider_message_id = ?`,
-      )
+    const collision = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE provider_message_id = ?`,
+    )
       .bind(PROVIDER_MESSAGE_ID)
       .first<{ n: number }>();
     expect(collision?.n).toBe(2);
@@ -465,41 +443,38 @@ describe('POST /api/v1/webhooks ordering (CAP-029 / R-MESSAGE-007)', () => {
       messageId: PROVIDER_MESSAGE_ID,
     });
     const signatureA = await computeHmac(body, WEBHOOK_SECRET);
-    const responseA = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionIdA}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signatureA,
-        },
+    const responseA = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionIdA}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signatureA,
       },
-    );
+    });
     expect(responseA.status).toBe(200);
 
     // Message A flipped 'sent' → 'delivered' — the legitimate owner.
-    const messageA = await env.DB
-      .prepare('SELECT status FROM messages WHERE id = ?')
+    const messageA = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
       .bind(messageIdA)
       .first<{ status: string }>();
     expect(messageA?.status).toBe('delivered');
 
     // Message B is unchanged — the IDOR is closed. A pre-fix implementation
     // would have flipped B too because the lookup ignored connection_id.
-    const messageB = await env.DB
-      .prepare('SELECT status FROM messages WHERE id = ?')
+    const messageB = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
       .bind(messageIdB)
       .first<{ status: string }>();
     expect(messageB?.status).toBe('sent');
 
     // Audit trail: only connection A has a delivery row.
-    const deliveriesA = await env.DB
-      .prepare('SELECT COUNT(*) AS n FROM webhook_deliveries WHERE connection_id = ?')
+    const deliveriesA = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionIdA)
       .first<{ n: number }>();
-    const deliveriesB = await env.DB
-      .prepare('SELECT COUNT(*) AS n FROM webhook_deliveries WHERE connection_id = ?')
+    const deliveriesB = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionIdB)
       .first<{ n: number }>();
     expect(deliveriesA?.n).toBe(1);
@@ -659,12 +634,10 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
         `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
          VALUES (?, ?, 1, X'00', X'000000000000000000000000', X'00000000000000000000000000000000', ?, ?)`,
       ).bind(credentialId, `cred-${connectionId}`, now, now),
-      env.DB
-        .prepare(
-          `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, webhook_secret, created_at, updated_at)
+      env.DB.prepare(
+        `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, webhook_secret, created_at, updated_at)
            VALUES (?, 'brevo', ?, ?, 'active', ?, ?, ?)`,
-        )
-        .bind(connectionId, `conn-${connectionId}`, credentialId, WEBHOOK_SECRET, now, now),
+      ).bind(connectionId, `conn-${connectionId}`, credentialId, WEBHOOK_SECRET, now, now),
     ]);
 
     return { connectionId };
@@ -697,24 +670,18 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
         `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
          VALUES (?, ?, 1, X'00', X'000000000000000000000000', X'00000000000000000000000000000000', ?, ?)`,
       ).bind(credentialId, `cred-${connectionId}`, now, now),
-      env.DB
-        .prepare(
-          `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, webhook_secret, created_at, updated_at)
+      env.DB.prepare(
+        `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, webhook_secret, created_at, updated_at)
            VALUES (?, 'brevo', ?, ?, 'active', ?, ?, ?)`,
-        )
-        .bind(connectionId, `conn-${connectionId}`, credentialId, WEBHOOK_SECRET, now, now),
-      env.DB
-        .prepare(
-          `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body, references_header, status, created_at, updated_at)
+      ).bind(connectionId, `conn-${connectionId}`, credentialId, WEBHOOK_SECRET, now, now),
+      env.DB.prepare(
+        `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body, references_header, status, created_at, updated_at)
            VALUES (?, 'sender@example.com', 'Sender', 'early', '', '', '', 'sending', ?, ?)`,
-        )
-        .bind(messageId, now, now),
-      env.DB
-        .prepare(
-          `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, provider_message_id, created_at, updated_at)
+      ).bind(messageId, now, now),
+      env.DB.prepare(
+        `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, provider_message_id, created_at, updated_at)
            VALUES (?, ?, ?, 'sending', NULL, ?, ?)`,
-        )
-        .bind(jobId, messageId, connectionId, now, now),
+      ).bind(jobId, messageId, connectionId, now, now),
     ]);
 
     return { connectionId, messageId, jobId };
@@ -730,23 +697,19 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
 
     const body = JSON.stringify({ event: 'delivered', messageId: orphanMessageId });
     const signature = await computeHmac(body, WEBHOOK_SECRET);
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
     expect(response.status).toBe(200);
 
-    const delivery = await env.DB
-      .prepare(
-        'SELECT message_id, raw_payload, event_type FROM webhook_deliveries WHERE connection_id = ?',
-      )
+    const delivery = await env.DB.prepare(
+      'SELECT message_id, raw_payload, event_type FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionId)
       .first<{ message_id: string | null; raw_payload: string; event_type: string }>();
     expect(delivery).not.toBeNull();
@@ -762,37 +725,32 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
 
     const body = JSON.stringify({ event: 'delivered', messageId: 'orphan@id' });
     const signature = await computeHmac(body, WEBHOOK_SECRET);
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
     expect(response.status).toBe(200);
 
     // The audit row is the contract proof: every webhook delivery writes
     // a webhook.delivered audit row carrying the requestId. R-AUDIT-001
     // + D-CAP-029-A atomicity.
-    const row = await env.DB
-      .prepare(
-        `SELECT id, action, resource_type, resource_id, actor_user_id, request_id, metadata
+    const row = await env.DB.prepare(
+      `SELECT id, action, resource_type, resource_id, actor_user_id, request_id, metadata
          FROM audit_events
          WHERE action = 'webhook.delivered'`,
-      )
-      .first<{
-        id: string;
-        action: string;
-        resource_type: string;
-        resource_id: string | null;
-        actor_user_id: string | null;
-        request_id: string | null;
-        metadata: string | null;
-      }>();
+    ).first<{
+      id: string;
+      action: string;
+      resource_type: string;
+      resource_id: string | null;
+      actor_user_id: string | null;
+      request_id: string | null;
+      metadata: string | null;
+    }>();
     expect(row).not.toBeNull();
     expect(row?.action).toBe('webhook.delivered');
     expect(row?.resource_type).toBe('message');
@@ -819,17 +777,14 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
 
     const body = JSON.stringify({ event: 'delivered', messageId: PROVIDER_MESSAGE_ID });
     const signature = await computeHmac(body, WEBHOOK_SECRET);
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
     expect(response.status).toBe(200);
 
     // D-CAP-029-A: when the batch succeeds, all three writes are
@@ -837,24 +792,22 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
     // audit row are the single-transaction proof of co-commit. The
     // contrapositive — a failing batch leaves NONE of the three rows
     // visible — is asserted by the next test below.
-    const message = await env.DB
-      .prepare('SELECT status FROM messages WHERE id = ?')
+    const message = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
       .bind(messageId)
       .first<{ status: string }>();
     expect(message?.status).toBe('delivered');
 
-    const delivery = await env.DB
-      .prepare('SELECT message_id FROM webhook_deliveries WHERE connection_id = ?')
+    const delivery = await env.DB.prepare(
+      'SELECT message_id FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionId)
       .first<{ message_id: string | null }>();
     expect(delivery?.message_id).toBe(messageId);
 
-    const audit = await env.DB
-      .prepare(
-        `SELECT resource_id FROM audit_events
+    const audit = await env.DB.prepare(
+      `SELECT resource_id FROM audit_events
          WHERE action = 'webhook.delivered' AND resource_id IS NOT NULL`,
-      )
-      .first<{ resource_id: string }>();
+    ).first<{ resource_id: string }>();
     expect(audit?.resource_id).toBe(messageId);
   });
 
@@ -873,68 +826,57 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
     // we patch the factory function instead.
     const { connectionId, messageId } = await seedConnectionAndMessage();
 
-    const writerModule = await import(
-      '../../modules/admin/audit-event-writer'
-    );
-    const spy = vi
-      .spyOn(writerModule, 'createAuditEventWriter')
-      .mockImplementation((db) => ({
-        prepare: (input: AuditEventInput) => ({
-            statement: db
-              .prepare(
-                `INSERT INTO audit_events
+    const writerModule = await import('../../modules/admin/audit-event-writer');
+    const spy = vi.spyOn(writerModule, 'createAuditEventWriter').mockImplementation((db) => ({
+      prepare: (input: AuditEventInput) => ({
+        statement: db
+          .prepare(
+            `INSERT INTO audit_events
                    (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
                  VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`,
-              )
-              .bind(
-                input.id,
-                input.actorUserId,
-                input.resourceType,
-                input.resourceId,
-                input.requestId ?? null,
-                input.metadata ?? null,
-                input.createdAt,
-              ),
-          }),
-      }));
+          )
+          .bind(
+            input.id,
+            input.actorUserId,
+            input.resourceType,
+            input.resourceId,
+            input.requestId ?? null,
+            input.metadata ?? null,
+            input.createdAt,
+          ),
+      }),
+    }));
 
     try {
       const body = JSON.stringify({ event: 'delivered', messageId: PROVIDER_MESSAGE_ID });
       const signature = await computeHmac(body, WEBHOOK_SECRET);
-      const response = await SELF.fetch(
-        `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-        {
-          method: 'POST',
-          body,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Webhook-Signature': signature,
-          },
+      const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+        method: 'POST',
+        body,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': signature,
         },
-      );
+      });
       // The batch fails → Hono's error middleware returns 500.
       expect(response.status).toBe(500);
 
       // Contrapositive assertions: NONE of the three writes landed.
-      const message = await env.DB
-        .prepare('SELECT status FROM messages WHERE id = ?')
+      const message = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
         .bind(messageId)
         .first<{ status: string }>();
       expect(message?.status).not.toBe('delivered');
 
-      const delivery = await env.DB
-        .prepare(
-          'SELECT message_id FROM webhook_deliveries WHERE connection_id = ?',
-        )
+      const delivery = await env.DB.prepare(
+        'SELECT message_id FROM webhook_deliveries WHERE connection_id = ?',
+      )
         .bind(connectionId)
         .first<{ message_id: string | null }>();
       expect(delivery).toBeNull();
 
-      const audit = await env.DB
-        .prepare(
-          `SELECT COUNT(*) as n FROM audit_events WHERE action IS NULL`,
-        )
-        .first<{ n: number }>();
+      const audit = await env.DB.prepare(
+        `SELECT COUNT(*) as n FROM audit_events WHERE action IS NULL`,
+      ).first<{ n: number }>();
       expect(audit?.n).toBe(0);
     } finally {
       spy.mockRestore();
@@ -950,21 +892,19 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
     //    delivery row with message_id NULL.
     const body = JSON.stringify({ event: 'delivered', messageId: orphanId });
     const signature = await computeHmac(body, WEBHOOK_SECRET);
-    const r1 = await SELF.fetch(
-      `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        body,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
+    const r1 = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+    });
     expect(r1.status).toBe(200);
 
-    const before = await env.DB
-      .prepare('SELECT message_id FROM webhook_deliveries WHERE connection_id = ?')
+    const before = await env.DB.prepare(
+      'SELECT message_id FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionId)
       .first<{ message_id: string | null }>();
     expect(before?.message_id).toBeNull();
@@ -972,8 +912,7 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
     // 2. Queue consumer (processOutboundJob post-send) writes the
     //    provider_message_id back into outbound_jobs. We simulate it
     //    here directly so the test is independent of the consumer.
-    await env.DB
-      .prepare('UPDATE outbound_jobs SET provider_message_id = ? WHERE id = ?')
+    await env.DB.prepare('UPDATE outbound_jobs SET provider_message_id = ? WHERE id = ?')
       .bind(orphanId, jobId)
       .run();
 
@@ -998,19 +937,18 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
     // The delivery row now links to the message via the STORED
     // generated column provider_message_id + the back-filled
     // message_id.
-    const after = await env.DB
-      .prepare('SELECT message_id FROM webhook_deliveries WHERE connection_id = ?')
+    const after = await env.DB.prepare(
+      'SELECT message_id FROM webhook_deliveries WHERE connection_id = ?',
+    )
       .bind(connectionId)
       .first<{ message_id: string | null }>();
     expect(after?.message_id).toBe(messageId);
 
     // The reconciliation also wrote an audit row carrying the requestId.
-    const audit = await env.DB
-      .prepare(
-        `SELECT resource_id, metadata FROM audit_events
+    const audit = await env.DB.prepare(
+      `SELECT resource_id, metadata FROM audit_events
          WHERE action = 'webhook_delivery.reconcile'`,
-      )
-      .first<{ resource_id: string | null; metadata: string | null }>();
+    ).first<{ resource_id: string | null; metadata: string | null }>();
     expect(audit?.resource_id).toBe(messageId);
     const meta = JSON.parse(audit?.metadata ?? '{}') as {
       providerMessageId: string;

@@ -23,7 +23,7 @@
   // See work/active/CAP-001-monorepo-scaffold/task.md §Open questions #2.
 
   "observability": {
-    "enabled": true
+    "enabled": true,
   },
 
   // ---- D1 — primary relational store ----
@@ -34,28 +34,28 @@
     {
       "binding": "DB",
       "database_name": "unimailbox-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
-    }
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+    },
   ],
 
   // ---- R2 — attachment bytes ----
   "r2_buckets": [
     {
       "binding": "ATTACHMENTS",
-      "bucket_name": "unimailbox-attachments"
-    }
+      "bucket_name": "unimailbox-attachments",
+    },
   ],
 
   // ---- KV — setup session + cache ----
   "kv_namespaces": [
     {
       "binding": "SETUP_SESSION",
-      "id": "REPLACE_WITH_KV_SETUP_SESSION_ID"
+      "id": "REPLACE_WITH_KV_SETUP_SESSION_ID",
     },
     {
       "binding": "CACHE",
-      "id": "REPLACE_WITH_KV_CACHE_ID"
-    }
+      "id": "REPLACE_WITH_KV_CACHE_ID",
+    },
   ],
 
   // ---- Queue — outbound dispatch ----
@@ -68,15 +68,15 @@
     "producers": [
       {
         "binding": "OUTBOUND",
-        "queue": "unimailbox-outbound"
-      }
+        "queue": "unimailbox-outbound",
+      },
     ],
     "consumers": [
       {
         "queue": "unimailbox-outbound",
-        "max_retries": 5
-      }
-    ]
+        "max_retries": 5,
+      },
+    ],
   },
 
   // ---- Assets — Vite-built web bundle ----
@@ -95,7 +95,7 @@
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*"],
   },
 
   // ---- Triggers — scheduled handler ----
@@ -103,7 +103,7 @@
   // CAP-028: the outbound-job reclaim runs every 2 minutes (see
   // apps/worker/src/platform/outbox-config.ts for the lease TTL).
   "triggers": {
-    "crons": ["*/2 * * * *"]
+    "crons": ["*/2 * * * *"],
   },
 
   // ---- Secrets Store — secrets the Worker reads via env.<name> ----
@@ -111,17 +111,17 @@
     {
       "binding": "INSTALLATION_TOKEN",
       "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
-      "secret_name": "INSTALLATION_TOKEN"
+      "secret_name": "INSTALLATION_TOKEN",
     },
     {
       "binding": "CREDENTIAL_ENCRYPTION_KEY",
       "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
-      "secret_name": "CREDENTIAL_ENCRYPTION_KEY"
-    }
+      "secret_name": "CREDENTIAL_ENCRYPTION_KEY",
+    },
   ],
 
   // ---- Vars — non-secret env vars (placeholder values only) ----
   "vars": {
-    "ENVIRONMENT": "local"
-  }
+    "ENVIRONMENT": "local",
+  },
 }

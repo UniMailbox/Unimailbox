@@ -29,9 +29,7 @@ import { checkPermission } from '../../modules/admin';
  * app.get('/api/v1/messages', requirePermission('message.read'), handler);
  * ```
  */
-export function requirePermission(
-  key: PermissionKey,
-): MiddlewareHandler<AppEnv> {
+export function requirePermission(key: PermissionKey): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const userId = c.get('userId');
     if (!userId || typeof userId !== 'string') {

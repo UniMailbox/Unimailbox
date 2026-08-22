@@ -4,11 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BlocklistEntryRow } from '@unimailbox/contracts';
 import type { ParsedEmail } from '@unimailbox/email-core';
-import {
-  matchesAvailDomain,
-  matchesBanEmail,
-  matchesBlocklistEntry,
-} from './pattern-matchers';
+import { matchesAvailDomain, matchesBanEmail, matchesBlocklistEntry } from './pattern-matchers';
 
 function makeParsed(overrides: Partial<ParsedEmail> = {}): ParsedEmail {
   return {
@@ -27,10 +23,7 @@ function makeParsed(overrides: Partial<ParsedEmail> = {}): ParsedEmail {
   };
 }
 
-function blocklistEntry(
-  kind: 'subject' | 'content' | 'from',
-  pattern: string,
-): BlocklistEntryRow {
+function blocklistEntry(kind: 'subject' | 'content' | 'from', pattern: string): BlocklistEntryRow {
   return {
     id: 'test-id',
     kind,

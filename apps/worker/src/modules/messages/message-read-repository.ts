@@ -179,15 +179,7 @@ export async function listMessagesByMailbox(
      ORDER BY m.created_at DESC, m.id DESC
         LIMIT ?`,
     )
-    .bind(
-      userId,
-      mailboxId,
-      cursorCreatedAt,
-      cursorCreatedAt,
-      cursorCreatedAt,
-      cursorId,
-      limit,
-    )
+    .bind(userId, mailboxId, cursorCreatedAt, cursorCreatedAt, cursorCreatedAt, cursorId, limit)
     .all<MessageListRow>();
 
   const items: MessageListItem[] = (rows.results ?? []).map((row) => ({

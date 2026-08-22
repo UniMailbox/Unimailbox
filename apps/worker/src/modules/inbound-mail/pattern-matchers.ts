@@ -29,10 +29,7 @@ import type { ParsedEmail } from '@unimailbox/email-core';
  *
  * Pattern is treated as a literal substring — no regex, no wildcards (v1).
  */
-export function matchesBlocklistEntry(
-  parsed: ParsedEmail,
-  entry: BlocklistEntryRow,
-): boolean {
+export function matchesBlocklistEntry(parsed: ParsedEmail, entry: BlocklistEntryRow): boolean {
   // CAP-035 Code M2: the route lowercases the pattern at storage time
   // (admin-blocklist POST handler), so this matcher must not lowercase
   // it again. The parsed sides are still normalized here because the

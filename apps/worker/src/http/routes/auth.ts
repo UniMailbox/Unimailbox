@@ -17,15 +17,8 @@ import {
   loginRequestSchema,
   refreshRequestSchema,
 } from '@unimailbox/contracts';
-import {
-  findUserByEmail,
-  createSession,
-  findSessionByRefreshHash,
-} from '../../modules/identity';
-import {
-  findKeyByCodeHash,
-  prepareIncrementKeyUsage,
-} from '../../modules/onboarding';
+import { findUserByEmail, createSession, findSessionByRefreshHash } from '../../modules/identity';
+import { findKeyByCodeHash, prepareIncrementKeyUsage } from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { verifyPassword, hashPassword } from '../../platform/crypto';
@@ -57,10 +50,7 @@ const REFRESH_OPERATION = 'POST /api/v1/auth/refresh';
  * Used for refresh tokens (never stored plaintext per R-SECRET-003).
  */
 async function hashToken(token: string): Promise<string> {
-  const buffer = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(token),
-  );
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -115,9 +105,10 @@ export function authRoutes(): Hono<AppEnv> {
       }
       throw error;
     }
-    const code = typeof (rawBodyJson as { code?: unknown })?.code === 'string'
-      ? (rawBodyJson as { code: string }).code
-      : '';
+    const code =
+      typeof (rawBodyJson as { code?: unknown })?.code === 'string'
+        ? (rawBodyJson as { code: string }).code
+        : '';
     if (!code) {
       // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
       // registration code is extracted before schema.parse so the
@@ -231,9 +222,9 @@ export function authRoutes(): Hono<AppEnv> {
     );
 
     // 2. Find the member role ID (seed role from CAP-017)
-    const memberRoleResult = await c.env.DB
-      .prepare(`SELECT id FROM roles WHERE name = 'member' LIMIT 1`)
-      .first<{ id: string }>();
+    const memberRoleResult = await c.env.DB.prepare(
+      `SELECT id FROM roles WHERE name = 'member' LIMIT 1`,
+    ).first<{ id: string }>();
 
     if (!memberRoleResult) {
       throw new DomainError({
@@ -324,9 +315,10 @@ export function authRoutes(): Hono<AppEnv> {
       }
       throw error;
     }
-    const email = typeof (rawBodyJson as { email?: unknown })?.email === 'string'
-      ? (rawBodyJson as { email: string }).email
-      : '';
+    const email =
+      typeof (rawBodyJson as { email?: unknown })?.email === 'string'
+        ? (rawBodyJson as { email: string }).email
+        : '';
     if (!email) {
       // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
       // email is extracted before schema.parse so the actorId hash
@@ -363,11 +355,10 @@ export function authRoutes(): Hono<AppEnv> {
     if (existing) {
       assertSameRequestHash(existing, requestHash);
       // Same key + same hash: delete the old record and re-execute.
-      await c.env.DB
-        .prepare(
-          `DELETE FROM idempotency_records
+      await c.env.DB.prepare(
+        `DELETE FROM idempotency_records
            WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-        )
+      )
         .bind(actorId, LOGIN_OPERATION, idempotencyKey)
         .run();
     }
@@ -428,11 +419,9 @@ export function authRoutes(): Hono<AppEnv> {
     const expiresAt = Math.floor(now.getTime() / 1000) + refreshTokenExpirySeconds;
 
     // Store access token in CACHE KV with 15-minute TTL
-    await c.env.CACHE.put(
-      `auth:${accessToken}`,
-      JSON.stringify({ userId: user.id }),
-      { expirationTtl: accessTokenExpirySeconds },
-    );
+    await c.env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId: user.id }), {
+      expirationTtl: accessTokenExpirySeconds,
+    });
 
     // Create session in D1
     const sessionId = systemIds.uuid();
@@ -530,9 +519,10 @@ export function authRoutes(): Hono<AppEnv> {
       }
       throw error;
     }
-    const refreshToken = typeof (rawBodyJson as { refreshToken?: unknown })?.refreshToken === 'string'
-      ? (rawBodyJson as { refreshToken: string }).refreshToken
-      : '';
+    const refreshToken =
+      typeof (rawBodyJson as { refreshToken?: unknown })?.refreshToken === 'string'
+        ? (rawBodyJson as { refreshToken: string }).refreshToken
+        : '';
     if (!refreshToken) {
       // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
       // refreshToken is extracted before schema.parse so the actorId
@@ -569,11 +559,10 @@ export function authRoutes(): Hono<AppEnv> {
     if (existing) {
       assertSameRequestHash(existing, requestHash);
       // Same key + same hash: delete the old record and re-execute.
-      await c.env.DB
-        .prepare(
-          `DELETE FROM idempotency_records
+      await c.env.DB.prepare(
+        `DELETE FROM idempotency_records
            WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-        )
+      )
         .bind(actorId, REFRESH_OPERATION, idempotencyKey)
         .run();
     }
@@ -608,11 +597,9 @@ export function authRoutes(): Hono<AppEnv> {
     const accessTokenExpirySeconds = 15 * 60; // 15 minutes
 
     // Store new access token in CACHE KV
-    await c.env.CACHE.put(
-      `auth:${accessToken}`,
-      JSON.stringify({ userId: session.user_id }),
-      { expirationTtl: accessTokenExpirySeconds },
-    );
+    await c.env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId: session.user_id }), {
+      expirationTtl: accessTokenExpirySeconds,
+    });
 
     // Return new access token
     const successBody = JSON.stringify({
@@ -667,10 +654,9 @@ export function authRoutes(): Hono<AppEnv> {
     }
 
     // Find user by ID
-    const user = await c.env.DB
-      .prepare(
-        `SELECT id, email, display_name FROM users WHERE id = ? AND status = 'active'`,
-      )
+    const user = await c.env.DB.prepare(
+      `SELECT id, email, display_name FROM users WHERE id = ? AND status = 'active'`,
+    )
       .bind(userId)
       .first<{ id: string; email: string; display_name: string | null }>();
 

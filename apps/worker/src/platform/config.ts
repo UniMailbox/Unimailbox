@@ -16,9 +16,7 @@ export interface PlatformConfig extends SharedConfig {
 
 export function loadConfig(env: Env): PlatformConfig {
   const raw = env.ENVIRONMENT ?? 'local';
-  const environment: EnvironmentName = ALLOWED_ENVIRONMENTS.includes(
-    raw as EnvironmentName,
-  )
+  const environment: EnvironmentName = ALLOWED_ENVIRONMENTS.includes(raw as EnvironmentName)
     ? (raw as EnvironmentName)
     : 'local';
   return { environment, runtime: 'workerd' };

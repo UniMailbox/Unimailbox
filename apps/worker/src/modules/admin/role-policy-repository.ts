@@ -8,11 +8,7 @@
 // comment.
 
 import type { Database } from '../../platform/database';
-import type {
-  RolePolicy,
-  RolePolicyReader,
-  RolePolicyRow,
-} from '@unimailbox/contracts';
+import type { RolePolicy, RolePolicyReader, RolePolicyRow } from '@unimailbox/contracts';
 
 export interface SetRolePolicyInput {
   readonly roleId: string;
@@ -28,10 +24,7 @@ export interface SetRolePolicyInput {
  * default (banEmail=[], availDomain=[]) — callers must not synthesize an
  * empty row in storage, they just treat absence as default.
  */
-export async function getRolePolicy(
-  db: Database,
-  roleId: string,
-): Promise<RolePolicy | null> {
+export async function getRolePolicy(db: Database, roleId: string): Promise<RolePolicy | null> {
   const row = await db
     .prepare(
       `SELECT role_id, ban_email_patterns_json, avail_domain_patterns_json,
@@ -52,10 +45,7 @@ export async function getRolePolicy(
  * works whether the row already exists or not. role_id is the PRIMARY KEY,
  * so REPLACE is unambiguous.
  */
-export async function setRolePolicy(
-  db: Database,
-  input: SetRolePolicyInput,
-): Promise<RolePolicy> {
+export async function setRolePolicy(db: Database, input: SetRolePolicyInput): Promise<RolePolicy> {
   await prepareSetRolePolicy(db, input).run();
   return {
     roleId: input.roleId,
@@ -71,10 +61,7 @@ export async function setRolePolicy(
  * can fold it into a `db.batch([...])` together with the audit row and
  * the idempotency record. CAP-035 / R-AUDIT-001.
  */
-export function prepareSetRolePolicy(
-  db: Database,
-  input: SetRolePolicyInput,
-): D1PreparedStatement {
+export function prepareSetRolePolicy(db: Database, input: SetRolePolicyInput): D1PreparedStatement {
   const banJson = JSON.stringify(input.banEmail);
   const availJson = JSON.stringify(input.availDomain);
   return db

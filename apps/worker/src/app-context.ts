@@ -15,11 +15,7 @@ import { getObjectStore } from './platform/object-store';
 import { systemClock, type Clock } from './platform/clock';
 import { systemIds, type IdGenerator } from './platform/ids';
 import { logger, type LogFields, type LogContext } from './platform/logger';
-import type {
-  AuditEventWriter,
-  BlocklistReader,
-  RolePolicyReader,
-} from '@unimailbox/contracts';
+import type { AuditEventWriter, BlocklistReader, RolePolicyReader } from '@unimailbox/contracts';
 import {
   createAuditEventWriter,
   createBlocklistReader,

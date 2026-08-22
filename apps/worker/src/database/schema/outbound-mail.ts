@@ -32,21 +32,20 @@ export type NewEncryptedCredential = typeof encryptedCredentials.$inferInsert;
 // foreign key to encrypted_credentials. CAP-024 adds webhook_secret — a
 // per-connection HMAC key used to verify inbound webhook payloads before
 // JSON parse (R-INBOUND-SIGNATURE).
-export const providerConnections = sqliteTable(
-  'provider_connections',
-  {
-    id: text('id').primaryKey(),
-    providerKey: text('provider_key').notNull(),
-    label: text('label').notNull(),
-    credentialId: text('credential_id').notNull().references(() => encryptedCredentials.id),
-    status: text('status').notNull(), // 'active' | 'disabled' | 'invalid'
-    // R-INBOUND-SIGNATURE: HMAC-SHA256 key for verifying provider webhook
-    // bodies. NULL until ensureWebhookSecret generates one on first read.
-    webhookSecret: text('webhook_secret'),
-    createdAt: text('created_at').notNull(),
-    updatedAt: text('updated_at').notNull(),
-  },
-);
+export const providerConnections = sqliteTable('provider_connections', {
+  id: text('id').primaryKey(),
+  providerKey: text('provider_key').notNull(),
+  label: text('label').notNull(),
+  credentialId: text('credential_id')
+    .notNull()
+    .references(() => encryptedCredentials.id),
+  status: text('status').notNull(), // 'active' | 'disabled' | 'invalid'
+  // R-INBOUND-SIGNATURE: HMAC-SHA256 key for verifying provider webhook
+  // bodies. NULL until ensureWebhookSecret generates one on first read.
+  webhookSecret: text('webhook_secret'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
 
 export type ProviderConnection = typeof providerConnections.$inferSelect;
 export type NewProviderConnection = typeof providerConnections.$inferInsert;
@@ -67,7 +66,9 @@ export const webhookDeliveries = sqliteTable(
   'webhook_deliveries',
   {
     id: text('id').primaryKey(),
-    connectionId: text('connection_id').notNull().references(() => providerConnections.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => providerConnections.id, { onDelete: 'cascade' }),
     eventType: text('event_type').notNull(),
     rawPayload: text('raw_payload').notNull(),
     messageId: text('message_id').references(() => messages.id, { onDelete: 'set null' }),
@@ -92,11 +93,17 @@ export const outboundJobs = sqliteTable(
   'outbound_jobs',
   {
     id: text('id').primaryKey(),
-    messageId: text('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
-    providerConnectionId: text('provider_connection_id').notNull().references(() => providerConnections.id, { onDelete: 'cascade' }),
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    providerConnectionId: text('provider_connection_id')
+      .notNull()
+      .references(() => providerConnections.id, { onDelete: 'cascade' }),
     status: text('status', {
       enum: ['queued', 'sending', 'sent', 'delayed', 'bounced', 'complained', 'failed'],
-    }).notNull().default('queued'),
+    })
+      .notNull()
+      .default('queued'),
     attempts: integer('attempts').notNull().default(0),
     maxAttempts: integer('max_attempts').notNull().default(3),
     lockedAt: text('locked_at'),

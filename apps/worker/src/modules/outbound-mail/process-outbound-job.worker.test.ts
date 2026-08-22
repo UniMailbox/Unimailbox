@@ -97,15 +97,27 @@ async function seedJob(opts: SeedOptions = {}): Promise<{ jobId: string; message
     env.DB.prepare(
       `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, locked_at, locked_by, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(jobId, messageId, connectionId, opts.status ?? 'queued', opts.attempts ?? 0, opts.maxAttempts ?? 3, opts.lockedAt ?? null, opts.lockedBy ?? null, now, now),
+    ).bind(
+      jobId,
+      messageId,
+      connectionId,
+      opts.status ?? 'queued',
+      opts.attempts ?? 0,
+      opts.maxAttempts ?? 3,
+      opts.lockedAt ?? null,
+      opts.lockedBy ?? null,
+      now,
+      now,
+    ),
   ]);
 
   return { jobId, messageId };
 }
 
 function fetchJob(jobId: string) {
-  return env.DB
-    .prepare('SELECT status, attempts, error_code, error_message, locked_at, locked_by FROM outbound_jobs WHERE id = ?')
+  return env.DB.prepare(
+    'SELECT status, attempts, error_code, error_message, locked_at, locked_by FROM outbound_jobs WHERE id = ?',
+  )
     .bind(jobId)
     .first<{
       status: string;
@@ -144,10 +156,7 @@ describe('processOutboundJob (AC2 — claim-first, R-OUTBOUND-007/009)', () => {
   });
 
   it('throws DomainError(LOCK_CONTENTION) without a provider call when another worker holds a live lease', async () => {
-    const liveLease = new Date(Date.now() + 60_000)
-      .toISOString()
-      .slice(0, 19)
-      .replace('T', ' ');
+    const liveLease = new Date(Date.now() + 60_000).toISOString().slice(0, 19).replace('T', ' ');
     const { jobId } = await seedJob({
       status: 'sending',
       lockedAt: liveLease,
@@ -226,12 +235,11 @@ describe('processOutboundJob (AC2 — claim-first, R-OUTBOUND-007/009)', () => {
     // Simulate a reclaim firing while this worker is inside adapter.send: the
     // send hook steals the row back to 'queued' before the success write runs.
     const adapter = makeMockAdapter(async () => {
-      await env.DB
-        .prepare(
-          `UPDATE outbound_jobs
+      await env.DB.prepare(
+        `UPDATE outbound_jobs
               SET status = 'queued', locked_at = NULL, locked_by = NULL
             WHERE id = ?`,
-        )
+      )
         .bind(jobId)
         .run();
       return { providerMessageId: 'brevo-raced', acceptedAt: new Date().toISOString() };
@@ -514,7 +522,9 @@ describe('processOutboundJob pre-send failures after a successful claim (H1 — 
             return async (): Promise<null> => null; // the race: row gone
           }
           const value = Reflect.get(s, prop, receiver);
-          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(s) : value;
+          return typeof value === 'function'
+            ? (value as (...a: unknown[]) => unknown).bind(s)
+            : value;
         },
       });
     const racingDb = new Proxy(realDb, {
@@ -670,14 +680,14 @@ describe('processOutboundJob post-send write failure (CAP-028 F2 — R-OUTBOUND-
     }));
 
     // CAP-029 M3 review-triage + CAP-030 direction guard: the precise SQL of the
-// post-send `updateMessageStatus` statement. Matched as a full string
-// (whitespace-normalised) so a future change that adds `provider_event_time`
-// to another statement cannot silently re-route that statement through the
-// failing proxy. The CAP-030 direction clause
-// `AND status IN (SELECT value FROM json_each(?))` now sits alongside the
-// CAP-029 rank CASE in the WHERE — both must be present for the proxy to
-// match. Update this constant when `updateMessageStatus` is refactored.
-const UPDATE_MESSAGE_STATUS_SQL = `UPDATE messages
+    // post-send `updateMessageStatus` statement. Matched as a full string
+    // (whitespace-normalised) so a future change that adds `provider_event_time`
+    // to another statement cannot silently re-route that statement through the
+    // failing proxy. The CAP-030 direction clause
+    // `AND status IN (SELECT value FROM json_each(?))` now sits alongside the
+    // CAP-029 rank CASE in the WHERE — both must be present for the proxy to
+    // match. Update this constant when `updateMessageStatus` is refactored.
+    const UPDATE_MESSAGE_STATUS_SQL = `UPDATE messages
           SET status = ?,
               provider_event_time = ?,
               sent_at = COALESCE(?, sent_at),
@@ -704,9 +714,9 @@ const UPDATE_MESSAGE_STATUS_SQL = `UPDATE messages
             )
           )`;
 
-function normalizeSql(s: string): string {
-  return s.replace(/\s+/g, ' ').trim();
-}
+    function normalizeSql(s: string): string {
+      return s.replace(/\s+/g, ' ').trim();
+    }
 
     // Same delegating-Proxy seam as the message-vanished test: every call
     // forwards to real D1 except the ONE post-send `updateMessageStatus`
@@ -730,7 +740,9 @@ function normalizeSql(s: string): string {
             };
           }
           const value = Reflect.get(s, prop, receiver);
-          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(s) : value;
+          return typeof value === 'function'
+            ? (value as (...a: unknown[]) => unknown).bind(s)
+            : value;
         },
       });
     const failingDb = new Proxy(realDb, {
@@ -874,13 +886,13 @@ describe('processOutboundJob end-to-end crash → reclaim → re-drive loop (H4 
     job = await fetchJob(jobId);
     expect(job?.status).toBe('sent');
     expect(job?.locked_by).toBeNull();
-    const message = await env.DB
-      .prepare('SELECT status FROM messages WHERE id = ?')
+    const message = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
       .bind(messageId)
       .first<{ status: string }>();
     expect(message?.status).toBe('sent');
-    const jobRow = await env.DB
-      .prepare('SELECT provider_message_id FROM outbound_jobs WHERE id = ?')
+    const jobRow = await env.DB.prepare(
+      'SELECT provider_message_id FROM outbound_jobs WHERE id = ?',
+    )
       .bind(jobId)
       .first<{ provider_message_id: string | null }>();
     expect(jobRow?.provider_message_id).toBe('brevo-recovered');
@@ -922,8 +934,9 @@ describe('processOutboundJob end-to-end crash → reclaim → re-drive loop (H4 
     expect(job?.status).toBe('sent');
     expect(job?.attempts).toBe(0); // no attempts burned by the duplicate drive
     expect(job?.locked_by).toBeNull();
-    const jobRow = await env.DB
-      .prepare('SELECT provider_message_id FROM outbound_jobs WHERE id = ?')
+    const jobRow = await env.DB.prepare(
+      'SELECT provider_message_id FROM outbound_jobs WHERE id = ?',
+    )
       .bind(jobId)
       .first<{ provider_message_id: string | null }>();
     expect(jobRow?.provider_message_id).toBe('brevo-exactly-once');

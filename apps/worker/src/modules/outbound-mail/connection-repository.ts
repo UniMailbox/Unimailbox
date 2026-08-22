@@ -32,15 +32,17 @@ export function prepareCreateConnection(
   db: D1Database,
   input: CreateConnectionInput,
 ): D1PreparedStatement {
-  return db.prepare(
-    'INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).bind(
-    input.id,
-    input.providerKey,
-    input.label,
-    input.credentialId,
-    input.status,
-    input.createdAt,
-    input.updatedAt,
-  );
+  return db
+    .prepare(
+      'INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    )
+    .bind(
+      input.id,
+      input.providerKey,
+      input.label,
+      input.credentialId,
+      input.status,
+      input.createdAt,
+      input.updatedAt,
+    );
 }

@@ -53,9 +53,7 @@ function defaultCtx(): ProviderRuntimeContext {
   return { env: {} };
 }
 
-export function stubOutboundAdapter(
-  providerKey: string = 'stub',
-): StubOutboundAdapter {
+export function stubOutboundAdapter(providerKey: string = 'stub'): StubOutboundAdapter {
   const calls: RecordedSend[] = [];
   let nextProviderMessageId = 'stub-provider-message-1';
   let nextAcceptedAt = '2026-01-01T00:00:00.000Z';
@@ -67,10 +65,7 @@ export function stubOutboundAdapter(
       // No-op: the stub has no remote to validate. Real adapters ping the
       // provider's auth endpoint.
     },
-    async send(
-      ctx: ProviderRuntimeContext,
-      msg: SendProviderMessage,
-    ): Promise<ProviderSendResult> {
+    async send(ctx: ProviderRuntimeContext, msg: SendProviderMessage): Promise<ProviderSendResult> {
       calls.push({ ctx, msg, sequence: calls.length });
       return {
         providerMessageId: nextProviderMessageId,
@@ -96,11 +91,7 @@ export function stubOutboundAdapter(
 // Quiet unused-symbol warnings for the helper reserved for future tests.
 void defaultCtx;
 
-export type FetchHandler =
-  | string
-  | number
-  | Response
-  | (() => Response | Promise<Response>);
+export type FetchHandler = string | number | Response | (() => Response | Promise<Response>);
 
 export interface StubFetch {
   (input: string | URL | Request, init?: RequestInit): Promise<Response>;
@@ -117,25 +108,16 @@ export function stubFetch(): StubFetch {
   const handlers = new Map<string, FetchHandler>();
   const requestedUrls: string[] = [];
 
-  const buildResponse = (
-    handler: FetchHandler,
-  ): Response | Promise<Response> => {
+  const buildResponse = (handler: FetchHandler): Response | Promise<Response> => {
     if (typeof handler === 'function') return handler();
     if (handler instanceof Response) return handler;
     if (typeof handler === 'number') return new Response(null, { status: handler });
     return new Response(handler, { status: 200 });
   };
 
-  const fn = (async (
-    input: string | URL | Request,
-    _init?: RequestInit,
-  ): Promise<Response> => {
+  const fn = (async (input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
     const raw =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const url = normaliseUrl(raw);
     requestedUrls.push(url);
     const handler = handlers.get(url);

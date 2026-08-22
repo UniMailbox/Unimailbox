@@ -59,10 +59,7 @@ async function completeSetup(): Promise<void> {
 }
 
 async function hashToken(token: string): Promise<string> {
-  const buffer = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(token),
-  );
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -92,9 +89,11 @@ async function createUserWithRole(
       now,
       now,
     ),
-    env.DB.prepare(
-      `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`,
-    ).bind(userId, roleName, now),
+    env.DB.prepare(`INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`).bind(
+      userId,
+      roleName,
+      now,
+    ),
   ]);
 
   return userId;
@@ -114,11 +113,9 @@ async function createSession(userId: string): Promise<string> {
     .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
     .run();
 
-  await env.CACHE.put(
-    `auth:${accessToken}`,
-    JSON.stringify({ userId }),
-    { expirationTtl: 15 * 60 },
-  );
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+    expirationTtl: 15 * 60,
+  });
 
   return accessToken;
 }
@@ -238,10 +235,9 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages', () => {
     const mailboxId = await createMailbox(domainId, ownerId);
 
     // otherId has message.read (member role) but is not a mailbox member.
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${otherToken}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${otherToken}` },
+    });
 
     expect(response.status).toBe(403);
     const body = await response.json();
@@ -254,10 +250,9 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages', () => {
     const domainId = await createDomain();
     const mailboxId = await createMailbox(domainId, ownerId);
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -280,10 +275,9 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages', () => {
       createdAt: '2026-01-02T00:00:00.000Z',
     });
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -352,10 +346,9 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages', () => {
 
     await insertMessage(mailboxId, { subject: 'shared' });
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${viewerToken}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -555,10 +548,9 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
     expect(viewerBody.data.isRead).toBe(0);
 
     // Also reflected in the list endpoint.
-    const viewerList = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${viewerToken}` } },
-    );
+    const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
     const viewerListBody = await viewerList.json();
     expect(viewerListBody.data.items[0].isRead).toBe(0);
   });
@@ -688,8 +680,9 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
     expect(secondBody).toEqual(firstBody);
 
     // Verify idempotency record was stored.
-    const record = await env.DB
-      .prepare('SELECT * FROM idempotency_records WHERE idempotency_key = ?')
+    const record = await env.DB.prepare(
+      'SELECT * FROM idempotency_records WHERE idempotency_key = ?',
+    )
       .bind(idempotencyKey)
       .first();
     expect(record).toBeDefined();
@@ -753,7 +746,9 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
     // already committed. The PATCH /read endpoint uses best-effort mode (record
     // INSERT after the business write), but the race path is still the same:
     // loser re-reads the winner's record and replays it.
-    const { sha256Hex, sqliteTimestamp, prepareCreateIdempotencyRecord } = await import('../../platform/idempotency');
+    const { sha256Hex, sqliteTimestamp, prepareCreateIdempotencyRecord } = await import(
+      '../../platform/idempotency'
+    );
     const requestHash = await sha256Hex(requestBody);
     const now = sqliteTimestamp(new Date());
     const successBody = JSON.stringify({ data: { ok: true } });
@@ -789,8 +784,9 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
     expect(loserBody.data).toEqual({ ok: true });
 
     // Verify no duplicate idempotency record was created (the loser replayed)
-    const recordCount = await env.DB
-      .prepare('SELECT COUNT(*) as count FROM idempotency_records WHERE idempotency_key = ?')
+    const recordCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM idempotency_records WHERE idempotency_key = ?',
+    )
       .bind(idempotencyKey)
       .first<{ count: number }>();
     expect(recordCount?.count).toBe(1);

@@ -58,4 +58,3 @@ describe('setup-session-store', () => {
     expect(useSetupSession.getState().sessionToken).toBeNull();
   });
 });
-

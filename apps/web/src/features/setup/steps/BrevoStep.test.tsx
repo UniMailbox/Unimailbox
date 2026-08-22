@@ -48,9 +48,7 @@ describe('BrevoStep', () => {
   });
 
   it('on 401 offers a Re-claim button (Security HIGH #2)', async () => {
-    const { fetchImpl } = spyFetch([
-      () => errorResponse('SESSION_EXPIRED', 'Token expired', 401),
-    ]);
+    const { fetchImpl } = spyFetch([() => errorResponse('SESSION_EXPIRED', 'Token expired', 401)]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <BrevoStep /> });
     await user.type(screen.getByLabelText(/^brevo api key$/i), 'xkeysib-secret');

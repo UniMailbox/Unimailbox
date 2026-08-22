@@ -36,8 +36,12 @@ const ENCRYPTION_KEY = 'a'.repeat(64);
  * vitest 4 otherwise flags the intermediate rejected promise as unhandled.
  */
 function makeMockAdapter(
-  sendImpl: (payload: { idempotencyKey: string; to: ReadonlyArray<{ address: string }> }) =>
-    Promise<{ providerMessageId: string; acceptedAt: string }> | { providerMessageId: string; acceptedAt: string },
+  sendImpl: (payload: {
+    idempotencyKey: string;
+    to: ReadonlyArray<{ address: string }>;
+  }) =>
+    | Promise<{ providerMessageId: string; acceptedAt: string }>
+    | { providerMessageId: string; acceptedAt: string },
 ): OutboundProviderAdapter & { sendCalls: Array<{ idempotencyKey: string; toCount: number }> } {
   const sendCalls: Array<{ idempotencyKey: string; toCount: number }> = [];
   const adapter: OutboundProviderAdapter = {
@@ -93,14 +97,7 @@ async function seedJob(): Promise<SeedResult> {
     env.DB.prepare(
       `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
        VALUES (?, 'brevo-api-key', 1, ?, ?, ?, ?, ?)`,
-    ).bind(
-      credentialId,
-      encrypted.ciphertext,
-      encrypted.iv,
-      encrypted.authTag,
-      now,
-      now,
-    ),
+    ).bind(credentialId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, now, now),
     env.DB.prepare(
       `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
        VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
@@ -139,16 +136,16 @@ describe('processOutboundJob', () => {
     expect(adapter.sendCalls[0]?.toCount).toBe(1);
 
     // Message row advanced to 'sent' with a sent_at timestamp.
-    const msg = await env.DB
-      .prepare('SELECT status, sent_at FROM messages WHERE id = ?')
+    const msg = await env.DB.prepare('SELECT status, sent_at FROM messages WHERE id = ?')
       .bind(messageId)
       .first<{ status: string; sent_at: string | null }>();
     expect(msg?.status).toBe('sent');
     expect(msg?.sent_at).not.toBeNull();
 
     // Job row advanced to 'sent' with the provider message id recorded.
-    const job = await env.DB
-      .prepare('SELECT status, provider_message_id, attempts FROM outbound_jobs WHERE id = ?')
+    const job = await env.DB.prepare(
+      'SELECT status, provider_message_id, attempts FROM outbound_jobs WHERE id = ?',
+    )
       .bind(jobId)
       .first<{ status: string; provider_message_id: string | null; attempts: number }>();
     expect(job?.status).toBe('sent');
@@ -176,10 +173,16 @@ describe('processOutboundJob', () => {
     expect((caught as Error).message).toBe('Brevo 503');
 
     // Job recorded the failure.
-    const job = await env.DB
-      .prepare('SELECT status, error_code, error_message, attempts FROM outbound_jobs WHERE id = ?')
+    const job = await env.DB.prepare(
+      'SELECT status, error_code, error_message, attempts FROM outbound_jobs WHERE id = ?',
+    )
       .bind(jobId)
-      .first<{ status: string; error_code: string | null; error_message: string | null; attempts: number }>();
+      .first<{
+        status: string;
+        error_code: string | null;
+        error_message: string | null;
+        attempts: number;
+      }>();
     // CAP-028: a first failure on a fresh attempts budget is retryable — the
     // row goes back to 'queued' (attempts 0 + 1 = 1 < max 3), not 'failed'.
     expect(job?.status).toBe('queued');
@@ -188,8 +191,7 @@ describe('processOutboundJob', () => {
 
     // The message stays 'queued' — only the queue consumer advancing the job
     // to 'sent' should flip the message.
-    const msg = await env.DB
-      .prepare('SELECT status FROM messages WHERE id = ?')
+    const msg = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
       .bind(messageId)
       .first<{ status: string }>();
     expect(msg?.status).toBe('queued');

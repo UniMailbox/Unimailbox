@@ -74,8 +74,7 @@ export function createApiClient(init: ApiClientInit): ApiClient {
       // request (PUT, PATCH, DELETE, POST) gets a fresh Idempotency-Key.
       // The server rejects reuse with a different body (409
       // IDEMPOTENCY_KEY_REUSED). GET/HEAD are safe — never need one.
-      const idempotent =
-        method !== 'GET' && method !== 'HEAD' && !headers.has('Idempotency-Key');
+      const idempotent = method !== 'GET' && method !== 'HEAD' && !headers.has('Idempotency-Key');
       if (idempotent) {
         headers.set('Idempotency-Key', uuid());
       }
@@ -102,11 +101,7 @@ export function createApiClient(init: ApiClientInit): ApiClient {
       // never sees a generic NetworkError, and the wizard's <ErrorPanel>
       // can surface the machine code per R-API-002.
       if (requestBody !== undefined && requestBody.length > MAX_BODY_BYTES) {
-        throw new ApiError(
-          'PAYLOAD_TOO_LARGE',
-          'Request body exceeds the 1 MB limit',
-          413,
-        );
+        throw new ApiError('PAYLOAD_TOO_LARGE', 'Request body exceeds the 1 MB limit', 413);
       }
 
       let attempt = 0;
@@ -162,12 +157,7 @@ export function createApiClient(init: ApiClientInit): ApiClient {
         // After this point the response is non-retryable. Parse the error
         // envelope and throw.
         const parsed = await parseErrorBody(response.clone());
-        lastError = new ApiError(
-          parsed.code,
-          parsed.message,
-          response.status,
-          parsed.requestId,
-        );
+        lastError = new ApiError(parsed.code, parsed.message, response.status, parsed.requestId);
         throw lastError;
       }
     },

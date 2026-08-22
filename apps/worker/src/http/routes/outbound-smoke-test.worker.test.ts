@@ -180,9 +180,9 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       expect(response.status).toBe(200);
 
       // Check the installation state
-      const state = await env.DB
-        .prepare('SELECT current_step, updated_at FROM installation_state WHERE id = 1')
-        .first<{ current_step: string; updated_at: string }>();
+      const state = await env.DB.prepare(
+        'SELECT current_step, updated_at FROM installation_state WHERE id = 1',
+      ).first<{ current_step: string; updated_at: string }>();
 
       if (!state) {
         throw new Error('Installation state not found');
@@ -291,9 +291,9 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       expect(response.status).toBe(502);
 
       // Verify step did NOT advance (should still be 'outbound-smoke')
-      const state = await env.DB
-        .prepare('SELECT current_step FROM installation_state WHERE id = 1')
-        .first<{ current_step: string }>();
+      const state = await env.DB.prepare(
+        'SELECT current_step FROM installation_state WHERE id = 1',
+      ).first<{ current_step: string }>();
 
       if (!state) {
         throw new Error('Installation state not found');
@@ -358,15 +358,15 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       const newSessionToken = await claimSession();
 
       // Manually set up domain (bypassing admin creation)
-      await env.DB
-        .prepare(
-          `INSERT INTO managed_domains (id, name, status, created_at, updated_at) VALUES (?, ?, 'active', ?, ?)`,
-        )
+      await env.DB.prepare(
+        `INSERT INTO managed_domains (id, name, status, created_at, updated_at) VALUES (?, ?, 'active', ?, ?)`,
+      )
         .bind('test-domain-id', 'example.com', FIXED_TIMESTAMP, FIXED_TIMESTAMP)
         .run();
 
-      await env.DB
-        .prepare(`UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`)
+      await env.DB.prepare(
+        `UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`,
+      )
         .bind(FIXED_TIMESTAMP)
         .run();
 
@@ -464,8 +464,9 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       expect(body1.data.providerMessageId).toBe('brevo-message-123');
 
       // Reset step to allow second call (simulating a replay attempt)
-      await env.DB
-        .prepare(`UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`)
+      await env.DB.prepare(
+        `UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`,
+      )
         .bind(FIXED_TIMESTAMP)
         .run();
 
@@ -491,7 +492,9 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       let callCount = 0;
       fetchSpy.mockImplementation(async () => {
         callCount++;
-        return new Response(JSON.stringify({ messageId: `brevo-msg-${callCount}` }), { status: 200 });
+        return new Response(JSON.stringify({ messageId: `brevo-msg-${callCount}` }), {
+          status: 200,
+        });
       });
 
       // First call
@@ -509,8 +512,9 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       expect(body1.data.providerMessageId).toBe('brevo-msg-1');
 
       // Reset step to allow second call
-      await env.DB
-        .prepare(`UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`)
+      await env.DB.prepare(
+        `UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`,
+      )
         .bind(FIXED_TIMESTAMP)
         .run();
 

@@ -49,10 +49,7 @@ export interface OutboundJobRow {
  */
 export function isJobTerminal(status: OutboundJobRow['status']): boolean {
   return (
-    status === 'sent' ||
-    status === 'failed' ||
-    status === 'bounced' ||
-    status === 'complained'
+    status === 'sent' || status === 'failed' || status === 'bounced' || status === 'complained'
   );
 }
 
@@ -65,33 +62,20 @@ export function isJobTerminal(status: OutboundJobRow['status']): boolean {
  * @param input — Job values (id, messageId, providerConnectionId, timestamps)
  * @returns D1PreparedStatement ready for batch execution
  */
-export function prepareCreateOutboundJob(
-  db: Database,
-  input: CreateJobInput,
-): D1PreparedStatement {
-  return db.prepare(
-    `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, created_at, updated_at)
+export function prepareCreateOutboundJob(db: Database, input: CreateJobInput): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, created_at, updated_at)
      VALUES (?, ?, ?, 'queued', 0, 3, ?, ?)`,
-  ).bind(
-    input.id,
-    input.messageId,
-    input.providerConnectionId,
-    input.createdAt,
-    input.updatedAt,
-  );
+    )
+    .bind(input.id, input.messageId, input.providerConnectionId, input.createdAt, input.updatedAt);
 }
 
 /**
  * Reads a single outbound job by ID. Returns null if not found.
  */
-export async function getOutboundJob(
-  db: Database,
-  jobId: string,
-): Promise<OutboundJobRow | null> {
-  return db
-    .prepare('SELECT * FROM outbound_jobs WHERE id = ?')
-    .bind(jobId)
-    .first<OutboundJobRow>();
+export async function getOutboundJob(db: Database, jobId: string): Promise<OutboundJobRow | null> {
+  return db.prepare('SELECT * FROM outbound_jobs WHERE id = ?').bind(jobId).first<OutboundJobRow>();
 }
 
 export interface UpdateJobStatusInput {
@@ -136,19 +120,26 @@ export async function updateJobStatus(
   const now = sqliteTimestamp(new Date());
 
   if (extra?.providerMessageId) {
-    await db.prepare(
-      'UPDATE outbound_jobs SET status = ?, provider_message_id = ?, updated_at = ? WHERE id = ?',
-    ).bind(status, extra.providerMessageId, now, jobId).run();
+    await db
+      .prepare(
+        'UPDATE outbound_jobs SET status = ?, provider_message_id = ?, updated_at = ? WHERE id = ?',
+      )
+      .bind(status, extra.providerMessageId, now, jobId)
+      .run();
   } else if (extra?.errorCode) {
     // Failure path: record the error and bump attempts so max_attempts can
     // gate retries in the queue consumer.
-    await db.prepare(
-      'UPDATE outbound_jobs SET status = ?, error_code = ?, error_message = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?',
-    ).bind(status, extra.errorCode, extra.errorMessage ?? '', now, jobId).run();
+    await db
+      .prepare(
+        'UPDATE outbound_jobs SET status = ?, error_code = ?, error_message = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?',
+      )
+      .bind(status, extra.errorCode, extra.errorMessage ?? '', now, jobId)
+      .run();
   } else {
-    await db.prepare(
-      'UPDATE outbound_jobs SET status = ?, updated_at = ? WHERE id = ?',
-    ).bind(status, now, jobId).run();
+    await db
+      .prepare('UPDATE outbound_jobs SET status = ?, updated_at = ? WHERE id = ?')
+      .bind(status, now, jobId)
+      .run();
   }
 }
 
@@ -487,14 +478,9 @@ export async function reclaimStaleOutboundJobs(
  * @param db — Database instance
  * @param cutoffSql — SQLite datetime string from `orphanSweepCutoff(now)`
  */
-export async function findOrphanedQueuedJobs(
-  db: Database,
-  cutoffSql: string,
-): Promise<string[]> {
+export async function findOrphanedQueuedJobs(db: Database, cutoffSql: string): Promise<string[]> {
   const orphans = await db
-    .prepare(
-      `SELECT id FROM outbound_jobs WHERE status = 'queued' AND updated_at < ?`,
-    )
+    .prepare(`SELECT id FROM outbound_jobs WHERE status = 'queued' AND updated_at < ?`)
     .bind(cutoffSql)
     .all<{ id: string }>();
   return (orphans.results ?? []).map((row) => row.id);

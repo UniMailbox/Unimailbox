@@ -43,16 +43,24 @@ export const roles = sqliteTable(
 );
 
 export const rolePermissions = sqliteTable('role_permissions', {
-  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
-  permissionId: text('permission_id').notNull().references(() => permissions.id, { onDelete: 'cascade' }),
+  roleId: text('role_id')
+    .notNull()
+    .references(() => roles.id, { onDelete: 'cascade' }),
+  permissionId: text('permission_id')
+    .notNull()
+    .references(() => permissions.id, { onDelete: 'cascade' }),
   createdAt: text('created_at').notNull(),
 });
 
 export const userRoles = sqliteTable(
   'user_roles',
   {
-    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    roleId: text('role_id')
+      .notNull()
+      .references(() => roles.id, { onDelete: 'cascade' }),
     grantedAt: text('granted_at').notNull(),
     grantedBy: text('granted_by').references(() => users.id, { onDelete: 'set null' }),
   },
@@ -97,7 +105,10 @@ export const maintenanceJobs = sqliteTable(
     updatedAt: text('updated_at').notNull(),
   },
   (t) => ({
-    statusScheduledAtIdx: index('maintenance_jobs_status_scheduled_at_idx').on(t.status, t.scheduledAt),
+    statusScheduledAtIdx: index('maintenance_jobs_status_scheduled_at_idx').on(
+      t.status,
+      t.scheduledAt,
+    ),
   }),
 );
 
@@ -131,7 +142,9 @@ export const blocklistEntries = sqliteTable(
 );
 
 export const rolePolicies = sqliteTable('role_policies', {
-  roleId: text('role_id').primaryKey().references(() => roles.id, { onDelete: 'cascade' }),
+  roleId: text('role_id')
+    .primaryKey()
+    .references(() => roles.id, { onDelete: 'cascade' }),
   banEmailPatternsJson: text('ban_email_patterns_json').notNull(),
   availDomainPatternsJson: text('avail_domain_patterns_json').notNull(),
   updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),

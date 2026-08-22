@@ -120,11 +120,7 @@ export function DomainStep(): ReactElement {
             message={submitErrorMessage}
             code={submitErrorCode}
             retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-            onRetry={
-              isUnauthorized
-                ? handleReclaim
-                : () => void onSubmit()
-            }
+            onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
           />
         ) : null}
         <div className="wizard-actions">

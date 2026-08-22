@@ -376,12 +376,15 @@ describe('POST /api/v1/setup/claim', () => {
       expect(body2.data.sessionToken).not.toBe(sessionToken1);
 
       // Verify the old record was deleted and a new one written
-      const record = await env.DB
-        .prepare(
-          `SELECT response_json FROM idempotency_records
+      const record = await env.DB.prepare(
+        `SELECT response_json FROM idempotency_records
            WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+      )
+        .bind(
+          await sha256Hex('setup-session:test-installation-token'),
+          'POST /api/v1/setup/claim',
+          idempotencyKey,
         )
-        .bind(await sha256Hex('setup-session:test-installation-token'), 'POST /api/v1/setup/claim', idempotencyKey)
         .first<{ response_json: string }>();
       expect(record).toBeDefined();
       expect(record?.response_json).toContain('redacted');

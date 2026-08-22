@@ -4,11 +4,7 @@
 // validation. Error rendering is driven by `aria-invalid` so the
 // styles downshift via the `[aria-invalid="true"]` selector in
 // tokens.css.
-import type {
-  InputHTMLAttributes,
-  ReactElement,
-  ReactNode,
-} from 'react';
+import type { InputHTMLAttributes, ReactElement, ReactNode } from 'react';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   readonly label?: ReactNode;
@@ -17,14 +13,7 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   readonly id: string;
 }
 
-export function Input({
-  label,
-  error,
-  help,
-  id,
-  className,
-  ...rest
-}: InputProps): ReactElement {
+export function Input({ label, error, help, id, className, ...rest }: InputProps): ReactElement {
   const describedBy: string[] = [];
   if (error !== undefined) describedBy.push(`${id}-error`);
   if (help !== undefined) describedBy.push(`${id}-help`);
@@ -41,9 +30,7 @@ export function Input({
         id={id}
         className={['input', className].filter(Boolean).join(' ')}
         aria-invalid={error !== undefined ? true : undefined}
-        aria-describedby={
-          describedBy.length > 0 ? describedBy.join(' ') : undefined
-        }
+        aria-describedby={describedBy.length > 0 ? describedBy.join(' ') : undefined}
       />
       {error !== undefined ? (
         <span id={`${id}-error`} className="input-error" role="alert">

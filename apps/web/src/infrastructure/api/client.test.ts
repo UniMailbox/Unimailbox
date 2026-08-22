@@ -142,22 +142,20 @@ describe('createApiClient', () => {
   it('retries on 5xx with exponential backoff and then succeeds (H3 — no real-time sleep)', async () => {
     vi.useFakeTimers();
     let attempt = 0;
-    const flakyFetch = vi.fn(
-      (input: RequestInfo | URL, init?: RequestInit) => {
-        attempt += 1;
-        const url = typeof input === 'string' ? input : input.toString();
-        calls.push({ url, init: init ?? {} });
-        if (attempt < 3) {
-          return Promise.resolve(new Response('boom', { status: 503 }));
-        }
-        return Promise.resolve(
-          new Response(JSON.stringify({ data: { ok: true } }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }),
-        );
-      },
-    ) as unknown as typeof fetch;
+    const flakyFetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      attempt += 1;
+      const url = typeof input === 'string' ? input : input.toString();
+      calls.push({ url, init: init ?? {} });
+      if (attempt < 3) {
+        return Promise.resolve(new Response('boom', { status: 503 }));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ data: { ok: true } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }) as unknown as typeof fetch;
     const client = createApiClient({
       baseUrl: '',
       getSessionToken: () => null,
@@ -166,10 +164,9 @@ describe('createApiClient', () => {
     // H3 (CAP-041 fix): `retryDelays` lets the test assert on the actual
     // delay values the retry policy chose, with no real-time sleep.
     const retryDelays: number[] = [];
-    const promise = client.fetch<{ data: { ok: boolean } }>(
-      '/api/v1/setup/status',
-      { retryDelays },
-    );
+    const promise = client.fetch<{ data: { ok: boolean } }>('/api/v1/setup/status', {
+      retryDelays,
+    });
     // First retry after 1s (2^(1-1) * 1000 = 1000ms). Advance just past.
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.advanceTimersByTimeAsync(2_000);
@@ -183,19 +180,17 @@ describe('createApiClient', () => {
   it('exhausts retries on persistent 5xx and throws ApiError', async () => {
     vi.useFakeTimers();
     let attempt = 0;
-    const alwaysFail = vi.fn(
-      (input: RequestInfo | URL, init?: RequestInit) => {
-        attempt += 1;
-        const url = typeof input === 'string' ? input : input.toString();
-        calls.push({ url, init: init ?? {} });
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({ error: { code: 'BOOM', message: 'no' } }),
-            { status: 503, headers: { 'content-type': 'application/json' } },
-          ),
-        );
-      },
-    ) as unknown as typeof fetch;
+    const alwaysFail = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      attempt += 1;
+      const url = typeof input === 'string' ? input : input.toString();
+      calls.push({ url, init: init ?? {} });
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: { code: 'BOOM', message: 'no' } }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }) as unknown as typeof fetch;
     const client = createApiClient({
       baseUrl: '',
       getSessionToken: () => null,

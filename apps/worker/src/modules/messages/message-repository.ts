@@ -10,11 +10,7 @@
 
 import type { Database } from '../../platform/database';
 import type { ParsedEmail } from '@unimailbox/email-core';
-import {
-  allowedFromForMessageStatus,
-  statusRank,
-  type MessageStatus,
-} from '@unimailbox/contracts';
+import { allowedFromForMessageStatus, statusRank, type MessageStatus } from '@unimailbox/contracts';
 
 export interface CreateMessageInput {
   readonly id: string;
@@ -51,30 +47,29 @@ export interface CreateMailboxMessageInput {
  * @param input — Message data from parsed email
  * @returns D1PreparedStatement ready for batch
  */
-export function prepareCreateMessage(
-  db: Database,
-  input: CreateMessageInput,
-): D1PreparedStatement {
-  return db.prepare(
-    `INSERT INTO messages (
+export function prepareCreateMessage(db: Database, input: CreateMessageInput): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO messages (
       id, from_address, from_name, subject, html_body, text_body,
       message_id_header, in_reply_to_header, references_header,
       status, received_at, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?, ?)`,
-  ).bind(
-    input.id,
-    input.parsed.from.address,
-    input.parsed.from.name,
-    input.parsed.subject,
-    input.parsed.htmlBody,
-    input.parsed.textBody,
-    input.parsed.messageId,
-    input.parsed.inReplyTo,
-    input.parsed.references,
-    input.receivedAt,
-    input.createdAt,
-    input.updatedAt,
-  );
+    )
+    .bind(
+      input.id,
+      input.parsed.from.address,
+      input.parsed.from.name,
+      input.parsed.subject,
+      input.parsed.htmlBody,
+      input.parsed.textBody,
+      input.parsed.messageId,
+      input.parsed.inReplyTo,
+      input.parsed.references,
+      input.receivedAt,
+      input.createdAt,
+      input.updatedAt,
+    );
 }
 
 /**
@@ -91,17 +86,12 @@ export function prepareCreateRecipient(
   db: Database,
   input: CreateRecipientInput,
 ): D1PreparedStatement {
-  return db.prepare(
-    `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
+  return db
+    .prepare(
+      `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    input.id,
-    input.messageId,
-    input.address,
-    input.displayName,
-    input.type,
-    input.createdAt,
-  );
+    )
+    .bind(input.id, input.messageId, input.address, input.displayName, input.type, input.createdAt);
 }
 
 /**
@@ -118,10 +108,12 @@ export function prepareCreateMailboxMessage(
   db: Database,
   input: CreateMailboxMessageInput,
 ): D1PreparedStatement {
-  return db.prepare(
-    `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
+  return db
+    .prepare(
+      `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
      VALUES (?, ?, ?, 0, 0, 'inbox', ?)`,
-  ).bind(input.id, input.mailboxId, input.messageId, input.createdAt);
+    )
+    .bind(input.id, input.mailboxId, input.messageId, input.createdAt);
 }
 
 /**

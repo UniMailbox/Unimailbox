@@ -22,9 +22,7 @@ afterEach(() => {
 
 describe('CompleteStep', () => {
   it('submits the final POST, shows success card, and exposes Go to app (happy path)', async () => {
-    const { fetchImpl, calls } = spyFetch([
-      () => jsonResponse({ data: { status: 'complete' } }),
-    ]);
+    const { fetchImpl, calls } = spyFetch([() => jsonResponse({ data: { status: 'complete' } })]);
     const user = userEvent.setup();
     const { history } = await renderStep({
       fetchImpl,
@@ -54,9 +52,7 @@ describe('CompleteStep', () => {
   });
 
   it('on 401 offers a Re-claim button (Security HIGH #2)', async () => {
-    const { fetchImpl } = spyFetch([
-      () => errorResponse('SESSION_EXPIRED', 'Token expired', 401),
-    ]);
+    const { fetchImpl } = spyFetch([() => errorResponse('SESSION_EXPIRED', 'Token expired', 401)]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <CompleteStep /> });
     await user.click(screen.getByTestId('complete-submit'));

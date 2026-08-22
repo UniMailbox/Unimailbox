@@ -41,7 +41,9 @@ const verifyOnly = args.has('--verify');
 const reset = args.has('--reset');
 
 if (reset && process.env.ENVIRONMENT && process.env.ENVIRONMENT !== 'local') {
-  console.error(`Refusing to reset: ENVIRONMENT=${process.env.ENVIRONMENT} (must be 'local' or unset).`);
+  console.error(
+    `Refusing to reset: ENVIRONMENT=${process.env.ENVIRONMENT} (must be 'local' or unset).`,
+  );
   process.exit(2);
 }
 
@@ -56,15 +58,11 @@ const wrangler = (subargs: string[]): { status: number | null; stdout: string } 
   // Merge stderr into stdout so a wrangler error message that lands on
   // stderr cannot end up interleaved with the --json payload on stdout
   // and confuse the parser. (F2 / code-review H7.)
-  const result = spawnSync(
-    'pnpm',
-    ['exec', 'wrangler', ...subargs],
-    {
-      cwd: WORKER_DIR,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CI: '1' },
-    },
-  );
+  const result = spawnSync('pnpm', ['exec', 'wrangler', ...subargs], {
+    cwd: WORKER_DIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, CI: '1' },
+  });
   const stdout = result.stdout?.toString('utf-8') ?? '';
   const stderr = result.stderr?.toString('utf-8') ?? '';
   return { status: result.status, stdout: stdout + stderr };
@@ -80,7 +78,9 @@ const verifyFiles = new Set(all.filter((f) => VERIFY_FILE.test(f)));
 // mv` could reintroduce a dangerous name.
 const assertSafeMigrationName = (name: string): void => {
   if (!MIGRATION_FILE.test(name)) {
-    console.error(`Refusing migration filename: ${name} (must match /\\d{4}_[A-Za-z0-9_-]+\\.sql\\$/).`);
+    console.error(
+      `Refusing migration filename: ${name} (must match /\\d{4}_[A-Za-z0-9_-]+\\.sql\\$/).`,
+    );
     process.exit(1);
   }
 };
@@ -92,8 +92,15 @@ const assertSafeMigrationName = (name: string): void => {
 // check still runs so a missing-file scenario is caught in both modes.
 let applied: string[] = [];
 const beforeResult = wrangler([
-  'd1', 'execute', 'DB', '--local', '--persist-to', PERSIST_DIR,
-  '--command', 'SELECT name FROM d1_migrations ORDER BY name', '--json',
+  'd1',
+  'execute',
+  'DB',
+  '--local',
+  '--persist-to',
+  PERSIST_DIR,
+  '--command',
+  'SELECT name FROM d1_migrations ORDER BY name',
+  '--json',
 ]);
 const beforeApplied = parseWranglerJson(beforeResult, 'before-applied');
 if (beforeApplied.ok) {
@@ -127,8 +134,14 @@ if (!verifyOnly) {
       assertSafeMigrationName(file);
       console.log(`Applying ${file}…`);
       const r = wrangler([
-        'd1', 'execute', 'DB', '--local', '--persist-to', PERSIST_DIR,
-        '--file', resolve(MIGRATIONS_DIR, file),
+        'd1',
+        'execute',
+        'DB',
+        '--local',
+        '--persist-to',
+        PERSIST_DIR,
+        '--file',
+        resolve(MIGRATIONS_DIR, file),
       ]);
       if (r.status !== 0) {
         console.error(`wrangler d1 execute exited ${r.status} on ${file}.`);
@@ -150,8 +163,15 @@ for (const file of migrations) {
   }
   ran++;
   const r = wrangler([
-    'd1', 'execute', 'DB', '--local', '--persist-to', PERSIST_DIR,
-    '--file', resolve(MIGRATIONS_DIR, verify), '--json',
+    'd1',
+    'execute',
+    'DB',
+    '--local',
+    '--persist-to',
+    PERSIST_DIR,
+    '--file',
+    resolve(MIGRATIONS_DIR, verify),
+    '--json',
   ]);
   if (r.status !== 0) {
     console.error(`wrangler d1 execute exited ${r.status} on ${verify}.`);
@@ -187,7 +207,10 @@ if (failed > 0) {
 }
 console.log(`\n${ran}/${migrations.length} verify script(s) passed.`);
 
-interface AssertionRow { assertion: string; pass: number }
+interface AssertionRow {
+  assertion: string;
+  pass: number;
+}
 
 // F2: wrangler --json shape is documented as an array of batches:
 //   [{ results: [...], success: true, meta: {...} }]
@@ -202,18 +225,30 @@ function parseWranglerJson(
   try {
     parsed = JSON.parse(r.stdout);
   } catch (e) {
-    return { ok: false, error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   if (!Array.isArray(parsed)) {
-    return { ok: false, error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}` };
+    return {
+      ok: false,
+      error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+    };
   }
   for (const batch of parsed) {
     if (batch && typeof batch === 'object' && (batch as { success?: unknown }).success === false) {
       const err = (batch as { error?: unknown }).error;
-      return { ok: false, error: `wrangler batch reported success=false: ${typeof err === 'string' ? err : JSON.stringify(err)}` };
+      return {
+        ok: false,
+        error: `wrangler batch reported success=false: ${typeof err === 'string' ? err : JSON.stringify(err)}`,
+      };
     }
     if (!batch || typeof batch !== 'object' || !('results' in batch)) {
-      return { ok: false, error: `wrangler batch missing 'results' key (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}` };
+      return {
+        ok: false,
+        error: `wrangler batch missing 'results' key (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+      };
     }
   }
   return { ok: true, data: parsed };

@@ -18,10 +18,7 @@ import { reclaimStaleJobs } from '../modules/outbound-mail';
 import { systemIds } from '../platform/ids';
 
 export default {
-  async scheduled(
-    _controller: ScheduledController,
-    env: Env,
-  ): Promise<void> {
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     // CAP-040 / R-AUDIT-001: one correlation UUID per cron tick. Held in a
     // local variable so a future audit-emitting cron target (idempotency
     // purge, credential rotation) can thread it through to its audit rows

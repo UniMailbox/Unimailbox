@@ -22,11 +22,7 @@ export function ErrorPanel({
   testId,
 }: ErrorPanelProps): ReactElement {
   return (
-    <div
-      className="error-panel"
-      role="alert"
-      data-testid={testId ?? 'error-panel'}
-    >
+    <div className="error-panel" role="alert" data-testid={testId ?? 'error-panel'}>
       <p className="error-panel-message">{message}</p>
       {code !== undefined ? (
         <span className="error-panel-code" data-testid="error-code">

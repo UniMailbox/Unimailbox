@@ -12,7 +12,9 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc --build",
     "clean": "rm -rf dist .tsbuildinfo"
@@ -30,7 +32,11 @@
     "vitest": "*"
   },
   "peerDependenciesMeta": {
-    "@cloudflare/vitest-pool-workers": { "optional": true },
-    "vitest": { "optional": true }
+    "@cloudflare/vitest-pool-workers": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
   }
 }

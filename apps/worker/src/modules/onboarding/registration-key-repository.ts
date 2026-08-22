@@ -89,7 +89,5 @@ export async function findKeyByCodeHash(
  * This is used in the same D1 batch as user creation to ensure atomicity.
  */
 export function prepareIncrementKeyUsage(db: Database): D1PreparedStatement {
-  return db.prepare(
-    `UPDATE registration_keys SET used_count = used_count + 1 WHERE id = ?`,
-  );
+  return db.prepare(`UPDATE registration_keys SET used_count = used_count + 1 WHERE id = ?`);
 }

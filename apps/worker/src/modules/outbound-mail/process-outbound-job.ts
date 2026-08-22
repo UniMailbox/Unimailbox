@@ -36,9 +36,7 @@ import type {
   ProviderRuntimeContext,
   SendProviderMessage,
 } from '@unimailbox/contracts';
-import {
-  TerminalProviderError,
-} from '@unimailbox/contracts';
+import { TerminalProviderError } from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 import { systemIds } from '../../platform/ids';
 import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
@@ -134,10 +132,7 @@ interface CredentialRow {
  * @throws the underlying provider or pre-send error after recording it on
  *         the job (retryable path; the terminal path resolves instead)
  */
-export async function processOutboundJob(
-  jobId: string,
-  deps: ProcessJobDeps,
-): Promise<void> {
+export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): Promise<void> {
   const { db, encryptionKey, adapter } = deps;
   const lockedBy = deps.lockedBy ?? systemIds.uuid();
   const clock = deps.clock ?? systemClock;
@@ -175,9 +170,12 @@ export async function processOutboundJob(
   let sendResult: Awaited<ReturnType<OutboundProviderAdapter['send']>>;
   try {
     // 3. Read message. We only select the columns we need to build the send.
-    const msg = await db.prepare(
-      'SELECT from_address, from_name, subject, html_body, text_body, message_id_header, in_reply_to_header, references_header FROM messages WHERE id = ?',
-    ).bind(claimed.message_id).first<MessageRow>();
+    const msg = await db
+      .prepare(
+        'SELECT from_address, from_name, subject, html_body, text_body, message_id_header, in_reply_to_header, references_header FROM messages WHERE id = ?',
+      )
+      .bind(claimed.message_id)
+      .first<MessageRow>();
     if (!msg) {
       throw new Error(`Message not found: ${claimed.message_id}`);
     }
@@ -185,23 +183,28 @@ export async function processOutboundJob(
     // 4. Read recipients. bcc is intentionally not loaded — outbound providers
     // strip it anyway and we never want to leak bcc addresses to 'to'/'cc'
     // recipients via the provider payload.
-    const recipientsResult = await db.prepare(
-      "SELECT address, display_name, type FROM message_recipients WHERE message_id = ? AND type IN ('to', 'cc')",
-    ).bind(claimed.message_id).all<RecipientRow>();
+    const recipientsResult = await db
+      .prepare(
+        "SELECT address, display_name, type FROM message_recipients WHERE message_id = ? AND type IN ('to', 'cc')",
+      )
+      .bind(claimed.message_id)
+      .all<RecipientRow>();
     const recipients = recipientsResult.results ?? [];
 
     // 5. Read provider connection.
-    const conn = await db.prepare(
-      'SELECT credential_id, provider_key FROM provider_connections WHERE id = ?',
-    ).bind(claimed.provider_connection_id).first<ConnectionRow>();
+    const conn = await db
+      .prepare('SELECT credential_id, provider_key FROM provider_connections WHERE id = ?')
+      .bind(claimed.provider_connection_id)
+      .first<ConnectionRow>();
     if (!conn) {
       throw new Error(`Provider connection not found: ${claimed.provider_connection_id}`);
     }
 
     // 6. Read encrypted credential by ID.
-    const cred = await db.prepare(
-      'SELECT ciphertext, iv, auth_tag FROM encrypted_credentials WHERE id = ?',
-    ).bind(conn.credential_id).first<CredentialRow>();
+    const cred = await db
+      .prepare('SELECT ciphertext, iv, auth_tag FROM encrypted_credentials WHERE id = ?')
+      .bind(conn.credential_id)
+      .first<CredentialRow>();
     if (!cred) {
       throw new Error(`Credential not found: ${conn.credential_id}`);
     }
@@ -327,7 +330,12 @@ export async function processOutboundJob(
     // CAP-028 review triage) — the row was resolved by whoever stole the
     // lock and the provider did report success, so throwing here would
     // re-drive an already-resolved job.
-    const jobAdvanced = await markOutboundJobSent(db, jobId, lockedBy, sendResult.providerMessageId);
+    const jobAdvanced = await markOutboundJobSent(
+      db,
+      jobId,
+      lockedBy,
+      sendResult.providerMessageId,
+    );
 
     // CAP-040 / D-CAP-040-ARCH-H1: gate reconciliation on
     // `sendResult.providerMessageId`, NOT on `jobAdvanced`. The provider has

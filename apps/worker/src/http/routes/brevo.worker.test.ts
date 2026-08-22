@@ -152,8 +152,9 @@ describe('POST /api/v1/setup/brevo', () => {
       const body = await response.json();
 
       // Query the connection to get credential_id
-      const connection = await env.DB
-        .prepare('SELECT credential_id FROM provider_connections WHERE id = ?')
+      const connection = await env.DB.prepare(
+        'SELECT credential_id FROM provider_connections WHERE id = ?',
+      )
         .bind(body.data.connectionId)
         .first<{ credential_id: string }>();
 
@@ -162,8 +163,9 @@ describe('POST /api/v1/setup/brevo', () => {
       }
 
       // Query the encrypted credential
-      const credential = await env.DB
-        .prepare('SELECT ciphertext, iv, auth_tag, name FROM encrypted_credentials WHERE id = ?')
+      const credential = await env.DB.prepare(
+        'SELECT ciphertext, iv, auth_tag, name FROM encrypted_credentials WHERE id = ?',
+      )
         .bind(connection.credential_id)
         .first<{ ciphertext: unknown; iv: unknown; auth_tag: unknown; name: string }>();
 
@@ -206,10 +208,9 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(response.status).toBe(200);
       const body = await response.json();
 
-      const connection = await env.DB
-        .prepare(
-          'SELECT id, provider_key, label, credential_id, status, created_at, updated_at FROM provider_connections WHERE id = ?',
-        )
+      const connection = await env.DB.prepare(
+        'SELECT id, provider_key, label, credential_id, status, created_at, updated_at FROM provider_connections WHERE id = ?',
+      )
         .bind(body.data.connectionId)
         .first<{
           id: string;
@@ -232,7 +233,9 @@ describe('POST /api/v1/setup/brevo', () => {
       // Don't check exact timestamp since clock runs in real-time
       expect(connection.created_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
       expect(connection.updated_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-      expect(connection.credential_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      expect(connection.credential_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
     });
 
     it('links the connection to the managed domain', async () => {
@@ -254,9 +257,9 @@ describe('POST /api/v1/setup/brevo', () => {
       const body = await response.json();
 
       // Query the managed domain
-      const domain = await env.DB
-        .prepare('SELECT id, outbound_connection_id FROM managed_domains LIMIT 1')
-        .first<{ id: string; outbound_connection_id: string }>();
+      const domain = await env.DB.prepare(
+        'SELECT id, outbound_connection_id FROM managed_domains LIMIT 1',
+      ).first<{ id: string; outbound_connection_id: string }>();
 
       if (!domain) {
         throw new Error('Domain not found');
@@ -283,9 +286,9 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(response.status).toBe(200);
 
       // Check the installation state
-      const state = await env.DB
-        .prepare('SELECT current_step, updated_at FROM installation_state WHERE id = 1')
-        .first<{ current_step: string; updated_at: string }>();
+      const state = await env.DB.prepare(
+        'SELECT current_step, updated_at FROM installation_state WHERE id = 1',
+      ).first<{ current_step: string; updated_at: string }>();
 
       if (!state) {
         throw new Error('Installation state not found');
@@ -361,7 +364,9 @@ describe('POST /api/v1/setup/brevo', () => {
   describe('invalid API key', () => {
     it('returns 502 PROVIDER_CONNECTION_FAILED when Brevo returns 401', async () => {
       // Mock Brevo API returning 401 (invalid key)
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify({ message: 'Invalid key' }), { status: 401 }));
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify({ message: 'Invalid key' }), { status: 401 }),
+      );
 
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
@@ -379,27 +384,27 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(body.error.code).toBe('PROVIDER_CONNECTION_FAILED');
 
       // Verify no credential was stored
-      const credentials = await env.DB
-        .prepare('SELECT COUNT(*) as count FROM encrypted_credentials')
-        .first<{ count: number }>();
+      const credentials = await env.DB.prepare(
+        'SELECT COUNT(*) as count FROM encrypted_credentials',
+      ).first<{ count: number }>();
       if (!credentials) {
         throw new Error('Credentials count not found');
       }
       expect(credentials.count).toBe(0);
 
       // Verify no connection was stored
-      const connections = await env.DB
-        .prepare('SELECT COUNT(*) as count FROM provider_connections')
-        .first<{ count: number }>();
+      const connections = await env.DB.prepare(
+        'SELECT COUNT(*) as count FROM provider_connections',
+      ).first<{ count: number }>();
       if (!connections) {
         throw new Error('Connections count not found');
       }
       expect(connections.count).toBe(0);
 
       // Verify step did NOT advance
-      const state = await env.DB
-        .prepare('SELECT current_step FROM installation_state WHERE id = 1')
-        .first<{ current_step: string }>();
+      const state = await env.DB.prepare(
+        'SELECT current_step FROM installation_state WHERE id = 1',
+      ).first<{ current_step: string }>();
       if (!state) {
         throw new Error('Installation state not found');
       }
@@ -407,7 +412,9 @@ describe('POST /api/v1/setup/brevo', () => {
     });
 
     it('returns 502 when Brevo returns 403', async () => {
-      fetchSpy.mockResolvedValue(new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }));
+      fetchSpy.mockResolvedValue(
+        new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }),
+      );
 
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
@@ -592,9 +599,9 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(body.error.code).toBe('SETUP_BREVO_ALREADY_CONFIGURED');
 
       // Verify only one connection exists
-      const connections = await env.DB
-        .prepare('SELECT COUNT(*) as count FROM provider_connections')
-        .first<{ count: number }>();
+      const connections = await env.DB.prepare(
+        'SELECT COUNT(*) as count FROM provider_connections',
+      ).first<{ count: number }>();
       if (!connections) {
         throw new Error('Connections count not found');
       }
@@ -623,8 +630,9 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(response1.status).toBe(200);
 
       const body1 = await response1.json();
-      const credential1 = await env.DB
-        .prepare('SELECT ciphertext, iv FROM encrypted_credentials WHERE id = (SELECT credential_id FROM provider_connections WHERE id = ?)')
+      const credential1 = await env.DB.prepare(
+        'SELECT ciphertext, iv FROM encrypted_credentials WHERE id = (SELECT credential_id FROM provider_connections WHERE id = ?)',
+      )
         .bind(body1.data.connectionId)
         .first<{ ciphertext: Uint8Array; iv: Uint8Array }>();
 
@@ -655,8 +663,9 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(response2.status).toBe(200);
 
       const body2 = await response2.json();
-      const credential2 = await env.DB
-        .prepare('SELECT ciphertext, iv FROM encrypted_credentials WHERE id = (SELECT credential_id FROM provider_connections WHERE id = ?)')
+      const credential2 = await env.DB.prepare(
+        'SELECT ciphertext, iv FROM encrypted_credentials WHERE id = (SELECT credential_id FROM provider_connections WHERE id = ?)',
+      )
         .bind(body2.data.connectionId)
         .first<{ ciphertext: Uint8Array; iv: Uint8Array }>();
 
@@ -670,7 +679,9 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(new Uint8Array(credential1.iv)).not.toEqual(new Uint8Array(credential2.iv));
 
       // Ciphertexts should also differ because IVs differ
-      expect(new Uint8Array(credential1.ciphertext)).not.toEqual(new Uint8Array(credential2.ciphertext));
+      expect(new Uint8Array(credential1.ciphertext)).not.toEqual(
+        new Uint8Array(credential2.ciphertext),
+      );
     });
   });
 

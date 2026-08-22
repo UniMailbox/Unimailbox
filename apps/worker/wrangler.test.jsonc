@@ -21,26 +21,20 @@
     {
       "binding": "DB",
       "database_name": "unimailbox-db",
-      "database_id": "test"
-    }
+      "database_id": "test",
+    },
   ],
 
-  "r2_buckets": [
-    { "binding": "ATTACHMENTS", "bucket_name": "test-attachments" }
-  ],
+  "r2_buckets": [{ "binding": "ATTACHMENTS", "bucket_name": "test-attachments" }],
 
   "kv_namespaces": [
     { "binding": "SETUP_SESSION", "id": "test-setup-session" },
-    { "binding": "CACHE", "id": "test-cache" }
+    { "binding": "CACHE", "id": "test-cache" },
   ],
 
   "queues": {
-    "producers": [
-      { "binding": "OUTBOUND", "queue": "test-outbound" }
-    ],
-    "consumers": [
-      { "queue": "test-outbound", "max_retries": 5 }
-    ]
+    "producers": [{ "binding": "OUTBOUND", "queue": "test-outbound" }],
+    "consumers": [{ "queue": "test-outbound", "max_retries": 5 }],
   },
 
   // CAP-039: SPA fallback — same shape as production. The test pool
@@ -52,7 +46,7 @@
     "directory": "../web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*"],
   },
 
   "triggers": { "crons": ["*/2 * * * *"] },
@@ -60,6 +54,6 @@
   "vars": {
     "ENVIRONMENT": "local",
     "INSTALLATION_TOKEN": "test-installation-token",
-    "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  }
+    "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  },
 }

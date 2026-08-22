@@ -37,11 +37,7 @@ export const setupGate: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
 
   // Exempt /setup and its subpaths (React client routes and setup API).
-  if (
-    path === '/setup' ||
-    path.startsWith('/setup/') ||
-    path.startsWith('/api/v1/setup/')
-  ) {
+  if (path === '/setup' || path.startsWith('/setup/') || path.startsWith('/api/v1/setup/')) {
     return await next();
   }
 

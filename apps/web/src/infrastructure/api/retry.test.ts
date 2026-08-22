@@ -48,21 +48,11 @@ describe('defaultRetryPolicy', () => {
   });
 
   it('computes exponential backoff (1s, 2s, 4s, 8s, 16s)', () => {
-    expect(
-      defaultRetryPolicy.nextDelay(1, { status: 503 }),
-    ).toBe(1_000);
-    expect(
-      defaultRetryPolicy.nextDelay(2, { status: 503 }),
-    ).toBe(2_000);
-    expect(
-      defaultRetryPolicy.nextDelay(3, { status: 503 }),
-    ).toBe(4_000);
-    expect(
-      defaultRetryPolicy.nextDelay(4, { status: 503 }),
-    ).toBe(8_000);
-    expect(
-      defaultRetryPolicy.nextDelay(5, { status: 503 }),
-    ).toBe(16_000);
+    expect(defaultRetryPolicy.nextDelay(1, { status: 503 })).toBe(1_000);
+    expect(defaultRetryPolicy.nextDelay(2, { status: 503 })).toBe(2_000);
+    expect(defaultRetryPolicy.nextDelay(3, { status: 503 })).toBe(4_000);
+    expect(defaultRetryPolicy.nextDelay(4, { status: 503 })).toBe(8_000);
+    expect(defaultRetryPolicy.nextDelay(5, { status: 503 })).toBe(16_000);
   });
 
   it('caps the delay at MAX_BACKOFF_MS (formula sanity check)', () => {
@@ -77,27 +67,17 @@ describe('defaultRetryPolicy', () => {
   });
 
   it('returns null after MAX_RETRY_ATTEMPTS retries', () => {
-    expect(
-      defaultRetryPolicy.nextDelay(MAX_RETRY_ATTEMPTS + 1, { status: 503 }),
-    ).toBeNull();
+    expect(defaultRetryPolicy.nextDelay(MAX_RETRY_ATTEMPTS + 1, { status: 503 })).toBeNull();
   });
 
   it('returns null for non-retryable statuses', () => {
-    expect(
-      defaultRetryPolicy.nextDelay(1, { status: 400 }),
-    ).toBeNull();
-    expect(
-      defaultRetryPolicy.nextDelay(1, { status: 404 }),
-    ).toBeNull();
-    expect(
-      defaultRetryPolicy.nextDelay(1, { status: 409 }),
-    ).toBeNull();
+    expect(defaultRetryPolicy.nextDelay(1, { status: 400 })).toBeNull();
+    expect(defaultRetryPolicy.nextDelay(1, { status: 404 })).toBeNull();
+    expect(defaultRetryPolicy.nextDelay(1, { status: 409 })).toBeNull();
   });
 
   it('treats 429 as retryable', () => {
-    expect(
-      defaultRetryPolicy.nextDelay(1, { status: 429 }),
-    ).toBe(1_000);
+    expect(defaultRetryPolicy.nextDelay(1, { status: 429 })).toBe(1_000);
   });
 });
 

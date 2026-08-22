@@ -116,11 +116,10 @@ export function setupRoutes(): Hono<AppEnv> {
     if (existing) {
       assertSameRequestHash(existing, requestHash);
       // Same key + same hash: delete the old record and re-execute.
-      await c.env.DB
-        .prepare(
-          `DELETE FROM idempotency_records
+      await c.env.DB.prepare(
+        `DELETE FROM idempotency_records
            WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-        )
+      )
         .bind(actorId, CLAIM_OPERATION, idempotencyKey)
         .run();
     }
@@ -403,10 +402,7 @@ export function setupRoutes(): Hono<AppEnv> {
     );
     if (replay) return replay;
 
-    const result = await verifyCloudflareEmailRouting(
-      { db: c.env.DB },
-      { clock: systemClock },
-    );
+    const result = await verifyCloudflareEmailRouting({ db: c.env.DB }, { clock: systemClock });
 
     const successBody = JSON.stringify({ data: result });
     await writeIdempotencyRecord(c.env.DB, {
@@ -615,14 +611,13 @@ export function setupRoutes(): Hono<AppEnv> {
     }
 
     // Check for existing record directly to handle the pending case without consuming Response body
-    const existingRecord = await c.env.DB
-      .prepare(
-        `SELECT request_hash, response_status, response_json
+    const existingRecord = await c.env.DB.prepare(
+      `SELECT request_hash, response_status, response_json
          FROM idempotency_records
          WHERE actor_id = ? AND operation = ? AND idempotency_key = ?
            AND expires_at > datetime('now')
          LIMIT 1`,
-      )
+    )
       .bind(actorId, OUTBOUND_SMOKE_TEST_OPERATION, idempotencyKey)
       .first<{ request_hash: string; response_status: number; response_json: string }>();
 

@@ -191,9 +191,7 @@ export function prepareBackfillDeliveryMessageId(
   messageId: string,
 ): D1PreparedStatement {
   return db
-    .prepare(
-      'UPDATE webhook_deliveries SET message_id = ? WHERE id = ? AND message_id IS NULL',
-    )
+    .prepare('UPDATE webhook_deliveries SET message_id = ? WHERE id = ? AND message_id IS NULL')
     .bind(messageId, deliveryId);
 }
 
@@ -222,10 +220,7 @@ export async function getProviderConnection(
  * entropy for an HMAC-SHA256 key. It is stored as plaintext because it is
  * a random signing key, not a user password or a provider API key.
  */
-export async function ensureWebhookSecret(
-  db: Database,
-  connectionId: string,
-): Promise<string> {
+export async function ensureWebhookSecret(db: Database, connectionId: string): Promise<string> {
   const conn = await getProviderConnection(db, connectionId);
   if (!conn) {
     throw new DomainError({
@@ -340,9 +335,7 @@ export interface ProviderConnectionRow {
  * is the only API surface that returns secret material, and each reveal
  * writes an audit row (R-AUDIT-001).
  */
-export async function listProviderConnections(
-  db: Database,
-): Promise<ProviderConnectionRow[]> {
+export async function listProviderConnections(db: Database): Promise<ProviderConnectionRow[]> {
   const result = await db
     .prepare(
       'SELECT id, provider_key, label, status, CASE WHEN webhook_secret IS NULL THEN 0 ELSE 1 END AS webhook_configured, created_at, updated_at FROM provider_connections ORDER BY created_at DESC',

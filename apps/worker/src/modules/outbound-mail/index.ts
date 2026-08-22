@@ -11,10 +11,7 @@ export {
   type CreateCredentialInput,
 } from './credential-repository';
 
-export {
-  prepareCreateConnection,
-  type CreateConnectionInput,
-} from './connection-repository';
+export { prepareCreateConnection, type CreateConnectionInput } from './connection-repository';
 
 export {
   prepareCreateOutboundJob,

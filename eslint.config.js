@@ -15,6 +15,7 @@ export default [
       '**/node_modules/**',
       '**/.tsbuildinfo',
       '**/worker-configuration.d.ts',
+      '.claude/worktrees/**',
       '.tmp/**',
       'work/archive/**',
       'work/handoffs/**',
@@ -100,7 +101,7 @@ export default [
       ],
       '@typescript-eslint/no-non-null-assertion': 'error',
       'no-console': ['warn', { allow: ['warn', 'error'] }],
-      'eqeqeq': ['error', 'always'],
+      eqeqeq: ['error', 'always'],
       'no-var': 'error',
       'prefer-const': 'error',
 
@@ -120,28 +121,19 @@ export default [
                 './apps/worker/src/http',
                 './apps/worker/src/entrypoints',
               ],
-              message:
-                'integrations/* may not depend on modules/*, http/*, or entrypoints/*.',
+              message: 'integrations/* may not depend on modules/*, http/*, or entrypoints/*.',
             },
             // modules/* may not import entrypoints/* or http/*.
             {
               target: './apps/worker/src/modules',
-              from: [
-                './apps/worker/src/entrypoints',
-                './apps/worker/src/http',
-              ],
-              message:
-                'modules/* may not depend on entrypoints/* or http/*.',
+              from: ['./apps/worker/src/entrypoints', './apps/worker/src/http'],
+              message: 'modules/* may not depend on entrypoints/* or http/*.',
             },
             // platform/* may not import entrypoints/* or http/* (no cycle upward).
             {
               target: './apps/worker/src/platform',
-              from: [
-                './apps/worker/src/entrypoints',
-                './apps/worker/src/http',
-              ],
-              message:
-                'platform/* may not depend on entrypoints/* or http/*.',
+              from: ['./apps/worker/src/entrypoints', './apps/worker/src/http'],
+              message: 'platform/* may not depend on entrypoints/* or http/*.',
             },
           ],
         },

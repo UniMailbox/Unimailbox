@@ -10,12 +10,7 @@
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { resetAndMigrate, FIXED_TIMESTAMP, migrationsDb } from '@unimailbox/test-kit';
-import {
-  seedRolesAndPermissions,
-  assignRole,
-  checkPermission,
-  getUserRoleIds,
-} from './index';
+import { seedRolesAndPermissions, assignRole, checkPermission, getUserRoleIds } from './index';
 import { systemClock } from '../../platform/clock';
 import { randomUUID } from 'node:crypto';
 
@@ -126,7 +121,9 @@ describe('admin module — seedRolesAndPermissions', () => {
     expect(memberRole?.is_system).toBe(1);
 
     const memberPerms = await db
-      .prepare('SELECT permission_id FROM role_permissions WHERE role_id = ? ORDER BY permission_id')
+      .prepare(
+        'SELECT permission_id FROM role_permissions WHERE role_id = ? ORDER BY permission_id',
+      )
       .bind('member')
       .all<{ permission_id: string }>();
 
@@ -220,7 +217,13 @@ describe('admin module — checkPermission', () => {
     const userId = await createTestUser(db);
     await assignRole(db, userId, 'member', FIXED_TIMESTAMP);
 
-    const memberPerms = ['message.read', 'message.send', 'message.delete', 'mailbox.create', 'mailbox.manage'] as const;
+    const memberPerms = [
+      'message.read',
+      'message.send',
+      'message.delete',
+      'mailbox.create',
+      'mailbox.manage',
+    ] as const;
 
     for (const perm of memberPerms) {
       const has = await checkPermission(db, userId, perm);
@@ -232,7 +235,14 @@ describe('admin module — checkPermission', () => {
     const userId = await createTestUser(db);
     await assignRole(db, userId, 'member', FIXED_TIMESTAMP);
 
-    const nonMemberPerms = ['user.manage', 'role.manage', 'domain.manage', 'signature.manage', 'settings.manage', 'provider.sync'] as const;
+    const nonMemberPerms = [
+      'user.manage',
+      'role.manage',
+      'domain.manage',
+      'signature.manage',
+      'settings.manage',
+      'provider.sync',
+    ] as const;
 
     for (const perm of nonMemberPerms) {
       const has = await checkPermission(db, userId, perm);
@@ -358,9 +368,15 @@ describe('completeSetup integration', () => {
     await completeSetup({ db }, { clock: systemClock });
 
     // Verify roles and permissions were seeded
-    const permCount = await db.prepare('SELECT COUNT(*) as count FROM permissions').first<{ count: number }>();
-    const roleCount = await db.prepare('SELECT COUNT(*) as count FROM roles').first<{ count: number }>();
-    const rpCount = await db.prepare('SELECT COUNT(*) as count FROM role_permissions').first<{ count: number }>();
+    const permCount = await db
+      .prepare('SELECT COUNT(*) as count FROM permissions')
+      .first<{ count: number }>();
+    const roleCount = await db
+      .prepare('SELECT COUNT(*) as count FROM roles')
+      .first<{ count: number }>();
+    const rpCount = await db
+      .prepare('SELECT COUNT(*) as count FROM role_permissions')
+      .first<{ count: number }>();
 
     expect(permCount?.count).toBe(20);
     expect(roleCount?.count).toBe(2);
@@ -403,9 +419,16 @@ describe('completeSetup integration', () => {
     await completeSetup({ db }, { clock: systemClock });
 
     // Verify no duplicates
-    const permCount = await db.prepare('SELECT COUNT(*) as count FROM permissions').first<{ count: number }>();
-    const roleCount = await db.prepare('SELECT COUNT(*) as count FROM roles').first<{ count: number }>();
-    const userRoleCount = await db.prepare('SELECT COUNT(*) as count FROM user_roles WHERE user_id = ?').bind(userId).first<{ count: number }>();
+    const permCount = await db
+      .prepare('SELECT COUNT(*) as count FROM permissions')
+      .first<{ count: number }>();
+    const roleCount = await db
+      .prepare('SELECT COUNT(*) as count FROM roles')
+      .first<{ count: number }>();
+    const userRoleCount = await db
+      .prepare('SELECT COUNT(*) as count FROM user_roles WHERE user_id = ?')
+      .bind(userId)
+      .first<{ count: number }>();
 
     expect(permCount?.count).toBe(20);
     expect(roleCount?.count).toBe(2);

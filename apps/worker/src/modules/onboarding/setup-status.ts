@@ -17,9 +17,7 @@ import { getInstallationState } from './installation-state-repository';
  * DB errors propagate to the caller (the setup gate catches them for
  * fail-closed behaviour, R-SETUP-004).
  */
-export async function getSetupStatus(
-  db: Database,
-): Promise<InstallationStateInfo> {
+export async function getSetupStatus(db: Database): Promise<InstallationStateInfo> {
   const state = await getInstallationState(db);
   if (!state) {
     return { status: 'setup', currentStep: 'claim' };

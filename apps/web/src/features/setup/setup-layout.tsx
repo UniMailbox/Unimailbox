@@ -17,10 +17,7 @@
 // screen reader hears "Step 5 of 9: Inbound smoke, current".
 import { useNavigate, Outlet } from '@tanstack/react-router';
 import { useState, type ReactElement } from 'react';
-import {
-  installationStepSchema,
-  type InstallationStep,
-} from '@unimailbox/contracts';
+import { installationStepSchema, type InstallationStep } from '@unimailbox/contracts';
 import { Button } from '../../components/ui/Button';
 import { clearSetupSession } from './setup-session-store';
 import { setupStatusQuery } from './setup-queries';
@@ -51,10 +48,8 @@ export function SetupLayout(): ReactElement {
   // the QueryClient; status updates flow into the chip indicator without
   // any extra wiring.
   const statusQuery = setupStatusQuery();
-  const currentStepKey: InstallationStep | null =
-    statusQuery.data?.currentStep ?? null;
-  const currentIndex =
-    currentStepKey === null ? -1 : STEPS.findIndex((s) => s === currentStepKey);
+  const currentStepKey: InstallationStep | null = statusQuery.data?.currentStep ?? null;
+  const currentIndex = currentStepKey === null ? -1 : STEPS.findIndex((s) => s === currentStepKey);
   const totalSteps = STEPS.length;
 
   const handleRestart = (): void => {
@@ -81,11 +76,7 @@ export function SetupLayout(): ReactElement {
         <ol className="wizard-steps">
           {STEPS.map((step, index) => {
             const stateAttr: 'complete' | 'current' | 'upcoming' =
-              index < currentIndex
-                ? 'complete'
-                : index === currentIndex
-                  ? 'current'
-                  : 'upcoming';
+              index < currentIndex ? 'complete' : index === currentIndex ? 'current' : 'upcoming';
             const labelText = STEP_LABELS[step];
             // HIGH 2 (CAP-041 fix): aria-label describes the chip's
             // position + state in human terms, and aria-current marks the
@@ -111,13 +102,9 @@ export function SetupLayout(): ReactElement {
       </div>
       <footer className="wizard-footer">
         {showConfirm ? (
-          <p
-            className="wizard-subtitle"
-            role="alert"
-            data-testid="restart-confirm"
-          >
-            Restarting will clear your in-memory session token. Click
-            &ldquo;Restart wizard&rdquo; again to confirm.
+          <p className="wizard-subtitle" role="alert" data-testid="restart-confirm">
+            Restarting will clear your in-memory session token. Click &ldquo;Restart wizard&rdquo;
+            again to confirm.
           </p>
         ) : null}
         <Button

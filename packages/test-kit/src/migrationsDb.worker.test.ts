@@ -37,9 +37,16 @@ describe('migrationsDb (worker pool)', () => {
 
   it('ADR-006: users has the four PBKDF2 columns', async () => {
     const db = await migrationsDb();
-    const cols = await db.prepare("SELECT name FROM pragma_table_info('users') WHERE name LIKE 'password_%'").all<{ name: string }>();
+    const cols = await db
+      .prepare("SELECT name FROM pragma_table_info('users') WHERE name LIKE 'password_%'")
+      .all<{ name: string }>();
     const names = cols.results.map((r) => r.name).sort();
-    expect(names).toEqual(['password_algorithm', 'password_hash', 'password_iterations', 'password_salt']);
+    expect(names).toEqual([
+      'password_algorithm',
+      'password_hash',
+      'password_iterations',
+      'password_salt',
+    ]);
   });
 
   it('R-AUTH-002: users.status CHECK rejects unknown values', async () => {
@@ -81,11 +88,12 @@ describe('migrationsDb (worker pool)', () => {
     );
     await insert.bind(id1, 'Mixed@Case.test', NOW, NOW).run();
     // Inserting the same address in a different case must fail.
-    await expect(
-      insert.bind(id2, 'MIXED@case.test', NOW, NOW).run(),
-    ).rejects.toThrow(/UNIQUE/);
+    await expect(insert.bind(id2, 'MIXED@case.test', NOW, NOW).run()).rejects.toThrow(/UNIQUE/);
     // And a case-insensitive lookup finds the original row.
-    const row = await db.prepare('SELECT id FROM users WHERE email = ?').bind('mixed@CASE.test').first<{ id: string }>();
+    const row = await db
+      .prepare('SELECT id FROM users WHERE email = ?')
+      .bind('mixed@CASE.test')
+      .first<{ id: string }>();
     expect(row?.id).toBe(id1);
   });
 });

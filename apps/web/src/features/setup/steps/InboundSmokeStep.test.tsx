@@ -6,12 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import { InboundSmokeStep } from './InboundSmokeStep';
-import {
-  errorResponse,
-  jsonResponse,
-  renderStep,
-  spyFetch,
-} from '../../../test-utils';
+import { errorResponse, jsonResponse, renderStep, spyFetch } from '../../../test-utils';
 
 afterEach(() => {
   cleanup();
@@ -46,9 +41,7 @@ describe('InboundSmokeStep', () => {
   });
 
   it('on 401 start offers a Re-claim button (Security HIGH #2)', async () => {
-    const { fetchImpl } = spyFetch([
-      () => errorResponse('SESSION_EXPIRED', 'Token expired', 401),
-    ]);
+    const { fetchImpl } = spyFetch([() => errorResponse('SESSION_EXPIRED', 'Token expired', 401)]);
     await renderStep({ fetchImpl, step: <InboundSmokeStep /> });
     const code = await screen.findByTestId('error-code');
     expect(code.textContent).toBe('SESSION_EXPIRED');

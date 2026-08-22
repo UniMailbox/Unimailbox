@@ -84,8 +84,9 @@ async function seedJob(opts: SeedOptions): Promise<string> {
 }
 
 async function fetchJob(jobId: string) {
-  return env.DB
-    .prepare('SELECT status, attempts, locked_at, locked_by, provider_message_id, error_code, error_message FROM outbound_jobs WHERE id = ?')
+  return env.DB.prepare(
+    'SELECT status, attempts, locked_at, locked_by, provider_message_id, error_code, error_message FROM outbound_jobs WHERE id = ?',
+  )
     .bind(jobId)
     .first<{
       status: string;

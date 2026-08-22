@@ -9,12 +9,7 @@
 import { z } from 'zod';
 
 // R-DATA-001 — email addresses are compared and stored case-insensitively.
-export const emailAddressSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .email()
-  .max(254);
+export const emailAddressSchema = z.string().trim().toLowerCase().email().max(254);
 
 /**
  * Sample contract — a UUIDv4 string. The shape every other ID contract will
@@ -101,10 +96,7 @@ export interface ProviderRuntimeContext {
 export interface OutboundProviderAdapter {
   readonly key: ProviderKey;
   validateConnection(ctx: ProviderRuntimeContext): Promise<void>;
-  send(
-    ctx: ProviderRuntimeContext,
-    msg: SendProviderMessage,
-  ): Promise<ProviderSendResult>;
+  send(ctx: ProviderRuntimeContext, msg: SendProviderMessage): Promise<ProviderSendResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +232,10 @@ export const ALLOWED_MESSAGE_TRANSITIONS: ReadonlyMap<
   ['draft', new Set<MessageStatus>(['queued', 'sent'])],
   // Compose inserts at 'queued'; outcomes from 'queued' cover the claim
   // path plus direct-send and direct-failure edge cases.
-  ['queued', new Set<MessageStatus>(['sending', 'sent', 'delayed', 'failed', 'bounced', 'complained'])],
+  [
+    'queued',
+    new Set<MessageStatus>(['sending', 'sent', 'delayed', 'failed', 'bounced', 'complained']),
+  ],
   // The post-claim attempt outcomes. 'sent' (success), 'delayed' (provider
   // deferral mid-flight), terminal outcomes. 'queued' is intentionally NOT
   // listed — R-OUTBOUND-008 retry reset applies to outbound_jobs, not messages.
@@ -318,11 +313,7 @@ export const ALLOWED_JOB_TRANSITIONS: ReadonlyMap<
  * dispatch without a cast; callers outside this module see only the
  * strict overloads.
  */
-export function canTransition(
-  domain: 'message',
-  from: MessageStatus,
-  to: MessageStatus,
-): boolean;
+export function canTransition(domain: 'message', from: MessageStatus, to: MessageStatus): boolean;
 export function canTransition(
   domain: 'job',
   from: OutboundJobStatus,
@@ -358,7 +349,8 @@ function canTransitionImpl(
       );
     case 'job':
       return (
-        ALLOWED_JOB_TRANSITIONS.get(from as OutboundJobStatus)?.has(to as OutboundJobStatus) ?? false
+        ALLOWED_JOB_TRANSITIONS.get(from as OutboundJobStatus)?.has(to as OutboundJobStatus) ??
+        false
       );
   }
 }
@@ -414,9 +406,7 @@ export function assertCanTransition(
  * a valid target). SQL `IN` over an empty `json_each` returns no rows,
  * so the predicate evaluates to false; correct behaviour.
  */
-export function allowedFromForMessageStatus(
-  to: MessageStatus,
-): ReadonlyArray<MessageStatus> {
+export function allowedFromForMessageStatus(to: MessageStatus): ReadonlyArray<MessageStatus> {
   const froms: MessageStatus[] = [];
   for (const [from, tos] of ALLOWED_MESSAGE_TRANSITIONS) {
     if (tos.has(to)) froms.push(from);
@@ -493,10 +483,7 @@ export class TerminalProviderError extends Error {
 export function isProviderError(
   error: unknown,
 ): error is RetryableProviderError | TerminalProviderError {
-  return (
-    error instanceof RetryableProviderError ||
-    error instanceof TerminalProviderError
-  );
+  return error instanceof RetryableProviderError || error instanceof TerminalProviderError;
 }
 
 // ---------------------------------------------------------------------------

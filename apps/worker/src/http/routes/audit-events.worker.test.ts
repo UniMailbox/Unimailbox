@@ -92,10 +92,23 @@ async function createUserWithRole(
     env.DB.prepare(
       `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(userId, email, `${roleName} user`, 'active', passwordHash.algorithm, passwordHash.iterations, passwordHash.salt, passwordHash.hash, now, now),
-    env.DB.prepare(
-      `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`,
-    ).bind(userId, roleName, now),
+    ).bind(
+      userId,
+      email,
+      `${roleName} user`,
+      'active',
+      passwordHash.algorithm,
+      passwordHash.iterations,
+      passwordHash.salt,
+      passwordHash.hash,
+      now,
+      now,
+    ),
+    env.DB.prepare(`INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`).bind(
+      userId,
+      roleName,
+      now,
+    ),
   ]);
 
   return userId;
@@ -111,13 +124,13 @@ async function createSession(userId: string): Promise<string> {
   await env.DB.prepare(
     `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
      VALUES (?, ?, ?, ?, ?)`,
-  ).bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString()).run();
+  )
+    .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
+    .run();
 
-  await env.CACHE.put(
-    `auth:${accessToken}`,
-    JSON.stringify({ userId }),
-    { expirationTtl: 15 * 60 },
-  );
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+    expirationTtl: 15 * 60,
+  });
 
   return accessToken;
 }
@@ -128,7 +141,9 @@ async function createDomain(name = 'example.com'): Promise<string> {
   await env.DB.prepare(
     `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
      VALUES (?, ?, 'active', NULL, ?, ?)`,
-  ).bind(domainId, name, now, now).run();
+  )
+    .bind(domainId, name, now, now)
+    .run();
   return domainId;
 }
 
@@ -154,10 +169,22 @@ async function createActiveProviderConnection(): Promise<string> {
   return connectionId;
 }
 
-async function getAuditEvents(): Promise<Array<{ action: string; resource_type: string; resource_id: string | null; actor_user_id: string | null }>> {
-  const result = await env.DB
-    .prepare('SELECT action, resource_type, resource_id, actor_user_id FROM audit_events ORDER BY created_at DESC')
-    .all<{ action: string; resource_type: string; resource_id: string | null; actor_user_id: string | null }>();
+async function getAuditEvents(): Promise<
+  Array<{
+    action: string;
+    resource_type: string;
+    resource_id: string | null;
+    actor_user_id: string | null;
+  }>
+> {
+  const result = await env.DB.prepare(
+    'SELECT action, resource_type, resource_id, actor_user_id FROM audit_events ORDER BY created_at DESC',
+  ).all<{
+    action: string;
+    resource_type: string;
+    resource_id: string | null;
+    actor_user_id: string | null;
+  }>();
   return result.results ?? [];
 }
 
@@ -290,7 +317,18 @@ describe('audit_events on state transitions', () => {
       env.DB.prepare(
         `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(userId, 'test@example.com', 'Test', 'active', passwordHash.algorithm, passwordHash.iterations, passwordHash.salt, passwordHash.hash, now, now),
+      ).bind(
+        userId,
+        'test@example.com',
+        'Test',
+        'active',
+        passwordHash.algorithm,
+        passwordHash.iterations,
+        passwordHash.salt,
+        passwordHash.hash,
+        now,
+        now,
+      ),
       env.DB.prepare(
         `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
          VALUES (?, 'example.com', 'active', NULL, ?, ?)`,
@@ -356,7 +394,9 @@ Body text.`;
       await env.DB.prepare(
         `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
          VALUES (?, ?, ?, 'me', '', 'active', ?, ?)`,
-      ).bind(mailboxId, domainId, ownerId, now, now).run();
+      )
+        .bind(mailboxId, domainId, ownerId, now, now)
+        .run();
 
       await createActiveProviderConnection();
 
@@ -430,14 +470,11 @@ Body text.`;
       const body = JSON.stringify({ event: 'delivered', messageId: PROVIDER_MESSAGE_ID });
       const signature = await computeHmac(body, WEBHOOK_SECRET);
 
-      const response = await SELF.fetch(
-        `http://localhost/api/v1/webhooks/brevo/${connectionId}`,
-        {
-          method: 'POST',
-          body,
-          headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': signature },
-        },
-      );
+      const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+        method: 'POST',
+        body,
+        headers: { 'Content-Type': 'application/json', 'X-Webhook-Signature': signature },
+      });
 
       expect(response.status).toBe(200);
 

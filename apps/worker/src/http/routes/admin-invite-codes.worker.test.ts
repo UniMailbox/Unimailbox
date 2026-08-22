@@ -10,10 +10,7 @@ import { hashPassword } from '../../platform/crypto';
 
 // Helper: hash a token
 async function hashToken(token: string): Promise<string> {
-  const buffer = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(token),
-  );
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -83,7 +80,10 @@ async function createAdminUser(): Promise<{ userId: string; accessToken: string 
       email: 'admin@example.com',
       password: 'adminPassword123',
     }),
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+    },
   });
 
   const body = await response.json();
@@ -173,7 +173,9 @@ describe('POST /api/v1/admin/invite-codes', () => {
 
       const key = await env.DB.prepare(
         `SELECT id, max_uses, used_count FROM registration_keys WHERE code_hash = ?`,
-      ).bind(codeHash).first();
+      )
+        .bind(codeHash)
+        .first();
 
       expect(key).toBeDefined();
       expect(key?.max_uses).toBe(1);
@@ -265,7 +267,10 @@ describe('POST /api/v1/admin/invite-codes', () => {
           email: 'member@example.com',
           password: 'memberPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const { accessToken } = (await loginResponse.json()).data;
@@ -288,7 +293,10 @@ describe('POST /api/v1/admin/invite-codes', () => {
       const response = await SELF.fetch('http://localhost/api/v1/admin/invite-codes', {
         method: 'POST',
         body: JSON.stringify({ maxUses: 1 }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(401);
@@ -505,7 +513,10 @@ describe('GET /api/v1/admin/invite-codes', () => {
           email: 'member@example.com',
           password: 'memberPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const { accessToken } = (await loginResponse.json()).data;
@@ -623,11 +634,10 @@ describe('POST /api/v1/admin/invite-codes — idempotency', () => {
     expect(secondBody.data.id).not.toBe(firstId);
 
     // Verify the old record was deleted and a new one written (with redacted code)
-    const record = await env.DB
-      .prepare(
-        `SELECT response_json FROM idempotency_records
+    const record = await env.DB.prepare(
+      `SELECT response_json FROM idempotency_records
          WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-      )
+    )
       .bind(adminId, 'POST /api/v1/admin/invite-codes', idempotencyKey)
       .first<{ response_json: string }>();
     expect(record).toBeDefined();

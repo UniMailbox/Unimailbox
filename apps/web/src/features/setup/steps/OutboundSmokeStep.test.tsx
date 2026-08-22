@@ -22,9 +22,7 @@ afterEach(() => {
 
 describe('OutboundSmokeStep', () => {
   it('submits the smoke test, advances to /setup/complete (happy path)', async () => {
-    const { fetchImpl, calls } = spyFetch([
-      () => jsonResponse({ data: { ok: true } }),
-    ]);
+    const { fetchImpl, calls } = spyFetch([() => jsonResponse({ data: { ok: true } })]);
     const user = userEvent.setup();
     const { history } = await renderStep({
       fetchImpl,
@@ -42,9 +40,7 @@ describe('OutboundSmokeStep', () => {
   it('surfaces the machine code via ErrorPanel on 4xx (AC #15)', async () => {
     // 4xx is non-retryable so the apiClient throws immediately and the
     // ErrorPanel surfaces the machine code without timer fiddling.
-    const { fetchImpl } = spyFetch([
-      () => errorResponse('OUTBOUND_FAILED', 'Send failed', 400),
-    ]);
+    const { fetchImpl } = spyFetch([() => errorResponse('OUTBOUND_FAILED', 'Send failed', 400)]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <OutboundSmokeStep /> });
     await user.click(screen.getByTestId('outbound-submit'));
@@ -53,9 +49,7 @@ describe('OutboundSmokeStep', () => {
   });
 
   it('on 401 offers a Re-claim button (Security HIGH #2)', async () => {
-    const { fetchImpl } = spyFetch([
-      () => errorResponse('SESSION_EXPIRED', 'Token expired', 401),
-    ]);
+    const { fetchImpl } = spyFetch([() => errorResponse('SESSION_EXPIRED', 'Token expired', 401)]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <OutboundSmokeStep /> });
     await user.click(screen.getByTestId('outbound-submit'));

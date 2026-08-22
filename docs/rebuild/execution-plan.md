@@ -17,8 +17,9 @@ product.
 
 ## Execution order
 
-Only one capability is active at a time. CAP-030 remains the sole active capability; no recovery
-capability starts until its reviews, ledger update, cleanup, and acceptance are complete.
+Only one capability is active at a time. Orders 0–3 are implemented and their workspaces are
+closed. No capability is currently active; CAP-042 is next. A later capability starts only after
+the current one completes review, ledger/log sync, cleanup, and acceptance.
 
 | Order | Capability | Outcome | Depends on | Exit evidence |
 |---|---|---|---|---|
@@ -98,4 +99,3 @@ only after its remaining acceptance criteria pass the same preview gate.
 - The ledger, execution plan, implementation log, active workspace, and Git state are reconciled at
   each capability boundary.
 - Phase 3 is not decomposed until the recovery gate and Phase 2 audit pass.
-

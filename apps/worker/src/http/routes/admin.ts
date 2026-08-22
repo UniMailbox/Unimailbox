@@ -39,10 +39,7 @@ const INVITE_CODES_CREATE_OPERATION = 'POST /api/v1/admin/invite-codes';
  * Used for registration invite codes (never stored plaintext).
  */
 async function hashToken(token: string): Promise<string> {
-  const buffer = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(token),
-  );
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -124,11 +121,10 @@ export function adminRoutes(): Hono<AppEnv> {
       if (existing) {
         assertSameRequestHash(existing, requestHash);
         // Same key + same hash: delete the old record and re-execute.
-        await c.env.DB
-          .prepare(
-            `DELETE FROM idempotency_records
+        await c.env.DB.prepare(
+          `DELETE FROM idempotency_records
              WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-          )
+        )
           .bind(actorId, INVITE_CODES_CREATE_OPERATION, idempotencyKey)
           .run();
       }
@@ -227,22 +223,20 @@ export function adminRoutes(): Hono<AppEnv> {
     }
 
     // Query all keys, excluding code_hash (never expose the hash)
-    const rows = await c.env.DB
-      .prepare(
-        `SELECT id, role_id, max_uses, used_count, expires_at, revoked_at, created_by, created_at
+    const rows = await c.env.DB.prepare(
+      `SELECT id, role_id, max_uses, used_count, expires_at, revoked_at, created_by, created_at
          FROM registration_keys
          ORDER BY created_at DESC`,
-      )
-      .all<{
-        id: string;
-        role_id: string | null;
-        max_uses: number;
-        used_count: number;
-        expires_at: string | null;
-        revoked_at: string | null;
-        created_by: string;
-        created_at: string;
-      }>();
+    ).all<{
+      id: string;
+      role_id: string | null;
+      max_uses: number;
+      used_count: number;
+      expires_at: string | null;
+      revoked_at: string | null;
+      created_by: string;
+      created_at: string;
+    }>();
 
     const keys =
       rows.results?.map((row) => ({

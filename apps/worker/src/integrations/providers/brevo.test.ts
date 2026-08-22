@@ -11,10 +11,7 @@
 // runs under the unit vitest project.
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import {
-  RetryableProviderError,
-  TerminalProviderError,
-} from '@unimailbox/contracts';
+import { RetryableProviderError, TerminalProviderError } from '@unimailbox/contracts';
 import { brevoAdapter } from './brevo';
 
 function makeJsonResponse(status: number, body: unknown): Response {
@@ -122,9 +119,7 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
   });
 
   it('5xx routes through RetryableProviderError with body attached as cause', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      makeTextResponse(503, 'upstream overloaded'),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeTextResponse(503, 'upstream overloaded'));
 
     let caught: unknown;
     try {

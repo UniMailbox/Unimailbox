@@ -119,12 +119,11 @@ export async function checkInboundSmokeTest(
  * Called by the email handler entrypoint. If this returns true, the message is
  * accepted (not rejected).
  */
-export async function handleSmokeTestMessage(
-  to: string,
-  cache: Cache,
-): Promise<boolean> {
+export async function handleSmokeTestMessage(to: string, cache: Cache): Promise<boolean> {
   // Parse smoke+<token>@<domain> pattern (case-insensitive)
-  const match = to.match(/^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i);
+  const match = to.match(
+    /^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i,
+  );
   if (!match) return false;
 
   // Normalize to lowercase for KV lookup (UUIDs are stored lowercase)

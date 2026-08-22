@@ -42,10 +42,7 @@ export interface MailboxMemberInfo {
  * @throws D1 error with "UNIQUE constraint failed: mailboxes.domain_id, mailboxes.local_part"
  *         on duplicate address (case-insensitive).
  */
-export async function createMailbox(
-  db: Database,
-  input: CreateMailboxInput,
-): Promise<MailboxInfo> {
+export async function createMailbox(db: Database, input: CreateMailboxInput): Promise<MailboxInfo> {
   await db
     .prepare(
       `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
@@ -91,7 +88,10 @@ export async function createMailbox(
  *
  * Returns the mailbox with full address (localPart@domain.name) or null.
  */
-export async function findMailboxById(db: Database, mailboxId: string): Promise<MailboxInfo | null> {
+export async function findMailboxById(
+  db: Database,
+  mailboxId: string,
+): Promise<MailboxInfo | null> {
   const result = await db
     .prepare(
       `SELECT
@@ -138,7 +138,10 @@ export async function findMailboxById(db: Database, mailboxId: string): Promise<
  * Looks up the domain by name first, then finds the mailbox.
  * Returns null if no matching mailbox exists.
  */
-export async function findMailboxByAddress(db: Database, address: string): Promise<MailboxInfo | null> {
+export async function findMailboxByAddress(
+  db: Database,
+  address: string,
+): Promise<MailboxInfo | null> {
   // Parse the address into localPart and domainName
   const atIdx = address.lastIndexOf('@');
   if (atIdx === -1) {
@@ -295,7 +298,9 @@ export async function findMailboxMember(
   userId: string,
 ): Promise<MailboxMemberInfo | null> {
   const result = await db
-    .prepare('SELECT mailbox_id, user_id, role FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?')
+    .prepare(
+      'SELECT mailbox_id, user_id, role FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?',
+    )
     .bind(mailboxId, userId)
     .first<{ mailbox_id: string; user_id: string; role: 'viewer' | 'sender' | 'admin' }>();
 

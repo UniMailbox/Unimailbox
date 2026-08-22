@@ -33,18 +33,20 @@ export function prepareCreateCredential(
   db: D1Database,
   input: CreateCredentialInput,
 ): D1PreparedStatement {
-  return db.prepare(
-    'INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-  ).bind(
-    input.id,
-    input.name,
-    input.version,
-    input.ciphertext,
-    input.iv,
-    input.authTag,
-    input.createdAt,
-    input.updatedAt,
-  );
+  return db
+    .prepare(
+      'INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+    .bind(
+      input.id,
+      input.name,
+      input.version,
+      input.ciphertext,
+      input.iv,
+      input.authTag,
+      input.createdAt,
+      input.updatedAt,
+    );
 }
 
 /**
@@ -62,7 +64,9 @@ export async function getCredentialByName(
   version: number;
 } | null> {
   return db
-    .prepare('SELECT id, ciphertext, iv, auth_tag, version FROM encrypted_credentials WHERE name = ? LIMIT 1')
+    .prepare(
+      'SELECT id, ciphertext, iv, auth_tag, version FROM encrypted_credentials WHERE name = ? LIMIT 1',
+    )
     .bind(name)
     .first();
 }

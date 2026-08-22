@@ -160,15 +160,11 @@ describe('sha256Hex', () => {
 
 describe('sqliteTimestamp', () => {
   it("formats a Date as SQLite's 'YYYY-MM-DD HH:MM:SS'", () => {
-    expect(sqliteTimestamp(new Date('2026-08-13T12:34:56.789Z'))).toBe(
-      '2026-08-13 12:34:56',
-    );
+    expect(sqliteTimestamp(new Date('2026-08-13T12:34:56.789Z'))).toBe('2026-08-13 12:34:56');
   });
 
   it('drops sub-second precision rather than rounding', () => {
-    expect(sqliteTimestamp(new Date('2026-08-13T12:34:56.999Z'))).toBe(
-      '2026-08-13 12:34:56',
-    );
+    expect(sqliteTimestamp(new Date('2026-08-13T12:34:56.999Z'))).toBe('2026-08-13 12:34:56');
   });
 
   it('sorts correctly as TEXT against a later timestamp', () => {
@@ -309,9 +305,7 @@ describe('replayResponse', () => {
   });
 
   it('sets a JSON content type', () => {
-    expect(replayResponse(record()).headers.get('Content-Type')).toBe(
-      'application/json',
-    );
+    expect(replayResponse(record()).headers.get('Content-Type')).toBe('application/json');
   });
 });
 
@@ -345,9 +339,7 @@ describe('isIdempotencyUniqueViolation', () => {
 
 describe('opaqueActorId', () => {
   it('produces a 64-char hex digest', async () => {
-    expect(await opaqueActorId('email', 'user@example.com')).toMatch(
-      /^[0-9a-f]{64}$/,
-    );
+    expect(await opaqueActorId('email', 'user@example.com')).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('is deterministic for the same kind and value', async () => {
@@ -366,9 +358,7 @@ describe('opaqueActorId', () => {
     // sessions.refresh_token_hash is a bare sha256(token). The prefix keeps
     // an actor_id from doubling as a session lookup key.
     const token = 'refresh-token-value';
-    expect(await opaqueActorId('refresh-token', token)).not.toBe(
-      await sha256Hex(token),
-    );
+    expect(await opaqueActorId('refresh-token', token)).not.toBe(await sha256Hex(token));
   });
 
   it('does not contain the raw value', async () => {

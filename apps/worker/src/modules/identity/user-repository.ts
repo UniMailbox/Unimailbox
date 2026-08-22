@@ -84,9 +84,7 @@ export async function createUser(db: Database, input: CreateUserInput): Promise<
  * Gets the first user (administrator) created during setup.
  * Returns null if no user exists.
  */
-export async function getFirstUser(
-  db: Database,
-): Promise<{ id: string; email: string } | null> {
+export async function getFirstUser(db: Database): Promise<{ id: string; email: string } | null> {
   return db
     .prepare('SELECT id, email FROM users ORDER BY created_at LIMIT 1')
     .first<{ id: string; email: string }>();
@@ -122,10 +120,7 @@ export interface UserRow {
  * @param email — Email address to look up (case-insensitive)
  * @returns User row if found, null otherwise
  */
-export async function findUserByEmail(
-  db: Database,
-  email: string,
-): Promise<UserRow | null> {
+export async function findUserByEmail(db: Database, email: string): Promise<UserRow | null> {
   const result = await db
     .prepare(
       `SELECT id, email, display_name, status,

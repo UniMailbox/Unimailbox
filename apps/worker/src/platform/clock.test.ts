@@ -38,9 +38,7 @@ describe('fakeClock (Clock contract)', () => {
 
     clock.advance(60_000);
 
-    expect(clock.unixMs()).toBe(
-      new Date('2026-01-01T00:01:00.000Z').getTime(),
-    );
+    expect(clock.unixMs()).toBe(new Date('2026-01-01T00:01:00.000Z').getTime());
     expect(clock.now().toISOString()).toBe('2026-01-01T00:01:00.000Z');
   });
 
@@ -51,9 +49,7 @@ describe('fakeClock (Clock contract)', () => {
     clock.advance(2_000);
     clock.advance(3_000);
 
-    expect(clock.unixMs()).toBe(
-      new Date('2026-01-01T00:00:06.000Z').getTime(),
-    );
+    expect(clock.unixMs()).toBe(new Date('2026-01-01T00:00:06.000Z').getTime());
   });
 
   it('throws when constructed with a non-finite initial date', () => {

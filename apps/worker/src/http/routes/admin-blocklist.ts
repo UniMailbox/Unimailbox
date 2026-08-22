@@ -193,12 +193,7 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
       // Empty body — hash an empty string so the lookup uses a stable value.
       const requestHash = await sha256Hex('');
 
-      const existing = await findIdempotencyRecord(
-        c.env.DB,
-        userId,
-        operation,
-        idempotencyKey,
-      );
+      const existing = await findIdempotencyRecord(c.env.DB, userId, operation, idempotencyKey);
       if (existing) {
         assertSameRequestHash(existing, requestHash);
         return new Response(existing.responseJson, {

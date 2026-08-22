@@ -129,9 +129,9 @@ describe('POST /api/v1/setup/complete', () => {
         },
       });
 
-      const state = await env.DB
-        .prepare('SELECT status FROM installation_state WHERE id = 1')
-        .first<{ status: string }>();
+      const state = await env.DB.prepare(
+        'SELECT status FROM installation_state WHERE id = 1',
+      ).first<{ status: string }>();
 
       if (!state) {
         throw new Error('Installation state not found');
@@ -150,9 +150,9 @@ describe('POST /api/v1/setup/complete', () => {
         },
       });
 
-      const state = await env.DB
-        .prepare('SELECT current_step FROM installation_state WHERE id = 1')
-        .first<{ current_step: string }>();
+      const state = await env.DB.prepare(
+        'SELECT current_step FROM installation_state WHERE id = 1',
+      ).first<{ current_step: string }>();
 
       if (!state) {
         throw new Error('Installation state not found');
@@ -173,9 +173,9 @@ describe('POST /api/v1/setup/complete', () => {
 
       expect(beforeResponse.status).toBe(200);
 
-      const state = await env.DB
-        .prepare('SELECT updated_at FROM installation_state WHERE id = 1')
-        .first<{ updated_at: string }>();
+      const state = await env.DB.prepare(
+        'SELECT updated_at FROM installation_state WHERE id = 1',
+      ).first<{ updated_at: string }>();
 
       if (!state) {
         throw new Error('Installation state not found');

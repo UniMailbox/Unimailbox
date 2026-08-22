@@ -29,15 +29,8 @@ export interface ApiClientProviderProps {
   readonly client: ApiClient;
 }
 
-export function ApiClientProvider({
-  children,
-  client,
-}: ApiClientProviderProps): ReactElement {
-  return (
-    <ApiClientContext.Provider value={client}>
-      {children}
-    </ApiClientContext.Provider>
-  );
+export function ApiClientProvider({ children, client }: ApiClientProviderProps): ReactElement {
+  return <ApiClientContext.Provider value={client}>{children}</ApiClientContext.Provider>;
 }
 
 export function useApiClient(): ApiClient {

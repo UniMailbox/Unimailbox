@@ -205,7 +205,9 @@ describe('setup-gate middleware', () => {
     });
 
     it('/api/v1/non-setup is NOT exempt — redirects', async () => {
-      const response = await SELF.fetch('http://localhost/api/v1/non-setup', { redirect: 'manual' });
+      const response = await SELF.fetch('http://localhost/api/v1/non-setup', {
+        redirect: 'manual',
+      });
       expect(response.status).toBe(302);
       expect(response.headers.get('Location')).toBe('/setup');
     });

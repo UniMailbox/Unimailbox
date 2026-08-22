@@ -22,21 +22,24 @@ async function createTestUser(db: D1Database): Promise<string> {
   const passwordHash = await hashPassword('testPassword123');
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-  await db.prepare(
-    `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
+  await db
+    .prepare(
+      `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    userId,
-    'test@example.com',
-    'Test User',
-    'active',
-    passwordHash.algorithm,
-    passwordHash.iterations,
-    passwordHash.salt,
-    passwordHash.hash,
-    now,
-    now,
-  ).run();
+    )
+    .bind(
+      userId,
+      'test@example.com',
+      'Test User',
+      'active',
+      passwordHash.algorithm,
+      passwordHash.iterations,
+      passwordHash.salt,
+      passwordHash.hash,
+      now,
+      now,
+    )
+    .run();
 
   return userId;
 }
@@ -64,10 +67,13 @@ async function createTestMailbox(
 ): Promise<string> {
   const mailboxId = systemIds.uuid();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  await db.prepare(
-    `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
+  await db
+    .prepare(
+      `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(mailboxId, domainId, ownerUserId, localPart, `${localPart} Mailbox`, 'active', now, now).run();
+    )
+    .bind(mailboxId, domainId, ownerUserId, localPart, `${localPart} Mailbox`, 'active', now, now)
+    .run();
   return mailboxId;
 }
 
@@ -131,7 +137,12 @@ Message-ID: <test@message.id>
 
 This is a test email body.`;
 
-    const message = makeMessage('inbox@example.com', 'sender@example.com', 'Test inbound email', rawEmail);
+    const message = makeMessage(
+      'inbox@example.com',
+      'sender@example.com',
+      'Test inbound email',
+      rawEmail,
+    );
 
     // Process the email
     await inboundEmail.email(message, env);
@@ -140,7 +151,9 @@ This is a test email body.`;
     expect(message._getRejectReason()).toBeNull();
 
     // Verify message was persisted
-    const messages = await db.prepare('SELECT * FROM messages ORDER BY created_at DESC LIMIT 1').first();
+    const messages = await db
+      .prepare('SELECT * FROM messages ORDER BY created_at DESC LIMIT 1')
+      .first();
     expect(messages).toBeDefined();
     expect(messages?.from_address).toBe('sender@example.com');
     expect(messages?.subject).toBe('Test inbound email');
@@ -149,7 +162,8 @@ This is a test email body.`;
     expect(messages?.message_id_header).toBe('<test@message.id>');
 
     // Verify recipients were persisted
-    const recipients = await db.prepare('SELECT * FROM message_recipients WHERE message_id = ?')
+    const recipients = await db
+      .prepare('SELECT * FROM message_recipients WHERE message_id = ?')
       .bind(messages?.id)
       .all();
     expect(recipients.results).toHaveLength(1);
@@ -157,7 +171,8 @@ This is a test email body.`;
     expect(recipients.results?.[0].type).toBe('to');
 
     // Verify mailbox_messages was persisted
-    const mailboxMessages = await db.prepare('SELECT * FROM mailbox_messages WHERE message_id = ?')
+    const mailboxMessages = await db
+      .prepare('SELECT * FROM mailbox_messages WHERE message_id = ?')
       .bind(messages?.id)
       .all();
     expect(mailboxMessages.results).toHaveLength(1);
@@ -183,7 +198,9 @@ Body`;
     await inboundEmail.email(message, env);
 
     // Verify rejection
-    expect(message._getRejectReason()).toBe('Unknown recipient. No mailbox found for this address.');
+    expect(message._getRejectReason()).toBe(
+      'Unknown recipient. No mailbox found for this address.',
+    );
   });
 
   it('handles multiple recipients with some known and some unknown', async () => {
@@ -214,14 +231,16 @@ Body`;
     expect(messages).toBeDefined();
 
     // Verify only one mailbox_message (for the known mailbox)
-    const mailboxMessages = await db.prepare('SELECT * FROM mailbox_messages WHERE message_id = ?')
+    const mailboxMessages = await db
+      .prepare('SELECT * FROM mailbox_messages WHERE message_id = ?')
       .bind(messages?.id)
       .all();
     expect(mailboxMessages.results).toHaveLength(1);
     expect(mailboxMessages.results?.[0].mailbox_id).toBe(mailboxId);
 
     // Verify all recipients were stored
-    const recipients = await db.prepare('SELECT * FROM message_recipients WHERE message_id = ?')
+    const recipients = await db
+      .prepare('SELECT * FROM message_recipients WHERE message_id = ?')
       .bind(messages?.id)
       .all();
     expect(recipients.results).toHaveLength(3); // 1 to + 1 cc
@@ -254,11 +273,12 @@ Body`;
     expect(messages).toBeDefined();
 
     // Verify two mailbox_messages rows
-    const mailboxMessages = await db.prepare('SELECT * FROM mailbox_messages WHERE message_id = ? ORDER BY mailbox_id')
+    const mailboxMessages = await db
+      .prepare('SELECT * FROM mailbox_messages WHERE message_id = ? ORDER BY mailbox_id')
       .bind(messages?.id)
       .all();
     expect(mailboxMessages.results).toHaveLength(2);
-    const mailboxIds = mailboxMessages.results?.map(m => m.mailbox_id).sort();
+    const mailboxIds = mailboxMessages.results?.map((m) => m.mailbox_id).sort();
     expect(mailboxIds).toEqual([mailboxId1, mailboxId2].sort());
   });
 
@@ -286,7 +306,12 @@ Content-Type: text/html
 <html><body>HTML body</body></html>
 --boundary123--`;
 
-    const message = makeMessage('inbox@example.com', 'sender@example.com', 'Multipart test', rawEmail);
+    const message = makeMessage(
+      'inbox@example.com',
+      'sender@example.com',
+      'Multipart test',
+      rawEmail,
+    );
 
     await inboundEmail.email(message, env);
 
@@ -345,7 +370,8 @@ Body`;
     const messages = await db.prepare('SELECT * FROM messages LIMIT 1').first();
     expect(messages?.from_address).toBe('sender@example.com'); // lowercased
 
-    const recipients = await db.prepare('SELECT * FROM message_recipients WHERE message_id = ?')
+    const recipients = await db
+      .prepare('SELECT * FROM message_recipients WHERE message_id = ?')
       .bind(messages?.id)
       .all();
     expect(recipients.results?.[0].address).toBe('inbox@example.com'); // lowercased
@@ -371,7 +397,7 @@ describe('inbound-email handler — D-CAP-021 / CAP-035', () => {
     await db.prepare('DELETE FROM mailboxes').run();
     await db.prepare('DELETE FROM managed_domains').run();
     await db.prepare('DELETE FROM users').run();
-    await db.prepare('DELETE FROM roles WHERE id NOT IN (\'administrator\', \'member\')').run();
+    await db.prepare("DELETE FROM roles WHERE id NOT IN ('administrator', 'member')").run();
     await db.prepare('DELETE FROM audit_events').run();
   });
 
@@ -382,24 +408,32 @@ describe('inbound-email handler — D-CAP-021 / CAP-035', () => {
     await seedInstallationState({ status: 'complete', currentStep: 'complete' });
 
     // Custom role for the mailbox owner (so we can attach a policy).
-    await db.prepare(
-      `INSERT OR IGNORE INTO roles (id, name, description, is_system, created_at)
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO roles (id, name, description, is_system, created_at)
        VALUES ('test-owner', 'test-owner', 'Test owner', 1, datetime('now'))`,
-    ).run();
+      )
+      .run();
 
     const userId = await createTestUser(db);
-    await db.prepare(
-      `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, 'test-owner', datetime('now'))`,
-    ).bind(userId).run();
+    await db
+      .prepare(
+        `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, 'test-owner', datetime('now'))`,
+      )
+      .bind(userId)
+      .run();
 
     const domainId = await createTestDomain(db);
     const mailboxId = await createTestMailbox(db, domainId, userId, 'inbox');
 
     if (policyJson) {
-      await db.prepare(
-        `INSERT INTO role_policies (role_id, ban_email_patterns_json, avail_domain_patterns_json, updated_by, updated_at)
+      await db
+        .prepare(
+          `INSERT INTO role_policies (role_id, ban_email_patterns_json, avail_domain_patterns_json, updated_by, updated_at)
          VALUES ('test-owner', ?, ?, ?, datetime('now'))`,
-      ).bind(policyJson.ban_email_patterns_json, policyJson.avail_domain_patterns_json, userId).run();
+        )
+        .bind(policyJson.ban_email_patterns_json, policyJson.avail_domain_patterns_json, userId)
+        .run();
     }
 
     return { userId, mailboxId };
@@ -411,10 +445,12 @@ describe('inbound-email handler — D-CAP-021 / CAP-035', () => {
     const { mailboxId: _mailboxId } = await setupMailboxWithRolePolicy(null);
 
     // Insert a blocklist entry matching the subject.
-    await db.prepare(
-      `INSERT INTO blocklist_entries (id, kind, pattern, created_by, created_at)
+    await db
+      .prepare(
+        `INSERT INTO blocklist_entries (id, kind, pattern, created_by, created_at)
        VALUES ('blocklist-subj', 'subject', 'special offer', NULL, datetime('now'))`,
-    ).run();
+      )
+      .run();
 
     const rawEmail = `From: sender@example.com
 To: inbox@example.com
@@ -436,13 +472,16 @@ Body`;
     expect(message._getRejectReason()).toContain('subject');
 
     // No message persisted (R-INBOUND-008: rejection short-circuits).
-    const msg = await db.prepare('SELECT id FROM messages WHERE message_id_header = ?')
+    const msg = await db
+      .prepare('SELECT id FROM messages WHERE message_id_header = ?')
       .bind('<block-test-1@message.id>')
       .first();
     expect(msg).toBeNull();
 
     // No audit row written (Decision §Q4: audit on reject OUT OF SCOPE).
-    const audit = await db.prepare('SELECT id FROM audit_events WHERE resource_type = \'message\'').first();
+    const audit = await db
+      .prepare("SELECT id FROM audit_events WHERE resource_type = 'message'")
+      .first();
     expect(audit).toBeNull();
   });
 
@@ -461,19 +500,15 @@ Message-ID: <block-test-2@message.id>
 
 Body`;
 
-    const message = makeMessage(
-      'inbox@example.com',
-      'spammer@example.com',
-      'Hello',
-      rawEmail,
-    );
+    const message = makeMessage('inbox@example.com', 'spammer@example.com', 'Hello', rawEmail);
 
     await inboundEmail.email(message, env);
 
     expect(message._getRejectReason()).toContain('banned');
     expect(message._getRejectReason()).toContain('spammer@example.com');
 
-    const msg = await db.prepare('SELECT id FROM messages WHERE message_id_header = ?')
+    const msg = await db
+      .prepare('SELECT id FROM messages WHERE message_id_header = ?')
       .bind('<block-test-2@message.id>')
       .first();
     expect(msg).toBeNull();
@@ -494,18 +529,14 @@ Message-ID: <block-test-3@message.id>
 
 Body`;
 
-    const message = makeMessage(
-      'inbox@example.com',
-      'anyone@example.com',
-      'Hello',
-      rawEmail,
-    );
+    const message = makeMessage('inbox@example.com', 'anyone@example.com', 'Hello', rawEmail);
 
     await inboundEmail.email(message, env);
 
     expect(message._getRejectReason()).toContain('banned');
 
-    const msg = await db.prepare('SELECT id FROM messages WHERE message_id_header = ?')
+    const msg = await db
+      .prepare('SELECT id FROM messages WHERE message_id_header = ?')
       .bind('<block-test-3@message.id>')
       .first();
     expect(msg).toBeNull();

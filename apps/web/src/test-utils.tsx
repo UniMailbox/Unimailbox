@@ -48,9 +48,7 @@ export interface RenderStepOptions {
 // The step element is rendered by `targetRoute.component` directly, NOT
 // as a child of RouterProvider (this TanStack Router version does not
 // accept children on RouterProvider — the route tree is the only mount).
-async function mountRouter(
-  options: RenderStepOptions,
-): Promise<AnyRouter> {
+async function mountRouter(options: RenderStepOptions): Promise<AnyRouter> {
   resetSetupSessionForTesting();
   const rootRoute = createRootRoute({
     component: () => <Outlet />,
@@ -78,16 +76,12 @@ async function mountRouter(
   const cloudflareRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/setup/cloudflare-verify',
-    component: () => (
-      <div data-testid="arrived-cloudflare-verify">cloudflare</div>
-    ),
+    component: () => <div data-testid="arrived-cloudflare-verify">cloudflare</div>,
   });
   const inboundSmokeRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/setup/inbound-smoke',
-    component: () => (
-      <div data-testid="arrived-inbound-smoke">inbound-smoke</div>
-    ),
+    component: () => <div data-testid="arrived-inbound-smoke">inbound-smoke</div>,
   });
   const brevoRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -192,9 +186,7 @@ export interface MountAppRouterOptions {
   readonly apiClient?: ApiClient;
 }
 
-export async function mountAppRouter(
-  options: MountAppRouterOptions,
-): Promise<{
+export async function mountAppRouter(options: MountAppRouterOptions): Promise<{
   readonly router: AnyRouter;
   readonly history: ReturnType<typeof createMemoryHistory>;
   readonly apiClient: ApiClient;
@@ -232,11 +224,7 @@ export async function mountAppRouter(
       mutations: { retry: false },
     },
   });
-  function Wrapper({
-    children: _children,
-  }: {
-    children: ReactNode;
-  }): ReactElement {
+  function Wrapper({ children: _children }: { children: ReactNode }): ReactElement {
     return (
       <QueryClientProvider client={queryClient}>
         <ApiClientProvider client={apiClient}>
@@ -276,15 +264,11 @@ export function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
-export function errorResponse(
-  code: string,
-  message: string,
-  status: number,
-): Response {
-  return new Response(
-    JSON.stringify({ error: { code, message, requestId: 'req-test' } }),
-    { status, headers: { 'content-type': 'application/json' } },
-  );
+export function errorResponse(code: string, message: string, status: number): Response {
+  return new Response(JSON.stringify({ error: { code, message, requestId: 'req-test' } }), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 export interface SpyFetch {
@@ -297,10 +281,7 @@ export function spyFetch(
 ): SpyFetch {
   const calls: Array<{ url: string; method: string }> = [];
   let index = 0;
-  const fetchImpl = async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
     const call = { url, method };

@@ -153,11 +153,7 @@ export async function verifyAndProcessEvent(
     false,
     ['sign'],
   );
-  const sigBuffer = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(rawBody),
-  );
+  const sigBuffer = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody));
   const computedHex = Array.from(new Uint8Array(sigBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -191,8 +187,7 @@ export async function verifyAndProcessEvent(
   //    known. The delivery row itself is durable; the link to the message
   //    is just deferred.
   let messageId: string | null = null;
-  const providerMessageId =
-    typeof event.messageId === 'string' ? event.messageId : null;
+  const providerMessageId = typeof event.messageId === 'string' ? event.messageId : null;
   if (providerMessageId) {
     const job = await findJobByProviderMessageId(db, connectionId, providerMessageId);
     if (job) {
@@ -270,9 +265,10 @@ export async function verifyAndProcessEvent(
  * Server fallback is `Date.now()` and is recorded as `source: 'server'` so
  * the audit trail can answer why a particular ordering decision was made.
  */
-function extractBrevoEventTimeMs(
-  event: BrevoWebhookEvent,
-): { readonly value: number; readonly source: 'provider' | 'server' } {
+function extractBrevoEventTimeMs(event: BrevoWebhookEvent): {
+  readonly value: number;
+  readonly source: 'provider' | 'server';
+} {
   const raw = event.ts ?? event.time;
   if (raw === undefined || raw === null) {
     return { value: Date.now(), source: 'server' };

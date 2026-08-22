@@ -169,11 +169,7 @@ export default {
 
     // Execute all statements in one atomic batch (R-INBOUND-008)
     const messageStatement = prepareCreateMessage(env.DB, messageInput);
-    const allStatements = [
-      messageStatement,
-      ...recipientStatements,
-      ...mailboxMessageStatements,
-    ];
+    const allStatements = [messageStatement, ...recipientStatements, ...mailboxMessageStatements];
 
     await createMessageWithRelations(env.DB, allStatements);
 

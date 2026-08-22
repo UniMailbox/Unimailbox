@@ -1,7 +1,14 @@
 // platform/crypto.test.ts — unit tests for constantTimeCompare, hashPassword,
 // verifyPassword, and AES-GCM encrypt/decrypt (ADR-007).
 import { describe, expect, it } from 'vitest';
-import { constantTimeCompare, hashPassword, verifyPassword, importEncryptionKey, encrypt, decrypt } from './crypto';
+import {
+  constantTimeCompare,
+  hashPassword,
+  verifyPassword,
+  importEncryptionKey,
+  encrypt,
+  decrypt,
+} from './crypto';
 
 describe('constantTimeCompare', () => {
   it('returns true for equal strings', () => {
@@ -141,8 +148,7 @@ describe('importEncryptionKey', () => {
 
   it('imports a real 256-bit hex key', async () => {
     // Example: 256-bit key as hex (64 hex chars = 32 bytes)
-    const hexKey =
-      '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
+    const hexKey = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f';
     const key = await importEncryptionKey(hexKey);
     expect(key.algorithm.name).toBe('AES-GCM');
   });

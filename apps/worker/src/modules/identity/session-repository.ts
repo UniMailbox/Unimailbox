@@ -46,10 +46,7 @@ export interface SessionRow {
  *
  * @throws D1 error on constraint violation
  */
-export async function createSession(
-  db: Database,
-  input: CreateSessionInput,
-): Promise<void> {
+export async function createSession(db: Database, input: CreateSessionInput): Promise<void> {
   await db
     .prepare(
       `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, ip, user_agent, created_at)

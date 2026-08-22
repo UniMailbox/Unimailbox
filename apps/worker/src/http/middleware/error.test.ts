@@ -36,7 +36,9 @@ async function runViaApp(err: unknown): Promise<{
 function runDirect(err: unknown, requestId: string | undefined) {
   // Minimal Context stub — only `get('requestId')` is exercised by the
   // middleware in these tests.
-  const c = { get: (_k: 'requestId') => requestId } as unknown as Parameters<typeof errorMiddleware>[1];
+  const c = { get: (_k: 'requestId') => requestId } as unknown as Parameters<
+    typeof errorMiddleware
+  >[1];
   const result = errorMiddleware(err as Error, c);
   return result as Response;
 }
@@ -105,10 +107,7 @@ describe('errorMiddleware', () => {
       expect(body.error.message).toBe('Internal server error');
       expect(body.error.requestId).toEqual(expect.any(String));
       // The unknown-error path should log.
-      expect(spy).toHaveBeenCalledWith(
-        '[error-middleware] unhandled error:',
-        expect.any(Error),
-      );
+      expect(spy).toHaveBeenCalledWith('[error-middleware] unhandled error:', expect.any(Error));
       spy.mockRestore();
     });
   });

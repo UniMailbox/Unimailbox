@@ -35,7 +35,9 @@ export const sessions = sqliteTable(
   'sessions',
   {
     id: text('id').primaryKey(),
-    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
     refreshTokenHash: text('refresh_token_hash').notNull(),
     expiresAt: integer('expires_at').notNull(),
     ip: text('ip'),
@@ -45,7 +47,9 @@ export const sessions = sqliteTable(
   },
   (t) => ({
     userIdExpiresAtIdx: index('sessions_user_id_expires_at_idx').on(t.userId, t.expiresAt),
-    refreshTokenHashUnique: uniqueIndex('sessions_refresh_token_hash_unique').on(t.refreshTokenHash),
+    refreshTokenHashUnique: uniqueIndex('sessions_refresh_token_hash_unique').on(
+      t.refreshTokenHash,
+    ),
   }),
 );
 
@@ -76,11 +80,7 @@ export const idempotencyRecords = sqliteTable(
     expiresAt: text('expires_at').notNull(),
   },
   (t) => ({
-    unique: uniqueIndex('idempotency_records_unique').on(
-      t.actorId,
-      t.operation,
-      t.idempotencyKey,
-    ),
+    unique: uniqueIndex('idempotency_records_unique').on(t.actorId, t.operation, t.idempotencyKey),
     expiresAtIdx: index('idempotency_records_expires_at_idx').on(t.expiresAt),
   }),
 );

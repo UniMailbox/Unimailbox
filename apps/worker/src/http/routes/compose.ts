@@ -45,8 +45,7 @@ import {
 import type { AppEnv } from '../../platform/env';
 import { parseJsonBody } from '../middleware/parse-json-body';
 
-const SEND_OPERATION =
-  'POST /api/v1/mailboxes/:mailboxId/messages/send';
+const SEND_OPERATION = 'POST /api/v1/mailboxes/:mailboxId/messages/send';
 
 export function composeRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -143,11 +142,9 @@ export function composeRoutes(): Hono<AppEnv> {
       // Resolve the active provider connection. There is exactly one outbound
       // provider in Phase 1 (Brevo); we pick the first 'active' row. CAP-024
       // will tighten this to the connection on the managed domain.
-      const connection = await c.env.DB
-        .prepare(
-          "SELECT id FROM provider_connections WHERE status = 'active' ORDER BY created_at ASC LIMIT 1",
-        )
-        .first<{ id: string }>();
+      const connection = await c.env.DB.prepare(
+        "SELECT id FROM provider_connections WHERE status = 'active' ORDER BY created_at ASC LIMIT 1",
+      ).first<{ id: string }>();
       if (!connection) {
         throw new DomainError({
           code: 'PROVIDER_CONNECTION_NOT_FOUND',
@@ -251,13 +248,7 @@ export function composeRoutes(): Hono<AppEnv> {
         // the same Idempotency-Key raced to INSERT. Re-read the winner's row
         // and replay it.
         if (isIdempotencyUniqueViolation(error)) {
-          return replayAfterRace(
-            c.env.DB,
-            userId,
-            SEND_OPERATION,
-            idempotencyKey,
-            requestHash,
-          );
+          return replayAfterRace(c.env.DB, userId, SEND_OPERATION, idempotencyKey, requestHash);
         }
         throw error;
       }

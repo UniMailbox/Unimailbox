@@ -108,9 +108,11 @@ async function createUserWithRole(
       now,
       now,
     ),
-    env.DB.prepare(
-      `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`,
-    ).bind(userId, roleName, now),
+    env.DB.prepare(`INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`).bind(
+      userId,
+      roleName,
+      now,
+    ),
   ]);
 
   return userId;
@@ -130,11 +132,9 @@ async function createSession(userId: string): Promise<string> {
     .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
     .run();
 
-  await env.CACHE.put(
-    `auth:${accessToken}`,
-    JSON.stringify({ userId }),
-    { expirationTtl: 15 * 60 },
-  );
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+    expirationTtl: 15 * 60,
+  });
 
   return accessToken;
 }
@@ -296,42 +296,43 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     const messageId = body.data.messageId;
 
     // Message row: status 'queued', from the mailbox address, created_by set.
-    const msg = await env.DB
-      .prepare(
-        'SELECT from_address, subject, status, created_by_user_id FROM messages WHERE id = ?',
-      )
+    const msg = await env.DB.prepare(
+      'SELECT from_address, subject, status, created_by_user_id FROM messages WHERE id = ?',
+    )
       .bind(messageId)
-      .first<{ from_address: string; subject: string; status: string; created_by_user_id: string }>();
+      .first<{
+        from_address: string;
+        subject: string;
+        status: string;
+        created_by_user_id: string;
+      }>();
     expect(msg?.from_address).toBe('me@example.com');
     expect(msg?.subject).toBe('Hello');
     expect(msg?.status).toBe('queued');
     expect(msg?.created_by_user_id).toBe(ownerId);
 
     // Recipients: one 'to', one 'cc'.
-    const recipients = await env.DB
-      .prepare(
-        "SELECT type, address FROM message_recipients WHERE message_id = ? ORDER BY type",
-      )
+    const recipients = await env.DB.prepare(
+      'SELECT type, address FROM message_recipients WHERE message_id = ? ORDER BY type',
+    )
       .bind(messageId)
       .all<{ type: string; address: string }>();
     const types = (recipients.results ?? []).map((r) => `${r.type}:${r.address}`).sort();
     expect(types).toEqual(['cc:cc@example.com', 'to:to@example.com']);
 
     // Mailbox association: folder 'sent', is_read true (the sender's own copy).
-    const mailboxMessage = await env.DB
-      .prepare(
-        'SELECT folder, is_read FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?',
-      )
+    const mailboxMessage = await env.DB.prepare(
+      'SELECT folder, is_read FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?',
+    )
       .bind(mailboxId, messageId)
       .first<{ folder: string; is_read: number }>();
     expect(mailboxMessage?.folder).toBe('sent');
     expect(mailboxMessage?.is_read).toBe(1);
 
     // Outbound job: status 'queued', linked to the message.
-    const job = await env.DB
-      .prepare(
-        'SELECT status, message_id FROM outbound_jobs WHERE message_id = ?',
-      )
+    const job = await env.DB.prepare(
+      'SELECT status, message_id FROM outbound_jobs WHERE message_id = ?',
+    )
       .bind(messageId)
       .first<{ status: string; message_id: string }>();
     expect(job?.status).toBe('queued');
@@ -339,9 +340,9 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
 
     // The route enqueued exactly one message with { jobId }.
     expect(queueSendSpy).toHaveBeenCalledTimes(1);
-    const enqueued = JSON.parse(
-      (queueSendSpy.mock.calls[0]?.[0] as string) ?? '{}',
-    ) as { jobId?: string };
+    const enqueued = JSON.parse((queueSendSpy.mock.calls[0]?.[0] as string) ?? '{}') as {
+      jobId?: string;
+    };
     expect(enqueued.jobId).toBeDefined();
   });
 
@@ -400,7 +401,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     expect(body.error.code).toBe('MAILBOX_ACCESS_DENIED');
   });
 
-  it('returns 403 when a non-member tries to send from another user\'s mailbox (IDOR, R-AUTHZ-004)', async () => {
+  it("returns 403 when a non-member tries to send from another user's mailbox (IDOR, R-AUTHZ-004)", async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const intruderId = await createUserWithRole('member', 'intruder@example.com');
     const intruderToken = await createSession(intruderId);
@@ -565,12 +566,11 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     const firstMessageId = firstBody.data.messageId;
 
     // Verify idempotency record was written
-    const record = await env.DB
-      .prepare(
-        `SELECT response_status, response_json, request_hash
+    const record = await env.DB.prepare(
+      `SELECT response_status, response_json, request_hash
          FROM idempotency_records
          WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-      )
+    )
       .bind(ownerId, 'POST /api/v1/mailboxes/:mailboxId/messages/send', idempotencyKey)
       .first<{ response_status: number; response_json: string; request_hash: string }>();
     expect(record).toBeDefined();
@@ -596,8 +596,9 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     expect(secondBody.data.status).toBe('queued');
 
     // Verify no additional message was created
-    const messageCount = await env.DB
-      .prepare('SELECT COUNT(*) as count FROM messages WHERE created_by_user_id = ?')
+    const messageCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM messages WHERE created_by_user_id = ?',
+    )
       .bind(ownerId)
       .first<{ count: number }>();
     expect(messageCount?.count).toBe(1);
@@ -766,8 +767,9 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     expect(loserBody.data.status).toBe('queued');
 
     // Verify no second message was created (the loser replayed, didn't execute)
-    const messageCount = await env.DB
-      .prepare('SELECT COUNT(*) as count FROM messages WHERE created_by_user_id = ?')
+    const messageCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM messages WHERE created_by_user_id = ?',
+    )
       .bind(ownerId)
       .first<{ count: number }>();
     expect(messageCount?.count).toBe(0);

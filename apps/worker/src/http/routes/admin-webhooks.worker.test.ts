@@ -163,7 +163,9 @@ async function seedWebhookDelivery(connectionId: string): Promise<string> {
   await env.DB.prepare(
     `INSERT INTO webhook_deliveries (id, connection_id, event_type, raw_payload, message_id, status, created_at)
      VALUES (?, ?, 'delivered', '{}', NULL, 'processed', ?)`,
-  ).bind(deliveryId, connectionId, now).run();
+  )
+    .bind(deliveryId, connectionId, now)
+    .run();
 
   return deliveryId;
 }
@@ -366,18 +368,16 @@ describe('POST /api/v1/admin/connections/:id/webhook-secret/reveal', () => {
     // R-AUDIT-001: every reveal writes an audit row. The actor is the
     // authenticated user; the resource is the connection; the metadata
     // carries the connectionId + providerKey but NEVER the secret.
-    const audit = await env.DB
-      .prepare(
-        `SELECT actor_user_id, resource_type, resource_id, metadata, request_id
+    const audit = await env.DB.prepare(
+      `SELECT actor_user_id, resource_type, resource_id, metadata, request_id
          FROM audit_events WHERE action = 'webhook_secret.reveal'`,
-      )
-      .first<{
-        actor_user_id: string | null;
-        resource_type: string;
-        resource_id: string | null;
-        metadata: string | null;
-        request_id: string | null;
-      }>();
+    ).first<{
+      actor_user_id: string | null;
+      resource_type: string;
+      resource_id: string | null;
+      metadata: string | null;
+      request_id: string | null;
+    }>();
     expect(audit).not.toBeNull();
     expect(audit?.resource_type).toBe('provider_connection');
     expect(audit?.resource_id).toBe(connectionId);
@@ -458,11 +458,10 @@ describe('POST /api/v1/admin/connections/:id/webhook-secret/reveal', () => {
     // Defensive: a denied reveal must NOT write the audit row.
     // R-AUDIT-001 audits successful reveals; denied reveals should not
     // clutter the audit trail (the rejection is logged at the auth layer).
-    const audit = await env.DB
-      .prepare(
-        `SELECT COUNT(*) as n FROM audit_events
+    const audit = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM audit_events
          WHERE action = 'webhook_secret.reveal' AND resource_id = ?`,
-      )
+    )
       .bind(connectionId)
       .first<{ n: number }>();
     expect(audit?.n).toBe(0);

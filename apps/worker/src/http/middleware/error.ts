@@ -47,10 +47,7 @@ function envelope(
   httpStatus: HttpStatusCode,
   requestId: string,
 ): Response {
-  const response = Response.json(
-    { error: { code, message, requestId } },
-    { status: httpStatus },
-  );
+  const response = Response.json({ error: { code, message, requestId } }, { status: httpStatus });
   // Don't propagate the AC5 sentinel as a real header.
   if (requestId !== '<unknown>') {
     response.headers.set('X-Request-Id', requestId);
@@ -95,10 +92,5 @@ export const errorMiddleware: ErrorHandler<AppEnv> = (err, c) => {
   // before persisting.
   console.error('[error-middleware] unhandled error:', err);
 
-  return envelope(
-    'INTERNAL',
-    'Internal server error',
-    500,
-    resolveRequestId(c),
-  );
+  return envelope('INTERNAL', 'Internal server error', 500, resolveRequestId(c));
 };

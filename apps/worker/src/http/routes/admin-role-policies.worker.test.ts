@@ -82,7 +82,10 @@ async function createAdminUser(): Promise<{ userId: string; accessToken: string 
       email: 'admin@example.com',
       password: 'adminPassword123',
     }),
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+    },
   });
 
   const body = await loginResponse.json();
@@ -125,7 +128,10 @@ async function memberAccessToken(): Promise<string> {
       email: 'member@example.com',
       password: 'memberPassword123',
     }),
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+    },
   });
   const body = await loginResponse.json();
   return body.data.accessToken;
@@ -148,10 +154,9 @@ describe('GET /api/v1/admin/roles/:id/policy', () => {
   });
 
   it('returns 200 with empty arrays when no policy row exists', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      { headers: { Authorization: `Bearer ${adminToken}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -179,10 +184,9 @@ describe('GET /api/v1/admin/roles/:id/policy', () => {
       },
     });
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      { headers: { Authorization: `Bearer ${adminToken}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -194,9 +198,7 @@ describe('GET /api/v1/admin/roles/:id/policy', () => {
   });
 
   it('returns 401 without authentication', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`);
     expect(response.status).toBe(401);
   });
 
@@ -204,10 +206,9 @@ describe('GET /api/v1/admin/roles/:id/policy', () => {
     await createMemberUser();
     const memberToken = await memberAccessToken();
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      { headers: { Authorization: `Bearer ${memberToken}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      headers: { Authorization: `Bearer ${memberToken}` },
+    });
 
     expect(response.status).toBe(403);
     const body = await response.json();
@@ -230,21 +231,18 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   });
 
   it('returns 200 with the stored policy on first PUT', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: ['spammer@example.com'],
-          availDomain: ['@allowed.com'],
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-put-first-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['spammer@example.com'],
+        availDomain: ['@allowed.com'],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-put-first-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -255,10 +253,9 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     expect(body.data.updatedAt).toEqual(expect.any(String));
 
     // Storage row exists with JSON columns populated.
-    const row = await env.DB
-      .prepare(
-        'SELECT ban_email_patterns_json, avail_domain_patterns_json FROM role_policies WHERE role_id = ?',
-      )
+    const row = await env.DB.prepare(
+      'SELECT ban_email_patterns_json, avail_domain_patterns_json FROM role_policies WHERE role_id = ?',
+    )
       .bind(ROLE_ID)
       .first<{ ban_email_patterns_json: string; avail_domain_patterns_json: string }>();
     expect(row).toBeDefined();
@@ -283,21 +280,18 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     });
 
     // Second PUT: completely different arrays.
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: ['new@example.com', '*'],
-          availDomain: ['@new.com', '@another.com'],
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-put-2-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['new@example.com', '*'],
+        availDomain: ['@new.com', '@another.com'],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-put-2-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -320,18 +314,15 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
       },
     });
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ banEmail: [], availDomain: [] }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-empty-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({ banEmail: [], availDomain: [] }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-empty-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -340,21 +331,18 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   });
 
   it('returns 400 VALIDATION_ERROR for banEmail entry without @ or *', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: ['not-a-valid-pattern'],
-          availDomain: [],
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-badban-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['not-a-valid-pattern'],
+        availDomain: [],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-badban-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -362,21 +350,18 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   });
 
   it('returns 400 VALIDATION_ERROR for availDomain without leading @', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: [],
-          availDomain: ['allowed.com'], // missing @
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-badavail-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: [],
+        availDomain: ['allowed.com'], // missing @
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-badavail-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -384,17 +369,14 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   });
 
   it('returns 400 IDEMPOTENCY_KEY_REQUIRED when header missing', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ banEmail: [], availDomain: [] }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({ banEmail: [], availDomain: [] }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
       },
-    );
+    });
 
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -402,17 +384,14 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   });
 
   it('returns 401 without authentication', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ banEmail: [], availDomain: [] }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'role-policy-noauth-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({ banEmail: [], availDomain: [] }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'role-policy-noauth-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(401);
   });
@@ -421,18 +400,15 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     await createMemberUser();
     const memberToken = await memberAccessToken();
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ banEmail: [], availDomain: [] }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${memberToken}`,
-          'Idempotency-Key': 'role-policy-forbid-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({ banEmail: [], availDomain: [] }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${memberToken}`,
+        'Idempotency-Key': 'role-policy-forbid-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(403);
   });
@@ -495,18 +471,15 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
       },
     });
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ banEmail: ['new@example.com'], availDomain: [] }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': idempotencyKey,
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({ banEmail: ['new@example.com'], availDomain: [] }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
       },
-    );
+    });
 
     expect(response.status).toBe(409);
     const body = await response.json();
@@ -523,21 +496,18 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     const idempotencyKey = 'role-policy-crossrole-' + crypto.randomUUID();
 
     // PUT against the administrator role.
-    const first = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/administrator/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: ['adminban@example.com'],
-          availDomain: ['@admin.example.com'],
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': idempotencyKey,
-        },
+    const first = await SELF.fetch(`http://localhost/api/v1/admin/roles/administrator/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['adminban@example.com'],
+        availDomain: ['@admin.example.com'],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
       },
-    );
+    });
     expect(first.status).toBe(200);
     const firstBody = await first.json();
 
@@ -546,21 +516,18 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     // the operation string (`PUT /api/v1/admin/roles/member/policy`) is
     // different from the first request's. Each role owns its idempotency
     // namespace.
-    const second = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/member/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: ['memberban@example.com'],
-          availDomain: ['@member.example.com'],
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': idempotencyKey,
-        },
+    const second = await SELF.fetch(`http://localhost/api/v1/admin/roles/member/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['memberban@example.com'],
+        availDomain: ['@member.example.com'],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
       },
-    );
+    });
 
     expect(second.status).toBe(200);
     const secondBody = await second.json();
@@ -570,34 +537,29 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     expect(secondBody.data.banEmail).toEqual(['memberban@example.com']);
 
     // Both rows exist with distinct content.
-    const adminRow = await env.DB
-      .prepare(
-        'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
-      )
+    const adminRow = await env.DB.prepare(
+      'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
+    )
       .bind('administrator')
       .first<{ ban_email_patterns_json: string }>();
-    const memberRow = await env.DB
-      .prepare(
-        'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
-      )
+    const memberRow = await env.DB.prepare(
+      'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
+    )
       .bind('member')
       .first<{ ban_email_patterns_json: string }>();
-    expect(JSON.parse(adminRow?.ban_email_patterns_json ?? '[]')).toEqual([
-      'adminban@example.com',
-    ]);
+    expect(JSON.parse(adminRow?.ban_email_patterns_json ?? '[]')).toEqual(['adminban@example.com']);
     expect(JSON.parse(memberRow?.ban_email_patterns_json ?? '[]')).toEqual([
       'memberban@example.com',
     ]);
 
     // Two separate idempotency records exist — keyed by (actor, operation,
     // idempotency_key). Same key, different operation strings.
-    const records = await env.DB
-      .prepare(
-        `SELECT operation FROM idempotency_records
+    const records = await env.DB.prepare(
+      `SELECT operation FROM idempotency_records
          WHERE actor_id = (SELECT id FROM users WHERE email = 'admin@example.com')
            AND idempotency_key = ?
            AND operation LIKE 'PUT /api/v1/admin/roles/%/policy'`,
-      )
+    )
       .bind(idempotencyKey)
       .all<{ operation: string }>();
     expect(records.results?.length).toBe(2);
@@ -611,38 +573,32 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   // in one D1 batch (R-AUDIT-001 + ADR-004).
   // -----------------------------------------------------------------------
   it('writes the audit row in the same D1 batch as the business PUT', async () => {
-    const before = await env.DB
-      .prepare(
-        `SELECT COUNT(*) as n FROM audit_events WHERE action = 'role_policy.set'`,
-      )
-      .first<{ n: number }>();
+    const before = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM audit_events WHERE action = 'role_policy.set'`,
+    ).first<{ n: number }>();
     const auditBefore = before?.n ?? 0;
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: ['audit-batch@example.com'],
-          availDomain: ['@audit-batch.example.com'],
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-audit-batch-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['audit-batch@example.com'],
+        availDomain: ['@audit-batch.example.com'],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-audit-batch-' + crypto.randomUUID(),
       },
-    );
+    });
     expect(response.status).toBe(200);
 
     // The audit row exists with action=role_policy.set and resource_id
     // equal to the roleId.
-    const audit = await env.DB
-      .prepare(
-        `SELECT id, action, resource_type, resource_id
+    const audit = await env.DB.prepare(
+      `SELECT id, action, resource_type, resource_id
          FROM audit_events
          WHERE action = 'role_policy.set' AND resource_id = ?`,
-      )
+    )
       .bind(ROLE_ID)
       .first<{ id: string; action: string; resource_type: string; resource_id: string }>();
     expect(audit).toBeDefined();
@@ -650,20 +606,17 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     expect(audit?.resource_type).toBe('role_policy');
 
     // Exactly one new audit row was inserted.
-    const after = await env.DB
-      .prepare(
-        `SELECT COUNT(*) as n FROM audit_events WHERE action = 'role_policy.set'`,
-      )
-      .first<{ n: number }>();
+    const after = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM audit_events WHERE action = 'role_policy.set'`,
+    ).first<{ n: number }>();
     expect(after?.n).toBe(auditBefore + 1);
 
     // The idempotency record exists with the per-role operation string.
-    const idem = await env.DB
-      .prepare(
-        `SELECT response_status, operation FROM idempotency_records
+    const idem = await env.DB.prepare(
+      `SELECT response_status, operation FROM idempotency_records
          WHERE actor_id = (SELECT id FROM users WHERE email = 'admin@example.com')
            AND operation = ?`,
-      )
+    )
       .bind(`PUT /api/v1/admin/roles/${ROLE_ID}/policy`)
       .first<{ response_status: number; operation: string }>();
     expect(idem?.response_status).toBe(200);
@@ -674,18 +627,15 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   // not a raw SyntaxError.
   // -----------------------------------------------------------------------
   it('returns 400 INVALID_JSON when request body is not valid JSON', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: '{not valid json',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-invalid-json-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: '{not valid json',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-invalid-json-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(400);
     const body = await response.json();
@@ -698,30 +648,26 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
   // the matching; this test verifies storage round-trip).
   // -----------------------------------------------------------------------
   it('accepts and persists a banEmail wildcard `*` entry', async () => {
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          banEmail: ['*'],
-          availDomain: [],
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'role-policy-wildcard-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['*'],
+        availDomain: [],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-wildcard-' + crypto.randomUUID(),
       },
-    );
+    });
 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.banEmail).toEqual(['*']);
 
-    const row = await env.DB
-      .prepare(
-        'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
-      )
+    const row = await env.DB.prepare(
+      'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
+    )
       .bind(ROLE_ID)
       .first<{ ban_email_patterns_json: string }>();
     expect(JSON.parse(row?.ban_email_patterns_json ?? '[]')).toEqual(['*']);

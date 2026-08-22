@@ -23,12 +23,26 @@ export const messages = sqliteTable(
     inReplyToHeader: text('in_reply_to_header'),
     referencesHeader: text('references_header').notNull().default(''),
     status: text('status', {
-      enum: ['draft', 'queued', 'sending', 'sent', 'delivered', 'delayed', 'bounced', 'complained', 'failed'],
-    }).notNull().default('delivered'),
+      enum: [
+        'draft',
+        'queued',
+        'sending',
+        'sent',
+        'delivered',
+        'delayed',
+        'bounced',
+        'complained',
+        'failed',
+      ],
+    })
+      .notNull()
+      .default('delivered'),
     errorCode: text('error_code'),
     errorMessage: text('error_message'),
     rawObjectKey: text('raw_object_key'),
-    createdByUserId: text('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     receivedAt: text('received_at'),
     sentAt: text('sent_at'),
     createdAt: text('created_at').notNull(),
@@ -50,7 +64,9 @@ export const messageRecipients = sqliteTable(
   'message_recipients',
   {
     id: text('id').primaryKey(),
-    messageId: text('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
     address: text('address').notNull(),
     displayName: text('display_name').notNull().default(''),
     type: text('type', { enum: ['to', 'cc', 'bcc'] }).notNull(),
@@ -69,8 +85,12 @@ export const mailboxMessages = sqliteTable(
   'mailbox_messages',
   {
     id: text('id').primaryKey(),
-    mailboxId: text('mailbox_id').notNull().references(() => mailboxes.id, { onDelete: 'cascade' }),
-    messageId: text('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+    mailboxId: text('mailbox_id')
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: 'cascade' }),
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
     isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
     isStarred: integer('is_starred', { mode: 'boolean' }).notNull().default(false),
     folder: text('folder').notNull().default('inbox'),
@@ -79,7 +99,10 @@ export const mailboxMessages = sqliteTable(
   (table) => ({
     mailboxIdx: index('mailbox_messages_mailbox_idx').on(table.mailboxId),
     messageIdx: index('mailbox_messages_message_idx').on(table.messageId),
-    mailboxMessageUnique: uniqueIndex('mailbox_messages_mailbox_id_message_id_unique').on(table.mailboxId, table.messageId),
+    mailboxMessageUnique: uniqueIndex('mailbox_messages_mailbox_id_message_id_unique').on(
+      table.mailboxId,
+      table.messageId,
+    ),
   }),
 );
 
@@ -90,8 +113,12 @@ export type NewMailboxMessage = typeof mailboxMessages.$inferInsert;
 export const messageUserState = sqliteTable(
   'message_user_state',
   {
-    mailboxMessageId: text('mailbox_message_id').primaryKey().references(() => mailboxMessages.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    mailboxMessageId: text('mailbox_message_id')
+      .primaryKey()
+      .references(() => mailboxMessages.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
     isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
     readAt: text('read_at'),
     updatedAt: text('updated_at').notNull(),

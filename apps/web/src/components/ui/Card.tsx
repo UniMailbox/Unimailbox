@@ -12,23 +12,13 @@ export interface CardProps {
   readonly testId?: string;
 }
 
-export function Card({
-  title,
-  description,
-  children,
-  actions,
-  testId,
-}: CardProps): ReactElement {
+export function Card({ title, description, children, actions, testId }: CardProps): ReactElement {
   return (
     <section className="card" data-testid={testId}>
       {title !== undefined ? <h2 className="card-title">{title}</h2> : null}
-      {description !== undefined ? (
-        <p className="card-description">{description}</p>
-      ) : null}
+      {description !== undefined ? <p className="card-description">{description}</p> : null}
       {children}
-      {actions !== undefined ? (
-        <div className="wizard-actions">{actions}</div>
-      ) : null}
+      {actions !== undefined ? <div className="wizard-actions">{actions}</div> : null}
     </section>
   );
 }

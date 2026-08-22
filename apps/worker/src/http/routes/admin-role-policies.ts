@@ -11,17 +11,10 @@
 // CAP-027 / ADR-004: writes enforce Idempotency-Key. Reads do not.
 
 import { Hono } from 'hono';
-import {
-  setRolePolicyRequestSchema,
-  type RolePolicy,
-} from '@unimailbox/contracts';
+import { setRolePolicyRequestSchema, type RolePolicy } from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
-import {
-  getRolePolicy,
-  prepareSetRolePolicy,
-  prepareCreateAuditEvent,
-} from '../../modules/admin';
+import { getRolePolicy, prepareSetRolePolicy, prepareCreateAuditEvent } from '../../modules/admin';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
 import {
@@ -39,36 +32,32 @@ export function adminRolePolicyRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
 
   // GET /api/v1/admin/roles/:id/policy
-  routes.get(
-    '/roles/:id/policy',
-    requirePermission('role.manage'),
-    async (c) => {
-      const roleId = c.req.param('id');
-      if (!roleId) {
-        throw new DomainError({
-          code: 'VALIDATION_ERROR',
-          message: 'role id path param required',
-          httpStatus: 400,
-        });
-      }
+  routes.get('/roles/:id/policy', requirePermission('role.manage'), async (c) => {
+    const roleId = c.req.param('id');
+    if (!roleId) {
+      throw new DomainError({
+        code: 'VALIDATION_ERROR',
+        message: 'role id path param required',
+        httpStatus: 400,
+      });
+    }
 
-      const policy = await getRolePolicy(c.env.DB, roleId);
-      if (!policy) {
-        // Absent row is the implicit default — return 200 with empty
-        // arrays rather than 404. The client treats empty availDomain as
-        // "allow all" (BF-100); empty banEmail is the trivial default.
-        const empty: RolePolicy = {
-          roleId,
-          banEmail: [],
-          availDomain: [],
-          updatedBy: null,
-          updatedAt: '',
-        };
-        return c.json({ data: empty });
-      }
-      return c.json({ data: policy });
-    },
-  );
+    const policy = await getRolePolicy(c.env.DB, roleId);
+    if (!policy) {
+      // Absent row is the implicit default — return 200 with empty
+      // arrays rather than 404. The client treats empty availDomain as
+      // "allow all" (BF-100); empty banEmail is the trivial default.
+      const empty: RolePolicy = {
+        roleId,
+        banEmail: [],
+        availDomain: [],
+        updatedBy: null,
+        updatedAt: '',
+      };
+      return c.json({ data: empty });
+    }
+    return c.json({ data: policy });
+  });
 
   // PUT /api/v1/admin/roles/:id/policy — replace both arrays atomically.
   routes.put(
@@ -111,12 +100,7 @@ export function adminRolePolicyRoutes(): Hono<AppEnv> {
       const rawBody = await c.req.text();
       const requestHash = await sha256Hex(rawBody);
 
-      const existing = await findIdempotencyRecord(
-        c.env.DB,
-        userId,
-        operation,
-        idempotencyKey,
-      );
+      const existing = await findIdempotencyRecord(c.env.DB, userId, operation, idempotencyKey);
       if (existing) {
         assertSameRequestHash(existing, requestHash);
         return new Response(existing.responseJson, {

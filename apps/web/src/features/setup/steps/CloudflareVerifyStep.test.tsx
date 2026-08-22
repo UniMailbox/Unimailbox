@@ -29,9 +29,7 @@ describe('CloudflareVerifyStep', () => {
   });
 
   it('opens the dashboard link, confirms, and advances (happy path)', async () => {
-    const openedSpy = vi
-      .spyOn(window, 'open')
-      .mockReturnValue(window as unknown as Window);
+    const openedSpy = vi.spyOn(window, 'open').mockReturnValue(window as unknown as Window);
     const { fetchImpl, calls } = spyFetch([
       () => jsonResponse({ data: { url: 'https://example.cloudflare.com' } }),
       () => jsonResponse({ data: {} }),

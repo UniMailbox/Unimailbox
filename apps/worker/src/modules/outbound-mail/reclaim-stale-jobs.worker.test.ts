@@ -14,10 +14,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { reclaimStaleJobs, type OutboundJobEnqueuer } from './reclaim-stale-jobs';
-import {
-  OUTBOX_LEASE_TTL_MS,
-  OUTBOUND_ORPHAN_SWEEP_AFTER_MS,
-} from '../../platform/outbox-config';
+import { OUTBOX_LEASE_TTL_MS, OUTBOUND_ORPHAN_SWEEP_AFTER_MS } from '../../platform/outbox-config';
 
 // Fixed clock. The reclaim treats `now` as authoritative, so seeded lease
 // literals are stable regardless of wall-clock time.
@@ -25,10 +22,7 @@ const NOW = new Date('2025-01-01T12:00:00Z');
 
 /** SQLite datetime literals relative to NOW. */
 function at(offsetMs: number): string {
-  return new Date(NOW.getTime() + offsetMs)
-    .toISOString()
-    .slice(0, 19)
-    .replace('T', ' ');
+  return new Date(NOW.getTime() + offsetMs).toISOString().slice(0, 19).replace('T', ' ');
 }
 
 const EXPIRED_LEASE = at(-OUTBOX_LEASE_TTL_MS - 60_000); // cutoff - 1 min
@@ -89,8 +83,9 @@ async function seedJob(opts: SeedOptions): Promise<string> {
 }
 
 function fetchJob(jobId: string) {
-  return env.DB
-    .prepare('SELECT status, attempts, error_code, error_message, locked_at, locked_by FROM outbound_jobs WHERE id = ?')
+  return env.DB.prepare(
+    'SELECT status, attempts, error_code, error_message, locked_at, locked_by FROM outbound_jobs WHERE id = ?',
+  )
     .bind(jobId)
     .first<{
       status: string;
@@ -225,8 +220,18 @@ describe('reclaimStaleJobs (AC6 — R-OUTBOUND-007/008/009)', () => {
   });
 
   it('reports both counts when a mixed batch is recovered and re-enqueues only the reclaimable rows', async () => {
-    const a = await seedJob({ status: 'sending', attempts: 0, lockedAt: EXPIRED_LEASE, lockedBy: 'w1' });
-    const b = await seedJob({ status: 'sending', attempts: 1, lockedAt: EXPIRED_LEASE, lockedBy: 'w2' });
+    const a = await seedJob({
+      status: 'sending',
+      attempts: 0,
+      lockedAt: EXPIRED_LEASE,
+      lockedBy: 'w1',
+    });
+    const b = await seedJob({
+      status: 'sending',
+      attempts: 1,
+      lockedAt: EXPIRED_LEASE,
+      lockedBy: 'w2',
+    });
     await seedJob({ status: 'sending', attempts: 3, lockedAt: EXPIRED_LEASE, lockedBy: 'w3' });
     const outbound = recordingEnqueuer();
 
@@ -287,8 +292,7 @@ describe('reclaimStaleJobs (AC6 — R-OUTBOUND-007/008/009)', () => {
       // minutes" deterministically — that is exactly the state the sweep
       // exists for.
       warnSpy.mockRestore();
-      await env.DB
-        .prepare('UPDATE outbound_jobs SET updated_at = ? WHERE id = ?')
+      await env.DB.prepare('UPDATE outbound_jobs SET updated_at = ? WHERE id = ?')
         .bind(at(-OUTBOUND_ORPHAN_SWEEP_AFTER_MS - 60_000), jobId)
         .run();
       const sweepOutbound = recordingEnqueuer();

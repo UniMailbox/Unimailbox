@@ -83,9 +83,11 @@ async function createUserWithRole(roleName: 'administrator' | 'member'): Promise
       now,
       now,
     ),
-    env.DB.prepare(
-      `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`,
-    ).bind(userId, roleName, now),
+    env.DB.prepare(`INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, ?, ?)`).bind(
+      userId,
+      roleName,
+      now,
+    ),
   ]);
 
   return userId;
@@ -93,10 +95,7 @@ async function createUserWithRole(roleName: 'administrator' | 'member'): Promise
 
 // Helper: hash a token (same as in auth routes)
 async function hashToken(token: string): Promise<string> {
-  const buffer = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(token),
-  );
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -117,11 +116,9 @@ async function createSession(userId: string): Promise<string> {
     ).bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString()),
   ]);
 
-  await env.CACHE.put(
-    `auth:${accessToken}`,
-    JSON.stringify({ userId }),
-    { expirationTtl: 15 * 60 },
-  );
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+    expirationTtl: 15 * 60,
+  });
 
   return accessToken;
 }
@@ -188,7 +185,7 @@ describe('POST /api/v1/mailboxes', () => {
       }),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -207,7 +204,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       method: 'POST',
@@ -218,7 +217,7 @@ describe('POST /api/v1/mailboxes', () => {
       }),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -240,7 +239,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       method: 'POST',
@@ -250,7 +251,7 @@ describe('POST /api/v1/mailboxes', () => {
       }),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -268,7 +269,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     // Create first mailbox
     await SELF.fetch('http://localhost/api/v1/mailboxes', {
@@ -279,7 +282,7 @@ describe('POST /api/v1/mailboxes', () => {
       }),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -295,7 +298,7 @@ describe('POST /api/v1/mailboxes', () => {
       }),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': 'test-idem-key-mailbox-dup1',
       },
     });
@@ -317,7 +320,7 @@ describe('POST /api/v1/mailboxes', () => {
       }),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -335,7 +338,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'disabled', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'disabled', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       method: 'POST',
@@ -345,7 +350,7 @@ describe('POST /api/v1/mailboxes', () => {
       }),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -367,7 +372,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       method: 'POST',
@@ -394,7 +401,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       method: 'POST',
@@ -422,7 +431,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const requestBody = JSON.stringify({
       localPart: 'john.doe',
@@ -447,12 +458,11 @@ describe('POST /api/v1/mailboxes', () => {
     const firstMailboxId = firstBody.data.id;
 
     // Verify idempotency record was written
-    const record = await env.DB
-      .prepare(
-        `SELECT response_status, response_json, request_hash
+    const record = await env.DB.prepare(
+      `SELECT response_status, response_json, request_hash
          FROM idempotency_records
          WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-      )
+    )
       .bind(userId, 'POST /api/v1/mailboxes', idempotencyKey)
       .first<{ response_status: number; response_json: string; request_hash: string }>();
     expect(record).toBeDefined();
@@ -475,8 +485,9 @@ describe('POST /api/v1/mailboxes', () => {
     expect(secondBody.data.address).toBe('john.doe@example.com');
 
     // Verify no additional mailbox was created
-    const mailboxCount = await env.DB
-      .prepare('SELECT COUNT(*) as count FROM mailboxes WHERE owner_user_id = ?')
+    const mailboxCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM mailboxes WHERE owner_user_id = ?',
+    )
       .bind(userId)
       .first<{ count: number }>();
     expect(mailboxCount?.count).toBe(1);
@@ -490,7 +501,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const idempotencyKey = 'test-reuse-key-001';
 
@@ -537,7 +550,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     // Deliberately non-minified JSON with whitespace
     const requestBody = JSON.stringify(
@@ -584,7 +599,9 @@ describe('POST /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const requestBody = JSON.stringify({
       localPart: 'race.test',
@@ -597,7 +614,9 @@ describe('POST /api/v1/mailboxes', () => {
 
     // Simulate the race winner: pre-insert the idempotency record as if the winner
     // already committed (mailbox + audit + record atomically).
-    const { sha256Hex, sqliteTimestamp, prepareCreateIdempotencyRecord } = await import('../../platform/idempotency');
+    const { sha256Hex, sqliteTimestamp, prepareCreateIdempotencyRecord } = await import(
+      '../../platform/idempotency'
+    );
     const requestHash = await sha256Hex(requestBody);
     const now = sqliteTimestamp(new Date());
     const successBody = JSON.stringify({
@@ -642,8 +661,9 @@ describe('POST /api/v1/mailboxes', () => {
     expect(loserBody.data.address).toBe('race.test@example.com');
 
     // Verify no second mailbox was created (the loser replayed, didn't execute)
-    const mailboxCount = await env.DB
-      .prepare('SELECT COUNT(*) as count FROM mailboxes WHERE owner_user_id = ?')
+    const mailboxCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM mailboxes WHERE owner_user_id = ?',
+    )
       .bind(userId)
       .first<{ count: number }>();
     expect(mailboxCount?.count).toBe(0);
@@ -721,7 +741,7 @@ describe('GET /api/v1/mailboxes', () => {
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -737,7 +757,7 @@ describe('GET /api/v1/mailboxes', () => {
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -758,41 +778,47 @@ describe('GET /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     // Create mailbox for user1
     await env.DB.prepare(
       `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      crypto.randomUUID(),
-      domainId,
-      user1Id,
-      'user1',
-      'User 1',
-      'active',
-      new Date().toISOString(),
-      new Date().toISOString(),
-    ).run();
+    )
+      .bind(
+        crypto.randomUUID(),
+        domainId,
+        user1Id,
+        'user1',
+        'User 1',
+        'active',
+        new Date().toISOString(),
+        new Date().toISOString(),
+      )
+      .run();
 
     // Create mailbox for user2
     await env.DB.prepare(
       `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      crypto.randomUUID(),
-      domainId,
-      user2Id,
-      'user2',
-      'User 2',
-      'active',
-      new Date().toISOString(),
-      new Date().toISOString(),
-    ).run();
+    )
+      .bind(
+        crypto.randomUUID(),
+        domainId,
+        user2Id,
+        'user2',
+        'User 2',
+        'active',
+        new Date().toISOString(),
+        new Date().toISOString(),
+      )
+      .run();
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
-        'Authorization': `Bearer ${user1Token}`,
+        Authorization: `Bearer ${user1Token}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -812,26 +838,30 @@ describe('GET /api/v1/mailboxes', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     const mailboxId = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      mailboxId,
-      domainId,
-      userId,
-      'john.doe',
-      'John Doe',
-      'active',
-      new Date().toISOString(),
-      new Date().toISOString(),
-    ).run();
+    )
+      .bind(
+        mailboxId,
+        domainId,
+        userId,
+        'john.doe',
+        'John Doe',
+        'active',
+        new Date().toISOString(),
+        new Date().toISOString(),
+      )
+      .run();
 
     const response = await SELF.fetch('http://localhost/api/v1/mailboxes', {
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         'Idempotency-Key': IDEMPOTENCY_KEY,
       },
     });
@@ -863,26 +893,31 @@ describe('R-MAILBOX-003 — owner implicit membership', () => {
     await env.DB.prepare(
       `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, ?, ?, NULL, ?, ?)`,
-    ).bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString()).run();
+    )
+      .bind(domainId, 'example.com', 'active', new Date().toISOString(), new Date().toISOString())
+      .run();
 
     await env.DB.prepare(
       `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      mailboxId,
-      domainId,
-      ownerId,
-      'owner.local',
-      'Owner',
-      'active',
-      new Date().toISOString(),
-      new Date().toISOString(),
-    ).run();
+    )
+      .bind(
+        mailboxId,
+        domainId,
+        ownerId,
+        'owner.local',
+        'Owner',
+        'active',
+        new Date().toISOString(),
+        new Date().toISOString(),
+      )
+      .run();
 
     // Confirm no mailbox_members row exists for the owner. R-MAILBOX-003
     // is the *absence* of this row.
-    const memberRow = await env.DB
-      .prepare('SELECT 1 FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?')
+    const memberRow = await env.DB.prepare(
+      'SELECT 1 FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?',
+    )
       .bind(mailboxId, ownerId)
       .first();
     expect(memberRow).toBeNull();

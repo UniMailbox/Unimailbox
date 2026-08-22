@@ -90,17 +90,12 @@ export async function prepareReconciliationStatements(
   readonly statements: ReadonlyArray<D1PreparedStatement>;
   readonly backfilledIds: ReadonlyArray<string>;
 }> {
-  const unmatched = await findUnmatchedDeliveriesByProviderMessageId(
-    db,
-    params.providerMessageId,
-  );
+  const unmatched = await findUnmatchedDeliveriesByProviderMessageId(db, params.providerMessageId);
 
   const statements: D1PreparedStatement[] = [];
   const backfilledIds: string[] = [];
   for (const row of unmatched) {
-    statements.push(
-      prepareBackfillDeliveryMessageId(db, row.id, params.messageId),
-    );
+    statements.push(prepareBackfillDeliveryMessageId(db, row.id, params.messageId));
     backfilledIds.push(row.id);
   }
 
@@ -148,10 +143,7 @@ export async function reconcileWebhookDeliveries(
     readonly auditEventWriter: AuditEventWriter;
   },
 ): Promise<ReconcileResult> {
-  const { statements, backfilledIds } = await prepareReconciliationStatements(
-    db,
-    params,
-  );
+  const { statements, backfilledIds } = await prepareReconciliationStatements(db, params);
   await db.batch([...statements]);
   return {
     backfilled: backfilledIds.length,

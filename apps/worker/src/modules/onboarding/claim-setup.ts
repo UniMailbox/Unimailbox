@@ -69,11 +69,9 @@ export async function claimSetup(
   // SQLite datetime format: 'YYYY-MM-DD HH:MM:SS' — matches datetime('now')
   // default in the DDL and the test-kit FIXED_TIMESTAMP convention.
   const now = deps.clock.now().toISOString().slice(0, 19).replace('T', ' ');
-  await input.setupSessionStore.put(
-    sessionToken,
-    JSON.stringify({ createdAt: now }),
-    { expirationTtl: SESSION_TTL_SECONDS },
-  );
+  await input.setupSessionStore.put(sessionToken, JSON.stringify({ createdAt: now }), {
+    expirationTtl: SESSION_TTL_SECONDS,
+  });
 
   // Seed installation_state if absent (fresh DB). Does not overwrite existing rows.
   await seedInstallationState(input.db, 'preflight', now);

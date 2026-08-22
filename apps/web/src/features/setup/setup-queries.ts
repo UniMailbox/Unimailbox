@@ -4,10 +4,7 @@
 // for installation progress (R-WORKFLOW-001 / R-WORKFLOW-002); every mutation
 // invalidates the status query so the router's `beforeLoad` re-evaluates and
 // redirects to the new current step.
-import {
-  useQuery,
-  type UseQueryResult,
-} from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import {
   installationStateInfoSchema,
   setupPreflightResponseSchema,
@@ -30,9 +27,7 @@ export const setupQueryKeys = {
 export async function fetchSetupStatus(
   apiClient: ReturnType<typeof useApiClient>,
 ): Promise<InstallationStateInfo> {
-  const response = await apiClient.fetch<{ data: InstallationStateInfo }>(
-    '/api/v1/setup/status',
-  );
+  const response = await apiClient.fetch<{ data: InstallationStateInfo }>('/api/v1/setup/status');
   return installationStateInfoSchema.parse(response.data);
 }
 
@@ -41,10 +36,7 @@ export async function fetchSetupStatus(
  * mounting — the `beforeLoad` always re-runs, so the value is effectively
  * fresh on every nav.
  */
-export function setupStatusQuery(): UseQueryResult<
-  InstallationStateInfo,
-  ApiError
-> {
+export function setupStatusQuery(): UseQueryResult<InstallationStateInfo, ApiError> {
   const apiClient = useApiClient();
   return useQuery({
     queryKey: setupQueryKeys.status(),
@@ -71,10 +63,7 @@ export async function fetchSetupPreflight(
  * Query hook for the preflight checks. The query is gated on the operator
  * having a session token (the /preflight route is session-protected).
  */
-export function setupPreflightQuery(): UseQueryResult<
-  SetupPreflightResponse,
-  ApiError
-> {
+export function setupPreflightQuery(): UseQueryResult<SetupPreflightResponse, ApiError> {
   const apiClient = useApiClient();
   return useQuery({
     queryKey: setupQueryKeys.preflight(),

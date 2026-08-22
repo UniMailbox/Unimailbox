@@ -45,7 +45,10 @@ export const availDomainPatternSchema = z
   .toLowerCase()
   .min(2)
   .max(254)
-  .regex(/^@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/, 'availDomain must be @domain');
+  .regex(
+    /^@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/,
+    'availDomain must be @domain',
+  );
 
 export type AvailDomainPattern = z.infer<typeof availDomainPatternSchema>;
 
@@ -107,7 +110,5 @@ export interface RolePolicyRow {
  * non-default policy (defaults are: banEmail=[], availDomain=[all domains]).
  */
 export interface RolePolicyReader {
-  loadRolePoliciesForRoleIds(
-    roleIds: ReadonlyArray<string>,
-  ): Promise<ReadonlyArray<RolePolicyRow>>;
+  loadRolePoliciesForRoleIds(roleIds: ReadonlyArray<string>): Promise<ReadonlyArray<RolePolicyRow>>;
 }

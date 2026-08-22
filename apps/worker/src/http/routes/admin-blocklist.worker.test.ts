@@ -86,7 +86,10 @@ async function createAdminUser(): Promise<{ userId: string; accessToken: string 
       email: 'admin@example.com',
       password: 'adminPassword123',
     }),
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+    },
   });
 
   const body = await loginResponse.json();
@@ -129,7 +132,10 @@ async function memberAccessToken(): Promise<string> {
       email: 'member@example.com',
       password: 'memberPassword123',
     }),
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+    },
   });
   const body = await loginResponse.json();
   return body.data.accessToken;
@@ -171,8 +177,7 @@ describe('POST /api/v1/admin/blocklist', () => {
     expect(body.data.createdAt).toEqual(expect.any(String));
 
     // Verify storage row exists.
-    const row = await env.DB
-      .prepare('SELECT id, kind, pattern FROM blocklist_entries WHERE id = ?')
+    const row = await env.DB.prepare('SELECT id, kind, pattern FROM blocklist_entries WHERE id = ?')
       .bind(body.data.id)
       .first<{ id: string; kind: string; pattern: string }>();
     expect(row).toBeDefined();
@@ -333,9 +338,9 @@ describe('POST /api/v1/admin/blocklist', () => {
     expect(secondJson).toEqual(firstJson);
 
     // Exactly one row in storage.
-    const count = await env.DB
-      .prepare('SELECT COUNT(*) as n FROM blocklist_entries')
-      .first<{ n: number }>();
+    const count = await env.DB.prepare('SELECT COUNT(*) as n FROM blocklist_entries').first<{
+      n: number;
+    }>();
     expect(count?.n).toBe(1);
   });
 
@@ -372,9 +377,9 @@ describe('POST /api/v1/admin/blocklist', () => {
   // CAP-035 B1: business write + audit row + idempotency record all land
   // in one D1 batch (R-AUDIT-001 + ADR-004).
   it('writes the audit row in the same D1 batch as the business write', async () => {
-    const before = await env.DB
-      .prepare('SELECT COUNT(*) as n FROM audit_events')
-      .first<{ n: number }>();
+    const before = await env.DB.prepare('SELECT COUNT(*) as n FROM audit_events').first<{
+      n: number;
+    }>();
     const auditBefore = before?.n ?? 0;
 
     const response = await SELF.fetch('http://localhost/api/v1/admin/blocklist', {
@@ -392,12 +397,11 @@ describe('POST /api/v1/admin/blocklist', () => {
 
     // After: one business row + one audit row + one idempotency row,
     // each delta is exactly 1.
-    const auditAfter = await env.DB
-      .prepare(
-        `SELECT id, action, resource_type, resource_id
+    const auditAfter = await env.DB.prepare(
+      `SELECT id, action, resource_type, resource_id
          FROM audit_events
          WHERE resource_id = ?`,
-      )
+    )
       .bind(body.data.id)
       .first<{ id: string; action: string; resource_type: string; resource_id: string }>();
     expect(auditAfter).toBeDefined();
@@ -405,19 +409,17 @@ describe('POST /api/v1/admin/blocklist', () => {
     expect(auditAfter?.resource_type).toBe('blocklist_entry');
     expect(auditAfter?.resource_id).toBe(body.data.id);
 
-    const auditCount = await env.DB
-      .prepare('SELECT COUNT(*) as n FROM audit_events')
-      .first<{ n: number }>();
+    const auditCount = await env.DB.prepare('SELECT COUNT(*) as n FROM audit_events').first<{
+      n: number;
+    }>();
     expect(auditCount?.n).toBe(auditBefore + 1);
 
     // Idempotency record exists with responseStatus = 201.
-    const idem = await env.DB
-      .prepare(
-        `SELECT response_status FROM idempotency_records
+    const idem = await env.DB.prepare(
+      `SELECT response_status FROM idempotency_records
          WHERE actor_id = (SELECT id FROM users WHERE email = 'admin@example.com')
            AND operation = 'POST /api/v1/admin/blocklist'`,
-      )
-      .first<{ response_status: number }>();
+    ).first<{ response_status: number }>();
     expect(idem?.response_status).toBe(201);
   });
 
@@ -590,8 +592,7 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     expect(body.data).toEqual({ id: created.id, deleted: true });
 
     // Storage row gone.
-    const row = await env.DB
-      .prepare('SELECT id FROM blocklist_entries WHERE id = ?')
+    const row = await env.DB.prepare('SELECT id FROM blocklist_entries WHERE id = ?')
       .bind(created.id)
       .first();
     expect(row).toBeNull();
@@ -623,32 +624,26 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     const idempotencyKey = 'blocklist-del-replay-' + crypto.randomUUID();
     const fakeId = '00000000-0000-4000-8000-000000000099';
 
-    const firstResponse = await SELF.fetch(
-      `http://localhost/api/v1/admin/blocklist/${fakeId}`,
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': idempotencyKey,
-        },
+    const firstResponse = await SELF.fetch(`http://localhost/api/v1/admin/blocklist/${fakeId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
       },
-    );
+    });
 
     expect(firstResponse.status).toBe(404);
     const firstJson = (await firstResponse.json()) as {
       error: { code: string; message: string; requestId: string };
     };
 
-    const secondResponse = await SELF.fetch(
-      `http://localhost/api/v1/admin/blocklist/${fakeId}`,
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': idempotencyKey,
-        },
+    const secondResponse = await SELF.fetch(`http://localhost/api/v1/admin/blocklist/${fakeId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
       },
-    );
+    });
 
     expect(secondResponse.status).toBe(404);
     const secondJson = (await secondResponse.json()) as {
@@ -764,13 +759,12 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
 
     // Two separate records with the same Idempotency-Key, distinguished
     // by their operation string.
-    const count = await env.DB
-      .prepare(
-        `SELECT COUNT(*) as n FROM idempotency_records
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM idempotency_records
          WHERE actor_id = (SELECT id FROM users WHERE email = 'admin@example.com')
            AND operation LIKE 'DELETE /api/v1/admin/blocklist/%'
            AND idempotency_key = ?`,
-      )
+    )
       .bind(idempotencyKey)
       .first<{ n: number }>();
     expect(count?.n).toBe(2);
@@ -792,49 +786,45 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     const { data: created } = await createResponse.json();
 
     // No audit row for the DELETE yet.
-    const before = await env.DB
-      .prepare(`SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`)
-      .first<{ n: number }>();
+    const before = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`,
+    ).first<{ n: number }>();
     const auditBefore = before?.n ?? 0;
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/admin/blocklist/${created.id}`,
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-          'Idempotency-Key': 'blocklist-del-audit-batch-' + crypto.randomUUID(),
-        },
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/blocklist/${created.id}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'blocklist-del-audit-batch-' + crypto.randomUUID(),
       },
-    );
+    });
     expect(response.status).toBe(200);
 
     // The audit row exists with action=blocklist.delete and resource_id
     // matching the deleted entry.
-    const audit = await env.DB
-      .prepare(
-        `SELECT id, action, resource_type, resource_id
+    const audit = await env.DB.prepare(
+      `SELECT id, action, resource_type, resource_id
          FROM audit_events
          WHERE action = 'blocklist.delete' AND resource_id = ?`,
-      )
+    )
       .bind(created.id)
       .first<{ id: string; action: string; resource_type: string; resource_id: string }>();
     expect(audit).toBeDefined();
     expect(audit?.action).toBe('blocklist.delete');
     expect(audit?.resource_type).toBe('blocklist_entry');
 
-    const after = await env.DB
-      .prepare(`SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`)
-      .first<{ n: number }>();
+    const after = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`,
+    ).first<{ n: number }>();
     expect(after?.n).toBe(auditBefore + 1);
   });
 
   // CAP-035 B1: a 404 DELETE must NOT write an audit row (no business
   // write happened).
   it('does not write an audit row when DELETE returns 404', async () => {
-    const before = await env.DB
-      .prepare(`SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`)
-      .first<{ n: number }>();
+    const before = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`,
+    ).first<{ n: number }>();
     const auditBefore = before?.n ?? 0;
 
     const response = await SELF.fetch(
@@ -849,9 +839,9 @@ describe('DELETE /api/v1/admin/blocklist/:id', () => {
     );
     expect(response.status).toBe(404);
 
-    const after = await env.DB
-      .prepare(`SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`)
-      .first<{ n: number }>();
+    const after = await env.DB.prepare(
+      `SELECT COUNT(*) as n FROM audit_events WHERE action = 'blocklist.delete'`,
+    ).first<{ n: number }>();
     expect(after?.n).toBe(auditBefore);
   });
 });

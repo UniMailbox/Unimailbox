@@ -111,9 +111,7 @@ export interface EncryptedData {
  * @returns A CryptoKey for AES-GCM encrypt/decrypt
  */
 export async function importEncryptionKey(rawKey: string): Promise<CryptoKey> {
-  const keyBytes = new Uint8Array(
-    rawKey.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) ?? [],
-  );
+  const keyBytes = new Uint8Array(rawKey.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) ?? []);
   return crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
@@ -157,11 +155,7 @@ export async function decrypt(data: EncryptedData, key: CryptoKey): Promise<stri
   const combined = new Uint8Array(data.ciphertext.length + data.authTag.length);
   combined.set(data.ciphertext);
   combined.set(data.authTag, data.ciphertext.length);
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: data.iv },
-    key,
-    combined,
-  );
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.iv }, key, combined);
   return new TextDecoder().decode(decrypted);
 }
 
@@ -182,10 +176,7 @@ export async function decrypt(data: EncryptedData, key: CryptoKey): Promise<stri
  *
  * See .claude/rules/security.md §Passwords and ADR-006.
  */
-export async function verifyPassword(
-  password: string,
-  stored: PasswordHash,
-): Promise<boolean> {
+export async function verifyPassword(password: string, stored: PasswordHash): Promise<boolean> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(password),

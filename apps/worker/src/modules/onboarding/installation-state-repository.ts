@@ -5,7 +5,11 @@
 // so there is at most one row. A missing row means the database is fresh and the
 // setup wizard has not been claimed yet — callers receive null.
 
-import { installationStateInfoSchema, type InstallationStateInfo, type InstallationStep } from '@unimailbox/contracts';
+import {
+  installationStateInfoSchema,
+  type InstallationStateInfo,
+  type InstallationStep,
+} from '@unimailbox/contracts';
 import type { Database } from '../../platform/database';
 
 /**
@@ -17,9 +21,7 @@ import type { Database } from '../../platform/database';
  * cast with `as`, so schema drift or a manual DB edit produces a loud error
  * instead of silently passing through.
  */
-export async function getInstallationState(
-  db: Database,
-): Promise<InstallationStateInfo | null> {
+export async function getInstallationState(db: Database): Promise<InstallationStateInfo | null> {
   const result = await db
     .prepare(
       `SELECT status, current_step

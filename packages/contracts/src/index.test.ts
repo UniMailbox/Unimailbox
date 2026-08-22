@@ -1225,9 +1225,9 @@ describe('STATUS_RANK_TABLE — R-MESSAGE-007 rank guard (CAP-029 Arch M1 / Secu
 
   it('higher-rank numbers correspond to terminal-ness first, then recency-of-life', () => {
     // Terminal failures all share the top rank (100), not just one terminal value.
-    const terminalRanks = STATUS_RANK_TABLE
-      .filter(([s]) => s === 'failed' || s === 'bounced' || s === 'complained')
-      .map(([, rank]) => rank);
+    const terminalRanks = STATUS_RANK_TABLE.filter(
+      ([s]) => s === 'failed' || s === 'bounced' || s === 'complained',
+    ).map(([, rank]) => rank);
     expect(terminalRanks).toHaveLength(3);
     expect(new Set(terminalRanks).size).toBe(1);
     expect(terminalRanks[0]).toBe(100);
@@ -1269,7 +1269,9 @@ describe('ALLOWED_*_TRANSITIONS — CAP-030 direction guard', () => {
     ['failed', []],
   ];
 
-  function mapToPairs<K, V>(map: ReadonlyMap<K, ReadonlySet<V>>): ReadonlyArray<readonly [K, ReadonlyArray<V>]> {
+  function mapToPairs<K, V>(
+    map: ReadonlyMap<K, ReadonlySet<V>>,
+  ): ReadonlyArray<readonly [K, ReadonlyArray<V>]> {
     return [...map.entries()].map(([k, v]) => [k, [...v]] as const);
   }
 
@@ -1414,7 +1416,12 @@ describe('ALLOWED_*_TRANSITIONS — CAP-030 direction guard', () => {
       }
     }
 
-    const TERMINAL_JOBS: ReadonlyArray<OutboundJobStatus> = ['failed', 'bounced', 'complained', 'sent'];
+    const TERMINAL_JOBS: ReadonlyArray<OutboundJobStatus> = [
+      'failed',
+      'bounced',
+      'complained',
+      'sent',
+    ];
     const ALL_TARGETS_JOBS: ReadonlyArray<OutboundJobStatus> = [
       'queued',
       'sending',

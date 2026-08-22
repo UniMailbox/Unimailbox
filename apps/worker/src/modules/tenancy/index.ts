@@ -12,10 +12,6 @@ export {
   listMailboxesByOwner,
   findMailboxMember,
 } from './mailbox-repository';
-export type {
-  CreateMailboxInput,
-  MailboxInfo,
-  MailboxMemberInfo,
-} from './mailbox-repository';
+export type { CreateMailboxInput, MailboxInfo, MailboxMemberInfo } from './mailbox-repository';
 
 export { assertCan, type MailboxOp } from './authorizer';

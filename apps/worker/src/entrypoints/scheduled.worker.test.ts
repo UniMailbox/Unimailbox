@@ -54,8 +54,9 @@ async function seedSendingJob(opts: {
 }
 
 function fetchJob(jobId: string) {
-  return env.DB
-    .prepare('SELECT status, attempts, locked_at, locked_by FROM outbound_jobs WHERE id = ?')
+  return env.DB.prepare(
+    'SELECT status, attempts, locked_at, locked_by FROM outbound_jobs WHERE id = ?',
+  )
     .bind(jobId)
     .first<{
       status: string;
@@ -81,7 +82,11 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
   });
 
   it('reclaims an expired lease through the cron handler, with no attempts++, and re-enqueues it on the OUTBOUND queue (H2)', async () => {
-    const jobId = await seedSendingJob({ attempts: 1, lockedAt: EXPIRED_LEASE, lockedBy: 'crashed-worker' });
+    const jobId = await seedSendingJob({
+      attempts: 1,
+      lockedAt: EXPIRED_LEASE,
+      lockedBy: 'crashed-worker',
+    });
     const sendSpy = vi.spyOn(env.OUTBOUND, 'send').mockResolvedValue(undefined);
 
     await scheduled.scheduled(controller(), env);
@@ -100,7 +105,11 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
   });
 
   it('marks an exhausted expired lease failed through the cron handler and re-enqueues nothing', async () => {
-    const jobId = await seedSendingJob({ attempts: 3, lockedAt: EXPIRED_LEASE, lockedBy: 'crashed-worker' });
+    const jobId = await seedSendingJob({
+      attempts: 3,
+      lockedAt: EXPIRED_LEASE,
+      lockedBy: 'crashed-worker',
+    });
     const sendSpy = vi.spyOn(env.OUTBOUND, 'send').mockResolvedValue(undefined);
 
     await scheduled.scheduled(controller(), env);
@@ -113,8 +122,16 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
   });
 
   it('leaves a live lease alone and is safe under repeated ticks', async () => {
-    const liveJobId = await seedSendingJob({ attempts: 0, lockedAt: LIVE_LEASE, lockedBy: 'healthy-worker' });
-    const expiredJobId = await seedSendingJob({ attempts: 0, lockedAt: EXPIRED_LEASE, lockedBy: 'crashed-worker' });
+    const liveJobId = await seedSendingJob({
+      attempts: 0,
+      lockedAt: LIVE_LEASE,
+      lockedBy: 'healthy-worker',
+    });
+    const expiredJobId = await seedSendingJob({
+      attempts: 0,
+      lockedAt: EXPIRED_LEASE,
+      lockedBy: 'crashed-worker',
+    });
 
     await scheduled.scheduled(controller(), env);
     await scheduled.scheduled(controller(), env); // second tick: idempotent

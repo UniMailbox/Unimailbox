@@ -14,11 +14,7 @@ import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan } from '../../modules/tenancy';
 import { checkPermission } from '../../modules/admin';
-import {
-  listMessagesByMailbox,
-  getMessageDetail,
-  markMessageAsRead,
-} from '../../modules/messages';
+import { listMessagesByMailbox, getMessageDetail, markMessageAsRead } from '../../modules/messages';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors';
@@ -34,8 +30,7 @@ import {
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
 
-const MARK_READ_OPERATION =
-  'PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read';
+const MARK_READ_OPERATION = 'PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 50;
@@ -52,39 +47,36 @@ export function messageRoutes(): Hono<AppEnv> {
    *   cursor — opaque base64 cursor returned by a prior page (optional)
    *   limit  — page size, default 50, clamped to 50
    */
-  routes.get(
-    '/mailboxes/:mailboxId/messages',
-    requirePermission('message.read'),
-    async (c) => {
-      const userId = c.get('userId');
-      if (!userId) {
-        throw new DomainError({
-          code: 'AUTHENTICATION_REQUIRED',
-          message: 'Authentication required',
-          httpStatus: 401,
-        });
-      }
+  routes.get('/mailboxes/:mailboxId/messages', requirePermission('message.read'), async (c) => {
+    const userId = c.get('userId');
+    if (!userId) {
+      throw new DomainError({
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'Authentication required',
+        httpStatus: 401,
+      });
+    }
 
-      const mailboxId = c.req.param('mailboxId');
-      const cursor = c.req.query('cursor') || undefined;
-      const requestedLimit = parseInt(c.req.query('limit') ?? String(DEFAULT_LIMIT), 10);
-      const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    const mailboxId = c.req.param('mailboxId');
+    const cursor = c.req.query('cursor') || undefined;
+    const requestedLimit = parseInt(c.req.query('limit') ?? String(DEFAULT_LIMIT), 10);
+    const limit =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
         ? Math.min(requestedLimit, MAX_LIMIT)
         : DEFAULT_LIMIT;
 
-      // R-AUTHZ-003: global permission already checked by middleware; now the
-      // mailbox-scoped check. R-AUTHZ-005: admin bypass flows through
-      // checkPermission('role.manage').
-      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
-      await assertCan(c.env.DB, userId, mailboxId, 'read', isAdmin);
+    // R-AUTHZ-003: global permission already checked by middleware; now the
+    // mailbox-scoped check. R-AUTHZ-005: admin bypass flows through
+    // checkPermission('role.manage').
+    const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
+    await assertCan(c.env.DB, userId, mailboxId, 'read', isAdmin);
 
-      const result = await listMessagesByMailbox(c.env.DB, mailboxId, userId, {
-        ...(cursor !== undefined && { cursor }),
-        limit,
-      });
-      return c.json({ data: result });
-    },
-  );
+    const result = await listMessagesByMailbox(c.env.DB, mailboxId, userId, {
+      ...(cursor !== undefined && { cursor }),
+      limit,
+    });
+    return c.json({ data: result });
+  });
 
   /**
    * GET /api/v1/mailboxes/:mailboxId/messages/:messageId
@@ -188,10 +180,9 @@ export function messageRoutes(): Hono<AppEnv> {
       // Resolve the mailbox_message row for this mailbox+message pair. The
       // mailbox-scoped assertCan above already guarantees access to the mailbox;
       // a missing row here means the message is simply not in this mailbox.
-      const mailboxMessage = await c.env.DB
-        .prepare(
-          'SELECT id FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?',
-        )
+      const mailboxMessage = await c.env.DB.prepare(
+        'SELECT id FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?',
+      )
         .bind(mailboxId, messageId)
         .first<{ id: string }>();
 

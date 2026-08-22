@@ -7,10 +7,6 @@ export default defineConfig({
     name: 'scripts',
     environment: 'node',
     include: ['**/*.test.ts'],
-    exclude: [
-      '**/node_modules/**',
-      'apps/**',
-      'packages/**',
-    ],
+    exclude: ['**/node_modules/**', 'apps/**', 'packages/**'],
   },
 });

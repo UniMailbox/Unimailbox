@@ -78,20 +78,14 @@ export function CompleteStep(): ReactElement {
           Installation is complete. The app is now live.
         </Alert>
       ) : (
-        <p className="wizard-subtitle">
-          Click the button to mark the installation complete.
-        </p>
+        <p className="wizard-subtitle">Click the button to mark the installation complete.</p>
       )}
       {submitError !== null ? (
         <ErrorPanel
           message={submitErrorMessage}
           code={submitErrorCode}
           retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            isUnauthorized
-              ? handleReclaim
-              : () => void onSubmit()
-          }
+          onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
         />
       ) : null}
       <div className="wizard-actions">

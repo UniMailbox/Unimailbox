@@ -10,6 +10,16 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-22 — Local baseline hardening
+
+The completed CAP-040/041 branch was integrated into the local main work line, then Hono and
+Drizzle ORM were upgraded and independently reviewed. Repository-state documentation was
+reconciled with the code, nested `.claude/worktrees` were removed while their branch refs were
+preserved, and formatter/linter inputs now exclude nested worktrees. Markdown is excluded from
+Prettier because its emphasis parser can rewrite literal capability syntax such as `R-*` and
+`/setup/*`; documentation remains manually reviewed. No remote, push, or preview deployment was
+configured or run.
+
 ## 2026-08-22 — CAP-041 closure: setup web vertical slice ships
 
 Five-way parallel review (architecture, code, security, qa, frontend) closed the prior cycle's 2 BLOCKERS + 7 HIGHs in one fix slice, then a re-review cycle landed 4 more MEDIUMs / 1 LOW that the orchestrator handled inline. Slice ships; CAP-042 is unblocked.

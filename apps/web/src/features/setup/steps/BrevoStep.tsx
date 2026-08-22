@@ -9,10 +9,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  setupBrevoRequestSchema,
-  type SetupBrevoRequest,
-} from '@unimailbox/contracts';
+import { setupBrevoRequestSchema, type SetupBrevoRequest } from '@unimailbox/contracts';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Card } from '../../../components/ui/Card';
@@ -99,11 +96,7 @@ export function BrevoStep(): ReactElement {
             message={submitErrorMessage}
             code={submitErrorCode}
             retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-            onRetry={
-              isUnauthorized
-                ? handleReclaim
-                : () => void onSubmit()
-            }
+            onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
           />
         ) : null}
         <div className="wizard-actions">

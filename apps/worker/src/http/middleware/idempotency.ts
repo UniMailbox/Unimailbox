@@ -32,10 +32,7 @@
 
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../../platform/env';
-import {
-  IDEMPOTENCY_HEADER,
-  IDEMPOTENCY_KEY_PATTERN,
-} from '../../platform/idempotency';
+import { IDEMPOTENCY_HEADER, IDEMPOTENCY_KEY_PATTERN } from '../../platform/idempotency';
 import { DomainError } from '../../platform/errors';
 
 export const requireIdempotencyKey: MiddlewareHandler<AppEnv> = async (c, next) => {

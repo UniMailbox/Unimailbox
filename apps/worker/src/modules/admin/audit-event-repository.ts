@@ -31,34 +31,39 @@ export interface AuditEventInput {
 
 /** Insert an audit event row. Use for standalone audit emits (outside a batch). */
 export async function createAuditEvent(db: Database, input: AuditEventInput): Promise<void> {
-  await db.prepare(
-    `INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
+  await db
+    .prepare(
+      `INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    input.id,
-    input.actorUserId,
-    input.action,
-    input.resourceType,
-    input.resourceId,
-    input.requestId ?? null,
-    input.metadata ?? null,
-    input.createdAt,
-  ).run();
+    )
+    .bind(
+      input.id,
+      input.actorUserId,
+      input.action,
+      input.resourceType,
+      input.resourceId,
+      input.requestId ?? null,
+      input.metadata ?? null,
+      input.createdAt,
+    )
+    .run();
 }
 
 /** Prepare an audit event insert for inclusion in a D1 batch. */
 export function prepareCreateAuditEvent(db: Database, input: AuditEventInput): D1PreparedStatement {
-  return db.prepare(
-    `INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
+  return db
+    .prepare(
+      `INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(
-    input.id,
-    input.actorUserId,
-    input.action,
-    input.resourceType,
-    input.resourceId,
-    input.requestId ?? null,
-    input.metadata ?? null,
-    input.createdAt,
-  );
+    )
+    .bind(
+      input.id,
+      input.actorUserId,
+      input.action,
+      input.resourceType,
+      input.resourceId,
+      input.requestId ?? null,
+      input.metadata ?? null,
+      input.createdAt,
+    );
 }

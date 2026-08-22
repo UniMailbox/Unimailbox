@@ -87,30 +87,19 @@ export function InboundSmokeStep(): ReactElement {
     void navigate({ to: '/setup/claim' });
   };
 
-  const renderError = (
-    error: unknown,
-    retry: () => void,
-  ): ReactElement => {
+  const renderError = (error: unknown, retry: () => void): ReactElement => {
     if (error instanceof ApiError) {
       const isUnauthorized = error.status === 401;
       return (
         <ErrorPanel
           message={error.message}
           code={error.code}
-          retryLabel={
-            isUnauthorized ? 'Re-claim installation token' : 'Retry'
-          }
+          retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
           onRetry={isUnauthorized ? handleReclaim : retry}
         />
       );
     }
-    return (
-      <ErrorPanel
-        message="Unexpected error"
-        code="UNEXPECTED_ERROR"
-        onRetry={retry}
-      />
-    );
+    return <ErrorPanel message="Unexpected error" code="UNEXPECTED_ERROR" onRetry={retry} />;
   };
 
   return (

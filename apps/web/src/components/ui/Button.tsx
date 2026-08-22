@@ -8,8 +8,7 @@ import type { ButtonHTMLAttributes, ReactElement, ReactNode } from 'react';
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type ButtonSize = 'md' | 'sm';
 
-export interface ButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly children: ReactNode;
   readonly variant?: ButtonVariant;
   readonly size?: ButtonSize;
@@ -36,9 +35,7 @@ export function Button({
   className,
   ...rest
 }: ButtonProps): ReactElement {
-  const classes = [variantClass[variant], sizeClass[size], className]
-    .filter(Boolean)
-    .join(' ');
+  const classes = [variantClass[variant], sizeClass[size], className].filter(Boolean).join(' ');
   return (
     <button
       {...rest}

@@ -10,10 +10,7 @@ import { hashPassword } from '../../platform/crypto';
 
 // Helper: hash a token (same as in auth routes)
 async function hashToken(token: string): Promise<string> {
-  const buffer = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(token),
-  );
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -87,7 +84,9 @@ async function createRegistrationKey(options: {
   createdBy?: string;
 }): Promise<string> {
   const codeBytes = crypto.getRandomValues(new Uint8Array(32));
-  const code = Array.from(codeBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const code = Array.from(codeBytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
   const codeHash = await hashToken(code);
 
   let expiresAt: string | null = null;
@@ -130,14 +129,16 @@ async function createRegistrationKey(options: {
   await env.DB.prepare(
     `INSERT INTO registration_keys (id, code_hash, role_id, max_uses, used_count, expires_at, revoked_at, created_by, created_at)
      VALUES (?, ?, NULL, ?, 0, ?, NULL, ?, ?)`,
-  ).bind(
-    crypto.randomUUID(),
-    codeHash,
-    options.maxUses ?? 1,
-    expiresAt,
-    createdBy,
-    new Date().toISOString(),
-  ).run();
+  )
+    .bind(
+      crypto.randomUUID(),
+      codeHash,
+      options.maxUses ?? 1,
+      expiresAt,
+      createdBy,
+      new Date().toISOString(),
+    )
+    .run();
 
   return code;
 }
@@ -152,7 +153,9 @@ async function createSession(userId: string): Promise<string> {
   await env.DB.prepare(
     `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
      VALUES (?, ?, ?, ?, ?)`,
-  ).bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString()).run();
+  )
+    .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
+    .run();
 
   return refreshToken;
 }
@@ -175,7 +178,10 @@ describe('POST /api/v1/auth/register', () => {
           password: 'securePassword123',
           displayName: 'New User',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(200);
@@ -197,12 +203,17 @@ describe('POST /api/v1/auth/register', () => {
           email: 'pbkdf2test@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const user = await env.DB.prepare(
         `SELECT id, password_algorithm, password_iterations FROM users WHERE email = ?`,
-      ).bind('pbkdf2test@example.com').first();
+      )
+        .bind('pbkdf2test@example.com')
+        .first();
 
       expect(user).toBeDefined();
       expect(user?.password_algorithm).toBe('pbkdf2-sha256');
@@ -219,7 +230,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'memberuser@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const body = await response.json();
@@ -227,7 +241,9 @@ describe('POST /api/v1/auth/register', () => {
 
       const userRole = await env.DB.prepare(
         `SELECT r.id, r.name FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE ur.user_id = ?`,
-      ).bind(userId).first();
+      )
+        .bind(userId)
+        .first();
 
       expect(userRole).toBeDefined();
       expect(userRole?.name).toBe('member');
@@ -243,12 +259,17 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user1@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const key = await env.DB.prepare(
         `SELECT used_count FROM registration_keys WHERE code_hash = ?`,
-      ).bind(await hashToken(code)).first();
+      )
+        .bind(await hashToken(code))
+        .first();
 
       expect(key?.used_count).toBe(1);
     });
@@ -263,7 +284,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'nodisplay@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(200);
@@ -281,7 +305,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(409);
@@ -299,7 +326,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(409);
@@ -313,7 +343,9 @@ describe('POST /api/v1/auth/register', () => {
       // Revoke the key
       await env.DB.prepare(
         `UPDATE registration_keys SET revoked_at = datetime('now') WHERE code_hash = ?`,
-      ).bind(await hashToken(code)).run();
+      )
+        .bind(await hashToken(code))
+        .run();
 
       const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
         method: 'POST',
@@ -322,7 +354,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(409);
@@ -341,7 +376,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user1@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       // Second registration should fail
@@ -352,7 +390,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user2@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(409);
@@ -373,7 +414,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'duplicate@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       // Second registration with same email
@@ -384,7 +428,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'duplicate@example.com',
           password: 'differentPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(409);
@@ -402,7 +449,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(400);
@@ -418,7 +468,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'notanemail',
           password: 'securePassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(400);
@@ -434,7 +487,10 @@ describe('POST /api/v1/auth/register', () => {
           email: 'user@example.com',
           password: 'short',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(400);
@@ -480,7 +536,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       if (response.status !== 200) {
@@ -504,7 +563,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const body = await response.json();
@@ -522,7 +584,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const body = await response.json();
@@ -531,7 +596,9 @@ describe('POST /api/v1/auth/login', () => {
 
       const session = await env.DB.prepare(
         `SELECT user_id, expires_at FROM sessions WHERE refresh_token_hash = ?`,
-      ).bind(refreshTokenHash).first();
+      )
+        .bind(refreshTokenHash)
+        .first();
 
       expect(session).toBeDefined();
       expect(session?.user_id).toBe(userId);
@@ -544,7 +611,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'ADMIN@EXAMPLE.COM', // Uppercase
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(200);
@@ -559,7 +629,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'wrongPassword',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(401);
@@ -574,7 +647,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'nonexistent@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(401);
@@ -586,7 +662,9 @@ describe('POST /api/v1/auth/login', () => {
       // Delete the user
       await env.DB.prepare(
         `UPDATE users SET status = 'deleted', deleted_at = datetime('now') WHERE id = ?`,
-      ).bind(userId).run();
+      )
+        .bind(userId)
+        .run();
 
       const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
         method: 'POST',
@@ -594,7 +672,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(401);
@@ -602,9 +683,7 @@ describe('POST /api/v1/auth/login', () => {
 
     it('returns 403 USER_BANNED for banned user', async () => {
       // Ban the user
-      await env.DB.prepare(
-        `UPDATE users SET status = 'banned' WHERE id = ?`,
-      ).bind(userId).run();
+      await env.DB.prepare(`UPDATE users SET status = 'banned' WHERE id = ?`).bind(userId).run();
 
       const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
         method: 'POST',
@@ -612,7 +691,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(403);
@@ -629,7 +711,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'notanemail',
           password: 'adminPassword123',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(400);
@@ -642,7 +727,10 @@ describe('POST /api/v1/auth/login', () => {
           email: 'admin@example.com',
           password: '',
         }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(400);
@@ -683,7 +771,10 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(200);
@@ -695,7 +786,10 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       const body = await response.json();
@@ -712,7 +806,10 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: crypto.randomUUID() }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(401);
@@ -729,18 +826,23 @@ describe('POST /api/v1/auth/refresh', () => {
       await env.DB.prepare(
         `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
          VALUES (?, ?, ?, ?, ?)`,
-      ).bind(
-        crypto.randomUUID(),
-        userId,
-        expiredTokenHash,
-        expiredExpiresAt,
-        new Date().toISOString(),
-      ).run();
+      )
+        .bind(
+          crypto.randomUUID(),
+          userId,
+          expiredTokenHash,
+          expiredExpiresAt,
+          new Date().toISOString(),
+        )
+        .run();
 
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: expiredToken }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(401);
@@ -754,7 +856,10 @@ describe('POST /api/v1/auth/refresh', () => {
       const response = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
         method: 'POST',
         body: JSON.stringify({ refreshToken: 'not-a-uuid' }),
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+        },
       });
 
       expect(response.status).toBe(400);
@@ -795,7 +900,10 @@ describe('GET /api/v1/auth/me', () => {
         email: 'admin@example.com',
         password: 'adminPassword123',
       }),
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'test-key-' + crypto.randomUUID() },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
+      },
     });
 
     const body = await response.json();
@@ -932,9 +1040,9 @@ describe('POST /api/v1/auth/register — idempotency', () => {
     expect(secondBody.data.user.id).toBe(userId); // Same user replayed
 
     // Verify only one user was created
-    const userCount = await env.DB.prepare(
-      `SELECT COUNT(*) as count FROM users WHERE email = ?`,
-    ).bind('user@example.com').first<{ count: number }>();
+    const userCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE email = ?`)
+      .bind('user@example.com')
+      .first<{ count: number }>();
     expect(userCount?.count).toBe(1);
   });
 

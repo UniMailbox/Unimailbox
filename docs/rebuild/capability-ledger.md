@@ -27,18 +27,18 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | | |
 |---|---|
 | **Phase** | 2 — Reliable Business Loop (implementation in progress; Phase 0/1 delivery verification reopened) |
-| **Active capability** | CAP-042 — auth/session and authorized mailbox shell. Contract at `work/active/CAP-042-.../task.md` (to be written next session); CAP-041 closed 2026-08-22. |
+| **Active capability** | None. `work/active/` contains only `.gitkeep`; CAP-041 closed 2026-08-22. |
 | **Next capability** | CAP-042 — auth/session and authorized mailbox shell (depends on CAP-041). |
-| **Blocked** | Phase 0/1 `Verified` status is blocked by missing web delivery, static asset wiring, queue consumer configuration, repeat-safe remote migrations, and preview evidence. CAP-039 implementation unblocks the first four; CAP-045 owns the preview gate. |
-| **Repository state** | Branch `claude/cap-030-closure-and-cap-039-start-4ffc43`, no Git remote/upstream configured. CAP-027/028/029/030/031/032/035/037/038/039/040/041 are implemented. The full local gate set passes on the working tree (doctor 13/13, lint 0 errors, typecheck clean, unit 556/556, worker 560/560, build ✓, `wrangler --dry-run` clean). CAP-041 closes Phase 0/1 web-client delivery; CAP-045 still owns the preview gate. |
+| **Blocked** | Phase 0/1 `Verified` status is blocked by the missing CAP-042–044 browser workflows and CAP-045 fresh/repeat preview evidence. CAP-039–041 implement the local delivery substrate and setup wizard but do not constitute preview verification. |
+| **Repository state** | Local branch `chore/local-baseline-hardening`, no Git remote/upstream configured. CAP-027/028/029/030/031/032/035/037/038/039/040/041 are implemented. Hono 4.13.3 and Drizzle ORM 0.45.2 are committed; the production dependency audit reports 0 vulnerabilities. The full local gate set passes (doctor 13/13, lint 0 errors, typecheck clean, unit 560/560, worker 560/560, build ✓, `wrangler --dry-run` clean). No push or preview deployment has run. |
 
 ## Phase progress
 
 | Phase | Title | Status | Exit criteria | Audit |
 |---|---|---|---|---|
-| 0 | Foundation | Reopened — delivery blockers | `/setup`, real asset serving, repeat-safe remote migrations, fresh preview deploy are NOT MET | `docs/rebuild/phase-0-audit.md` is superseded for current status by the 2026-08-19 reality audit below |
-| 1 | Minimal Business Closed Loop | Reopened — backend implemented, user loop unavailable | React workflow and real browser/email loop are NOT MET | `docs/rebuild/phase-1-audit.md` is superseded for current status by the 2026-08-19 reality audit below |
-| 2 | Reliable Business Loop | In Progress — recovery gate | CAP-030 active; early-webhook, audit-query, delivery, and preview criteria remain open | — |
+| 0 | Foundation | Reopened — preview unverified | Local `/setup`, asset serving, queue topology, and repeat-safe migration paths are implemented; fresh/repeat preview deploy is NOT MET | `docs/rebuild/phase-0-audit.md` is superseded for current status by the 2026-08-19 reality audit and CAP-039/041 evidence below |
+| 1 | Minimal Business Closed Loop | Reopened — user loop incomplete | Setup UI is implemented; auth, mailbox, inbox, compose/reply, admin UI, and real browser/email verification are NOT MET | `docs/rebuild/phase-1-audit.md` is superseded for current status by the 2026-08-19 reality audit and CAP-041 evidence below |
+| 2 | Reliable Business Loop | In Progress — CAP-042 next | CAP-033/034 and CAP-042–045 remain; no capability is active | — |
 | 3 | Complete Core Business | Not started | drafts + attachments | — |
 | 4 | Operations + Data Import | Not started | ops tooling + legacy import | — |
 | 5 | Automation & Multi-Provider | Not started | — | — |
@@ -64,9 +64,11 @@ This audit inspected implementation and deployment configuration, not only roadm
 | MEDIUM | Request correlation is not consistently persisted in audit rows. | Request ID middleware exists, but most `createAuditEvent` call sites do not carry it. | CAP-040 |
 | PROCESS | Repository memory had drifted behind code and Git state. | Ledger named CAP-029 as active while CAP-030 had a workspace and source diff; README still said no business code existed; roadmap criteria for future phases were pre-checked. | Corrected in this update; session-state checks strengthened in `.claude/hooks/`. |
 
-Passing local gates remains valid evidence for the implemented backend slices. The findings above
-mean Phase 0 and Phase 1 cannot be called `Verified`, and “code complete” is no longer used for
-Phase 1 until the missing client/delivery scope is implemented or formally removed.
+The table above is the historical 2026-08-19 snapshot. CAP-039 resolves its deployment-substrate
+findings in local code, CAP-040 resolves the webhook/audit findings, and CAP-041 resolves the setup
+route plus setup-wizard portion of the web-client finding. CAP-042–044 still own the remaining
+Phase 1 client workflows, and CAP-045 owns real preview verification. Passing local gates remains
+valid evidence for implemented slices, but Phase 0 and Phase 1 cannot yet be called `Verified`.
 
 ---
 
@@ -240,6 +242,7 @@ future capability can sweep them; not blocking CAP-040 acceptance.
 | ID | Description | Source | Severity |
 |---|---|---|---|
 | D-CAP-040-A | `webhook_deliveries` has no TTL purge. The table grows by one row per received event; a daily cron that deletes rows older than a retention window (e.g. 90 days) is a follow-up. The migration 0013 added the generated `provider_message_id` column but did not add a retention job. | Capability gap | MEDIUM |
+| D-CAP-040-B | The admin-only, audited webhook-secret reveal endpoint returns `webhookSecret`, while the literal global wording of `R-SECRET-003` says secrets are never returned in API responses or exposed to the client. Before CAP-044 designs the admin surface, decide whether to remove the reveal endpoint and use rotation-only disclosure, or formally define the narrow exception and its controls. | 2026-08-22 local baseline security review | MEDIUM (policy decision before CAP-044) |
 | D-CAP-040-LOW-1 | Webhook receiver is not idempotent on provider-supplied event id. Brevo retries are at-least-once; the route does not dedupe on any provider-supplied delivery id. A `UNIQUE (connection_id, provider_supplied_event_id)` constraint (with the row's existing UUID as fallback when the provider omits it) would catch duplicates. | Code LOW-L1 | LOW |
 | D-CAP-040-LOW-2 | `queue.ts:52` synthesises one `requestId` for the whole batch; if a batch carries 5 messages, 5 reconciliation audit rows share the same `requestId`. Move the `systemIds.uuid()` call inside the `for (const msg of batch.messages)` loop so each message gets its own correlation id. | Code LOW-L2 | LOW |
 | D-CAP-040-LOW-3 | `reconcile-webhook-deliveries.ts:102-108` audit metadata `backfilledIds` is unbounded. A flood of unmatched events for one reconciliation could push the audit row toward the D1 TEXT 1 GB limit. Add a cap (e.g. first 50 ids + `omitted` count). | Code LOW-L3 | LOW |

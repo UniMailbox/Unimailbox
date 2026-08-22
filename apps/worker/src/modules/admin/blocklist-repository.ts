@@ -8,11 +8,7 @@
 // AppContext (architecture edge: inbound-mail → admin via contracts).
 
 import type { Database } from '../../platform/database';
-import type {
-  BlocklistEntryRow,
-  BlocklistKind,
-  BlocklistReader,
-} from '@unimailbox/contracts';
+import type { BlocklistEntryRow, BlocklistKind, BlocklistReader } from '@unimailbox/contracts';
 
 export interface CreateBlocklistEntryInput {
   readonly id: string;
@@ -75,10 +71,7 @@ export async function listBlocklistEntries(
  * Deletes a blocklist entry by id. Returns true when a row was removed,
  * false when no row matched.
  */
-export async function deleteBlocklistEntry(
-  db: Database,
-  id: string,
-): Promise<boolean> {
+export async function deleteBlocklistEntry(db: Database, id: string): Promise<boolean> {
   const result = await prepareDeleteBlocklistEntry(db, id).run();
   return (result.meta?.changes ?? 0) > 0;
 }
@@ -88,10 +81,7 @@ export async function deleteBlocklistEntry(
  * it into a `db.batch([...])` together with the audit row and the
  * idempotency record. CAP-035 / R-AUDIT-001.
  */
-export function prepareDeleteBlocklistEntry(
-  db: Database,
-  id: string,
-): D1PreparedStatement {
+export function prepareDeleteBlocklistEntry(db: Database, id: string): D1PreparedStatement {
   return db.prepare('DELETE FROM blocklist_entries WHERE id = ?').bind(id);
 }
 

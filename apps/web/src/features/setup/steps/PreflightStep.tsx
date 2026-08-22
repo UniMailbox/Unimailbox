@@ -12,9 +12,7 @@
 // re-validate the response.
 import { useNavigate } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
-import {
-  CURRENT_SCHEMA_VERSION,
-} from '@unimailbox/contracts';
+import { CURRENT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { Spinner } from '../../../components/ui/Spinner';
@@ -69,15 +67,16 @@ export function PreflightStep(): ReactElement {
         Schema version: <code>{data.schemaVersion}</code>
         {schemaOk ? null : (
           <>
-            {' '}(expected <code>{CURRENT_SCHEMA_VERSION}</code>)
+            {' '}
+            (expected <code>{CURRENT_SCHEMA_VERSION}</code>)
           </>
         )}
       </p>
       {!schemaOk ? (
         <Alert variant="warning" testId="schema-drift">
           The deployment is on schema version <code>{data.schemaVersion}</code>
-          but this client expects <code>{CURRENT_SCHEMA_VERSION}</code>.
-          Run pending migrations before continuing.
+          but this client expects <code>{CURRENT_SCHEMA_VERSION}</code>. Run pending migrations
+          before continuing.
         </Alert>
       ) : null}
       <ul className="binding-list" data-testid="binding-list">
@@ -89,9 +88,7 @@ export function PreflightStep(): ReactElement {
             data-testid={`binding-${name}`}
           >
             <span className="binding-name">{name}</span>
-            <span className="binding-status">
-              {present ? 'present' : 'missing'}
-            </span>
+            <span className="binding-status">{present ? 'present' : 'missing'}</span>
           </li>
         ))}
       </ul>

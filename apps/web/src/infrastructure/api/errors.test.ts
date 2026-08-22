@@ -68,10 +68,9 @@ describe('parseErrorBody', () => {
   });
 
   it('falls back when fields are missing or wrong types', async () => {
-    const response = new Response(
-      JSON.stringify({ error: { code: 42, message: null } }),
-      { status: 400 },
-    );
+    const response = new Response(JSON.stringify({ error: { code: 42, message: null } }), {
+      status: 400,
+    });
     const parsed = await parseErrorBody(response);
     expect(parsed.code).toBe('HTTP_ERROR');
     expect(parsed.message).toContain('400');

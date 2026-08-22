@@ -9,13 +9,6 @@
 // are wired in `app-context.ts`. This file does not import from
 // `modules/admin` directly.
 
-export {
-  evaluateInboundPolicy,
-  type EvaluationDecision,
-} from './policy-evaluator';
+export { evaluateInboundPolicy, type EvaluationDecision } from './policy-evaluator';
 
-export {
-  matchesBlocklistEntry,
-  matchesBanEmail,
-  matchesAvailDomain,
-} from './pattern-matchers';
+export { matchesBlocklistEntry, matchesBanEmail, matchesAvailDomain } from './pattern-matchers';

@@ -30,9 +30,7 @@ export function Alert({
       data-testid={testId ?? 'alert'}
     >
       {title !== undefined ? <p className="alert-title">{title}</p> : null}
-      {children !== undefined ? (
-        <p className="alert-message">{children}</p>
-      ) : null}
+      {children !== undefined ? <p className="alert-message">{children}</p> : null}
       {code !== undefined ? (
         <span className="alert-code" data-testid="alert-code">
           {code}

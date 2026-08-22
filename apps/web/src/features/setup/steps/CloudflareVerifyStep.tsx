@@ -53,11 +53,7 @@ export function CloudflareVerifyStep(): ReactElement {
         '/api/v1/setup/cloudflare/dashboard-link',
         { method: 'POST', body: {} },
       );
-      const opened = window.open(
-        response.data.url,
-        '_blank',
-        'noopener,noreferrer',
-      );
+      const opened = window.open(response.data.url, '_blank', 'noopener,noreferrer');
       // MEDIUM (CAP-041 fix): null means the popup was blocked. The
       // operator must allow popups (or click the link manually) before
       // continuing; we surface a notice and disable the confirm button.
@@ -164,8 +160,8 @@ export function CloudflareVerifyStep(): ReactElement {
       ) : null}
       {popupBlocked ? (
         <Alert variant="warning" testId="cloudflare-popup-blocked">
-          The browser blocked the popup. Allow popups for this site, then
-          re-open the dashboard link below.
+          The browser blocked the popup. Allow popups for this site, then re-open the dashboard link
+          below.
         </Alert>
       ) : null}
       {linkLoaded && !popupBlocked ? (
@@ -178,11 +174,7 @@ export function CloudflareVerifyStep(): ReactElement {
           message={verifyErrorMessage}
           code={verifyErrorCode}
           retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            isUnauthorized
-              ? handleReclaim
-              : () => void onConfirm()
-          }
+          onRetry={isUnauthorized ? handleReclaim : () => void onConfirm()}
         />
       ) : null}
       <div className="wizard-actions">

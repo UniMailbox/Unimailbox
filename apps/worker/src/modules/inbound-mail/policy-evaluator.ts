@@ -27,11 +27,7 @@
 
 import type { BlocklistEntryRow, RolePolicyRow } from '@unimailbox/contracts';
 import type { ParsedEmail } from '@unimailbox/email-core';
-import {
-  matchesBlocklistEntry,
-  matchesBanEmail,
-  matchesAvailDomain,
-} from './pattern-matchers';
+import { matchesBlocklistEntry, matchesBanEmail, matchesAvailDomain } from './pattern-matchers';
 
 export type EvaluationDecision =
   | { readonly allow: true }
@@ -87,9 +83,7 @@ export function evaluateInboundPolicy(
     const availPatterns = safeParseStringArray(policy.avail_domain_patterns_json);
     if (availPatterns.length === 0) continue;
 
-    const allowed = availPatterns.some((pattern) =>
-      matchesAvailDomain(pattern, senderAddress),
-    );
+    const allowed = availPatterns.some((pattern) => matchesAvailDomain(pattern, senderAddress));
     if (!allowed) {
       return {
         allow: false,

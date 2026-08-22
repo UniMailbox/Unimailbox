@@ -108,10 +108,7 @@ export function sqliteTimestamp(date: Date): string {
  * this is request-shaped.
  */
 export async function sha256Hex(input: string): Promise<string> {
-  const buffer = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(input),
-  );
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
@@ -257,12 +254,7 @@ export async function replayAfterRace(
   idempotencyKey: string,
   requestHash: string,
 ): Promise<Response> {
-  const winner = await findIdempotencyRecord(
-    db,
-    actorId,
-    operation,
-    idempotencyKey,
-  );
+  const winner = await findIdempotencyRecord(db, actorId, operation, idempotencyKey);
 
   if (!winner) {
     // The row collided a moment ago but is gone now (TTL purge, or a
@@ -437,10 +429,7 @@ export function prepareReleaseIdempotencyRecord(
  * Same key + different hash is the ADR-004 conflict case — the client
  * reused a key it had already spent on a different request.
  */
-export function assertSameRequestHash(
-  record: IdempotencyRecord,
-  requestHash: string,
-): void {
+export function assertSameRequestHash(record: IdempotencyRecord, requestHash: string): void {
   if (record.requestHash !== requestHash) {
     throw new DomainError({
       code: 'IDEMPOTENCY_KEY_REUSED',
@@ -467,12 +456,7 @@ export async function tryReplayIdempotency(
   idempotencyKey: string,
   requestHash: string,
 ): Promise<Response | null> {
-  const record = await findIdempotencyRecord(
-    db,
-    actorId,
-    operation,
-    idempotencyKey,
-  );
+  const record = await findIdempotencyRecord(db, actorId, operation, idempotencyKey);
 
   if (!record) return null;
 

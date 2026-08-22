@@ -47,10 +47,7 @@ export async function checkPermission(
  * @param userId — UUID of the user
  * @returns Array of role IDs (strings) assigned to the user
  */
-export async function getUserRoleIds(
-  db: Database,
-  userId: string,
-): Promise<string[]> {
+export async function getUserRoleIds(db: Database, userId: string): Promise<string[]> {
   const rows = await db
     .prepare('SELECT role_id FROM user_roles WHERE user_id = ?')
     .bind(userId)

@@ -13,18 +13,9 @@ export interface ToastProps {
   readonly testId?: string;
 }
 
-export function Toast({
-  variant = 'default',
-  children,
-  testId,
-}: ToastProps): ReactElement {
+export function Toast({ variant = 'default', children, testId }: ToastProps): ReactElement {
   return (
-    <div
-      className="toast"
-      data-variant={variant}
-      role="status"
-      data-testid={testId ?? 'toast'}
-    >
+    <div className="toast" data-variant={variant} role="status" data-testid={testId ?? 'toast'}>
       {children}
     </div>
   );

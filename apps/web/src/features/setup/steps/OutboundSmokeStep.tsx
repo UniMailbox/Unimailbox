@@ -70,10 +70,7 @@ export function OutboundSmokeStep(): ReactElement {
   const isUnauthorized = submitErrorStatus === 401;
 
   return (
-    <Card
-      title="Outbound smoke test"
-      description="Send a real outbound email to confirm delivery."
-    >
+    <Card title="Outbound smoke test" description="Send a real outbound email to confirm delivery.">
       {submitted ? (
         <Alert variant="success" testId="outbound-success">
           Smoke test sent — the server is marking the installation complete.
@@ -88,11 +85,7 @@ export function OutboundSmokeStep(): ReactElement {
           message={submitErrorMessage}
           code={submitErrorCode}
           retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            isUnauthorized
-              ? handleReclaim
-              : () => void onSubmit()
-          }
+          onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
         />
       ) : null}
       <div className="wizard-actions">

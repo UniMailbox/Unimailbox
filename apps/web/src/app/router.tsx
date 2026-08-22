@@ -72,8 +72,7 @@ function DefaultPending(): ReactElement {
 }
 
 function DefaultError({ error }: ErrorComponentProps): ReactElement {
-  const message =
-    error instanceof Error ? error.message : 'Something went wrong.';
+  const message = error instanceof Error ? error.message : 'Something went wrong.';
   return (
     <main className="unimailbox-stub" role="alert">
       <h1>Something went wrong</h1>

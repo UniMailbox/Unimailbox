@@ -89,7 +89,9 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
 
       // Format: smoke+<uuid>@<domain>
       const address = body.data.smokeTestAddress as string;
-      expect(address).toMatch(/^smoke\+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@example\.com$/i);
+      expect(address).toMatch(
+        /^smoke\+[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@example\.com$/i,
+      );
     });
 
     it('returns the success envelope { data: T }', async () => {
@@ -123,7 +125,9 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
       const body = await response.json();
       const address = body.data.smokeTestAddress as string;
       // Extract token from smoke+<token>@domain
-      const match = address.match(/^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i);
+      const match = address.match(
+        /^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i,
+      );
       const token = match ? match[1] : '';
 
       // Verify the token exists in KV
@@ -399,7 +403,9 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
 
     const body = await response.json();
     const address = body.data.smokeTestAddress as string;
-    const match = address.match(/^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i);
+    const match = address.match(
+      /^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i,
+    );
     const token = match ? match[1] : '';
     return { token, address };
   }
@@ -732,7 +738,9 @@ describe('email handler smoke test detection', () => {
 
     const body = await response.json();
     smokeAddress = body.data.smokeTestAddress as string;
-    const match = smokeAddress.match(/^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i);
+    const match = smokeAddress.match(
+      /^smoke\+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i,
+    );
     smokeToken = match ? match[1] : '';
   }
 

@@ -27,16 +27,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary'],
-      include: [
-        'apps/worker/src/platform/**/*.ts',
-        'packages/email-core/src/**/*.ts',
-      ],
-      exclude: [
-        '**/*.test.ts',
-        '**/test/**',
-        '**/dist/**',
-        '**/node_modules/**',
-      ],
+      include: ['apps/worker/src/platform/**/*.ts', 'packages/email-core/src/**/*.ts'],
+      exclude: ['**/*.test.ts', '**/test/**', '**/dist/**', '**/node_modules/**'],
       thresholds: {
         lines: 70,
       },
