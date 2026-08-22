@@ -13,6 +13,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF } from 'cloudflare:test';
 import { resetAndMigrate } from '@unimailbox/test-kit';
+import { CURRENT_SCHEMA_VERSION } from '@unimailbox/contracts';
 
 describe('POST /api/v1/setup/preflight', () => {
   let sessionToken: string;
@@ -97,7 +98,7 @@ describe('POST /api/v1/setup/preflight', () => {
       });
 
       const body = await response.json();
-      expect(body.data.schemaVersion).toBe('0013');
+      expect(body.data.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     });
 
     it('returns the success envelope { data: T }', async () => {

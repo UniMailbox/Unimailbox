@@ -18,8 +18,11 @@ product.
 ## Execution order
 
 Only one capability is active at a time. Orders 0–3 are implemented and their workspaces are
-closed. No capability is currently active; CAP-042 is next. A later capability starts only after
-the current one completes review, ledger/log sync, cleanup, and acceptance.
+closed. CAP-042 completed Slice 0 and its repository-owned 0014 additive migration; runtime
+secret/config bindings and the request-scoped auth factory are next within the additive-substrate
+slice. A later
+capability starts only after the current one completes review, ledger/log sync, cleanup, and
+acceptance.
 
 | Order | Capability | Outcome | Depends on | Exit evidence |
 |---|---|---|---|---|
@@ -27,7 +30,7 @@ the current one completes review, ledger/log sync, cleanup, and acceptance.
 | 1 | CAP-039 — deployment substrate | One build/deploy serves the real web bundle and client routes; queue consumer is declared; remote migrations apply pending files once and a second deploy is safe. | CAP-030 | Dry-run config inspection; asset and SPA route Worker tests; queue config assertion; fresh + repeat migration test |
 | 2 | CAP-040 — webhook and audit reliability | Webhook secret is no longer returned by list APIs; early events are durably retained and reconciled; status change and delivery/audit evidence are atomic; request IDs reach audit events. | CAP-039 | Security, crash-window, early-event replay, cross-tenant, and atomicity tests |
 | 3 | CAP-041 — setup web vertical slice | `/setup` renders a resumable wizard for every existing setup API step, with explicit loading/error/retry/success states. | CAP-039 | Browser test on fresh local bindings plus Worker route fallback tests |
-| 4 | CAP-042 — auth and mailbox shell | Registration/login/logout/session recovery and authorized mailbox navigation work in the single web client. Missing API scope is either implemented or explicitly removed from Phase 1. | CAP-041 | Browser allowed/denied/expired-session tests and contract tests |
+| 4 | CAP-042 — Better Auth and authorized mailbox shell | Better Auth runs on Hono + D1 without replacing canonical user IDs or RBAC; existing users can authenticate; registration/login/logout/session recovery and authorized mailbox navigation work in the single web client. | CAP-041 | D1 compatibility and atomic-registration proof; migration verification; browser allowed/denied/expired-session tests; contract and rollback tests |
 | 5 | CAP-043 — inbox and message reading | Authorized users can list mailboxes, open inbox, view message/thread, mark read, and perform the Phase 1 delete behavior. | CAP-042, CAP-034 if cursor contract is pulled forward | Browser loading/empty/error/success tests, IDOR tests, pagination evidence |
 | 6 | CAP-044 — compose, reply, and admin surfaces | Compose/reply uses the durable outbox and idempotency contract; admin users can inspect users, webhook metadata, and audit events without receiving secrets. | CAP-040, CAP-043, CAP-033 if audit query is pulled forward | Browser mutation retry/replay tests; queue path; permission matrix; secret-leak scan |
 | 7 | CAP-045 — preview delivery verification | A fresh preview deployment and a repeat deployment complete the real setup, inbound, read, reply, webhook, recovery, and audit loop. | CAP-039–CAP-044 | Recorded deployment URLs/config checks, real inbound email, real provider reply, queue/crash recovery, audit trail, second deploy |
@@ -62,6 +65,58 @@ needs its contract; otherwise execute them after CAP-045. This avoids a second b
 - Propagate the request ID to all request-originated audit rows; define a correlation ID for email,
   queue, and scheduled events.
 - Close D-CAP-029-A, D-CAP-029-B, and the early-event gap found by the recovery audit.
+
+### CAP-042 — Better Auth and authorized mailbox shell
+
+ADR-008 owns the architecture and migration decisions. CAP-042 remains one capability, executed as
+ordered, independently reviewable slices. Do not start a later slice until the previous slice's
+exit gate passes.
+
+1. **Compatibility and atomicity spike.** Pin matching Better Auth core/Drizzle-adapter versions;
+   generate the SQLite schema for review; prove Hono raw-request handling, D1 adapter behavior,
+   Secrets Store access, cookie handling, bundle compatibility, custom ADR-006 PBKDF2 verification,
+   and registration/setup-administrator transaction behavior in the Cloudflare Workers Pool.
+   Reconcile each `R-AUTH-001` through `R-AUTH-009` rule with Better Auth and record any contract
+   conflict, especially verified-email and password-bound drift. This slice makes no route cutover.
+   An unproven atomicity story blocks sign-up work.
+2. **Additive substrate.** Add the request-scoped auth factory, new secret/config bindings, Drizzle
+   D1 adapter, typing declarations, repository-owned SQL plus verification migration, deploy-time
+   secret provisioning, test bindings, and doctor configuration-parity checks. Reuse `users` as the
+   canonical identity and create distinct `auth_accounts`, `auth_sessions`, and
+   `auth_verifications` tables. Keep legacy password/session storage intact.
+3. **Shadow session bridge.** Mount Better Auth at `/api/v1/auth/better/*`, with matching `basePath`,
+   and resolve its cookie session into the existing Hono `userId`. Deny banned/deleted users and
+   conflicting cookie/bearer principals. Prove existing `requirePermission` and mailbox
+   authorization without changing their ownership.
+4. **Existing-user credential migration.** Idempotently backfill Better Auth credential accounts
+   from the existing PBKDF2 columns; verify counts, duplicates, orphan handling, case-insensitive
+   email, and login without a forced password reset. Do not migrate legacy sessions.
+5. **Registration and administrator cutover.** Enable Better Auth-backed credential creation only
+   after tests prove user + credential + invite usage + role assignment atomicity, and the analogous
+   setup-administrator transition. Retain the application-owned orchestration endpoint and its
+   idempotency contract; Better Auth does not own invitation or role policy.
+6. **Browser cookie cutover.** Add login/register routes and authorized mailbox navigation to the
+   single React client. Use HttpOnly cookies, session recovery, explicit loading/error/unauthorized
+   states, and logout; do not persist bearer or refresh tokens in browser storage. Close
+   D-CAP-041-1 and D-CAP-041-9 before copying their query/router patterns into the mailbox shell.
+7. **Local cutover and rollback proof.** Exercise `AUTH_PROVIDER=legacy|dual|better-auth`, invalidate
+   legacy sessions only at the controlled switch, verify rollback to legacy on the same additive
+   schema, and leave destructive legacy-table/column cleanup for a later capability after CAP-045
+   preview evidence.
+
+CAP-042 acceptance requires all `R-AUTH-001` through `R-AUTH-009` behaviors to be demonstrated or
+explicitly re-decided before browser cutover. In particular, Better Auth defaults do not override
+the ten-session limit, renewal rotation, revoke-all-on-password-change, banned/deleted denial,
+verified-email policy, password limits, or case-insensitive email rules.
+
+The delivery path is:
+
+`Browser login/register` → `Hono Better Auth boundary` → `D1 auth tables + canonical users` →
+`session bridge sets userId` → `existing RBAC/mailbox authorization` → `authorized mailbox shell`.
+
+Security review is mandatory because this capability changes authentication, cookies, secrets,
+password verification, and database identity records. Architecture, code, QA, and frontend reviews
+remain required by the vertical-slice contract.
 
 ### CAP-041–CAP-044 — web vertical slices
 

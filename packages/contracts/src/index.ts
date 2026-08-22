@@ -531,7 +531,7 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * without crossing module boundaries (CAP-041 AC #6). Bumped when a new
  * migration lands. Hand-written; intentionally not auto-generated.
  */
-export const CURRENT_SCHEMA_VERSION = '0013' as const;
+export const CURRENT_SCHEMA_VERSION = '0014' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008

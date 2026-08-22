@@ -76,7 +76,7 @@ the ledger's `Known documentation discrepancies` table records each.
 |---|---|---|---|
 | 0 — Foundation | **Reopened — preview unverified** | 11 boxes — `08-roadmap/phase-0-foundation.md` | CAP-039/041 implement `/setup`, asset delivery, queue topology, and repeat-safe migrations locally; fresh and repeat preview evidence remains pending in CAP-045. |
 | 1 — Minimal Loop | **Reopened — user loop incomplete** | 29 boxes — `F-minimal-business-closed-loop.md` §F.4 (H doc says 23) | CAP-041 implements the setup wizard; auth, mailbox, inbox, compose/reply, admin UI, and the real browser/email loop remain CAP-042–045. |
-| 2 — Reliable Loop | **In progress — CAP-042 next** | 7 boxes — `08-roadmap/phase-2-core-loop.md` | CAP-027–032, CAP-035, and CAP-037–041 are implemented; no capability workspace is currently active. |
+| 2 — Reliable Loop | **In progress — CAP-042 active** | 7 boxes — `08-roadmap/phase-2-core-loop.md` | CAP-027–032, CAP-035, and CAP-037–041 are implemented; CAP-042 Slice 0 and migration 0014 are complete, with runtime auth config/factory next. |
 | 3 — Complete Core | Not started | drafts + attachments | — |
 | 4 — Operations + Data Import | Not started | ops tooling + legacy import | — |
 | 5 — Automation | Not started | — | — |

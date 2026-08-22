@@ -2,4 +2,4 @@
 // The constant the doctor `schema-version` check compares the highest
 // migration filename against. Bump this when a new migration lands.
 // Hand-written; intentionally not auto-generated.
-export const CURRENT_SCHEMA_VERSION = '0013' as const;
+export const CURRENT_SCHEMA_VERSION = '0014' as const;

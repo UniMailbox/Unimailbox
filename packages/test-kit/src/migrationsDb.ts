@@ -30,24 +30,29 @@ import blocklistAndRolePoliciesSql from '../../../migrations/0010_blocklist_and_
 import messageEventTimeSql from '../../../migrations/0011_message_event_time.sql?raw';
 import webhookEventTimeSql from '../../../migrations/0012_webhook_event_time.sql?raw';
 import webhookDeliveryMessageIndexSql from '../../../migrations/0013_webhook_delivery_message_index.sql?raw';
+import betterAuthSubstrateSql from '../../../migrations/0014_better_auth_substrate.sql?raw';
 
-// Split migration SQL on semicolons for applyD1Migrations
-// Filters out comment-only lines to avoid passing them as separate statements
+// Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
+// internal semicolons, so they remain one statement through their END; line.
 function splitSql(sql: string): string[] {
   const lines = sql.split('\n');
   const statements: string[] = [];
   let current = '';
+  let inTrigger = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
-    // Skip comment-only lines but keep the separator
     if (trimmed.startsWith('--')) {
       continue;
     }
     current += line + '\n';
-    if (trimmed.endsWith(';')) {
+    if (/^CREATE\s+TRIGGER\b/i.test(trimmed)) {
+      inTrigger = true;
+    }
+    if ((inTrigger && /^END;$/i.test(trimmed)) || (!inTrigger && trimmed.endsWith(';'))) {
       statements.push(current.trim());
       current = '';
+      inTrigger = false;
     }
   }
 
@@ -59,34 +64,93 @@ function splitSql(sql: string): string[] {
   return statements.filter((s) => s.trim());
 }
 
+const MIGRATIONS = [
+  { name: '0001_initial', fileName: '0001_initial.sql', sql: initialSql },
+  { name: '0002_managed_domains', fileName: '0002_managed_domains.sql', sql: managedDomainsSql },
+  {
+    name: '0003_provider_connections',
+    fileName: '0003_provider_connections.sql',
+    sql: providerConnectionsSql,
+  },
+  {
+    name: '0004_registration_keys',
+    fileName: '0004_registration_keys.sql',
+    sql: registrationKeysSql,
+  },
+  { name: '0005_mailboxes', fileName: '0005_mailboxes.sql', sql: mailboxesSql },
+  { name: '0006_messages', fileName: '0006_messages.sql', sql: messagesSql },
+  { name: '0007_outbound_jobs', fileName: '0007_outbound_jobs.sql', sql: outboundJobsSql },
+  { name: '0008_webhook_events', fileName: '0008_webhook_events.sql', sql: webhookEventsSql },
+  {
+    name: '0009_idempotency_records',
+    fileName: '0009_idempotency_records.sql',
+    sql: idempotencyRecordsSql,
+  },
+  {
+    name: '0010_blocklist_and_role_policies',
+    fileName: '0010_blocklist_and_role_policies.sql',
+    sql: blocklistAndRolePoliciesSql,
+  },
+  {
+    name: '0011_message_event_time',
+    fileName: '0011_message_event_time.sql',
+    sql: messageEventTimeSql,
+  },
+  {
+    name: '0012_webhook_event_time',
+    fileName: '0012_webhook_event_time.sql',
+    sql: webhookEventTimeSql,
+  },
+  {
+    name: '0013_webhook_delivery_message_index',
+    fileName: '0013_webhook_delivery_message_index.sql',
+    sql: webhookDeliveryMessageIndexSql,
+  },
+  {
+    name: '0014_better_auth_substrate',
+    fileName: '0014_better_auth_substrate.sql',
+    sql: betterAuthSubstrateSql,
+  },
+] as const;
+
+export interface MigrationsDbOptions {
+  /** Apply through this migration name, inclusive. Omit for the current schema. */
+  readonly through?: string;
+}
+
 /**
  * Returns the worker-pool D1 binding with all migrations applied. The
  * `d1_migrations` tracking table makes subsequent calls a no-op, so
  * calling migrationsDb() in every test is safe (and cheap).
  */
-export async function migrationsDb(): Promise<D1Database> {
+export async function migrationsDb(options: MigrationsDbOptions = {}): Promise<D1Database> {
   // Lazy-import so packages/test-kit still typechecks for callers that
   // never touch a worker-pool binding (e.g. unit tests of the fixtures
   // themselves). cloudflare:test is a virtual module — it only exists
   // inside workerd.
   const mod = await import('cloudflare:test');
-  await mod.applyD1Migrations(mod.env.DB, [
-    { name: '0001_initial', queries: splitSql(initialSql) },
-    { name: '0002_managed_domains', queries: splitSql(managedDomainsSql) },
-    { name: '0003_provider_connections', queries: splitSql(providerConnectionsSql) },
-    { name: '0004_registration_keys', queries: splitSql(registrationKeysSql) },
-    { name: '0005_mailboxes', queries: splitSql(mailboxesSql) },
-    { name: '0006_messages', queries: splitSql(messagesSql) },
-    { name: '0007_outbound_jobs', queries: splitSql(outboundJobsSql) },
-    { name: '0008_webhook_events', queries: splitSql(webhookEventsSql) },
-    { name: '0009_idempotency_records', queries: splitSql(idempotencyRecordsSql) },
-    { name: '0010_blocklist_and_role_policies', queries: splitSql(blocklistAndRolePoliciesSql) },
-    { name: '0011_message_event_time', queries: splitSql(messageEventTimeSql) },
-    { name: '0012_webhook_event_time', queries: splitSql(webhookEventTimeSql) },
-    {
-      name: '0013_webhook_delivery_message_index',
-      queries: splitSql(webhookDeliveryMessageIndexSql),
-    },
-  ]);
+  const throughIndex = options.through
+    ? MIGRATIONS.findIndex((migration) => migration.name === options.through)
+    : MIGRATIONS.length - 1;
+  if (throughIndex < 0) {
+    throw new Error(`Unknown migration boundary: ${options.through}`);
+  }
+
+  let applied = new Set<string>();
+  try {
+    const rows = await mod.env.DB.prepare('SELECT name FROM d1_migrations').all<{ name: string }>();
+    applied = new Set(rows.results.map((row) => row.name));
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('no such table: d1_migrations')) {
+      throw error;
+    }
+  }
+
+  const pending = MIGRATIONS.slice(0, throughIndex + 1)
+    .filter((migration) => !applied.has(migration.fileName))
+    .map((migration) => ({ name: migration.name, queries: splitSql(migration.sql) }));
+  if (pending.length > 0) {
+    await mod.applyD1Migrations(mod.env.DB, pending);
+  }
   return mod.env.DB;
 }

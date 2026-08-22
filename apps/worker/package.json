@@ -10,9 +10,11 @@
     "clean": "rm -rf dist .wrangler .tsbuildinfo"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.1",
     "@unimailbox/config": "workspace:*",
     "@unimailbox/contracts": "workspace:*",
     "@unimailbox/email-core": "workspace:*",
+    "better-auth": "1.7.1",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.3",
     "zod": "3.25.76"

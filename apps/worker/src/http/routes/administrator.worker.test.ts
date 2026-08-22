@@ -198,7 +198,7 @@ describe('POST /api/v1/setup/administrator', () => {
       });
     });
 
-    it('creates user without displayName when omitted', async () => {
+    it('uses the deterministic email-prefix displayName when omitted', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
         method: 'POST',
         body: JSON.stringify({
@@ -219,7 +219,7 @@ describe('POST /api/v1/setup/administrator', () => {
         .bind(userId)
         .first();
 
-      expect(user?.display_name).toBeNull();
+      expect(user?.display_name).toBe('admin');
     });
 
     it('returns the success envelope { data: T }', async () => {
