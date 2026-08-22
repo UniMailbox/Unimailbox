@@ -1,0 +1,144 @@
+// apps/web — DomainStep.
+//
+// CAP-041 / step 4. Collects the managed domain. R-DATA-001: the wizard
+// displays the normalized (lowercased) domain from the parsed form
+// value rather than the user-typed form.
+//
+// H2 (CAP-041 fix): the unused `normalized` state and its setter are
+// removed — the parsed form value is the single source of truth.
+import { useNavigate } from '@tanstack/react-router';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useState, type ReactElement } from 'react';
+import {
+  domainNameSchema,
+  setupDomainRequestSchema,
+  type SetupDomainRequest,
+} from '@unimailbox/contracts';
+import { Button } from '../../../components/ui/Button';
+import { Input } from '../../../components/ui/Input';
+import { Card } from '../../../components/ui/Card';
+import { Spinner } from '../../../components/ui/Spinner';
+import { ErrorPanel } from '../../../components/ui/ErrorPanel';
+import { ApiError } from '../../../infrastructure/api/errors';
+import { useApiClient } from '../../../infrastructure/api/client-provider';
+import { useQueryClient } from '@tanstack/react-query';
+import { setupQueryKeys } from '../setup-queries';
+import { clearSetupSession } from '../setup-session-store';
+
+export function DomainStep(): ReactElement {
+  const apiClient = useApiClient();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [submitError, setSubmitError] = useState<{
+    readonly message: string;
+    readonly code: string;
+    readonly status: number | null;
+  } | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<SetupDomainRequest>({
+    resolver: zodResolver(setupDomainRequestSchema),
+    defaultValues: { name: '' },
+  });
+
+  const watchedName = watch('name');
+
+  // HIGH 2 (CAP-041 fix): when the session token expires mid-wizard
+  // (e.g. server rotates the session), the next mutation returns 401.
+  // Surface that as a clear action: re-claim the installation token.
+  const handleReclaim = (): void => {
+    clearSetupSession();
+    void navigate({ to: '/setup/claim' });
+  };
+
+  const onSubmit = handleSubmit(async (values) => {
+    setSubmitError(null);
+    try {
+      await apiClient.fetch('/api/v1/setup/domain', {
+        method: 'POST',
+        body: values,
+      });
+      await queryClient.invalidateQueries({ queryKey: setupQueryKeys.status() });
+      await navigate({ to: '/setup/cloudflare-verify' });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setSubmitError({
+          message: error.message,
+          code: error.code,
+          status: error.status,
+        });
+        return;
+      }
+      setSubmitError({
+        message: 'Unexpected error',
+        code: 'UNEXPECTED_ERROR',
+        status: null,
+      });
+    }
+  });
+
+  const previewed =
+    typeof watchedName !== 'string' || watchedName.length === 0
+      ? null
+      : (() => {
+          const parsed = domainNameSchema.safeParse(watchedName);
+          return parsed.success ? parsed.data : null;
+        })();
+
+  const submitErrorMessage = submitError?.message ?? '';
+  const submitErrorCode = submitError?.code ?? '';
+  const submitErrorStatus = submitError?.status ?? null;
+  const isUnauthorized = submitErrorStatus === 401;
+
+  return (
+    <Card
+      title="Add managed domain"
+      description="The domain that will receive mail for this deployment."
+    >
+      <form onSubmit={onSubmit} noValidate>
+        <Input
+          id="domain-name"
+          type="text"
+          autoComplete="off"
+          label="Domain"
+          help="e.g. mail.example.com"
+          error={errors.name?.message}
+          {...register('name')}
+        />
+        {previewed !== null ? (
+          <p data-testid="domain-normalized" className="wizard-subtitle">
+            Will be stored as: <code>{previewed}</code>
+          </p>
+        ) : null}
+        {submitError !== null ? (
+          <ErrorPanel
+            message={submitErrorMessage}
+            code={submitErrorCode}
+            retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+            onRetry={
+              isUnauthorized
+                ? handleReclaim
+                : () => void onSubmit()
+            }
+          />
+        ) : null}
+        <div className="wizard-actions">
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={isSubmitting}
+            aria-busy={isSubmitting}
+            data-testid="domain-submit"
+          >
+            {isSubmitting ? <Spinner /> : 'Add domain'}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}

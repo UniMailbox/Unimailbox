@@ -2,6 +2,11 @@
  * Design tokens — shadcn/ui-style CSS variables.
  * CAP-001 ships a minimal palette so primitives can reference tokens from day one.
  * See phase-0-foundation.md §Scope "design tokens (matches DESIGN.md of the legacy repo)".
+ *
+ * CAP-041 extends the palette with semantic state tokens (success/danger/warning),
+ * ring tokens, and styles for the new setup wizard primitives (Input, Card,
+ * Toast, Spinner, Alert, ErrorPanel). Every visual value lives here so the
+ * component files are token-driven.
  */
 
 :root {
@@ -21,6 +26,23 @@
   --unimailbox-muted: 210 40% 96.1%;
   --unimailbox-muted-foreground: 215.4 16.3% 46.9%;
 
+  /* Semantic state (CAP-041) */
+  --unimailbox-success: 142.1 70.6% 35.3%;
+  --unimailbox-success-foreground: 0 0% 100%;
+  --unimailbox-success-soft: 138 76% 97%;
+  --unimailbox-danger: 0 72.2% 50.6%;
+  --unimailbox-danger-foreground: 0 0% 100%;
+  --unimailbox-danger-soft: 0 86% 97%;
+  --unimailbox-warning: 38 92% 50%;
+  --unimailbox-warning-foreground: 0 0% 100%;
+  --unimailbox-warning-soft: 48 100% 96%;
+  --unimailbox-info: 221.2 83.2% 53.3%;
+  --unimailbox-info-foreground: 0 0% 100%;
+  --unimailbox-info-soft: 214 100% 97%;
+
+  /* Focus */
+  --unimailbox-ring: 222.2 47.4% 11.2%;
+
   /* Radii */
   --unimailbox-radius: 0.5rem;
 }
@@ -37,6 +59,19 @@
     --unimailbox-primary-foreground: 222.2 47.4% 11.2%;
     --unimailbox-muted: 217.2 32.6% 17.5%;
     --unimailbox-muted-foreground: 215 20.2% 65.1%;
+    --unimailbox-success: 142.1 70.6% 45.3%;
+    --unimailbox-success-foreground: 144.9 80.4% 10%;
+    --unimailbox-success-soft: 144.9 80.4% 10%;
+    --unimailbox-danger: 0 72.2% 60.6%;
+    --unimailbox-danger-foreground: 0 0% 98%;
+    --unimailbox-danger-soft: 0 62.8% 30.6%;
+    --unimailbox-warning: 48 96% 60%;
+    --unimailbox-warning-foreground: 26 83.3% 14.1%;
+    --unimailbox-warning-soft: 26 83.3% 14.1%;
+    --unimailbox-info: 217.2 91.2% 59.8%;
+    --unimailbox-info-foreground: 222.2 47.4% 11.2%;
+    --unimailbox-info-soft: 222.2 47.4% 11.2%;
+    --unimailbox-ring: 212.7 26.8% 83.9%;
   }
 }
 
@@ -102,7 +137,7 @@ body {
 }
 
 .btn:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-primary));
+  outline: 2px solid hsl(var(--unimailbox-ring));
   outline-offset: 2px;
 }
 
@@ -115,8 +150,399 @@ body {
   opacity: 0.5;
 }
 
+.btn-secondary {
+  background-color: hsl(var(--unimailbox-background));
+  color: hsl(var(--unimailbox-foreground));
+  border-color: hsl(var(--unimailbox-border));
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: hsl(var(--unimailbox-muted));
+}
+
+.btn-ghost {
+  background-color: transparent;
+  color: hsl(var(--unimailbox-foreground));
+  border-color: transparent;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: hsl(var(--unimailbox-muted));
+}
+
+.btn-danger {
+  background-color: hsl(var(--unimailbox-danger));
+  color: hsl(var(--unimailbox-danger-foreground));
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
+}
+
+.btn-md {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
 /* ---- 404 / error recovery ---- */
 .unimailbox-stub a {
   color: hsl(var(--unimailbox-primary));
   text-decoration: underline;
+}
+
+/* ---- Input primitive (CAP-041) ----
+ * The wizard forms rely on this for the email, password, domain, and
+ * Brevo API key inputs. Field-level error state is declared via
+ * `aria-invalid="true"` so the input picks up the danger border.
+ */
+.input {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-family: inherit;
+  color: hsl(var(--unimailbox-foreground));
+  background-color: hsl(var(--unimailbox-background));
+  border: 1px solid hsl(var(--unimailbox-input));
+  border-radius: var(--unimailbox-radius);
+  transition: border-color 120ms ease;
+}
+
+.input:focus-visible {
+  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline-offset: 1px;
+  border-color: hsl(var(--unimailbox-ring));
+}
+
+.input[aria-invalid='true'] {
+  border-color: hsl(var(--unimailbox-danger));
+}
+
+.input[aria-invalid='true']:focus-visible {
+  outline-color: hsl(var(--unimailbox-danger));
+}
+
+.input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.input-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  color: hsl(var(--unimailbox-foreground));
+}
+
+.input-error {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--unimailbox-danger));
+}
+
+.input-help {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+/* ---- Card primitive (CAP-041) ----
+ * Section wrapper for each step body. The optional title / description
+ * are passed as children so the primitive stays presentational.
+ */
+.card {
+  padding: 1.5rem;
+  border: 1px solid hsl(var(--unimailbox-border));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-card));
+  color: hsl(var(--unimailbox-card-foreground));
+}
+
+.card-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.card-description {
+  margin: 0 0 1rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+  line-height: 1.5;
+}
+
+/* ---- Spinner primitive (CAP-041) ---- */
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid hsl(var(--unimailbox-muted));
+  border-top-color: hsl(var(--unimailbox-primary));
+  border-radius: 50%;
+  animation: unimailbox-spin 0.8s linear infinite;
+}
+
+@keyframes unimailbox-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Alert primitive (CAP-041) ----
+ * Information / success / danger / warning banners. The `data-variant`
+ * attribute toggles the semantic color set so the component stays
+ * agnostic of the visual style.
+ */
+.alert {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid hsl(var(--unimailbox-border));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-muted));
+  color: hsl(var(--unimailbox-foreground));
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.alert[data-variant='success'] {
+  background-color: hsl(var(--unimailbox-success-soft));
+  border-color: hsl(var(--unimailbox-success));
+  color: hsl(var(--unimailbox-success));
+}
+
+.alert[data-variant='danger'] {
+  background-color: hsl(var(--unimailbox-danger-soft));
+  border-color: hsl(var(--unimailbox-danger));
+  color: hsl(var(--unimailbox-danger));
+}
+
+.alert[data-variant='warning'] {
+  background-color: hsl(var(--unimailbox-warning-soft));
+  border-color: hsl(var(--unimailbox-warning));
+  color: hsl(var(--unimailbox-warning));
+}
+
+.alert[data-variant='info'] {
+  background-color: hsl(var(--unimailbox-info-soft));
+  border-color: hsl(var(--unimailbox-info));
+  color: hsl(var(--unimailbox-info));
+}
+
+.alert-title {
+  font-weight: 600;
+  margin: 0;
+}
+
+.alert-message {
+  margin: 0;
+}
+
+.alert-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* ---- Toast primitive (CAP-041) ----
+ * Inline announcement (not a portal). The wizard uses it to surface
+ * transient acknowledgements like "Setup complete" without building a
+ * full notification system.
+ */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 1000;
+  padding: 0.75rem 1rem;
+  background-color: hsl(var(--unimailbox-foreground));
+  color: hsl(var(--unimailbox-background));
+  border-radius: var(--unimailbox-radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  font-size: 0.875rem;
+  max-width: 320px;
+}
+
+.toast[data-variant='success'] {
+  background-color: hsl(var(--unimailbox-success));
+  color: hsl(var(--unimailbox-success-foreground));
+}
+
+.toast[data-variant='danger'] {
+  background-color: hsl(var(--unimailbox-danger));
+  color: hsl(var(--unimailbox-danger-foreground));
+}
+
+/* ---- Wizard layout (CAP-041) ----
+ * Bounded card that wraps the step indicator + the active step body.
+ */
+.wizard {
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.wizard-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.wizard-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.wizard-subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+.wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+  background-color: hsl(var(--unimailbox-muted));
+  color: hsl(var(--unimailbox-muted-foreground));
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+
+.wizard-step[data-state='complete'] {
+  background-color: hsl(var(--unimailbox-success-soft));
+  color: hsl(var(--unimailbox-success));
+  border-color: hsl(var(--unimailbox-success));
+}
+
+.wizard-step[data-state='current'] {
+  background-color: hsl(var(--unimailbox-primary));
+  color: hsl(var(--unimailbox-primary-foreground));
+  border-color: hsl(var(--unimailbox-primary));
+}
+
+.wizard-step[data-state='upcoming'] {
+  opacity: 0.7;
+}
+
+.wizard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.wizard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.wizard-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ---- Binding rows (PreflightStep) ---- */
+.binding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.binding-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background-color: hsl(var(--unimailbox-muted));
+  border-radius: var(--unimailbox-radius);
+  font-size: 0.875rem;
+}
+
+.binding-row[data-present='true'] {
+  color: hsl(var(--unimailbox-success));
+}
+
+.binding-row[data-present='false'] {
+  color: hsl(var(--unimailbox-danger));
+}
+
+.binding-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.binding-status {
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Error panel (CAP-041) ----
+ * Renders a human message + machine code sub-line + retry button. Used
+ * by every step for both inline (mutation) and step-level failures.
+ */
+.error-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid hsl(var(--unimailbox-danger));
+  background-color: hsl(var(--unimailbox-danger-soft));
+  color: hsl(var(--unimailbox-danger));
+  border-radius: var(--unimailbox-radius);
+}
+
+.error-panel-message {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.error-panel-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+
+.error-panel-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
 }

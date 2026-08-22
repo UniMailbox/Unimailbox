@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
-import { Component, useState, type ErrorInfo, type ReactElement } from 'react';
+import { Component, useMemo, useState, type ErrorInfo, type ReactElement } from 'react';
 import { createAppRouter } from './app/router';
+import { ApiClientProvider } from './infrastructure/api/client-provider';
+import { createApiClient } from './infrastructure/api/client';
+import { useSetupSession } from './features/setup/setup-session-store';
 
 // Top-level error boundary — catches the throw that escapes a route's
 // `defaultErrorComponent` (e.g. an error during provider setup, an error
@@ -50,20 +53,43 @@ export function App(): ReactElement {
     () =>
       new QueryClient({
         defaultOptions: {
+          // Architecture H7 (CAP-041 fix): the API client owns retry policy
+          // for 5xx / 429. Queries must NOT retry implicitly — double
+          // retries would surface wrong error codes and wrong UX.
           queries: {
             staleTime: 30_000,
             refetchOnWindowFocus: false,
-            retry: 1,
+            retry: false,
+          },
+          mutations: {
+            retry: false,
           },
         },
       }),
   );
-  const [router] = useState(() => createAppRouter());
+  // B2 (CAP-041 fix): construct the API client ONCE. The token getter is
+  // bound to the live Zustand store so the client always sees the current
+  // session token, but the client identity is stable across renders —
+  // preserving `retryDelaysByCall` and any in-flight retry state. The same
+  // instance is passed to `<ApiClientProvider>` (for step components via
+  // `useApiClient()`) AND to `createAppRouter` (for `beforeLoad` via the
+  // router's context).
+  const apiClient = useMemo(
+    () =>
+      createApiClient({
+        baseUrl: '',
+        getSessionToken: () => useSetupSession.getState().sessionToken,
+      }),
+    [],
+  );
+  const [router] = useState(() => createAppRouter(apiClient));
 
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
+        <ApiClientProvider client={apiClient}>
+          <RouterProvider router={router} />
+        </ApiClientProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );

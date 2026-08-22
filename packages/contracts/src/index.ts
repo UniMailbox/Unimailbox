@@ -535,6 +535,17 @@ export const installationStateInfoSchema = z.object({
 
 export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
 
+/**
+ * `CURRENT_SCHEMA_VERSION` — the canonical migration identifier the doctor
+ * `schema-version` check compares the highest migration filename against.
+ *
+ * Lives in `apps/worker/src/database/schema-version.ts`; exported here so
+ * the web client can gate its Continue button on the same constant
+ * without crossing module boundaries (CAP-041 AC #6). Bumped when a new
+ * migration lands. Hand-written; intentionally not auto-generated.
+ */
+export const CURRENT_SCHEMA_VERSION = '0013' as const;
+
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008
 // ---------------------------------------------------------------------------
