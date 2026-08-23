@@ -130,12 +130,12 @@ Objectively checkable. No criterion is complete from a typecheck or mocked Node-
       rows, non-password users, and case-insensitive email behavior.
 - [x] 16. Existing PBKDF2 users log in without a forced password reset; wrong-password behavior
       remains non-enumerating.
-- [ ] 17. Invitation registration atomically creates canonical user + credential + member role and
+- [x] 17. Invitation registration atomically creates canonical user + credential + member role and
       consumes the invite once; injected failure rolls everything back or proves the accepted
       durable compensation state.
-- [ ] 18. Setup administrator creation has the equivalent credential and setup-state atomicity
+- [x] 18. Setup administrator creation has the equivalent credential and setup-state atomicity
       evidence.
-- [ ] 19. Tests named for R-AUTH-001..009 cover verified-email policy, banned/deleted denial,
+- [x] 19. Tests named for R-AUTH-001..009 cover verified-email policy, banned/deleted denial,
       ten-session eviction, renewal rotation, revoke-all, password eligibility/limits, email-prefix
       limit, and case-insensitive email.
 
