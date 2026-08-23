@@ -37,6 +37,14 @@
 //     revocation, status changes, and token rotation are read at every
 //     protected request.
 //
+// What this factory **does** that callers should know:
+//
+//   - On every Better Auth session create it consults canonical
+//     `users.status` via the `databaseHooks.session.create.before` hook
+//     and rejects `banned`/`deleted` principals before any `auth_sessions`
+//     row is written. R-AUTH-002 end-to-end; the Hono bridge rechecks
+//     status on every protected request as a second layer.
+//
 // Schema mapping (`name` ↔ `display_name`):
 //
 //   Better Auth's core user model has `name` as the human-readable
@@ -46,7 +54,7 @@
 //   Without this map, sign-in would 500 on the first SELECT because
 //   no column named `name` exists. The mapping is **typing only** —
 //   the SQL column is owned by `migrations/0014_better_auth_substrate.sql`.
-import { betterAuth } from 'better-auth';
+import { APIError, betterAuth } from 'better-auth';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -204,6 +212,44 @@ export async function createBetterAuth(
           // signature: returning `false` aborts the create with no
           // replacement data. Sync `false` is not assignable.
           before: async () => false,
+        },
+      },
+      // R-AUTH-002: canonical users.status check at session-create time.
+      // Banned/deleted users must not acquire a new session via the
+      // Better Auth sign-in path. The legacy /api/v1/auth/login route
+      // enforces the same rule; this hook closes the Better Auth path
+      // so the invariant holds end-to-end (spike-evidence.md R-AUTH-002
+      // row).
+      //
+      // Implementation notes:
+      //
+      //   * Read `users.status` via the canonical D1 binding (env.DB),
+      //     not via `ctx.context.internalAdapter`. The internal adapter
+      //     surfaces Better Auth's `banned` field (admin-plugin shape),
+      //     not the canonical `status` enum; spike-evidence.md
+      //     R-AUTH-002 pins the canonical column as the source of truth.
+      //   * Generic "Invalid email or password" message and code prevent
+      //     factor leak (R-AUTHZ-002 spirit: no distinction between
+      //     banned / deleted / wrong-password at the response boundary).
+      //   * `env.DB` is captured by closure from `createBetterAuth`'s
+      //     parameter scope; the factory is per-request so the captured
+      //     binding is the request's binding.
+      session: {
+        create: {
+          before: async (session) => {
+            const userId = session.userId;
+            if (!userId) return;
+            const row = await env.DB
+              .prepare('SELECT status FROM users WHERE id = ?')
+              .bind(userId)
+              .first<{ status: string }>();
+            if (row && row.status !== 'active') {
+              throw new APIError('UNAUTHORIZED', {
+                message: 'Invalid email or password',
+                code: 'INVALID_EMAIL_OR_PASSWORD',
+              });
+            }
+          },
         },
       },
     },
