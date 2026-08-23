@@ -31,6 +31,7 @@ import messageEventTimeSql from '../../../migrations/0011_message_event_time.sql
 import webhookEventTimeSql from '../../../migrations/0012_webhook_event_time.sql?raw';
 import webhookDeliveryMessageIndexSql from '../../../migrations/0013_webhook_delivery_message_index.sql?raw';
 import betterAuthSubstrateSql from '../../../migrations/0014_better_auth_substrate.sql?raw';
+import credentialBackfillSql from '../../../migrations/0015_credential_backfill.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -110,6 +111,11 @@ const MIGRATIONS = [
     name: '0014_better_auth_substrate',
     fileName: '0014_better_auth_substrate.sql',
     sql: betterAuthSubstrateSql,
+  },
+  {
+    name: '0015_credential_backfill',
+    fileName: '0015_credential_backfill.sql',
+    sql: credentialBackfillSql,
   },
 ] as const;
 

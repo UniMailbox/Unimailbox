@@ -209,7 +209,7 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0014');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0015');
   });
 
   it('CAP-042: upgrading 0013 to 0014 preserves canonical IDs, passwords, and legacy sessions', async () => {
