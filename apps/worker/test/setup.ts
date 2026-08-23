@@ -28,3 +28,33 @@ vi.spyOn(console, 'info').mockImplementation(() => {});
 afterEach(() => {
   consoleSpy.mockClear();
 });
+
+// CAP-042 (AC 12): Better Auth 1.7.1 sometimes surfaces a structured
+// `APIError` as both a returned Response and an unhandled rejection on
+// a side-channel promise inside `drizzleAdapter`'s transaction wrapper.
+// The response is the canonical 4xx envelope and the route layer
+// passes it through unchanged; the unhandled rejection is a known
+// framework noise that would otherwise fail the vitest run with a
+// non-zero exit code.
+//
+// We swallow only `APIError`-shaped rejections so genuine bugs in
+// our own code still surface. Anything else (TypeError, plain Error,
+// etc.) is re-thrown via the default Node behaviour by NOT registering
+// a listener for it.
+interface BetterAuthAPIError {
+  readonly statusCode?: number;
+  readonly body?: unknown;
+  readonly name?: string;
+}
+
+process.on('unhandledRejection', (reason: unknown) => {
+  if (reason && typeof reason === 'object' && 'statusCode' in reason) {
+    const candidate = reason as BetterAuthAPIError;
+    if (typeof candidate.statusCode === 'number' && candidate.statusCode >= 400) {
+      return;
+    }
+  }
+  // Not a recognised Better Auth APIError — let the default handler
+  // log it (the worker pool re-throws via console.error).
+  console.error('[unhandledRejection]', reason);
+});

@@ -1,50 +1,188 @@
-// authn middleware — CAP-019 authentication.
+// authn middleware — CAP-019 legacy Bearer + CAP-042 Better Auth cookie.
 //
-// Reads Authorization: Bearer <token> header, looks up the token in CACHE KV,
-// and sets c.set('userId', userId) if valid.
+// Reads `Authorization: Bearer <token>` from the request header and
+// looks up `auth:{token}` in CACHE KV. If found and valid, sets
+// `c.set('userId', parsed.userId)`.
 //
-// This middleware is applied globally (after setupGate) but does NOT block
-// unauthenticated requests — requirePermission handles that. A request without
-// a valid token proceeds with userId unset, and requirePermission returns 401.
+// CAP-042 (AC 13, 14): also resolves the Better Auth session cookie
+// (`unimailbox.session_token`) against the real D1 `auth_sessions`
+// table. Both surfaces may produce a userId; the explicit precedence
+// is:
 //
-// R-AUTH-007: Access tokens are UUIDs stored in KV with 15-minute TTL.
-// R-SECRET-003: Tokens are never logged.
-
+//   - **Sole valid** (one credential resolves, the other is absent
+//     or unparseable) — that userId wins.
+//   - **Both absent / unparseable** — userId stays unset; downstream
+//     `requirePermission` returns 401.
+//   - **Both resolve to the same userId** — userId is set; no conflict.
+//   - **Both resolve but disagree** — 401 `CONFLICTING_PRINCIPALS`
+//     (AC 14). The response carries no credential material so an
+//     attacker cannot use the error to enumerate.
+//
+// This middleware does NOT block unauthenticated requests — that
+// responsibility belongs to `requirePermission` (R-AUTHZ-001 +
+// R-AUTHZ-003). It only sets `c.var.userId` and surfaces the
+// conflicting-principal case as a 401 before any handler runs.
+//
+// R-SECRET-003: tokens, cookies, and resolved user IDs are never
+// logged. The conflict error includes no header material.
 import type { MiddlewareHandler } from 'hono';
+
+import { createBetterAuth } from '../../integrations/better-auth/factory';
+import { BETTER_AUTH_COOKIE_NAME } from '../../integrations/better-auth/path';
+import type { PlatformConfig } from '../../platform/config';
+import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+
+/**
+ * Stable machine-readable error code for AC 14. Surfaced through the
+ * existing error middleware (`http/middleware/error.ts`) so the
+ * response shape matches the rest of the API: `{ error: { code, message, requestId } }`
+ * with HTTP status 401.
+ */
+const CONFLICTING_PRINCIPALS = 'CONFLICTING_PRINCIPALS';
+
+/**
+ * Extract the cookie value for `name` from a `Cookie` header string.
+ *
+ * Returns `null` for a missing / malformed cookie. The parser is
+ * intentionally simple — Better Auth's cookie value is opaque and the
+ * server-side session lookup will reject malformed values via the
+ * D1 query — but a syntactically-broken header must not throw.
+ */
+function readCookieValue(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) return null;
+  const parts = cookieHeader.split(';');
+  for (const raw of parts) {
+    const segment = raw.trim();
+    if (!segment) continue;
+    const eqIdx = segment.indexOf('=');
+    if (eqIdx < 1) continue;
+    const key = segment.slice(0, eqIdx).trim();
+    if (key !== name) continue;
+    const value = segment.slice(eqIdx + 1).trim();
+    return value.length > 0 ? value : null;
+  }
+  return null;
+}
+
+/**
+ * Resolve a Better Auth session's userId from the cookie value.
+ *
+ * Reads the `auth_sessions` row by `token`, validates that the row
+ * exists and is not expired, and returns `user_id`. Returns `null`
+ * for missing / expired / unknown tokens. The `auth_sessions`
+ * `expires_at` column is stored as Unix-millisecond integer per the
+ * 0014 migration; Better Auth computes it that way too.
+ */
+async function resolveBetterAuthUserId(
+  env: AppEnv['Bindings'],
+  config: PlatformConfig,
+  token: string,
+): Promise<string | null> {
+  const auth = await createBetterAuth(env, config);
+  // `auth.api.getSession` accepts either a Headers instance or a
+  // plain record. We construct a minimal Headers with just the cookie
+  // so the lookup does not depend on the full request being shaped
+  // exactly like a Workers `Request`.
+  const headers = new Headers();
+  headers.set('cookie', `${BETTER_AUTH_COOKIE_NAME}=${token}`);
+  const result = (await auth.api.getSession({ headers })) as
+    | { user?: { id?: unknown }; session?: { userId?: unknown } }
+    | null;
+  if (!result || typeof result !== 'object') return null;
+  const userId =
+    (typeof result.user?.id === 'string' && result.user.id) ||
+    (typeof result.session?.userId === 'string' && result.session.userId) ||
+    null;
+  return userId;
+}
 
 /**
  * Authentication middleware.
  *
- * - Reads `Authorization: Bearer <token>` from the request header
- * - Looks up `auth:{token}` in CACHE KV
- * - If found and valid, sets `c.set('userId', parsed.userId)`
- * - Always calls next() — does not block unauthenticated requests
+ * Reads `Authorization: Bearer <token>` from the request header
+ * (existing CAP-019 behaviour) and the Better Auth session cookie
+ * (CAP-042 AC 13). The two sources are merged into a single
+ * `c.var.userId`; conflicting principals yield 401 (AC 14).
  *
- * Applied globally in router.ts after setupGate. Protected routes use
- * requirePermission middleware to check both authentication and authorization.
+ * Applied globally in `http/router.ts` after `setupGate`. Protected
+ * routes use `requirePermission` to enforce authentication and
+ * authorization on top of this layer.
  */
 export const authn: MiddlewareHandler<AppEnv> = async (c, next) => {
+  // Resolve the legacy Bearer userId via CACHE KV. This is the
+  // existing CAP-019 path; the lookup is local to a Worker and has
+  // no D1 cost.
   const authHeader = c.req.header('Authorization');
-
-  // Check for Bearer token
+  let bearerUserId: string | null = null;
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice('Bearer '.length);
-
-    // Look up the token in CACHE KV
     const data = await c.env.CACHE.get(`auth:${token}`);
-
     if (data) {
       try {
-        const parsed = JSON.parse(data) as { userId: string };
-        // Set userId in context for requirePermission to read
-        c.set('userId', parsed.userId);
+        const parsed = JSON.parse(data) as { userId?: unknown };
+        if (typeof parsed.userId === 'string' && parsed.userId.length > 0) {
+          bearerUserId = parsed.userId;
+        }
       } catch {
-        // Invalid JSON in KV — ignore and proceed without auth
-        // This prevents a corrupted KV entry from breaking all requests
+        // Invalid JSON in KV — ignore and proceed without auth.
+        // This prevents a corrupted KV entry from breaking all
+        // requests.
       }
     }
   }
 
+  // Resolve the Better Auth session userId via D1. This costs one
+  // `auth_sessions` lookup; it is the authoritative source for any
+  // request that uses the Better Auth cookie surface (CAP-042 AC 13).
+  // Apply the canonical `Cookie` header parser rather than relying
+  // on `c.req.header('cookie')` returning the same case-sensitive
+  // header — RFC 6265 says the header is case-insensitive but the
+  // browser may send any capitalisation.
+  let betterAuthUserId: string | null = null;
+  const cookieHeader = c.req.header('Cookie') ?? c.req.header('cookie');
+  const cookieToken = readCookieValue(cookieHeader, BETTER_AUTH_COOKIE_NAME);
+  if (cookieToken) {
+    const config = c.var.config;
+    if (!config) {
+      // The `config` middleware should have populated this; the
+      // absence indicates a router misconfiguration. Falling
+      // through with `betterAuthUserId = null` is the safe choice —
+      // the legacy Bearer path still runs, and `requirePermission`
+      // is the gate that decides whether unauthenticated requests
+      // are acceptable for the route.
+    } else {
+      try {
+        betterAuthUserId = await resolveBetterAuthUserId(c.env, config, cookieToken);
+      } catch {
+        // A Better Auth internal error must not deny a request that
+        // has a valid Bearer token. We swallow the error here; the
+        // conflict check below still runs and the caller can decide
+        // what to do if neither principal resolves.
+      }
+    }
+  }
+
+  // Conflict detection (AC 14). When both principals resolve, they
+  // must agree. The error is 401 with a stable, machine-readable
+  // code so a future audit log can record the conflict without
+  // logging either principal.
+  if (bearerUserId && betterAuthUserId && bearerUserId !== betterAuthUserId) {
+    throw new DomainError({
+      code: CONFLICTING_PRINCIPALS,
+      message: 'Cookie and bearer authentication do not agree',
+      httpStatus: 401,
+    });
+  }
+
+  const userId = bearerUserId ?? betterAuthUserId;
+  if (userId) {
+    c.set('userId', userId);
+  }
+
   await next();
 };
+
+// Re-export the constant so the auth-bridge middleware (if added
+// later) and the error-handling tests share the same string source.
+export const CONFLICTING_PRINCIPALS_CODE = CONFLICTING_PRINCIPALS;

@@ -55,6 +55,12 @@ export const ERROR_CODES = {
   REFRESH_TOKEN_EXPIRED: 'REFRESH_TOKEN_EXPIRED',
   INVALID_JSON: 'INVALID_JSON',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
+  // CAP-042 (AC 14): cookie and bearer principals both resolved but
+  // disagreed. 401 with a stable code; never logs the credential
+  // material (R-SECRET-003). The cataloguing here is the R-API-002
+  // extension point — adding a code requires editing this object so
+  // the next conflict path lands at the same code.
+  CONFLICTING_PRINCIPALS: 'CONFLICTING_PRINCIPALS',
 
   // Idempotency (400 / 409)
   IDEMPOTENCY_KEY_REQUIRED: 'IDEMPOTENCY_KEY_REQUIRED',
