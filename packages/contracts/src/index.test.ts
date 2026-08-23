@@ -19,11 +19,15 @@ import {
   loginRequestSchema,
   refreshRequestSchema,
   createMailboxRequestSchema,
+  mailboxListItemSchema,
+  mailboxListResponseSchema,
   messageRecipientSchema,
   messageListItemSchema,
   messageListResponseSchema,
   messageDetailSchema,
   messageThreadResponseSchema,
+  toggleStarResponseSchema,
+  auditActionSchema,
   composeRecipientSchema,
   composeRequestSchema,
   messageStatusSchema,
@@ -797,6 +801,97 @@ describe('createMailboxRequestSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
+// CAP-020 mailboxes list response — promoted from the web's local schema in
+// CAP-043 Slice 3 (Slice 1 review, arch MEDIUM). The shape is the envelope's
+// inner `data` object; the wire body is `{ data: { items: [...] } }`.
+// ---------------------------------------------------------------------------
+
+describe('mailboxListItemSchema', () => {
+  it('accepts a valid item', () => {
+    const result = mailboxListItemSchema.parse({
+      id: '00000000-0000-4000-8000-000000000001',
+      address: 'inbox@example.com',
+      displayName: 'Inbox',
+      status: 'active',
+      domainId: '00000000-0000-4000-8000-000000000002',
+      localPart: 'inbox',
+      ownerUserId: '00000000-0000-4000-8000-000000000003',
+    });
+    expect(result.address).toBe('inbox@example.com');
+    expect(result.localPart).toBe('inbox');
+  });
+
+  it('accepts an empty displayName', () => {
+    const result = mailboxListItemSchema.parse({
+      id: 'mb-1',
+      address: 'inbox@example.com',
+      displayName: '',
+      status: 'active',
+      domainId: 'd-1',
+      localPart: 'inbox',
+      ownerUserId: 'u-1',
+    });
+    expect(result.displayName).toBe('');
+  });
+
+  it('rejects a missing address via safeParse', () => {
+    const result = mailboxListItemSchema.safeParse({
+      id: 'mb-1',
+      displayName: '',
+      status: 'active',
+      domainId: 'd-1',
+      localPart: 'inbox',
+      ownerUserId: 'u-1',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('mailboxListResponseSchema', () => {
+  it('accepts a response with two items', () => {
+    const result = mailboxListResponseSchema.parse({
+      items: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          address: 'one@example.com',
+          displayName: '',
+          status: 'active',
+          domainId: 'd-1',
+          localPart: 'one',
+          ownerUserId: 'u-1',
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          address: 'two@example.com',
+          displayName: 'Two',
+          status: 'active',
+          domainId: 'd-1',
+          localPart: 'two',
+          ownerUserId: 'u-1',
+        },
+      ],
+    });
+    expect(result.items).toHaveLength(2);
+    expect(result.items[1]?.address).toBe('two@example.com');
+  });
+
+  it('accepts an empty list', () => {
+    const result = mailboxListResponseSchema.parse({ items: [] });
+    expect(result.items).toEqual([]);
+  });
+
+  it('rejects a missing items array via safeParse', () => {
+    const result = mailboxListResponseSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects non-array items via safeParse', () => {
+    const result = mailboxListResponseSchema.safeParse({ items: 'nope' });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CAP-022: Message response schemas
 // ---------------------------------------------------------------------------
 
@@ -1066,6 +1161,94 @@ describe('messageThreadResponseSchema', () => {
 
   it('rejects a missing rootId via safeParse', () => {
     const result = messageThreadResponseSchema.safeParse({ items: [] });
+    expect(result.success).toBe(false);
+  });
+});
+
+// CAP-043 Slice 3 (AC 14): the star toggle response covers the full wire
+// body `{ data: { id, isStarred } }`. isStarred is the SQLite 0/1 integer,
+// same convention as messageListItemSchema (D-CAP-043-A: mailbox-level).
+describe('toggleStarResponseSchema', () => {
+  it('accepts a starred response', () => {
+    const result = toggleStarResponseSchema.parse({
+      data: { id: '00000000-0000-4000-8000-000000000001', isStarred: 1 },
+    });
+    expect(result.data.id).toBe('00000000-0000-4000-8000-000000000001');
+    expect(result.data.isStarred).toBe(1);
+  });
+
+  it('accepts an unstarred response', () => {
+    const result = toggleStarResponseSchema.parse({
+      data: { id: '00000000-0000-4000-8000-000000000001', isStarred: 0 },
+    });
+    expect(result.data.isStarred).toBe(0);
+  });
+
+  it('rejects a non-uuid id via safeParse', () => {
+    const result = toggleStarResponseSchema.safeParse({
+      data: { id: 'not-a-uuid', isStarred: 1 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing data envelope via safeParse', () => {
+    const result = toggleStarResponseSchema.safeParse({ id: '00000000-0000-4000-8000-000000000001' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing isStarred via safeParse', () => {
+    const result = toggleStarResponseSchema.safeParse({
+      data: { id: '00000000-0000-4000-8000-000000000001' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-number isStarred via safeParse', () => {
+    const result = toggleStarResponseSchema.safeParse({
+      data: { id: '00000000-0000-4000-8000-000000000001', isStarred: true },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// CAP-043 Slice 3 fix H4 / D-CAP-043-I: the closed audit-action enum gains
+// `message.star_toggled` and `message.soft_deleted`. The enum is closed by
+// design — a value reaching audit_events that is not in this list is a
+// contract violation, so coverage pins the exact option set.
+describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
+  it('contains the exact expected option set, including the CAP-043 message actions', () => {
+    expect([...auditActionSchema.options].sort()).toEqual(
+      [
+        'setup.claim',
+        'setup.complete',
+        'mailbox.create',
+        'message.receive',
+        'message.send',
+        'webhook.delivered',
+        'blocklist.create',
+        'blocklist.delete',
+        'role_policy.set',
+        'webhook_delivery.reconcile',
+        'webhook_secret.reveal',
+        'message.star_toggled',
+        'message.soft_deleted',
+      ].sort(),
+    );
+  });
+
+  it('accepts every declared action (parse round-trip)', () => {
+    for (const action of auditActionSchema.options) {
+      expect(auditActionSchema.parse(action)).toBe(action);
+    }
+  });
+
+  it('accepts message.star_toggled and message.soft_deleted (the H4 additions)', () => {
+    expect(auditActionSchema.parse('message.star_toggled')).toBe('message.star_toggled');
+    expect(auditActionSchema.parse('message.soft_deleted')).toBe('message.soft_deleted');
+  });
+
+  it('rejects an undeclared action (the enum is closed)', () => {
+    const result = auditActionSchema.safeParse('message.hard_deleted');
     expect(result.success).toBe(false);
   });
 });

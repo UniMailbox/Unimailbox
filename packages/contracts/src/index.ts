@@ -828,6 +828,39 @@ export const createMailboxRequestSchema = z.object({
 
 export type CreateMailboxRequest = z.infer<typeof createMailboxRequestSchema>;
 
+/**
+ * One row in the mailbox list response (GET /api/v1/mailboxes, CAP-020).
+ *
+ * CAP-043 Slice 3 (Slice 1 review, arch MEDIUM): promoted verbatim from the
+ * local zod schema in `apps/web/src/features/mailbox/mailbox-queries.ts` —
+ * cross-boundary wire shapes belong in contracts, not in a client feature
+ * folder. The field types are carried over unchanged so
+ * `fetchMailboxList`'s parsing behavior is identical before and after the
+ * move (ids are UUIDs per ADR-005, but the schema keeps `z.string()` to
+ * preserve the promoted shape).
+ */
+export const mailboxListItemSchema = z.object({
+  id: z.string(),
+  address: z.string(),
+  displayName: z.string(),
+  status: z.string(),
+  domainId: z.string(),
+  localPart: z.string(),
+  ownerUserId: z.string(),
+});
+
+export type MailboxListItem = z.infer<typeof mailboxListItemSchema>;
+
+/**
+ * Inner shape of the GET /api/v1/mailboxes response body (the envelope's
+ * `data` object): `{ data: { items: MailboxListItem[] } }` on the wire.
+ */
+export const mailboxListResponseSchema = z.object({
+  items: z.array(mailboxListItemSchema),
+});
+
+export type MailboxListResponse = z.infer<typeof mailboxListResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // Messages — CAP-022
 // ---------------------------------------------------------------------------
@@ -925,6 +958,31 @@ export const messageThreadResponseSchema = z.object({
 });
 
 export type MessageThreadResponse = z.infer<typeof messageThreadResponseSchema>;
+
+/**
+ * Full response body of PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star
+ * (CAP-043 Slice 3 / AC 14). Unlike the list/detail schemas, which model the
+ * envelope's inner `data` object, this schema covers the whole wire body —
+ * a one-shot action response is parsed in one step by the star mutation.
+ *
+ * `id` is the message id from the path (echoed so a replayed caller can
+ * correlate); `isStarred` is the post-toggle mailbox-level flag (D-CAP-043-A)
+ * as the SQLite integer 0 or 1, consistent with `messageListItemSchema`.
+ *
+ * R-API-004: replays return the byte-identical stored response.
+ */
+export const toggleStarResponseSchema = z.object({
+  data: z.object({
+    id: uuidSchema,
+    isStarred: z.number(),
+  }),
+});
+
+export type ToggleStarResponse = z.infer<typeof toggleStarResponseSchema>;
+
+// CAP-043 D-CAP-043-E: there is deliberately NO `deleteMessageResponseSchema`
+// — DELETE .../messages/:messageId returns 204 No Content, and a body-less
+// response has nothing to contract.
 
 // ---------------------------------------------------------------------------
 // Compose — CAP-023

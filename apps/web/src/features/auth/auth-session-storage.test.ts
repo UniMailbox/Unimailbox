@@ -2,8 +2,11 @@
 //
 // CAP-042 (Batch 5) AC 21: no `localStorage`, `sessionStorage`, or
 // `indexedDB` token write paths exist anywhere in
-// `apps/web/src/features/auth/**`. This test walks the source tree and
-// asserts the absence of:
+// `apps/web/src/features/auth/**`. CAP-043 Slice 3 fix H13 extends the
+// guarded tree to `apps/web/src/features/mailbox/**` — the mailbox
+// feature now owns session-adjacent surface (StarButton, delete dialog,
+// query caches) and must not grow a second token-storage path either.
+// This test walks BOTH source trees and asserts the absence of:
 //
 //   - `localStorage.<anything>` and `sessionStorage.<anything>` calls,
 //   - any reference to `indexedDB` (better-auth / Dexie-style usage),
@@ -21,15 +24,25 @@
 // runs in happy-dom).
 import { describe, expect, it } from 'vitest';
 
-// Glob the source tree relative to this file. Vite evaluates the glob
+// Glob the source trees relative to this file. Vite evaluates the globs
 // at build time and produces a map from module path to file content.
 // CAP-042 Batch 8 (L-1 fix): scan the whole subtree recursively
 // (`./**/*.{ts,tsx}`) so guard coverage includes nested helpers, not
-// only the files in this directory. Test files are filtered out below.
-const RAW_SOURCE: Readonly<Record<string, string>> = import.meta.glob(
-  './**/*.{ts,tsx}',
-  { query: '?raw', import: 'default', eager: true },
-);
+// only the files in this directory. CAP-043 Slice 3 fix H13 adds the
+// sibling mailbox tree (`../mailbox/**/*.{ts,tsx}`). Test files are
+// filtered out below.
+const RAW_SOURCE: Readonly<Record<string, string>> = {
+  ...import.meta.glob('./**/*.{ts,tsx}', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }),
+  ...import.meta.glob('../mailbox/**/*.{ts,tsx}', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }),
+};
 
 function authSourceFiles(): ReadonlyArray<readonly [string, string]> {
   const entries: Array<readonly [string, string]> = [];
@@ -59,11 +72,14 @@ function stripComments(source: string): string {
 }
 
 describe('auth-session-storage guard (AC 21)', () => {
-  it('features/auth/** contains no localStorage/sessionStorage/indexedDB/persist references', () => {
+  it('features/auth/** and features/mailbox/** contain no localStorage/sessionStorage/indexedDB/persist references', () => {
     const files = authSourceFiles();
-    // Sanity: this test is meaningful only if the directory has at
+    // Sanity: this test is meaningful only if BOTH guarded trees have at
     // least one production file.
-    expect(files.length).toBeGreaterThan(0);
+    const authFiles = files.filter(([filePath]) => !filePath.startsWith('../mailbox'));
+    const mailboxFiles = files.filter(([filePath]) => filePath.startsWith('../mailbox'));
+    expect(authFiles.length).toBeGreaterThan(0);
+    expect(mailboxFiles.length).toBeGreaterThan(0);
     for (const [filePath, content] of files) {
       expect(content, `${filePath} should not use localStorage`).not.toMatch(
         /\blocalStorage\./i,

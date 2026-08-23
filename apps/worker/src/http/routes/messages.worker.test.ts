@@ -1,8 +1,10 @@
 // messages.worker.test.ts — CAP-022 inbox endpoints.
 //
 // Worker-pool tests for GET /api/v1/mailboxes/:mailboxId/messages (list),
-// GET .../messages/:messageId (detail), PATCH .../messages/:messageId/read.
-// Uses SELF.fetch to exercise the full request pipeline.
+// GET .../messages/:messageId (detail), GET .../messages/:messageId/thread
+// (CAP-043 Slice 2), PATCH .../messages/:messageId/read,
+// PATCH .../messages/:messageId/star and DELETE .../messages/:messageId
+// (CAP-043 Slice 3). Uses SELF.fetch to exercise the full request pipeline.
 //
 // Covers: happy path, empty mailbox, detail with bodies/recipients, 404 on
 // missing message, mark-as-read, per-user isRead (R-MESSAGE-005), IDOR blocked
@@ -1678,5 +1680,844 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread — CAP-04
       m1.messageId,
       m2.messageId,
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-043 Slice 3 — PATCH .../messages/:messageId/star (AC 13 + AC 14).
+// D-CAP-043-A: the star is MAILBOX-LEVEL (mailbox_messages.is_starred) —
+// one atomic UPDATE ... RETURNING, last-write-wins. Any member's star is
+// every member's star (AC 17). D-CAP-043-H: rides the read surface
+// (requirePermission('message.read') + assertCan('read')).
+// ---------------------------------------------------------------------------
+
+describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-043 Slice 3', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+  });
+
+  it('AC 14: toggles the star both directions — each response value matches the DB truth', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`;
+    const star = async () =>
+      SELF.fetch(url, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+      });
+
+    // Unstarred → starred.
+    const first = await star();
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.data.id).toBe(messageId);
+    expect(firstBody.data.isStarred).toBe(1);
+    const dbFirst = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
+      .bind(mailboxMessageId)
+      .first<{ is_starred: number }>();
+    expect(dbFirst?.is_starred).toBe(1);
+
+    // Starred → unstarred.
+    const second = await star();
+    expect(second.status).toBe(200);
+    const secondBody = await second.json();
+    expect(secondBody.data.isStarred).toBe(0);
+    const dbSecond = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
+      .bind(mailboxMessageId)
+      .first<{ is_starred: number }>();
+    expect(dbSecond?.is_starred).toBe(0);
+  });
+
+  it('AC 17 / D-CAP-043-A: the star is mailbox-level — another member\'s list shows isStarred = 1', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const { messageId } = await insertMessage(mailboxId, { subject: 'shared star' });
+
+    // Owner stars it.
+    const starResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(starResponse.status).toBe(200);
+
+    // The viewer never touched the star, but the flag is mailbox-level:
+    // their list resolves isStarred = 1 too (AC 17).
+    const viewerList = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerList.status).toBe(200);
+    const viewerBody = await viewerList.json();
+    expect(viewerBody.data.items).toHaveLength(1);
+    expect(viewerBody.data.items[0].isStarred).toBe(1);
+  });
+
+  it('returns 404 MESSAGE_NOT_FOUND for a non-existent message and for a message in ANOTHER mailbox (identical envelope)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailbox1 = await createMailbox(domainId, ownerId, 'one');
+    const mailbox2 = await createMailbox(domainId, ownerId, 'two');
+
+    const { messageId } = await insertMessage(mailbox2, { subject: 'other mailbox' });
+
+    const crossMailbox = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailbox1}/messages/${messageId}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
+      },
+    );
+    const nonExistent = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailbox1}/messages/${crypto.randomUUID()}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
+      },
+    );
+
+    expect(crossMailbox.status).toBe(404);
+    expect(nonExistent.status).toBe(404);
+    const crossBody = await crossMailbox.json();
+    const missingBody = await nonExistent.json();
+    expect(crossBody.error.code).toBe('MESSAGE_NOT_FOUND');
+    expect(missingBody.error.code).toBe('MESSAGE_NOT_FOUND');
+    expect(Object.keys(crossBody.error).sort()).toEqual(Object.keys(missingBody.error).sort());
+  });
+
+  it('blocks a non-member from starring (IDOR)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const otherId = await createUserWithRole('member', 'other@example.com');
+    const otherToken = await createSession(otherId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${otherToken}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
+      },
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error.code).toBe('MAILBOX_ACCESS_DENIED');
+  });
+
+  it('returns 400 when the Idempotency-Key header is missing', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('replays the stored response on same key + body — the star does NOT toggle twice', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const first = await SELF.fetch(url, { method: 'PATCH', headers });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.data.isStarred).toBe(1);
+
+    // Replay: same key, same (empty) body → the STORED response, not a
+    // second toggle. A naive re-execution would have flipped it back to 0.
+    const replay = await SELF.fetch(url, { method: 'PATCH', headers });
+    expect(replay.status).toBe(200);
+    const replayBody = await replay.json();
+    expect(replayBody).toEqual(firstBody);
+
+    const row = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
+      .bind(mailboxMessageId)
+      .first<{ is_starred: number }>();
+    expect(row?.is_starred).toBe(1);
+  });
+
+  it('returns 409 when the same Idempotency-Key is reused with a different body', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const first = await SELF.fetch(url, { method: 'PATCH', headers, body: '' });
+    expect(first.status).toBe(200);
+
+    const second = await SELF.fetch(url, {
+      method: 'PATCH',
+      headers,
+      body: '{"different": "body"}',
+    });
+    expect(second.status).toBe(409);
+    const secondBody = await second.json();
+    expect(secondBody.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+
+  // Slice 3 fix H1: the star write, idempotency record, and audit row now run
+  // in ONE D1 batch (implicit transaction). Two same-key toggles racing to
+  // settle must leave the store exactly as a single toggle would — the
+  // invariants below hold under every interleaving, so the test cannot pass
+  // by luck of scheduling.
+  it('H1: same-key concurrent star toggles settle atomically — identical responses, one record, one audit row, DB matches the response', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const [a, b] = await Promise.all([
+      SELF.fetch(url, { method: 'PATCH', headers }),
+      SELF.fetch(url, { method: 'PATCH', headers }),
+    ]);
+
+    // The loser either lost the INSERT race (batch rolled back → replayed
+    // the winner's stored response) or arrived after commit (begin-path
+    // replay). Either way: both 200 with byte-identical bodies.
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const aBody = await a.json();
+    const bBody = await b.json();
+    expect(bBody).toEqual(aBody);
+    expect([0, 1]).toContain(aBody.data.isStarred);
+
+    // Exactly one record for the key — never two, whatever interleaved.
+    const recordCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM idempotency_records WHERE idempotency_key = ?',
+    )
+      .bind(idempotencyKey)
+      .first<{ count: number }>();
+    expect(recordCount?.count).toBe(1);
+
+    // The DB matches the response value: the loser's flip rolled back with
+    // its failed record INSERT (a double-toggle would leave the DB at the
+    // OPPOSITE of the replayed response).
+    const row = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
+      .bind(mailboxMessageId)
+      .first<{ is_starred: number }>();
+    expect(row?.is_starred).toBe(aBody.data.isStarred);
+
+    // Exactly one audit row — the loser's audit INSERT rolled back too.
+    const auditCount = await env.DB.prepare(
+      "SELECT COUNT(*) as count FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
+    )
+      .bind(messageId)
+      .first<{ count: number }>();
+    expect(auditCount?.count).toBe(1);
+  });
+
+  // Slice 3 fix H4 / R-AUDIT-001 / D-CAP-043-I: the star transition writes
+  // its audit row in the SAME batch as the business write; a replay (which
+  // never re-runs the write) must add none.
+  it('H4: a star toggle writes exactly one audit row; a replay adds none', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const first = await SELF.fetch(url, { method: 'PATCH', headers });
+    expect(first.status).toBe(200);
+
+    const auditRow = await env.DB
+      .prepare(
+        "SELECT actor_user_id, action, resource_type, resource_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
+      )
+      .bind(messageId)
+      .first<{
+        actor_user_id: string;
+        action: string;
+        resource_type: string;
+        resource_id: string;
+        metadata: string;
+      }>();
+    expect(auditRow?.actor_user_id).toBe(ownerId);
+    expect(auditRow?.action).toBe('message.star_toggled');
+    expect(auditRow?.resource_type).toBe('message');
+    expect(auditRow?.resource_id).toBe(messageId);
+    expect(JSON.parse(auditRow?.metadata ?? '{}')).toEqual({ mailboxId, isStarred: 1 });
+
+    // Replay the same key: the stored response returns, the batch never
+    // runs, no second audit row appears.
+    const replay = await SELF.fetch(url, { method: 'PATCH', headers });
+    expect(replay.status).toBe(200);
+
+    const auditCount = await env.DB.prepare(
+      "SELECT COUNT(*) as count FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
+    )
+      .bind(messageId)
+      .first<{ count: number }>();
+    expect(auditCount?.count).toBe(1);
+  });
+
+  // H10: no Authorization header → 401 on BOTH Slice 3 mutating routes
+  // (requirePermission runs before the idempotency middleware and before
+  // any write, so no key is required to see the 401).
+  it('H10: unauthenticated requests are rejected 401 on both routes before any write', async () => {
+    const starResponse = await SELF.fetch(
+      'http://localhost/api/v1/mailboxes/00000000-0000-4000-8000-000000000001/messages/00000000-0000-4000-8000-000000000002/star',
+      {
+        method: 'PATCH',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(starResponse.status).toBe(401);
+    const starBody = await starResponse.json();
+    expect(starBody.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    const deleteResponse = await SELF.fetch(
+      'http://localhost/api/v1/mailboxes/00000000-0000-4000-8000-000000000001/messages/00000000-0000-4000-8000-000000000002',
+      {
+        method: 'DELETE',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(deleteResponse.status).toBe(401);
+    const deleteBody = await deleteResponse.json();
+    expect(deleteBody.error.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-043 Slice 3 — DELETE .../messages/:messageId (AC 15).
+// D-CAP-043-B: per-user soft delete — only the calling user's
+// message_user_state row flips to is_deleted = 1; the UPSERT conflicts on
+// the post-0017 composite PK and preserves is_read / read_at (gate 1).
+// D-CAP-043-E: 204 No Content with an empty body; replays return the same
+// empty 204 (R-API-004).
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Slice 3', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+  });
+
+  it('AC 15 + AC 17: returns 204 with an empty body; hides the message from the deleter but not from another member', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const { messageId } = await insertMessage(mailboxId, { subject: 'soft delete me' });
+
+    const deleteResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+
+    // D-CAP-043-E: 204 with an empty body.
+    expect(deleteResponse.status).toBe(204);
+    expect(await deleteResponse.text()).toBe('');
+
+    // Owner: gone from the list, 404 at the detail URL.
+    const ownerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    const ownerListBody = await ownerList.json();
+    expect(ownerListBody.data.items).toEqual([]);
+    const ownerDetail = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect(ownerDetail.status).toBe(404);
+
+    // Viewer: still fully present (AC 17 — per-user delete, R-MESSAGE-005).
+    const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
+    const viewerListBody = await viewerList.json();
+    expect(viewerListBody.data.items).toHaveLength(1);
+    expect(viewerListBody.data.items[0].id).toBe(messageId);
+    const viewerDetail = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerDetail.status).toBe(200);
+  });
+
+  it('gate 1: the delete UPSERT preserves is_read / read_at when the user already has a state row', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+
+    // Read first — creates the state row with is_read = 1 and a read_at.
+    const readResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(readResponse.status).toBe(200);
+
+    const beforeDelete = await env.DB
+      .prepare('SELECT is_read, read_at, is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+      .bind(mailboxMessageId, ownerId)
+      .first<{ is_read: number; read_at: string; is_deleted: number }>();
+    expect(beforeDelete?.is_read).toBe(1);
+    expect(beforeDelete?.read_at).not.toBeNull();
+    expect(beforeDelete?.is_deleted).toBe(0);
+
+    // Delete second — UPSERT on the composite PK must only flip the
+    // delete flags; is_read / read_at ride through untouched.
+    const deleteResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    const afterDelete = await env.DB
+      .prepare('SELECT is_read, read_at, is_deleted, deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+      .bind(mailboxMessageId, ownerId)
+      .first<{ is_read: number; read_at: string; is_deleted: number; deleted_at: string }>();
+    expect(afterDelete?.is_read).toBe(1);
+    expect(afterDelete?.read_at).toBe(beforeDelete?.read_at);
+    expect(afterDelete?.is_deleted).toBe(1);
+    expect(afterDelete?.deleted_at).not.toBeNull();
+  });
+
+  it('returns 404 MESSAGE_NOT_FOUND for a non-existent message and for a message in ANOTHER mailbox (identical envelope)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailbox1 = await createMailbox(domainId, ownerId, 'one');
+    const mailbox2 = await createMailbox(domainId, ownerId, 'two');
+
+    const { messageId } = await insertMessage(mailbox2, { subject: 'other mailbox' });
+
+    const crossMailbox = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailbox1}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
+      },
+    );
+    const nonExistent = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailbox1}/messages/${crypto.randomUUID()}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
+      },
+    );
+
+    expect(crossMailbox.status).toBe(404);
+    expect(nonExistent.status).toBe(404);
+    const crossBody = await crossMailbox.json();
+    const missingBody = await nonExistent.json();
+    expect(crossBody.error.code).toBe('MESSAGE_NOT_FOUND');
+    expect(missingBody.error.code).toBe('MESSAGE_NOT_FOUND');
+    expect(Object.keys(crossBody.error).sort()).toEqual(Object.keys(missingBody.error).sort());
+  });
+
+  it('blocks a non-member from deleting (IDOR)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const otherId = await createUserWithRole('member', 'other@example.com');
+    const otherToken = await createSession(otherId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${otherToken}`, 'Idempotency-Key': IDEMPOTENCY_KEY },
+      },
+    );
+
+    expect(response.status).toBe(403);
+    const body = await response.json();
+    expect(body.error.code).toBe('MAILBOX_ACCESS_DENIED');
+  });
+
+  it('returns 400 when the Idempotency-Key header is missing', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('replays the stored 204 — same key + body returns the same empty 204, one record, delete not re-run', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const first = await SELF.fetch(url, { method: 'DELETE', headers });
+    expect(first.status).toBe(204);
+    expect(await first.text()).toBe('');
+
+    const afterFirst = await env.DB
+      .prepare('SELECT deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+      .bind(mailboxMessageId, ownerId)
+      .first<{ deleted_at: string }>();
+    expect(afterFirst?.deleted_at).not.toBeNull();
+
+    // Replay: same key, same (empty) body → the stored empty 204. This is
+    // the path that would throw if the replay rebuilt the Response with a
+    // non-null body on a null-body status (D-CAP-043-E).
+    const replay = await SELF.fetch(url, { method: 'DELETE', headers });
+    expect(replay.status).toBe(204);
+    expect(await replay.text()).toBe('');
+
+    // Exactly one record for the key, and the delete row was untouched by
+    // the replay (deleted_at identical — the business write did not re-run).
+    const afterReplay = await env.DB
+      .prepare('SELECT deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+      .bind(mailboxMessageId, ownerId)
+      .first<{ deleted_at: string }>();
+    expect(afterReplay?.deleted_at).toBe(afterFirst?.deleted_at);
+
+    const recordCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM idempotency_records WHERE idempotency_key = ?',
+    )
+      .bind(idempotencyKey)
+      .first<{ count: number }>();
+    expect(recordCount?.count).toBe(1);
+  });
+
+  it('returns 409 when the same Idempotency-Key is reused with a different body', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const first = await SELF.fetch(url, { method: 'DELETE', headers, body: '' });
+    expect(first.status).toBe(204);
+
+    const second = await SELF.fetch(url, {
+      method: 'DELETE',
+      headers,
+      body: '{"different": "body"}',
+    });
+    expect(second.status).toBe(409);
+    const secondBody = await second.json();
+    expect(secondBody.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+
+  // Slice 3 fix H9: two same-key DELETEs racing to settle must leave the
+  // store exactly as a single delete would — the invariants below hold
+  // under every interleaving.
+  it('H9: same-key concurrent DELETEs settle atomically — both 204, one record, one audit row, is_deleted = 1', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const [a, b] = await Promise.all([
+      SELF.fetch(url, { method: 'DELETE', headers }),
+      SELF.fetch(url, { method: 'DELETE', headers }),
+    ]);
+
+    // The loser either lost the INSERT race (batch rolled back → replayed
+    // the winner's stored empty 204) or arrived after commit (begin-path
+    // replay). Either way: both 204, empty bodies.
+    expect(a.status).toBe(204);
+    expect(b.status).toBe(204);
+    expect(await a.text()).toBe('');
+    expect(await b.text()).toBe('');
+
+    // Exactly one record for the key.
+    const recordCount = await env.DB.prepare(
+      'SELECT COUNT(*) as count FROM idempotency_records WHERE idempotency_key = ?',
+    )
+      .bind(idempotencyKey)
+      .first<{ count: number }>();
+    expect(recordCount?.count).toBe(1);
+
+    // The soft-delete landed for the caller — the loser's duplicate UPSERT
+    // rolled back with its failed record INSERT.
+    const stateRow = await env.DB
+      .prepare(
+        'SELECT is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+      )
+      .bind(mailboxMessageId, ownerId)
+      .first<{ is_deleted: number }>();
+    expect(stateRow?.is_deleted).toBe(1);
+
+    // Exactly one audit row.
+    const auditCount = await env.DB.prepare(
+      "SELECT COUNT(*) as count FROM audit_events WHERE resource_id = ? AND action = 'message.soft_deleted'",
+    )
+      .bind(messageId)
+      .first<{ count: number }>();
+    expect(auditCount?.count).toBe(1);
+  });
+
+  // Slice 3 fix H4 / R-AUDIT-001 / D-CAP-043-I: the soft-delete transition
+  // writes its audit row in the SAME batch as the business write; a replay
+  // (which never re-runs the write) must add none.
+  it('H4: a soft delete writes exactly one audit row; a replay adds none', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const idempotencyKey = crypto.randomUUID();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`;
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': idempotencyKey };
+
+    const first = await SELF.fetch(url, { method: 'DELETE', headers });
+    expect(first.status).toBe(204);
+
+    const auditRow = await env.DB
+      .prepare(
+        "SELECT actor_user_id, action, resource_type, resource_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.soft_deleted'",
+      )
+      .bind(messageId)
+      .first<{
+        actor_user_id: string;
+        action: string;
+        resource_type: string;
+        resource_id: string;
+        metadata: string;
+      }>();
+    expect(auditRow?.actor_user_id).toBe(ownerId);
+    expect(auditRow?.action).toBe('message.soft_deleted');
+    expect(auditRow?.resource_type).toBe('message');
+    expect(auditRow?.resource_id).toBe(messageId);
+    expect(JSON.parse(auditRow?.metadata ?? '{}')).toEqual({ mailboxId });
+
+    // Replay the same key: the stored empty 204 returns, no second audit row.
+    const replay = await SELF.fetch(url, { method: 'DELETE', headers });
+    expect(replay.status).toBe(204);
+
+    const auditCount = await env.DB.prepare(
+      "SELECT COUNT(*) as count FROM audit_events WHERE resource_id = ? AND action = 'message.soft_deleted'",
+    )
+      .bind(messageId)
+      .first<{ count: number }>();
+    expect(auditCount?.count).toBe(1);
+  });
+
+  // H10 / R-MESSAGE-005 / gate 1: the whole scenario is seeded through the
+  // REAL routes (F4 convention from the review) — no direct state-row
+  // inserts. The viewer reads first, the owner deletes; the viewer's read
+  // state must survive the owner's delete untouched.
+  it('H10: another member\'s read state survives the owner\'s delete — seeded through the real routes (F4)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId, {
+      subject: 'read survives delete',
+    });
+
+    // Viewer marks the message read via the real PATCH read route.
+    const readResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${viewerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(readResponse.status).toBe(200);
+
+    // Owner soft-deletes it via the real DELETE route.
+    const deleteResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    // The viewer's state row kept is_read = 1 and is_deleted = 0 (gate 1:
+    // the owner's UPSERT cannot touch another member's row).
+    const viewerState = await env.DB
+      .prepare(
+        'SELECT is_read, read_at, is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+      )
+      .bind(mailboxMessageId, viewerId)
+      .first<{ is_read: number; read_at: string; is_deleted: number }>();
+    expect(viewerState?.is_read).toBe(1);
+    expect(viewerState?.read_at).not.toBeNull();
+    expect(viewerState?.is_deleted).toBe(0);
+
+    // And the message is still fully present in the viewer's list (AC 17).
+    const viewerList = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerList.status).toBe(200);
+    const viewerListBody = await viewerList.json();
+    expect(viewerListBody.data.items).toHaveLength(1);
+    expect(viewerListBody.data.items[0].id).toBe(messageId);
+    // The list contract resolves isRead as 0/1 (SQLite integer).
+    expect(viewerListBody.data.items[0].isRead).toBe(1);
+  });
+
+  // H10: deleting an already-soft-deleted message with a FRESH key is an
+  // idempotent no-op success (204), not 404 — the mailbox_messages row
+  // still exists; only the calling user's state row says deleted.
+  it('H10: a second delete with a fresh key returns 204 (idempotent no-op, not 404)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId } = await insertMessage(mailboxId);
+
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`;
+
+    const first = await SELF.fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+    });
+    expect(first.status).toBe(204);
+
+    const second = await SELF.fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+    });
+    expect(second.status).toBe(204);
+    expect(await second.text()).toBe('');
+  });
+
+  // H10 / D-CAP-043-H: star and soft delete ride the read surface — a
+  // VIEWER-role mailbox member (member system role) can do both.
+  it('H10 / D-CAP-043-H: a viewer-role member can star and soft-delete on the read surface', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const { messageId } = await insertMessage(mailboxId, { subject: 'viewer tidies inbox' });
+
+    // Viewer stars the message — 200, and the mailbox-level flag flips.
+    const starResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${viewerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(starResponse.status).toBe(200);
+    const starBody = await starResponse.json();
+    expect(starBody.data.isStarred).toBe(1);
+
+    // Viewer soft-deletes it from their own view — 204.
+    const deleteResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${viewerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(deleteResponse.status).toBe(204);
+
+    // The viewer's list is empty; the owner still sees the message,
+    // starred by the viewer (mailbox-level star, AC 17 / D-CAP-043-A).
+    const viewerList = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    const viewerListBody = await viewerList.json();
+    expect(viewerListBody.data.items).toEqual([]);
+
+    const ownerList = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    const ownerListBody = await ownerList.json();
+    expect(ownerListBody.data.items).toHaveLength(1);
+    expect(ownerListBody.data.items[0].isStarred).toBe(1);
   });
 });

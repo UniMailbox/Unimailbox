@@ -231,9 +231,15 @@ export function isIdempotencyUniqueViolation(error: unknown): boolean {
 /**
  * Build the replay Response for a stored record: the status and body the
  * first request returned, byte for byte.
+ *
+ * D-CAP-043-E (Slice 3 fix H3): a stored 204 carries `responseJson = ''`,
+ * and the fetch spec rejects a NON-NULL body on a null-body status (204/
+ * 205/304) — the constructor throws `TypeError: Response constructor:
+ * Invalid response status code 204`. The empty body must reach the
+ * constructor as `null`. Non-empty bodies replay byte for byte.
  */
 export function replayResponse(record: IdempotencyRecord): Response {
-  return new Response(record.responseJson, {
+  return new Response(record.responseJson === '' ? null : record.responseJson, {
     status: record.responseStatus,
     headers: { 'Content-Type': 'application/json' },
   });

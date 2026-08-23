@@ -307,6 +307,19 @@ describe('replayResponse', () => {
   it('sets a JSON content type', () => {
     expect(replayResponse(record()).headers.get('Content-Type')).toBe('application/json');
   });
+
+  // Slice 3 fix H3 / D-CAP-043-E: before the guard, a stored 204 replay
+  // threw TypeError at construction time — the fetch spec rejects a
+  // non-null body on a null-body status, and the stored body for a 204
+  // is the empty string, not null. Verified against node's undici.
+  it('replays a stored 204 without throwing — the empty body becomes null (D-CAP-043-E)', async () => {
+    const stored = record({ responseStatus: 204, responseJson: '' });
+    const response = replayResponse(stored);
+
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+    expect(await response.text()).toBe('');
+  });
 });
 
 describe('isIdempotencyUniqueViolation', () => {

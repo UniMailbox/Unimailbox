@@ -71,11 +71,11 @@ Objectively checkable. No "works correctly". Each maps to a test or a demonstrab
 
 ### Slice 3 — Star + delete
 
-- [ ] 13. `apps/worker/src/modules/messages/message-read-repository.ts` exports `toggleMessageStar(db, mailboxId, messageId)` and `deleteMessageForUser(db, mailboxId, messageId, userId)`. Star toggles `mailbox_messages.is_starred` (mailbox-level — see `D-CAP-043-A`); delete is per-user via `message_user_state.is_deleted` + `deleted_at`.
-- [ ] 14. `PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star` requires `Idempotency-Key`; replays return the same response. Returns `{ data: { id, isStarred } }`.
-- [ ] 15. `DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId` requires `Idempotency-Key`; returns `204` on success; replays return the same `204`. The per-user row write is a single UPSERT on `message_user_state` so the operation is atomic.
-- [ ] 16. Web: star button toggles optimistic state; delete button opens an `AlertDialog` confirmation, then removes the message from the inbox list cache (`setQueryData` slice, not full invalidation).
-- [ ] 17. Star / delete state survive a route refresh; star is mailbox-level (any member sees the same star), delete is per-user (user A's delete does not hide the message from user B).
+- [x] 13. `apps/worker/src/modules/messages/message-read-repository.ts` exports `toggleMessageStar(db, mailboxId, messageId)` and `deleteMessageForUser(db, mailboxId, messageId, userId)`. Star toggles `mailbox_messages.is_starred` (mailbox-level — see `D-CAP-043-A`); delete is per-user via `message_user_state.is_deleted` + `deleted_at`. (Post-review shape per H1/H2: the exports became the read + prepared-write pairs `getMessageStarState`/`prepareSetMessageStar` and `prepareSoftDeleteMessageForUser`, so the routes fold business write + idempotency record + audit row into one atomic D1 batch.)
+- [x] 14. `PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star` requires `Idempotency-Key`; replays return the same response. Returns `{ data: { id, isStarred } }`.
+- [x] 15. `DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId` requires `Idempotency-Key`; returns `204` on success; replays return the same `204`. The per-user row write is a single UPSERT on `message_user_state` so the operation is atomic.
+- [x] 16. Web: star button toggles optimistic state; delete button opens an `AlertDialog` confirmation, then removes the message from the inbox list cache (`setQueryData` slice, not full invalidation).
+- [x] 17. Star / delete state survive a route refresh; star is mailbox-level (any member sees the same star), delete is per-user (user A's delete does not hide the message from user B).
 
 ### Cross-slice gates
 
@@ -100,19 +100,19 @@ Layers each slice touches, in dependency order:
 
 ### Slice 2
 
-- [ ] repository — `apps/worker/src/modules/messages/message-read-repository.ts` (getMessageThread)
-- [ ] contract schema — `packages/contracts/src/index.ts` (messageThreadResponseSchema)
-- [ ] route — `apps/worker/src/http/routes/messages.ts` (GET .../thread)
-- [ ] client — `apps/web/src/features/mailbox/{MessageDetailPage,MessageThreadPanel,MessageDetailSkeleton}.tsx` (NEW)
-- [ ] tests — `apps/worker/src/http/routes/messages.worker.test.ts` (thread tests), `apps/web/src/features/mailbox/MessageDetailPage.test.tsx` (NEW)
+- [x] repository — `apps/worker/src/modules/messages/message-read-repository.ts` (getMessageThread)
+- [x] contract schema — `packages/contracts/src/index.ts` (messageThreadResponseSchema)
+- [x] route — `apps/worker/src/http/routes/messages.ts` (GET .../thread)
+- [x] client — `apps/web/src/features/mailbox/{MessageDetailPage,MessageThreadPanel,MessageDetailSkeleton}.tsx` (NEW)
+- [x] tests — `apps/worker/src/http/routes/messages.worker.test.ts` (thread tests), `apps/web/src/features/mailbox/MessageDetailPage.test.tsx` (NEW)
 
 ### Slice 3
 
-- [ ] repository — `apps/worker/src/modules/messages/message-read-repository.ts` (toggleMessageStar + deleteMessageForUser)
-- [ ] contract schema — `packages/contracts/src/index.ts` (toggleStarResponseSchema, deleteMessageResponseSchema)
-- [ ] route — `apps/worker/src/http/routes/messages.ts` (PATCH .../star, DELETE .../messages/:id)
-- [ ] client — `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton,ConfirmDeleteDialog}.tsx` (NEW), `apps/web/src/components/ui/AlertDialog.tsx` (NEW if not present)
-- [ ] tests — `apps/worker/src/http/routes/messages.worker.test.ts` (star/delete tests), `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton}.test.tsx` (NEW)
+- [x] repository — `apps/worker/src/modules/messages/message-read-repository.ts` (toggleMessageStar + deleteMessageForUser)
+- [x] contract schema — `packages/contracts/src/index.ts` (toggleStarResponseSchema, deleteMessageResponseSchema)
+- [x] route — `apps/worker/src/http/routes/messages.ts` (PATCH .../star, DELETE .../messages/:id)
+- [x] client — `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton,ConfirmDeleteDialog}.tsx` (NEW), `apps/web/src/components/ui/AlertDialog.tsx` (NEW if not present)
+- [x] tests — `apps/worker/src/http/routes/messages.worker.test.ts` (star/delete tests), `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton}.test.tsx` (NEW)
 
 New module dependency edges introduced: `modules/messages` → `platform/cursor` (allowed; messages already uses `platform/*`). `apps/web/src/features/mailbox` → `apps/web/src/components/ui` (allowed; existing pattern).
 
@@ -216,6 +216,15 @@ Migration **0017** rebuilds the table with `PRIMARY KEY (mailbox_message_id, use
 
 `signCursor`/`verifyCursor` currently have one concrete caller (`listMessagesByMailbox`). The abstraction is not justified by the Rule of Three; it is accepted because the CAP-043 contract explicitly pulls CAP-034 forward (§Out of scope, §Dependencies) and the execution plan allocates further cursor-paginated lists (drafts, sent, search) to the same helper. Recorded here so the acceptance is contractual, not tacit.
 
+### D-CAP-043-H — star and per-user soft delete ride the `message.read` surface (Slice 3 dispatch decision)
+
+Both Slice 3 mutations are presentation-state changes on the read surface, not destructive operations, so both use `requirePermission('message.read')` + `assertCan(actor, mailboxId, 'read', isAdmin)` — exactly the markRead route's surface:
+
+- **star** toggles a mailbox-level presentation flag (D-CAP-043-A); the per-user-star deferral is the recorded gap.
+- **soft delete** writes only the calling user's own `message_user_state` row (D-CAP-043-B); it cannot affect any other member's view, so it is the user tidying their own inbox, not exercising a destructive capability.
+
+The `message.delete` permission and the mailbox matrix's owner-only `delete_message` op stay reserved for hard delete / per-message purge (explicitly out of scope for CAP-043). If a future capability moves star to per-user state or adds hard delete, it revisits this mapping.
+
 ## Slice 1 review outcome → fix pass
 
 Reviews returned: frontend **REJECT** (3 HIGH, 2 MEDIUM, 2 LOW) · QA **ACCEPT** (all AC verified) · security **ACCEPT-WITH-FOLLOWUPS** (2 MEDIUM, 3 LOW) · code **ACCEPT-WITH-FOLLOWUPS** (1 HIGH, 3 MEDIUM, 3 LOW) · architecture pending. The orchestrator independently confirmed the code H1 / security M2 root cause (single-column PK) by inspecting `schema/messages.ts:113-129` and `message-read-repository.ts:369-394`.
@@ -285,6 +294,71 @@ Reviews returned (all five in parallel on the uncommitted Slice 2 tree): archite
 | `message-read-repository.ts` approaching 250+ lines | Split decision at Slice 3 completion |
 | `assertCan` 404-vs-403 oracle (deny shape for cross-tenant IDs) | Closure-time recorded decision |
 | Detail page Back link + title show raw mailbox UUID | Cosmetic; ride along with Slice 3 web work if touched |
+
+## Slice 3 dispatch contract
+
+### File ownership
+
+| Agent | Slice | Files |
+|---|---|---|
+| `implementer-slice-3` | Slice 3 (star + delete, AC 13–17) | `apps/worker/src/modules/messages/message-read-repository.ts`, `apps/worker/src/modules/messages/index.ts` (exports), `apps/worker/src/http/routes/messages.ts` (star + delete routes + authz/idempotency helper extraction), `apps/worker/src/http/routes/messages.worker.test.ts`, `packages/contracts/src/index.ts` (+ `index.test.ts` — `toggleStarResponseSchema`, `mailboxListResponseSchema` promotion), `apps/web/src/features/mailbox/mailbox-queries.ts` (star/delete mutations + switch to the promoted contracts schema), `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton,ConfirmDeleteDialog}.tsx` (NEW), `apps/web/src/components/ui/AlertDialog.tsx` (NEW primitive), `apps/web/src/features/mailbox/InboxListPage.tsx` (row actions), `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton,InboxListPage}.test.tsx` |
+
+### Binding gates (carried findings — a reviewer blocks on any of these)
+
+1. **Composite-key UPSERT** (Slice 1 review, sec M2): `deleteMessageForUser`'s UPSERT targets `ON CONFLICT(mailbox_message_id, user_id)` post-0017, preserving `is_read`/`read_at` on conflict (DO UPDATE SET lists only `is_deleted`, `deleted_at`, `updated_at`).
+2. **`mailboxListResponseSchema` promotion** (Slice 1 review, arch MEDIUM — "before Slice 3 lands"): the local zod schema moves from `mailbox-queries.ts:45-70` to `packages/contracts`, exported as `mailboxListResponseSchema` + `MailboxListItem`; contracts `index.test.ts` covers it; the web imports it and the local copy is deleted. `fetchMailboxList`'s parsing behavior is unchanged.
+3. **Route authz + idempotency helper extraction** (Slice 2 review, arch L4): star and delete are the 6th and 7th copies of the markRead stanza. Extract within `messages.ts` (no new module): a context helper (userId 401 + `checkPermission('role.manage')` + `assertCan(..., 'read', ...)` on the path mailboxId) and the idempotency replay/record/race stanza, then apply to all message routes in the file. Behavior of the existing routes is unchanged — extraction is a refactor in the same commit, proven by the existing tests passing untouched.
+4. **Permission surface** (D-CAP-043-H): both routes use `requirePermission('message.read')` + `assertCan('read')`.
+5. **Star repository semantics** (D-CAP-043-A): single atomic `UPDATE mailbox_messages SET is_starred = NOT is_starred WHERE mailbox_id = ? AND message_id = ? RETURNING is_starred` (D1 supports RETURNING); no row → null → route 404s. Concurrent toggles are last-write-wins, accepted under D-CAP-043-A.
+6. **Delete returns 204** (D-CAP-043-E): empty body; idempotent replay returns the same 204 — the worker test proves replay of a 204 works end-to-end (same key+body → identical 204; different body → 409).
+7. **No `deleteMessageResponseSchema`** — the vertical-slice plan line is superseded by D-CAP-043-E (204 has no body). Only `toggleStarResponseSchema` (`{ data: { id, isStarred } }`) is added.
+8. **Web actions live in the inbox rows** (AC 16): `StarButton` optimistic toggle with rollback on failure; `DeleteMessageButton` → `ConfirmDeleteDialog` (`AlertDialog` composed from the existing `Alert`/`Button` primitives); on 204 the item is removed from the inbox infinite cache via structural `setQueryData` (no full invalidation). Detail-page actions ride with CAP-044 — `MessageDetailPage.tsx` is NOT in this slice's envelope.
+
+### Test obligations (beyond AC 13–17)
+
+Worker: star round-trip both directions with returned value; star visible to the second member (mailbox-level, AC 17); delete hides from A but not B (AC 17, seeded rows per F4 convention); delete of absent/cross-mailbox message → 404 no-leak shape; idempotency replay matrix on both routes (same key+body → identical response incl. 204; different body → 409); the post-extraction suite passes unchanged. Web: optimistic star flip + rollback on API failure; dialog open → cancel (no request) → confirm (DELETE fires, row leaves the list cache); mailbox-list address lookup still green after the schema promotion.
+
+## Slice 3 review outcome → fix pass
+
+Reviews returned (all five in parallel on the uncommitted Slice 3 tree): security **ACCEPT-WITH-FOLLOWUPS** · architecture **ACCEPT-WITH-FOLLOWUPS** · QA **ACCEPT-WITH-FOLLOWUPS** · frontend **ACCEPT-WITH-FOLLOWUPS** · code **ACCEPT-WITH-FOLLOWUPS** — zero BLOCKER and zero HIGH across the round. Consolidated record: `work/reviews/CAP-043-slice3-review.md`. The orchestrator independently confirmed the H1 mechanics (toggle and record are separate statements in `messages.ts:438→452`), the H3 platform defect (`platform/idempotency.ts:235-240`), and the H8 dialog-closes-before-mutate behavior before writing this contract.
+
+**New decision — D-CAP-043-I (audit boundary for message presentation state):** `message.star_toggled` and `message.soft_deleted` join the closed `AuditAction` enum, and both routes fold an `audit_events` INSERT into the same D1 batch as the business write + idempotency record (R-AUDIT-001, CAP-040 `AuditEventWriter` seam — the `webhooks.ts` fold). `markMessageAsRead` is exempt: a per-user read flag is presentation state, not a resource state transition, and per-open audit rows would grow `audit_events` without forensic value. D-CAP-043-H was challenged and upheld — star/delete stay on the read surface; `message.delete` remains reserved for hard delete.
+
+### Fix-pass acceptance criteria (H1–H14)
+
+- [x] H1. **Star toggle becomes batch-atomic** (sec M1 + code M1 — the toggle runs, then the record INSERTs separately; the ApiClient mints the Idempotency-Key once and reuses it across 5xx/429 retries, so a crash gap or same-key race re-executes a non-re-runnable `NOT is_starred`: one click, two state changes, exactly what R-API-004 forbids). `toggleMessageStar` is replaced by `getMessageStarState(db, mailboxId, messageId): Promise<boolean | null>` (read; null → route 404) and `prepareSetMessageStar(db, mailboxId, messageId, target): D1PreparedStatement` (`UPDATE mailbox_messages SET is_starred = ? WHERE mailbox_id = ? AND message_id = ?`). The route reads the current flag, computes `target = !current`, builds `successBody` from the KNOWN target — a batched `UPDATE … RETURNING` cannot feed the record's `responseJson` because statement values bind at prepare time, hence read-compute-write — then runs ONE `db.batch([setStar, record(200, successBody), audit])` (H4). On `isIdempotencyUniqueViolation` the whole batch has rolled back; the catch calls platform `replayAfterRace` (H3). The read→batch window for DIFFERENT-key concurrent toggles stays last-write-wins (gate 5 / D-CAP-043-A). Worker test (interleaving-independent): `Promise.all` of two same-key star toggles → both responses identical AND `mailbox_messages.is_starred` equals the response value (under the old non-batched code the DB could disagree with the response).
+- [x] H2. **Soft delete becomes batch-atomic.** `deleteMessageForUser` is replaced by `prepareSoftDeleteMessageForUser(db, mailboxId, messageId, userId): Promise<D1PreparedStatement | null>` (internal existence SELECT → null, else the post-0017 composite-key UPSERT preserving `is_read`/`read_at`). Route: null → 404; else ONE `db.batch([upsert, record(204, ''), audit])`; UNIQUE race → `replayAfterRace`; success → `new Response(null, { status: 204 })`. The 204/`''` response is deterministic, so no read-compute-write is needed here.
+- [x] H3. **Platform 204 replay fix + collapse of the parallel replay implementations** (sec M1 / code M3 / arch M-1 — one fact, one home). `platform/idempotency.ts` `replayResponse` passes `record.responseJson === '' ? null : record.responseJson` to the Response constructor (fetch spec: a non-null body on a null-body status throws — D-CAP-043-E); a unit test proves a stored 204 replays without throwing. `messages.ts` then deletes BOTH local helpers — `replayStoredResponse` and `settleIdempotentOperation` (including its mis-stated "every write here is naturally re-runnable" comment): the begin-path replays via platform `replayResponse`; the star/delete race catch calls platform `replayAfterRace` (which already owns the re-read + vanished-winner `IDEMPOTENCY_CONFLICT` 409); markRead settles via platform `writeIdempotencyRecord` (best-effort mode, documented as such — re-marking a read message is a no-op, the only remaining legitimate best-effort write in this file).
+- [x] H4. **Audit rows for star and soft delete** (sec M2 + D-CAP-043-I). `AuditAction` gains `message.star_toggled` and `message.soft_deleted` (`contracts/src/admin/audit.ts`; enum coverage in `contracts/src/index.test.ts`). Both routes build the statement via `buildAppContext(c.env).auditEventWriter.prepare({ id: systemIds.uuid(), actorUserId: userId, action, resourceType: 'message', resourceId: messageId, requestId, metadata: { mailboxId, … }, createdAt: systemClock.now() })` — exactly the `webhooks.ts` fold — and include it in the H1/H2 batches. Worker test: each operation leaves exactly one `audit_events` row (actor, action, resource id); a replayed idempotent request adds none.
+- [x] H5. **Timestamp normalization** (arch M-2 + code L2). `markMessageAsRead` and the soft-delete UPSERT write `sqliteTimestamp(systemClock.now())` ('YYYY-MM-DD HH:MM:SS') instead of `new Date().toISOString()` — the same-column format mixing that `platform/idempotency.ts` documents as a silent correctness bug the moment any SQL predicate compares these columns as TEXT.
+- [x] H6. **Route-layer hygiene** (code L1). The list route uses `const userId = await requireMailboxReadAccess(c, mailboxId)` and passes it down — no `c.get('userId') as string` cast. The markRead handler's inline `SELECT id FROM mailbox_messages …` moves into the module (e.g. `markMessageAsRead` takes `(mailboxId, messageId, userId)` and resolves the row itself, returning a found signal — implementer's choice of shape, but no raw SQL remains in routes). Trailing newlines added where missing (`mailbox-queries.ts`, `InboxListPage.test.tsx`, `message-read-repository.ts`).
+- [x] H7. **Row-scoped star rollback** (code M2 — whole-snapshot restore can resurrect state: star A then star B, both fail → B's snapshot restore re-applies A's failed flip; star X then delete X succeeds → the star's late failure restores the deleted row into the list). `onError` replaces the snapshot restore with a functional `setQueryData` that flips ONLY `input.messageId`'s `isStarred` back; the `previousInbox` snapshot and its context payload go away (the awaited `cancelQueries` stays). Web tests for both scenarios above: two-then-fail leaves both rows at pre-click values; a failed star after a successful delete leaves the row gone.
+- [x] H8. **A failed delete is not user-silent after confirmation** (fe M3 + QA M2 — today `onConfirm` closes the dialog BEFORE mutating, so a 5xx leaves the row in place with only a `console.warn`). The dialog stays open on failure and shows the error inline (an `Alert` inside the dialog); it closes only on success. Implement via per-call callbacks on `mutate` (`onSuccess: close`, `onError: setError`) alongside the hook-level cache handlers; confirm disabled while pending. Web test: failing DELETE → dialog still open with the error visible, row still present, warn logged once; success → dialog closed, row gone.
+- [x] H9. **Settle-race path proven** (QA M3 + code "not verified" — the UNIQUE-catch / re-read / replay branch has no test, and sequential `SELF.fetch` cannot hit it mid-flight). `Promise.all` of two same-key DELETEs against real bindings; assert interleaving-independent invariants: both responses 204, exactly ONE `idempotency_records` row, `message_user_state.is_deleted = 1`, exactly one audit row (after H2 the loser's batch rolls back, so the business write commits once under any interleaving).
+- [x] H10. **Boundary + authz + seeding matrix** (QA M1 + QA L1/L2/L4). Worker: the cross-user delete test seeds state through the real route per the F4 convention (viewer marks read via `PATCH …/read` → owner deletes → viewer's row survives `is_read = 1, is_deleted = 0` and the message remains in the viewer's list); a second delete of the same message with a FRESH key returns 204 (idempotent no-op, not 404); a `member`-role viewer can star and soft-delete on the read surface (D-CAP-043-H) and an unauthenticated request 401s on both routes. Web: the row's StarButton `aria-pressed` reflects the server-confirmed value after the mutation settles (detail-page star display is out of scope — CAP-044).
+- [x] H11. **Web cache hygiene** (code L3/L6 + QA L5). The delete mutation gains the awaited `cancelQueries` on the messages key (symmetry with star — an in-flight page fetch must not re-insert the deleted row). The `mailbox-queries.ts` header comment states the real key shape `['mailbox', 'messages', mailboxId]`. A web test proves `removeQueries` dropped the detail + thread entries after a successful delete.
+- [x] H12. **Dialog semantics + markup validity** (fe M2 + fe L1/L5 + code L5). `AlertDialog` panel: `role="alertdialog"`, `aria-modal="true"`, an accessible name (string prop supplied by `ConfirmDeleteDialog`), Escape cancels, initial focus lands on the CANCEL button (the safe action). The delete trigger's accessible name includes the subject (`aria-label={'Delete message: ' + subject}`, falling back to `'Delete message'` when the subject is empty). No `<div>` inside `<span>`/`<p>` anywhere in the inbox row at any dialog state (row-actions container becomes a div if that is the minimal fix). Full focus-trap modal semantics stay deferred (arch L-4).
+- [x] H13. **Storage guard extended** (fe M1 + the recorded Slice-1 follow-up "extend guard root when Slice 3 adds cache mutations" — Slice 3 added them). `auth-session-storage.test.ts` globs `../mailbox/**/*.{ts,tsx}` in addition to `./**/*.{ts,tsx}`; title and header comment describe both trees.
+- [x] H14. Gates: `pnpm scaffold doctor` 13/13 · `pnpm typecheck` · `pnpm lint` · `pnpm test:unit` ≥ 692 + new (platform replay test, contracts enum coverage) · `pnpm test:worker` at the 690/694 baseline + new passing (only the 4 documented pre-existing D1-parallelism failures) · web mailbox tests green · `pnpm build` EXIT=0.
+
+### Fix-pass file ownership (one implementer)
+
+`apps/worker/src/http/routes/messages.ts` · `apps/worker/src/modules/messages/message-read-repository.ts` · `apps/worker/src/modules/messages/index.ts` (exports) · `apps/worker/src/platform/idempotency.ts` (+ its unit test file, extended per existing convention) · `apps/worker/src/http/routes/messages.worker.test.ts` · `packages/contracts/src/admin/audit.ts` · `packages/contracts/src/index.test.ts` · `apps/web/src/features/mailbox/mailbox-queries.ts` · `apps/web/src/features/mailbox/{DeleteMessageButton,ConfirmDeleteDialog}.tsx` · `apps/web/src/components/ui/AlertDialog.tsx` · `apps/web/src/features/mailbox/InboxListPage.tsx` (row-actions container only) · `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton,InboxListPage}.test.tsx` · `apps/web/src/features/auth/auth-session-storage.test.ts` (glob extension only)
+
+### Deferred to closure / follow-ups (recorded, not fixed now)
+
+| Finding | Disposition |
+|---|---|
+| Per-user star (a viewer's star is every member's star) — inherent to D-CAP-043-A's mailbox-level flag | Ledger follow-up with the per-user-star migration |
+| `THREAD_ROOT_SQL` per-row CASE scan (no serving index) | Ledger follow-up with the `thread_id` backfill (D-CAP-043-C) |
+| `mailboxListItemSchema` `id`/`domainId`/`ownerUserId` stay `z.string()` (gate 2 mandated verbatim promotion) | Follow-up tightening to `uuidSchema` |
+| No `.inbox-*` styles exist in tokens.css — the whole inbox is unstyled since Slice 1 | Styling pass follow-up (fe L2) |
+| Sibling thread-cache stale flash on navigation | Self-corrects on navigation; accepted (fe L3) |
+| AlertDialog full focus-trap / scroll-lock modal semantics | Beyond H12's minimal set (arch L-4) |
+| `message-read-repository.ts` split decision | At closure (the file grows again with H1/H2) |
+| `assertCan` 404-vs-403 deny-shape oracle | At closure |
+| `MailboxListItem` re-export vs direct contracts import | At closure |
+| Cursor payload binding to mailboxId/actor/TTL + `verifyCursor` format validation (carried from Slice 1) | Follow-up hardening |
 
 ## Open questions
 

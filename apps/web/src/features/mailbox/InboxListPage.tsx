@@ -36,6 +36,11 @@ import { InboxEmpty } from './InboxEmpty';
 import { InboxError } from './InboxError';
 import { Card } from '../../components/ui/Card';
 import { LogoutButton } from '../auth/LogoutButton';
+// CAP-043 Slice 3 / AC 16: the inbox row's star + delete actions. Both
+// live here, not on the detail page — detail-page actions ride with
+// CAP-044.
+import { StarButton } from './StarButton';
+import { DeleteMessageButton } from './DeleteMessageButton';
 
 export interface InboxListPageProps {
   readonly mailboxId: string;
@@ -136,7 +141,7 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
           <>
             <ul className="inbox-list" data-testid="inbox-list">
               {items.map((item) => (
-                <InboxListRow key={item.id} message={item} />
+                <InboxListRow key={item.id} mailboxId={mailboxId} message={item} />
               ))}
             </ul>
             {query.hasNextPage ? (
@@ -162,10 +167,11 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
 }
 
 interface InboxListRowProps {
+  readonly mailboxId: string;
   readonly message: MessageListItem;
 }
 
-function InboxListRow({ message }: InboxListRowProps): ReactElement {
+function InboxListRow({ mailboxId, message }: InboxListRowProps): ReactElement {
   const isUnread = message.isRead === 0;
   return (
     <li
@@ -179,12 +185,21 @@ function InboxListRow({ message }: InboxListRowProps): ReactElement {
           {message.fromName !== '' ? `${message.fromName} <${message.fromAddress}>` : message.fromAddress}
         </span>
         <span className="inbox-list-row-date">{message.createdAt}</span>
-        {message.isStarred === 1 ? (
-          <span className="inbox-list-row-star" data-testid="inbox-star">★</span>
-        ) : null}
         {isUnread ? (
           <span className="inbox-list-row-badge" data-testid="inbox-unread-badge">Unread</span>
         ) : null}
+        {/* Slice 3 fix H12: a DIV container, not a span — the inline
+            AlertDialog panel renders a <div class="alert-dialog"> here
+            when open, and a div inside a span is invalid HTML (the
+            auth-session-storage markup guard asserts the row stays
+            valid at every dialog state). */}
+        <div className="inbox-list-row-actions">
+          {/* Slice 3 / AC 13 + AC 16: the star glyph is now the toggle
+              itself; the cached isStarred drives its filled/outline
+              state and the optimistic flip happens in the mutation. */}
+          <StarButton mailboxId={mailboxId} message={message} />
+          <DeleteMessageButton mailboxId={mailboxId} message={message} />
+        </div>
       </div>
     </li>
   );

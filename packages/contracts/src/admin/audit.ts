@@ -47,7 +47,8 @@ export interface D1StatementLike {
 // The catalogue is the source of truth for every audit action code in the
 // system. Existing entries are inherited from CAP-026 / CAP-027 / CAP-029;
 // CAP-040 adds two for the new flows (reconciliation back-fill + admin
-// secret reveal).
+// secret reveal); CAP-043 Slice 3 fix (D-CAP-043-I) adds the two message
+// presentation-state transitions — star toggle and per-user soft delete.
 export const auditActionSchema = z.enum([
   // CAP-026 / CAP-027 setup + admin
   'setup.claim',
@@ -65,6 +66,9 @@ export const auditActionSchema = z.enum([
   // CAP-040 reconciliation + reveal
   'webhook_delivery.reconcile',
   'webhook_secret.reveal',
+  // CAP-043 Slice 3 fix / D-CAP-043-I — message presentation state
+  'message.star_toggled',
+  'message.soft_deleted',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

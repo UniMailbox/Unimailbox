@@ -32,7 +32,20 @@ export {
   // CAP-043 Slice 2 / AC 9: same-thread messages for one mailbox,
   // oldest-first, root resolved at read time (D-CAP-043-C).
   getMessageThread,
+  // CAP-043 Slice 3 fix H6: resolves the mailbox_message row from
+  // (mailboxId, messageId) itself — the route layer no longer runs raw SQL.
+  // Returns false (→ 404 MESSAGE_NOT_FOUND) when the pair has no row.
   markMessageAsRead,
+  // CAP-043 Slice 3 fix H1 / AC 13 (D-CAP-043-A): read + prepared-write
+  // pair so the route folds the star UPDATE into the same D1 batch as the
+  // idempotency record and audit row. getMessageStarState returns null
+  // (→ 404 MESSAGE_NOT_FOUND) when the pair has no row.
+  getMessageStarState,
+  prepareSetMessageStar,
+  // CAP-043 Slice 3 fix H2 / AC 13 (D-CAP-043-B): builds the per-user
+  // soft-delete UPSERT for the route's atomic batch. Returns null
+  // (→ 404 MESSAGE_NOT_FOUND) when the pair has no row.
+  prepareSoftDeleteMessageForUser,
   // CAP-043 Slice 1 / R-API-005: the typed CursorInvalidError so the
   // route layer can map a tampered cursor to 400 INVALID_CURSOR without
   // reaching into platform/cursor.ts. signCursor / verifyCursor are

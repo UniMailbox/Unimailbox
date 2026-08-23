@@ -32,6 +32,8 @@
 
 import type { Database } from '../../platform/database';
 import { signCursor, verifyCursor } from '../../platform/cursor';
+import { sqliteTimestamp } from '../../platform/idempotency';
+import { systemClock } from '../../platform/clock';
 
 export interface RecipientInfo {
   address: string;
@@ -565,7 +567,11 @@ export async function getMessageThread(
 }
 
 /**
- * Marks a mailbox_message as read for a specific user.
+ * Marks a message as read for a specific user, resolving the
+ * mailbox_message row from (mailboxId, messageId) itself.
+ *
+ * Slice 3 fix H6: the row lookup lives here, not as raw SQL in the route
+ * handler — the route layer validates and calls one module function.
  *
  * Two writes run in one D1 batch (R-MESSAGE-005):
  *   1. mailbox_messages.is_read = 1 — the "any reader" flag used by counters.
@@ -575,20 +581,41 @@ export async function getMessageThread(
  *      second reader's write cannot collide with or clobber the first
  *      reader's state.
  *
+ * Slice 3 fix H5: `updated_at` / `read_at` are written as
+ * `sqliteTimestamp(systemClock.now())` — the column DEFAULT is
+ * `datetime('now')`, and mixing an ISO-8601 string into the same TEXT
+ * column is a silent ordering bug (see platform/idempotency.ts
+ * sqliteTimestamp for the full rationale).
+ *
  * @param db — D1 database binding
- * @param mailboxMessageId — PK of the mailbox_messages row
+ * @param mailboxId — target mailbox (caller must have asserted read access)
+ * @param messageId — target message
  * @param userId — user marking the message read
+ * @returns true when the message was found and marked; false when no
+ *   `mailbox_messages` row exists for the (mailbox, message) pair — the
+ *   caller surfaces 404 MESSAGE_NOT_FOUND (same envelope as every other
+ *   not-found path; no cross-mailbox existence leak).
  */
 export async function markMessageAsRead(
   db: Database,
-  mailboxMessageId: string,
+  mailboxId: string,
+  messageId: string,
   userId: string,
-): Promise<void> {
-  const now = new Date().toISOString();
+): Promise<boolean> {
+  const mailboxMessage = await db
+    .prepare('SELECT id FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?')
+    .bind(mailboxId, messageId)
+    .first<{ id: string }>();
+
+  if (!mailboxMessage) {
+    return false;
+  }
+
+  const now = sqliteTimestamp(systemClock.now());
 
   const updateMailboxMessage = db
     .prepare('UPDATE mailbox_messages SET is_read = 1 WHERE id = ?')
-    .bind(mailboxMessageId);
+    .bind(mailboxMessage.id);
 
   // R-MESSAGE-005 / D-CAP-043-F: one row per (mailbox_message, user). The
   // conflict target is the composite PK, so a second member reading the
@@ -603,7 +630,131 @@ export async function markMessageAsRead(
          read_at = ?,
          updated_at = ?`,
     )
-    .bind(mailboxMessageId, userId, now, now, now, now);
+    .bind(mailboxMessage.id, userId, now, now, now, now);
 
   await db.batch([updateMailboxMessage, upsertUserState]);
+
+  return true;
+}
+
+/**
+ * Reads the current mailbox-level star flag (CAP-043 Slice 3 fix H1,
+ * D-CAP-043-A).
+ *
+ * H1 replaced the single-statement `NOT is_starred` toggle with a
+ * read-compute-write pair: the route reads the current flag, computes the
+ * target, and folds `prepareSetMessageStar` into the SAME D1 batch as the
+ * idempotency record + audit row. A batched `UPDATE … RETURNING` cannot
+ * feed the record's `responseJson` (D1 binds all statement values at
+ * prepare time), hence the two-step shape — see the route for the
+ * batch-atomicity rationale (R-API-004: a non-re-runnable write must
+ * never execute under best-effort idempotency).
+ *
+ * @param db — D1 database binding
+ * @param mailboxId — target mailbox (caller must have asserted read access
+ *   per D-CAP-043-H)
+ * @param messageId — target message
+ * @returns the current `is_starred` (true/false), or null when no
+ *   `mailbox_messages` row exists for the (mailbox, message) pair — the
+ *   caller surfaces 404 MESSAGE_NOT_FOUND.
+ */
+export async function getMessageStarState(
+  db: Database,
+  mailboxId: string,
+  messageId: string,
+): Promise<boolean | null> {
+  const row = await db
+    .prepare('SELECT is_starred FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?')
+    .bind(mailboxId, messageId)
+    .first<{ is_starred: number }>();
+
+  return row === null ? null : row.is_starred === 1;
+}
+
+/**
+ * Prepared `UPDATE` setting the mailbox-level star flag to a KNOWN target
+ * (CAP-043 Slice 3 fix H1, D-CAP-043-A). The route computes `target` from
+ * `getMessageStarState`'s read and appends this statement to the batch
+ * that also carries the idempotency record and the audit row — the star
+ * write, its replay record, and its audit row commit or roll back
+ * together.
+ *
+ * `is_starred` is deliberately NOT per-user: the deferral to
+ * `message_user_state.is_starred` is recorded in D-CAP-043-A, so any
+ * member's star is every member's star (AC 17).
+ *
+ * The read→batch window for DIFFERENT-key concurrent toggles stays
+ * last-write-wins (gate 5 / D-CAP-043-A).
+ *
+ * @param db — D1 database binding
+ * @param mailboxId — target mailbox
+ * @param messageId — target message
+ * @param target — the computed post-toggle value (SQLite 0/1)
+ */
+export function prepareSetMessageStar(
+  db: Database,
+  mailboxId: string,
+  messageId: string,
+  target: 0 | 1,
+): D1PreparedStatement {
+  return db
+    .prepare('UPDATE mailbox_messages SET is_starred = ? WHERE mailbox_id = ? AND message_id = ?')
+    .bind(target, mailboxId, messageId);
+}
+
+/**
+ * Builds the prepared per-user soft-delete UPSERT for ONE user (CAP-043
+ * Slice 3 fix H2, D-CAP-043-B, R-MESSAGE-005). The write is per-user state
+ * only — no other member's view changes (AC 17). The caller folds the
+ * returned statement into the SAME D1 batch as the idempotency record and
+ * audit row, so the delete, its replay record, and its audit row are
+ * atomic (R-API-004).
+ *
+ * Gate 1 (Slice 1 review, sec M2): the UPSERT conflicts on the post-0017
+ * composite PK `(mailbox_message_id, user_id)` and the DO UPDATE SET lists
+ * ONLY `is_deleted`, `deleted_at`, `updated_at` — an existing row's
+ * `is_read` / `read_at` are preserved, so deleting a read message does not
+ * silently unread it.
+ *
+ * Slice 3 fix H5: `updated_at` / `deleted_at` are written as
+ * `sqliteTimestamp(systemClock.now())` to match the column DEFAULT's
+ * `datetime('now')` format.
+ *
+ * @param db — D1 database binding
+ * @param mailboxId — target mailbox (caller must have asserted read access
+ *   per D-CAP-043-H)
+ * @param messageId — target message
+ * @param userId — the user deleting; only their row is written
+ * @returns the bound UPSERT statement, or null when no `mailbox_messages`
+ *   row exists for the (mailbox, message) pair — the caller surfaces 404
+ *   MESSAGE_NOT_FOUND (same envelope as a non-existent message; no
+ *   cross-mailbox existence leak).
+ */
+export async function prepareSoftDeleteMessageForUser(
+  db: Database,
+  mailboxId: string,
+  messageId: string,
+  userId: string,
+): Promise<D1PreparedStatement | null> {
+  const mailboxMessage = await db
+    .prepare('SELECT id FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?')
+    .bind(mailboxId, messageId)
+    .first<{ id: string }>();
+
+  if (!mailboxMessage) {
+    return null;
+  }
+
+  const now = sqliteTimestamp(systemClock.now());
+
+  return db
+    .prepare(
+      `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, updated_at, is_deleted, deleted_at)
+       VALUES (?, ?, 0, NULL, ?, 1, ?)
+       ON CONFLICT(mailbox_message_id, user_id) DO UPDATE SET
+         is_deleted = 1,
+         deleted_at = ?,
+         updated_at = ?`,
+    )
+    .bind(mailboxMessage.id, userId, now, now, now, now);
 }

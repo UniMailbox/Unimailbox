@@ -429,3 +429,142 @@ describe('InboxListPage', () => {
     ).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CAP-043 Slice 3 — inbox row actions (AC 16). Star + delete buttons
+// mount in every row; a confirmed delete removes the row from the
+// rendered list via the cache write (D-CAP-041-1) — the page never
+// refetches to reflect it.
+// ---------------------------------------------------------------------------
+
+describe('InboxListPage — row actions (CAP-043 Slice 3)', () => {
+  const STARRED_ROW = {
+    id: '00000000-0000-4000-8000-00000000000a',
+    fromAddress: 'a@x.test',
+    fromName: 'A',
+    subject: 'Starred',
+    isRead: 0,
+    isStarred: 1,
+    folder: 'inbox',
+    createdAt: '2026-01-01T00:00:00Z',
+    recipients: { to: [], cc: [] },
+  };
+  const UNSTARRED_ROW = {
+    id: '00000000-0000-4000-8000-00000000000b',
+    fromAddress: 'b@x.test',
+    fromName: 'B',
+    subject: 'Unstarred',
+    isRead: 1,
+    isStarred: 0,
+    folder: 'inbox',
+    createdAt: '2026-01-02T00:00:00Z',
+    recipients: { to: [], cc: [] },
+  };
+
+  it('mounts a star and a delete button in every row, reflecting each row\'s star state', async () => {
+    renderInbox({
+      resolvers: [
+        () => jsonResponse({ data: { items: [STARRED_ROW, UNSTARRED_ROW], nextCursor: null } }),
+      ],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(2);
+    });
+
+    // One star + one delete per row.
+    const starButtons = screen.getAllByTestId('inbox-star-button');
+    const deleteButtons = screen.getAllByTestId('inbox-delete-button');
+    expect(starButtons).toHaveLength(2);
+    expect(deleteButtons).toHaveLength(2);
+
+    // The star state is per-row: starred → pressed, unstarred → not.
+    const starredRow = screen
+      .getAllByTestId('inbox-list-row')
+      .find((row) => row.getAttribute('data-message-id') === STARRED_ROW.id);
+    const unstarredRow = screen
+      .getAllByTestId('inbox-list-row')
+      .find((row) => row.getAttribute('data-message-id') === UNSTARRED_ROW.id);
+    expect(starredRow?.querySelector('[data-testid="inbox-star-button"]')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(unstarredRow?.querySelector('[data-testid="inbox-star-button"]')).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('a confirmed delete removes the row from the rendered list and surfaces the empty state, without a refetch', async () => {
+    // Resolver order: [session, messages page, DELETE 204]. spyFetch
+    // repeats the LAST resolver afterwards — a second GET would get the
+    // 204 Response, so the assertion that no refetch happened below
+    // relies on the cache write, not on resolver exhaustion.
+    const { fetchCalls } = renderInbox({
+      resolvers: [
+        () => jsonResponse({ data: { items: [STARRED_ROW], nextCursor: null } }),
+        () => new Response(null, { status: 204 }),
+      ],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(1);
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('inbox-delete-button'));
+
+    // Confirmation gate: nothing is deleted before Confirm.
+    expect(screen.getByTestId('alert-dialog')).toBeInTheDocument();
+    expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(1);
+
+    await user.click(screen.getByTestId('alert-dialog-confirm'));
+
+    // The structural cache removal re-renders the list: zero rows, the
+    // empty state shows. D-CAP-043-E: the 204 has no body to parse.
+    await waitFor(() => {
+      expect(screen.queryAllByTestId('inbox-list-row')).toHaveLength(0);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
+    });
+
+    // Exactly one DELETE fired — and no messages GET after it (the row
+    // left via setQueryData, not a refetch).
+    const deleteCalls = fetchCalls.filter((call) => call.method === 'DELETE');
+    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls[0]?.url).toBe(`/api/v1/mailboxes/${MAILBOX_ID}/messages/${STARRED_ROW.id}`);
+    const messagesGets = fetchCalls.filter(
+      (call) => call.method === 'GET' && call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`),
+    );
+    expect(messagesGets).toHaveLength(1);
+  });
+
+  // Slice 3 fix H12: the inline AlertDialog renders a <div> panel inside
+  // the row's actions container, and a div inside a span (or a p) is
+  // invalid HTML — the browser's parser would relocate it and the
+  // auth-session-storage markup guard would flag the tree. The row must
+  // stay valid at EVERY dialog state, so the assertion runs with the
+  // dialog OPEN.
+  it('H12: the row stays markup-valid with the delete dialog open — no <div> inside a <span> or <p>', async () => {
+    renderInbox({
+      resolvers: [
+        () => jsonResponse({ data: { items: [STARRED_ROW], nextCursor: null } }),
+      ],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(1);
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('inbox-delete-button'));
+    expect(screen.getByTestId('alert-dialog')).toBeInTheDocument();
+
+    // With the dialog panel rendered inside the row's actions container,
+    // a div must never appear under a span or a p anywhere in the row.
+    for (const row of screen.getAllByTestId('inbox-list-row')) {
+      expect(row.querySelectorAll('span div, p div')).toHaveLength(0);
+    }
+  });
+});

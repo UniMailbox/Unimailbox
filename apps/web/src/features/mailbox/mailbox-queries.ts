@@ -18,9 +18,17 @@
 //     (R-MESSAGE-005). D-CAP-041-2: ApiClient mints the fresh
 //     Idempotency-Key; components never touch that header.
 //
-// The hook keyed on `['mailbox', mailboxId, 'messages']` so a navigation
-// to a different mailbox invalidates by query key (D-CAP-041-1 cache
-// pattern). The cursor is opaque to the client; we never inspect it.
+// CAP-043 Slice 3 adds the inbox-row actions:
+//   - `useToggleMessageStarMutation` — `PATCH .../messages/:messageId/star`
+//     (AC 13/14, D-CAP-043-A) with an optimistic flip on the inbox cache
+//     and rollback on failure.
+//   - `useDeleteMessageMutation` — `DELETE .../messages/:messageId`
+//     (AC 15/16, D-CAP-043-B/E); the 204 response removes the row from
+//     the inbox cache via structural `setQueryData`.
+//
+// The hooks are keyed on `['mailbox', 'messages', mailboxId]` so a
+// navigation to a different mailbox invalidates by query key (D-CAP-041-1
+// cache pattern). The cursor is opaque to the client; we never inspect it.
 import {
   useInfiniteQuery,
   useMutation,
@@ -30,44 +38,27 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import {
+  mailboxListResponseSchema,
   messageDetailSchema,
   messageListResponseSchema,
   messageThreadResponseSchema,
+  toggleStarResponseSchema,
+  type MailboxListItem,
   type MessageDetail,
   type MessageListResponse,
   type MessageThreadResponse,
 } from '@unimailbox/contracts';
-import { z } from 'zod';
 import type { ApiClient } from '../../infrastructure/api/client';
 import { ApiError } from '../../infrastructure/api/errors';
 import { useApiClient } from '../../infrastructure/api/client-provider';
 
-/**
- * Closed schema for the mailbox-list response. We re-declare it here
- * rather than reusing `createMailboxRequestSchema` because the
- * /mailboxes endpoint (CAP-020) is a presentational list — its fields
- * are address / displayName / status — not a create payload. Until the
- * contracts package exposes a canonical `mailboxListResponseSchema`,
- * this local zod schema is the single place the web parses the wire
- * shape and surfaces `MailboxListItem` to consumers.
- */
-const mailboxListResponseSchema = z.object({
-  items: z.array(
-    z.object({
-      id: z.string(),
-      address: z.string(),
-      displayName: z.string(),
-      status: z.string(),
-      domainId: z.string(),
-      localPart: z.string(),
-      ownerUserId: z.string(),
-    }),
-  ),
-});
-
-export type MailboxListItem = z.infer<
-  typeof mailboxListResponseSchema
->['items'][number];
+// CAP-043 Slice 3 / gate 2: the mailbox-list wire shape was promoted
+// verbatim into `packages/contracts` (`mailboxListResponseSchema` +
+// `MailboxListItem`); the local zod copy that used to live here is
+// deleted. The type is re-exported so `./mailbox-queries` stays the
+// single import site for existing consumers (MailboxListPage) without
+// forking the definition — one fact, one home.
+export type { MailboxListItem };
 
 export const mailboxQueryKeys = {
   all: ['mailbox'] as const,
@@ -293,6 +284,203 @@ export function useMarkMessageReadMutation() {
       // rejection is one); anything else narrows to a generic code.
       const code = error instanceof ApiError ? error.code : 'UNKNOWN';
       console.warn('mark-message-read failed', {
+        mailboxId: input.mailboxId,
+        messageId: input.messageId,
+        code,
+        message: error.message,
+      });
+    },
+  });
+}
+
+export interface ToggleMessageStarInput {
+  readonly mailboxId: string;
+  readonly messageId: string;
+}
+
+/**
+ * Star toggle mutation (CAP-043 Slice 3 / AC 13 + AC 14, D-CAP-043-A).
+ *
+ * AC 16: the flip is OPTIMISTIC — `onMutate` inverts the row's
+ * `isStarred` in the inbox cache before the request flies, so the star
+ * responds instantly. `onSuccess` then overwrites the guess with the
+ * server's authoritative post-toggle value (mailbox-level star — another
+ * member may have toggled concurrently, so the response is the only
+ * truth).
+ *
+ * Slice 3 fix H7: `onError` rolls back with a ROW-SCOPED inverse flip —
+ * a functional `setQueryData` that inverts `isStarred` on THIS message's
+ * row only. The previous whole-snapshot restore could resurrect another
+ * row's state: when two stars fail and the FIRST error's restore runs
+ * before the SECOND's, the second snapshot (taken after A's optimistic
+ * flip) overwrote A's rollback — leaving A starred with no server
+ * confirmation. The inverse flip also no-ops when the row is gone (a
+ * delete landed in between), unlike a snapshot restore, which would
+ * resurrect a deleted row. A failed star warns once (G9 pattern):
+ * ignorable for rendering, never silent.
+ *
+ * D-CAP-041-2: ApiClient mints the fresh Idempotency-Key per request;
+ * the component never touches that header.
+ */
+export function useToggleMessageStarMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ToggleMessageStarInput): Promise<number> => {
+      const response = await apiClient.fetch<unknown>(
+        `/api/v1/mailboxes/${input.mailboxId}/messages/${input.messageId}/star`,
+        { method: 'PATCH' },
+      );
+      // Envelope-wrapped contract: { data: { id, isStarred } } — the
+      // schema models the full wire body, so parse the whole response.
+      const parsed = toggleStarResponseSchema.parse(response);
+      return parsed.data.isStarred;
+    },
+    onMutate: async (input): Promise<void> => {
+      // Stop in-flight refetches from clobbering the optimistic write.
+      await queryClient.cancelQueries({
+        queryKey: mailboxQueryKeys.messages(input.mailboxId),
+      });
+      // Structural additive copy — only this message's row changes.
+      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
+        mailboxQueryKeys.messages(input.mailboxId),
+        (existing) =>
+          existing === undefined
+            ? existing
+            : {
+                ...existing,
+                pages: existing.pages.map((page) => ({
+                  ...page,
+                  items: page.items.map((item) =>
+                    item.id === input.messageId
+                      ? { ...item, isStarred: item.isStarred === 1 ? 0 : 1 }
+                      : item,
+                  ),
+                })),
+              },
+      );
+    },
+    onSuccess: (isStarred, input) => {
+      // Server truth replaces the optimistic guess.
+      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
+        mailboxQueryKeys.messages(input.mailboxId),
+        (existing) =>
+          existing === undefined
+            ? existing
+            : {
+                ...existing,
+                pages: existing.pages.map((page) => ({
+                  ...page,
+                  items: page.items.map((item) =>
+                    item.id === input.messageId ? { ...item, isStarred } : item,
+                  ),
+                })),
+              },
+      );
+    },
+    onError: (error, input) => {
+      // H7: row-scoped inverse flip — undo THIS row's optimistic change
+      // only. No snapshot, so a sibling mutation's state (another row's
+      // star, or a delete that removed this row) is never clobbered; the
+      // functional update no-ops when the row is no longer in the cache.
+      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
+        mailboxQueryKeys.messages(input.mailboxId),
+        (existing) =>
+          existing === undefined
+            ? existing
+            : {
+                ...existing,
+                pages: existing.pages.map((page) => ({
+                  ...page,
+                  items: page.items.map((item) =>
+                    item.id === input.messageId
+                      ? { ...item, isStarred: item.isStarred === 1 ? 0 : 1 }
+                      : item,
+                  ),
+                })),
+              },
+      );
+      const code = error instanceof ApiError ? error.code : 'UNKNOWN';
+      console.warn('toggle-message-star failed', {
+        mailboxId: input.mailboxId,
+        messageId: input.messageId,
+        code,
+        message: error.message,
+      });
+    },
+  });
+}
+
+export interface DeleteMessageInput {
+  readonly mailboxId: string;
+  readonly messageId: string;
+}
+
+/**
+ * Per-user soft-delete mutation (CAP-043 Slice 3 / AC 15 + AC 16,
+ * D-CAP-043-B). The confirm dialog fires this once per confirmed click;
+ * D-CAP-041-2 gives it a fresh Idempotency-Key, and a replayed key would
+ * return the same 204 (R-API-004).
+ *
+ * D-CAP-043-E: the endpoint answers 204 No Content — ApiClient surfaces
+ * that as `undefined`; there is no response body to parse.
+ *
+ * On success the row leaves the inbox cache via structural
+ * `setQueryData` (filter, no refetch — D-CAP-041-1), and the message's
+ * detail + thread cache entries are dropped so a later visit cannot
+ * render a deleted message from cache (the API 404s it). On failure the
+ * row stays and the mutation warns once (G9 pattern) — a failed delete
+ * is ignorable for rendering, but never silent.
+ *
+ * Slice 3 fix H11: `onMutate` awaits `cancelQueries` on the inbox key
+ * before the request flies — without it, an in-flight list refetch that
+ * resolves after the success filter would resurrect the deleted row.
+ */
+export function useDeleteMessageMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DeleteMessageInput): Promise<void> => {
+      await apiClient.fetch(
+        `/api/v1/mailboxes/${input.mailboxId}/messages/${input.messageId}`,
+        { method: 'DELETE' },
+      );
+    },
+    onMutate: async (input): Promise<void> => {
+      // H11: stop in-flight refetches of the inbox key so the success
+      // filter is the last write.
+      await queryClient.cancelQueries({
+        queryKey: mailboxQueryKeys.messages(input.mailboxId),
+      });
+    },
+    onSuccess: (_result, input) => {
+      // Structural removal: pages/items copies with this message
+      // filtered out; an absent cache stays absent.
+      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
+        mailboxQueryKeys.messages(input.mailboxId),
+        (existing) =>
+          existing === undefined
+            ? existing
+            : {
+                ...existing,
+                pages: existing.pages.map((page) => ({
+                  ...page,
+                  items: page.items.filter((item) => item.id !== input.messageId),
+                })),
+              },
+      );
+      // Soft-deleted-for-this-user messages 404 at the detail and thread
+      // routes; cached entries for them must not render again.
+      queryClient.removeQueries({
+        queryKey: mailboxQueryKeys.message(input.mailboxId, input.messageId),
+      });
+      queryClient.removeQueries({
+        queryKey: mailboxQueryKeys.thread(input.mailboxId, input.messageId),
+      });
+    },
+    onError: (error, input) => {
+      const code = error instanceof ApiError ? error.code : 'UNKNOWN';
+      console.warn('delete-message failed', {
         mailboxId: input.mailboxId,
         messageId: input.messageId,
         code,
