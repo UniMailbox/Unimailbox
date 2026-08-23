@@ -2049,3 +2049,29 @@ worker 505/505, build ✓, doctor 10/10.
 - **LOW — `RegisterPage` posts to `/api/v1/auth/register` (legacy endpoint)**. Better Auth's `sign-up/email` is intentionally disabled (`disableSignUp: true` in `factory.ts`); the legacy endpoint is the production registration path. Batch 6 may consider a unified Better Auth surface; out of scope for Batch 5.
 
 **Deferred**: D-CAP-042-auth-descriptor (orchestrator decision on whether to promote `AuthSessionDescriptor` into `packages/contracts/auth/session.ts` — Batch 6 territory).
+
+2026-08-23 — CAP-042 Batch 6 (AC 23): AUTH_PROVIDER cutover matrix + rollback proof on the additive schema. Pure worker-side slice; apps/web/ and packages/contracts/ untouched.
+
+**Per-request config gating (the load-bearing change).** `apps/worker/src/http/middleware/authn.ts` now reads `c.var.config.authProvider` per request and gates which credential surfaces resolve:
+- `legacy`: Bearer only; Better Auth cookie is silently ignored (no D1 lookup, no probing leak).
+- `better-auth`: Better Auth cookie only; Bearer is silently ignored (no CACHE lookup).
+- `dual`: both surfaces resolve, AC 14 conflict detection still runs (CONFLICTING_PRINCIPALS on disagreement).
+
+`apps/worker/src/http/routes/better-auth.ts` short-circuits with 401 `AUTHENTICATION_REQUIRED` when `config.authProvider === 'legacy'`. The Hono mount stays in place so a future env flip re-enables it without an Hono edit. `apps/worker/src/http/routes/auth.ts` mirrors the gate on `POST /api/v1/auth/login`: 401 when `authProvider === 'better-auth'`. Both short-circuits use the canonical `{ error: { code, message, requestId } }` envelope, not a thrown Error, so no new error catalog entry was added.
+
+**Why per-request and not module-scope.** `http/middleware/config.ts` re-parses `parsePlatformConfig(env)` on every request. The factory and the cookie-cache are also per-request. A test (or a runtime env flip) that mutates `env.AUTH_PROVIDER` sees the new value on the next request — no Worker restart. `apps/worker/wrangler.test.jsonc` `AUTH_PROVIDER` flipped from `legacy` to `dual` so the pre-existing AC 12 / 13 / 14 / 16 / 19 suites keep exercising Better Auth sign-in without per-test overrides; production `wrangler.jsonc` still defaults to `legacy` per ADR-008.
+
+**Tests** (11 new for AC 23, plus 4 new auth.ts gate tests): `authn.worker.test.ts` adds the 6 mode-gating cases + 1 dual→legacy→dual rollback proof; `better-auth.worker.test.ts` adds 4 mount-gating cases; `auth.worker.test.ts` adds the better-auth rejection + dual regression coverage. Gates (orchestrator-run, post-Batch 6): `pnpm scaffold doctor` 13/13 ✓, `pnpm typecheck` clean ✓, `pnpm lint` clean ✓, `pnpm test:unit` 637/637 ✓, `pnpm test:worker` 635/638 (the 3 remaining failures are pre-existing D1 parallelism on `admin`/`migrationsDb`/`0015_backfill`; pass when isolated via `pnpm test:worker src/<file>`), `pnpm build` ✓.
+
+**Cutover matrix evidence (orchestrator-run, per-mode)**:
+- `legacy` — `/api/v1/auth/better/sign-in/email` → 401 (mount gated); Bearer-only request → 200; legacy `/api/v1/auth/login` → 200.
+- `dual` — Better Auth cookie only → 200; Bearer only → 200; matching cookie + Bearer → 200; conflicting cookie + Bearer → 401 `CONFLICTING_PRINCIPALS` (AC 14 holds); `/api/v1/auth/login` → 200.
+- `better-auth` — Better Auth cookie → 200; Bearer-only → 401 (Bearer silently ignored); `/api/v1/auth/better/sign-in/email` → 200; legacy `/api/v1/auth/login` → 401 `AUTHENTICATION_REQUIRED` (auth.ts gated in this batch).
+- **Rollback proof** — one test exercises `dual → legacy → dual` without a Worker restart: dual signs in via Better Auth cookie (200), legacy re-runs the same request (401, cookie silently ignored), dual restores (200, cookie accepted again). `auth_accounts` / `auth_sessions` rows survive all three phases; legacy `users.password_*` rows survive all three phases. No migration required.
+
+**Findings**:
+- **HIGH (gating gap, FIXED in this batch)** — `authn.ts` previously resolved both principals regardless of mode. Closed with per-request gating inside file ownership.
+- **HIGH (route mount gap, FIXED in this batch)** — `better-auth.ts` mounted the Better Auth HTTP surface unconditionally in `legacy` mode. Closed with short-circuit inside file ownership.
+- **HIGH (legacy login reachable in better-auth mode, FIXED in this batch — extension)** — `auth.ts` `POST /api/v1/auth/login` did not consult `authProvider`. Closed with mirror gate inside file ownership (extended in the follow-up slice).
+
+**Deferred**: D-CAP-042-pre-existing-parallelism (the 3 worker-pool migration-state failures — separate capability).
