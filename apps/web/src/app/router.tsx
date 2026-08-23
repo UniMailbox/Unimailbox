@@ -1,6 +1,7 @@
 // apps/web router — code-based TanStack Router.
-// CAP-001 stub extended by CAP-041 with the /setup tree. The router
-// validates the current step against the server's `currentStep` on every
+// CAP-001 stub extended by CAP-041 with the /setup tree. CAP-042 Batch 5
+// adds the /login, /register, and /mailbox subtree; the router validates
+// the current setup step against the server's `currentStep` on every
 // mount (R-WORKFLOW-001 / D4) and redirects stale /setup/<step> URLs
 // back to the server's current step.
 //
@@ -25,6 +26,17 @@
 // M7 (CAP-041 fix): STEP_PATHS is derived from
 // `installationStepSchema.options` so the router order matches the
 // contracts schema exactly.
+//
+// CAP-042 Batch 5 / D-CAP-041-1: `queryClient` is added to the router
+// context so `mailboxRoute.beforeLoad` can call
+// `queryClient.ensureQueryData({ queryKey: authQueryKeys.session(), ... })`.
+// The same cache entry feeds `MailboxShell.authSessionQuery`, so the
+// `beforeLoad` does the network round-trip once and the component
+// reads synchronously.
+//
+// CAP-042 Batch 5 / D-CAP-041-9: the `/mailbox` route's `beforeLoad`
+// redirects to `/login` when the cache contains no session. This is
+// exercised by `apps/web/src/app/router.test.tsx` via `mountAppRouter`.
 import {
   Outlet,
   createRootRouteWithContext,
@@ -33,6 +45,7 @@ import {
   Link,
   redirect,
 } from '@tanstack/react-router';
+import type { QueryClient } from '@tanstack/react-query';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 import {
   installationStepSchema,
@@ -45,6 +58,12 @@ import type { ApiClient } from '../infrastructure/api/client';
 import { fetchSetupStatus } from '../features/setup/setup-queries';
 import { SetupLayout } from '../features/setup/setup-layout';
 import {
+  authQueryKeys,
+  fetchAuthSession,
+} from '../features/auth/auth-queries';
+import { LoginPage } from '../features/auth/LoginPage';
+import { RegisterPage } from '../features/auth/RegisterPage';
+import {
   ClaimStep,
   PreflightStep,
   AdministratorStep,
@@ -55,12 +74,15 @@ import {
   OutboundSmokeStep,
   CompleteStep,
 } from '../features/setup';
+import { MailboxShell } from '../features/mailbox/MailboxShell';
 
-// B1 (CAP-041 fix): typed router context. `beforeLoad` reads
-// `context.apiClient` without a React hook. Step components still
-// use `useApiClient()` (render-time hook, safe).
+// B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
+// reads `context.apiClient` and `context.queryClient` without React hooks.
+// Step / page components still use `useApiClient()` and `useQueryClient()`
+// (render-time hooks, safe).
 export interface RouterContext {
   readonly apiClient: ApiClient;
+  readonly queryClient: QueryClient;
 }
 
 function DefaultPending(): ReactElement {
@@ -108,6 +130,52 @@ const indexRoute = createRoute({
       <p>The client is wired. Feature pages land with later capabilities.</p>
     </main>
   ),
+});
+
+// CAP-042 Batch 5 — /login. The login form posts to
+// /api/v1/auth/better/sign-in/email; success navigates to /mailbox.
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/login',
+  component: () => <LoginPage />,
+});
+
+// CAP-042 Batch 5 — /register. Self-service registration is the legacy
+// /api/v1/auth/register endpoint; success navigates to /login so the
+// user can sign in with the new credentials (registration is separate
+// from sign-in, per CAP-019 / R-AUTH-006).
+const registerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/register',
+  component: () => <RegisterPage />,
+});
+
+// CAP-042 Batch 5 — /mailbox.
+//
+// D-CAP-041-1: the `beforeLoad` warms the session cache via
+// `queryClient.ensureQueryData`. A cache hit means zero additional
+// network requests on subsequent navigations to /mailbox; a cache
+// miss triggers exactly one GET /api/v1/auth/better/get-session,
+// shared with MailboxShell's `authSessionQuery`.
+//
+// D-CAP-041-9: the redirect-to-`/login` branch is exercised by
+// `apps/web/src/app/router.test.tsx`. A reviewer should be able to
+// read the test and see the route tree mount with an empty session
+// store, navigate to `/mailbox`, and assert the final pathname is
+// `/login`.
+const mailboxRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mailbox',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: () => <MailboxShell />,
 });
 
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
@@ -246,17 +314,25 @@ const setupChildren = setupRoute.addChildren([
   completeRoute,
 ]);
 
-const routeTree = rootRoute.addChildren([indexRoute, setupIndexRoute, setupChildren]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  loginRoute,
+  registerRoute,
+  mailboxRoute,
+  setupIndexRoute,
+  setupChildren,
+]);
 
 export type AppRouter = typeof routeTree;
 
-// B1 (CAP-041 fix): the router takes the apiClient as a constructor
-// argument and exposes it via `context`. beforeLoad reads it via
-// `({ context })`; step components still use `useApiClient()`.
-export function createAppRouter(apiClient: ApiClient) {
+// B1 (CAP-041 fix) + CAP-042 Batch 5: the router takes the apiClient
+// AND the queryClient as constructor arguments and exposes both via
+// `context`. `beforeLoad` reads them via `({ context })`; step / page
+// components still use `useApiClient()` and `useQueryClient()`.
+export function createAppRouter(apiClient: ApiClient, queryClient: QueryClient) {
   return createRouter({
     routeTree,
     defaultPreload: false,
-    context: { apiClient },
+    context: { apiClient, queryClient },
   });
 }

@@ -82,7 +82,7 @@ export function App(): ReactElement {
       }),
     [],
   );
-  const [router] = useState(() => createAppRouter(apiClient));
+  const [router] = useState(() => createAppRouter(apiClient, queryClient));
 
   return (
     <ErrorBoundary>

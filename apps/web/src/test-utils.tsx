@@ -12,6 +12,11 @@
 // did not propagate. `mountAppRouter()` lets future tests that exercise
 // the router's `beforeLoad` (which needs an apiClient in its context)
 // build the same shape as `renderStep()`.
+//
+// CAP-042 Batch 5: `mountAppRouter()` threads the queryClient into the
+// router's context (D-CAP-041-1) and accepts an optional auth-session
+// fixture so router tests can pre-seed `authQueryKeys.session()` in the
+// cache or in the in-memory descriptor store.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render as rtlRender, screen } from '@testing-library/react';
 import {
@@ -32,6 +37,12 @@ import {
   setSetupSession,
   useSetupSession,
 } from './features/setup/setup-session-store';
+import {
+  resetAuthSessionForTesting,
+  setAuthSession,
+  type AuthSessionDescriptor,
+} from './features/auth/auth-session-store';
+import { authQueryKeys } from './features/auth/auth-queries';
 import type { RouterContext } from './app/router';
 
 export interface RenderStepOptions {
@@ -76,7 +87,7 @@ async function mountRouter(options: RenderStepOptions): Promise<AnyRouter> {
   const cloudflareRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/setup/cloudflare-verify',
-    component: () => <div data-testid="arrived-cloudflare-verify">cloudflare</div>,
+    component: () => <div data-testid="arrived-cloudflare-verify">cloudflare-verify</div>,
   });
   const inboundSmokeRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -164,13 +175,18 @@ export async function renderStep(options: RenderStepOptions): Promise<{
   };
 }
 
-// H6 (CAP-041 fix): mountAppRouter — for tests that exercise the
-// router's `beforeLoad` (which reads `apiClient` via `context`).
-// `renderStep()` is fine for step-component tests; router tests need
-// the apiClient injected into the router's `context` so `beforeLoad`
-// can call it without a React hook. The route tree is built lazily
-// inside the test via `buildRouteTree(rootRoute)` so the routeTree's
-// type inference stays intact.
+// H6 (CAP-041 fix) + CAP-042 Batch 5: mountAppRouter — for tests that
+// exercise the router's `beforeLoad` (which reads `apiClient` and the
+// `queryClient` via `context`). `renderStep()` is fine for step-component
+// tests; router tests need both providers injected into the router's
+// context so `beforeLoad` can call them without a React hook. The route
+// tree is built lazily inside the test via `buildRouteTree(rootRoute)`
+// so the routeTree's type inference stays intact.
+//
+// `authSession` pre-seeds the TanStack Query cache and the in-memory
+// descriptor store so tests that exercise the `/mailbox` route after a
+// successful sign-in can skip the login step. Omit it (or pass `null`)
+// to assert the `/mailbox` → `/login` redirect (D-CAP-041-9).
 export interface MountAppRouterOptions {
   readonly fetchImpl: typeof fetch;
   readonly buildRouteTree: (
@@ -184,6 +200,7 @@ export interface MountAppRouterOptions {
   readonly initialEntries?: ReadonlyArray<string>;
   readonly sessionToken?: string;
   readonly apiClient?: ApiClient;
+  readonly authSession?: AuthSessionDescriptor | null;
 }
 
 export async function mountAppRouter(options: MountAppRouterOptions): Promise<{
@@ -192,10 +209,32 @@ export async function mountAppRouter(options: MountAppRouterOptions): Promise<{
   readonly apiClient: ApiClient;
   readonly queryClient: QueryClient;
   render: () => ReturnType<typeof rtlRender>;
+  rerender: ReturnType<typeof rtlRender>['rerender'];
+  unmount: ReturnType<typeof rtlRender>['unmount'];
+  container: HTMLElement;
 }> {
   resetSetupSessionForTesting();
+  resetAuthSessionForTesting();
   if (options.sessionToken !== undefined) {
     setSetupSession(options.sessionToken);
+  }
+  // CAP-042 Batch 5: create the QueryClient BEFORE the router so we can
+  // thread it into the router's `context` (D-CAP-041-1). Pre-seed the
+  // `authQueryKeys.session()` cache entry from the `authSession`
+  // fixture, then mirror the descriptor into the in-memory store.
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  if (options.authSession !== undefined) {
+    if (options.authSession !== null) {
+      queryClient.setQueryData(authQueryKeys.session(), options.authSession);
+      setAuthSession(options.authSession);
+    } else {
+      queryClient.setQueryData(authQueryKeys.session(), null);
+    }
   }
   const apiClient =
     options.apiClient ??
@@ -215,15 +254,9 @@ export async function mountAppRouter(options: MountAppRouterOptions): Promise<{
   const router = createRouter({
     routeTree: routeTree as AnyRoute,
     history,
-    context: { apiClient },
+    context: { apiClient, queryClient },
   }) as unknown as AnyRouter;
   await router.load();
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, staleTime: 0 },
-      mutations: { retry: false },
-    },
-  });
   function Wrapper({ children: _children }: { children: ReactNode }): ReactElement {
     return (
       <QueryClientProvider client={queryClient}>
@@ -235,11 +268,77 @@ export async function mountAppRouter(options: MountAppRouterOptions): Promise<{
   }
   const render = (): ReturnType<typeof rtlRender> =>
     rtlRender(<div data-testid="root" />, { wrapper: Wrapper });
-  return { router, history, apiClient, queryClient, render };
+  // Auto-render so callers can read the DOM immediately after
+  // `await mountAppRouter(...)`. `router.test.tsx` and other history-only
+  // tests ignore the rendered tree — the router's `await load()` above
+  // already resolved the active route.
+  const rendered = render();
+  return {
+    router,
+    history,
+    apiClient,
+    queryClient,
+    render,
+    rerender: rendered.rerender,
+    unmount: rendered.unmount,
+    container: rendered.container,
+  };
 }
 
 export function lastPathname(history: ReturnType<typeof createMemoryHistory>): string {
   return history.location.pathname;
+}
+
+// CAP-042 Batch 5: renderAuthPage — for tests that mount an auth page
+// (LoginPage / RegisterPage / LogoutButton / Unauthorized) inside a
+// real router. Mirrors `renderStep()` but for the auth surface: a
+// minimal route tree with /login, /register, /mailbox, and a sentinel
+// landing page so `useNavigate({ to: '/mailbox' })` and friends resolve
+// to a real destination the test can observe via `lastPathname()`.
+export interface RenderAuthPageOptions {
+  readonly fetchImpl: typeof fetch;
+  readonly authSession?: AuthSessionDescriptor | null;
+  readonly initialPath?: string;
+  readonly login?: ReactElement;
+  readonly register?: ReactElement;
+  readonly mailbox?: ReactElement;
+}
+
+export async function renderAuthPage(
+  options: RenderAuthPageOptions,
+): Promise<{
+  readonly router: AnyRouter;
+  readonly history: ReturnType<typeof createMemoryHistory>;
+  readonly apiClient: ApiClient;
+  readonly queryClient: QueryClient;
+  render: () => ReturnType<typeof rtlRender>;
+  rerender: ReturnType<typeof rtlRender>['rerender'];
+  unmount: ReturnType<typeof rtlRender>['unmount'];
+  container: HTMLElement;
+}> {
+  return mountAppRouter({
+    fetchImpl: options.fetchImpl,
+    initialEntries: [options.initialPath ?? '/login'],
+    ...(options.authSession !== undefined ? { authSession: options.authSession } : {}),
+    buildRouteTree: (rootRoute) => {
+      const loginRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: '/login',
+        component: () => options.login ?? <div data-testid="arrived-login">login</div>,
+      });
+      const registerRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: '/register',
+        component: () => options.register ?? <div data-testid="arrived-register">register</div>,
+      });
+      const mailboxRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: '/mailbox',
+        component: () => options.mailbox ?? <div data-testid="arrived-mailbox">mailbox</div>,
+      });
+      return rootRoute.addChildren([loginRoute, registerRoute, mailboxRoute]);
+    },
+  });
 }
 
 // H6 (CAP-041 fix): typed root-route helper. Local re-export so
