@@ -255,6 +255,7 @@ export async function mountAppRouter(options: MountAppRouterOptions): Promise<{
     routeTree: routeTree as AnyRoute,
     history,
     context: { apiClient, queryClient },
+    defaultPreload: false,
   }) as unknown as AnyRouter;
   await router.load();
   function Wrapper({ children: _children }: { children: ReactNode }): ReactElement {

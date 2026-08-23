@@ -45,6 +45,12 @@ export type Env = {
   INSTALLATION_TOKEN: SecretsStoreSecret;
   CREDENTIAL_ENCRYPTION_KEY: SecretsStoreSecret;
   BETTER_AUTH_SECRET: SecretsStoreSecret | string;
+  // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY is the third
+  // independent Secrets Store binding. It is read via readSecret() the
+  // same way BETTER_AUTH_SECRET is (plain string in tests, SecretsStoreSecret
+  // in production). The cursor HMAC key is neither the credential
+  // AES-GCM key nor the Better Auth cookie HMAC key.
+  CURSOR_SIGNING_KEY: SecretsStoreSecret | string;
   ENVIRONMENT?: string;
   BETTER_AUTH_URL?: string;
   AUTH_PROVIDER?: string;

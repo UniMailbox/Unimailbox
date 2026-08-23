@@ -8,8 +8,24 @@
 // surface reports the per-user value.
 // R-AUTHZ-004: Callers must have already asserted access to the mailbox; these
 // queries authorise against the supplied mailboxId, never a client-supplied owner.
+//
+// R-MESSAGE-005 (delete half, CAP-043 Slice 1 / D-CAP-043-B): soft-delete
+// is per-user on `message_user_state.is_deleted`. The inbox list query
+// LEFT JOINs the per-user state and filters `COALESCE(mus.is_deleted, 0) = 0`
+// so a soft-deleted row disappears from user A's list but remains in
+// user B's list (asserted by the `keeps_per-user_isDeleted_independent`
+// worker test in messages.worker.test.ts).
+//
+// R-API-005 (CAP-043 Slice 1 / D-CAP-043-D): the cursor is HMAC-SHA-256
+// signed with `env.CURSOR_SIGNING_KEY`. The repository receives the
+// resolved key string from the route layer (see platform/cursor.ts:
+// signCursor / verifyCursor) and never reads the env directly. A
+// tampered or malformed cursor surfaces as `null` from verifyCursor and
+// the repository throws CursorInvalidError so the route can map it to
+// a stable 400 INVALID_CURSOR envelope.
 
 import type { Database } from '../../platform/database';
+import { signCursor, verifyCursor } from '../../platform/cursor';
 
 export interface RecipientInfo {
   address: string;
@@ -94,28 +110,18 @@ interface CursorPayload {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 50;
 
-function encodeCursor(payload: CursorPayload): string {
-  // Phase 1: base64 of JSON. HMAC signing is CAP-034 (Phase 2).
-  return btoa(JSON.stringify(payload));
-}
-
-function decodeCursor(cursor: string): CursorPayload | null {
-  try {
-    const decoded = atob(cursor);
-    const parsed = JSON.parse(decoded) as unknown;
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      'createdAt' in parsed &&
-      'id' in parsed &&
-      typeof (parsed as CursorPayload).createdAt === 'string' &&
-      typeof (parsed as CursorPayload).id === 'string'
-    ) {
-      return parsed as CursorPayload;
-    }
-    return null;
-  } catch {
-    return null;
+/**
+ * Thrown when the cursor the client supplied cannot be verified.
+ *
+ * The route catches this and renders a 400 INVALID_CURSOR. We do not
+ * distinguish "malformed token" from "tampered token" because the two
+ * are observationally equivalent for an attacker; a single error code
+ * keeps the API surface stable (R-API-002 / R-API-005).
+ */
+export class CursorInvalidError extends Error {
+  constructor() {
+    super('Cursor is invalid or tampered with');
+    this.name = 'CursorInvalidError';
   }
 }
 
@@ -140,26 +146,55 @@ function groupRecipients(rows: RecipientRow[]): {
 /**
  * Lists messages in a mailbox, newest first, with cursor pagination.
  *
- * R-MESSAGE-005: isRead is resolved per user via a LEFT JOIN on
- * message_user_state keyed by (mailbox_message_id, user_id). When no row exists
- * for the requesting user the value falls back to 0 (unread).
+ * R-MESSAGE-005:
+ *   - isRead is resolved per user via a LEFT JOIN on message_user_state.
+ *   - isDeleted is filtered to 0 via `COALESCE(mus.is_deleted, 0) = 0`.
+ *     A user who has never opened the message has no row; COALESCE
+ *     reads 0 and the message shows. A user who soft-deleted has
+ *     `is_deleted = 1` and the message is filtered out — but only for
+ *     that user. Another user with no row sees it normally
+ *     (D-CAP-043-B).
+ *
+ * R-API-005: the cursor is HMAC-SHA-256 signed (D-CAP-043-D). A
+ * tampered or malformed cursor surfaces as `CursorInvalidError` so
+ * the route returns a 400 INVALID_CURSOR envelope. The repository
+ * accepts `cursorSigningKey` as a string parameter rather than
+ * reading the env directly — `env` does not cross the module
+ * boundary cleanly, and the route is the right place to resolve the
+ * binding.
  *
  * @param db — D1 database binding
  * @param mailboxId — target mailbox (caller must have asserted read access)
- * @param userId — requesting user; drives per-user isRead resolution
- * @param opts — optional cursor + limit
+ * @param userId — requesting user; drives per-user isRead + is_deleted resolution
+ * @param opts — cursor + limit + signing key
  */
 export async function listMessagesByMailbox(
   db: Database,
   mailboxId: string,
   userId: string,
-  opts: { cursor?: string; limit?: number } = {},
+  opts: { cursor?: string; limit?: number; cursorSigningKey: string },
 ): Promise<ListMessagesResult> {
   const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+
+  // Verify the cursor BEFORE running the page query. verifyCursor
+  // returns null on any failure (malformed token, signature mismatch,
+  // unparseable payload). The route catches CursorInvalidError and
+  // returns 400 INVALID_CURSOR; nothing the client sent past this
+  // point can be misinterpreted as a valid page boundary.
+  let cursor: CursorPayload | null = null;
+  if (opts.cursor !== undefined && opts.cursor.length > 0) {
+    const verified = await verifyCursor(opts.cursor, opts.cursorSigningKey);
+    if (verified === null) {
+      throw new CursorInvalidError();
+    }
+    cursor = verified;
+  }
 
   // Page query: join mailbox_messages → messages, LEFT JOIN per-user state.
   // Cursor slot bound to null when no cursor so the WHERE is a no-op.
+  // R-MESSAGE-005: COALESCE(mus.is_deleted, 0) = 0 hides the user's
+  // soft-deleted rows; users who never opened the message have no
+  // mus row, COALESCE returns 0, and the message shows.
   const cursorCreatedAt = cursor?.createdAt ?? null;
   const cursorId = cursor?.id ?? null;
 
@@ -174,6 +209,7 @@ export async function listMessagesByMailbox(
               ON mus.mailbox_message_id = mm.id
              AND mus.user_id = ?
         WHERE mm.mailbox_id = ?
+          AND COALESCE(mus.is_deleted, 0) = 0
           AND (? IS NULL
                OR (m.created_at < ? OR (m.created_at = ? AND m.id < ?)))
      ORDER BY m.created_at DESC, m.id DESC
@@ -222,11 +258,16 @@ export async function listMessagesByMailbox(
   }
 
   // Next cursor: only present when the page was full (more may follow).
+  // R-API-005: signed with the same HMAC key the request verified with
+  // so the client's next request continues the chain end-to-end.
   let nextCursor: string | null = null;
   if (items.length === limit && items.length > 0) {
     const last = items[items.length - 1];
     if (last) {
-      nextCursor = encodeCursor({ createdAt: last.createdAt, id: last.id });
+      nextCursor = await signCursor(
+        { createdAt: last.createdAt, id: last.id },
+        opts.cursorSigningKey,
+      );
     }
   }
 
@@ -307,7 +348,10 @@ export async function getMessageDetail(
  * Two writes run in one D1 batch (R-MESSAGE-005):
  *   1. mailbox_messages.is_read = 1 — the "any reader" flag used by counters.
  *   2. message_user_state UPSERT keyed by (mailbox_message_id, user_id) — the
- *      per-user record consulted by the list/detail queries.
+ *      per-user record consulted by the list/detail queries. Every member
+ *      gets their own row (PK per D-CAP-043-F / migration 0017), so the
+ *      second reader's write cannot collide with or clobber the first
+ *      reader's state.
  *
  * @param db — D1 database binding
  * @param mailboxMessageId — PK of the mailbox_messages row
@@ -324,14 +368,15 @@ export async function markMessageAsRead(
     .prepare('UPDATE mailbox_messages SET is_read = 1 WHERE id = ?')
     .bind(mailboxMessageId);
 
-  // ON CONFLICT(mailbox_message_id) keeps the existing user_id; the per-user
-  // resolution query joins on both mailbox_message_id and user_id so a stale
-  // row from another reader does not pollute this user's isRead.
+  // R-MESSAGE-005 / D-CAP-043-F: one row per (mailbox_message, user). The
+  // conflict target is the composite PK, so a second member reading the
+  // same message UPSERTs their own row and re-reading refreshes only the
+  // calling user's read_at / updated_at.
   const upsertUserState = db
     .prepare(
       `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, updated_at)
        VALUES (?, ?, 1, ?, ?)
-       ON CONFLICT(mailbox_message_id) DO UPDATE SET
+       ON CONFLICT(mailbox_message_id, user_id) DO UPDATE SET
          is_read = 1,
          read_at = ?,
          updated_at = ?`,

@@ -1,10 +1,11 @@
 // platform/config — typed env parsing for the Worker runtime.
 //
 // CAP-001 stub evolved. The strict parsers here are the runtime authority
-// for `AUTH_PROVIDER` and `BETTER_AUTH_URL`. Both fail closed: an unknown
-// provider or an origin that carries credentials, query, or fragment is
-// rejected with a typed `ConfigError` so the entrypoint can surface a
-// 500 with a stable `code` instead of silently degrading.
+// for `AUTH_PROVIDER`, `BETTER_AUTH_URL`, and `CURSOR_SIGNING_KEY`. All
+// three fail closed: an unknown provider, an origin that carries
+// credentials, query, or fragment, or a missing cursor key is rejected
+// with a typed `ConfigError` so the entrypoint can surface a 500 with a
+// stable `code` instead of silently degrading.
 //
 // Why parse here rather than at route entry:
 //   - The auth factory (Batch 2) and the deploy script (Batch 1) both need
@@ -14,13 +15,20 @@
 //     across `wrangler.jsonc`, `wrangler.test.jsonc`, and this Env typing.
 //     A `BETTER_AUTH_URL` default that is unusable in non-local targets
 //     must be caught before the Worker tries to construct Better Auth.
+//     The `CURSOR_SIGNING_KEY` requirement (CAP-043 Slice 1 / D-CAP-043-D)
+//     belongs in the same gate so the worker-pool tests catch a missing
+//     binding at startup rather than at first request.
 //
 // ADR-008 §HTTP and browser session contract — `BETTER_AUTH_SECRET` is
 // distinct from `CREDENTIAL_ENCRYPTION_KEY`, the provider mode is the
 // single closed enum (legacy|dual|better-auth), and HTTPS is required
-// outside the local environment.
+// outside the local environment. CAP-043 D-CAP-043-D adds
+// `CURSOR_SIGNING_KEY` as a third independent secret: the cursor HMAC
+// key is neither the credential AES-GCM key nor the Better Auth cookie
+// HMAC key, and a rotation of one must not silently rotate the other.
 import type { EnvironmentName, SharedConfig } from '@unimailbox/config';
 import type { AuthProviderName, Env } from './env';
+import { readSecret, type SecretLike } from './secrets';
 
 const ALLOWED_ENVIRONMENTS: ReadonlyArray<EnvironmentName> = [
   'local',
@@ -140,10 +148,48 @@ export function loadConfig(env: Env): PlatformConfig {
     : 'local';
   const authProvider = parseAuthProvider(env.AUTH_PROVIDER);
   const betterAuthUrl = parseBetterAuthUrl(env.BETTER_AUTH_URL, environment);
+  // CAP-043 Slice 1 fix pass (F8): there is no `cursorSigningKey` field on
+  // PlatformConfig. The key is Secrets-Store-backed and therefore read
+  // asynchronously — the only valid path is `parseCursorSigningKey(env)`
+  // (below), which the messages route awaits per request.
   return {
     environment,
     runtime: 'workerd',
     authProvider,
     betterAuthUrl,
   };
+}
+
+/**
+ * Read the `CURSOR_SIGNING_KEY` binding and return its raw string form.
+ *
+ * The binding is a Secrets Store entry in production (SecretsStoreSecret
+ * with `.get()`) and a plain string in the worker-pool test (set as a
+ * var in `wrangler.test.jsonc`). `readSecret()` in `platform/secrets.ts`
+ * abstracts the two forms; this helper only enforces the
+ * non-empty-string rule that HMAC-SHA-256 needs to be deterministic.
+ *
+ * The key is required at runtime: the inbox list cursor must be signed
+ * for every paginated response, and an absent or empty key would
+ * silently produce HMACs over the empty string (a value any attacker
+ * could compute independently). We fail closed with
+ * `INVALID_CURSOR_SIGNING_KEY` so the error middleware renders a 500
+ * rather than a 200 with an unsigned cursor.
+ */
+export async function parseCursorSigningKey(env: Env): Promise<string> {
+  const raw: SecretLike | undefined = env.CURSOR_SIGNING_KEY;
+  if (raw === undefined) {
+    throw new ConfigError(
+      'INVALID_CURSOR_SIGNING_KEY',
+      'CURSOR_SIGNING_KEY is required (CAP-043 / D-CAP-043-D)',
+    );
+  }
+  const value = await readSecret(raw);
+  if (value.length === 0) {
+    throw new ConfigError(
+      'INVALID_CURSOR_SIGNING_KEY',
+      'CURSOR_SIGNING_KEY must be a non-empty string',
+    );
+  }
+  return value;
 }

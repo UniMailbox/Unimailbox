@@ -555,6 +555,65 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
     expect(viewerListBody.data.items[0].isRead).toBe(0);
   });
 
+  // Fix pass F3 / D-CAP-043-F: pre-0017 the UPSERT conflicted on
+  // mailbox_message_id alone, so the second reader's row never existed
+  // and their read state was silently dropped.
+  it('R-MESSAGE-005 / D-CAP-043-F: two members marking the same message read each get their own is_read = 1 row', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+
+    // Both members open the message (mark-read fires on detail open).
+    for (const token of [ownerToken, viewerToken]) {
+      const response = await SELF.fetch(
+        `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/read`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+        },
+      );
+      expect(response.status).toBe(200);
+    }
+
+    // Both per-user rows exist with is_read = 1 — only possible post-0017,
+    // where the PK is (mailbox_message_id, user_id).
+    const stateRows = await env.DB
+      .prepare(
+        `SELECT user_id, is_read FROM message_user_state
+         WHERE mailbox_message_id = ? ORDER BY user_id`,
+      )
+      .bind(mailboxMessageId)
+      .all<{ user_id: string; is_read: number }>();
+    expect(stateRows.results).toHaveLength(2);
+    expect(new Set(stateRows.results.map((row) => row.user_id))).toEqual(
+      new Set([ownerId, viewerId]),
+    );
+    for (const row of stateRows.results) {
+      expect(row.is_read).toBe(1);
+    }
+
+    // Each member's list resolves the message as read for themselves.
+    for (const token of [ownerToken, viewerToken]) {
+      const list = await SELF.fetch(
+        `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(list.status).toBe(200);
+      const body = await list.json();
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0].isRead).toBe(1);
+    }
+  });
+
   it('returns 404 when the message is not in the mailbox', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
@@ -790,5 +849,205 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
       .bind(idempotencyKey)
       .first<{ count: number }>();
     expect(recordCount?.count).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-043 Slice 1 — HMAC cursor + per-user soft-delete (R-API-005,
+// R-MESSAGE-005). These tests exercise the inbox list endpoint with the
+// new cursor implementation: a tampered cursor must surface as a single
+// 400 INVALID_CURSOR, soft-delete state must be per-user, and the
+// repository must still produce a valid HMAC nextCursor on the boundary.
+// ---------------------------------------------------------------------------
+
+describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-delete', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+  });
+
+  it('returns 400 INVALID_CURSOR when the supplied cursor was tampered with', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // A syntactically well-formed cursor signed with a *different* key.
+    // Tampering the signature with the right shape must surface as a
+    // single 400 INVALID_CURSOR — not 500, not 200.
+    const { signCursor } = await import('../../platform/cursor');
+    const otherKey = 'attacker-supplied-key-different-from-env';
+    const foreignCursor = await signCursor(
+      { createdAt: '2026-01-01 00:00:00', id: crypto.randomUUID() },
+      otherKey,
+    );
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages?cursor=${encodeURIComponent(foreignCursor)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_CURSOR');
+  });
+
+  it('returns 400 INVALID_CURSOR when the cursor has the wrong shape (no dot)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // A garbage cursor — neither signed nor shaped correctly. The
+    // route layer must still emit INVALID_CURSOR, not INVALID_REQUEST
+    // or 500.
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages?cursor=not-a-cursor`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_CURSOR');
+  });
+
+  it('round-trips a valid cursor (page 2 returns the next slice and null nextCursor)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // Seed three messages with strictly-increasing created_at so the
+    // (created_at < ?, id < ?) boundary has a stable, deterministic shape.
+    const oldest = await insertMessage(mailboxId, {
+      subject: 'oldest',
+      createdAt: '2026-01-01 00:00:00.000Z',
+    });
+    await insertMessage(mailboxId, {
+      subject: 'middle',
+      createdAt: '2026-01-02 00:00:00.000Z',
+    });
+    await insertMessage(mailboxId, {
+      subject: 'newest',
+      createdAt: '2026-01-03 00:00:00.000Z',
+    });
+
+    // First page: limit=2 → newest + middle + a next cursor.
+    const page1 = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages?limit=2`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(page1.status).toBe(200);
+    const page1Body = await page1.json();
+    expect(page1Body.data.items).toHaveLength(2);
+    expect(page1Body.data.items[0].subject).toBe('newest');
+    expect(page1Body.data.items[1].subject).toBe('middle');
+    expect(page1Body.data.nextCursor).not.toBeNull();
+    // The cursor is opaque to clients; the assertion is that page 2
+    // successfully decodes it and returns the slice the server
+    // intended. If the signature were broken or the payload shape
+    // changed the second request would 400 INVALID_CURSOR.
+
+    // Second page: same key, signed cursor → oldest row, no next cursor.
+    const page2 = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages?limit=2&cursor=${encodeURIComponent(page1Body.data.nextCursor)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(page2.status).toBe(200);
+    const page2Body = await page2.json();
+    expect(page2Body.data.items).toHaveLength(1);
+    expect(page2Body.data.items[0].id).toBe(oldest.messageId);
+    expect(page2Body.data.nextCursor).toBeNull();
+  });
+
+  it('keeps per-user isDeleted independent (R-MESSAGE-005) — one user\'s delete does not hide it for another', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId, {
+      subject: 'soft-delete per-user',
+    });
+
+    // Fix pass F4: seed BOTH members' rows explicitly — owner soft-deleted
+    // (is_deleted = 1), viewer present and not deleted (is_deleted = 0).
+    // The two rows coexisting on the same mailbox_message_id is the
+    // post-0017 proof (composite PK, D-CAP-043-F); under the 0006
+    // single-column PK the second INSERT would have collided. Plain
+    // INSERTs — the rows do not exist yet, and ON CONFLICT(mailbox_message_id)
+    // no longer matches any unique constraint post-0017.
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, is_deleted, deleted_at, updated_at)
+         VALUES (?, ?, 1, datetime('now'), 1, datetime('now'), datetime('now'))`,
+      ).bind(mailboxMessageId, ownerId),
+      env.DB.prepare(
+        `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, is_deleted, deleted_at, updated_at)
+         VALUES (?, ?, 0, NULL, 0, NULL, datetime('now'))`,
+      ).bind(mailboxMessageId, viewerId),
+    ]);
+
+    // Sanity: both rows landed and only the owner's carries the delete.
+    const stateRows = await env.DB
+      .prepare(
+        `SELECT user_id, is_deleted FROM message_user_state
+         WHERE mailbox_message_id = ? ORDER BY user_id`,
+      )
+      .bind(mailboxMessageId)
+      .all<{ user_id: string; is_deleted: number }>();
+    expect(stateRows.results).toHaveLength(2);
+
+    // Owner has soft-deleted → owner's inbox list excludes it.
+    const ownerList = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect(ownerList.status).toBe(200);
+    const ownerBody = await ownerList.json();
+    expect(ownerBody.data.items).toEqual([]);
+
+    // Viewer has an explicit non-deleted row → still sees it.
+    const viewerList = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerList.status).toBe(200);
+    const viewerBody = await viewerList.json();
+    expect(viewerBody.data.items).toHaveLength(1);
+    expect(viewerBody.data.items[0].id).toBe(messageId);
+  });
+
+  it('returns empty page when the only message in the mailbox has been soft-deleted', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { mailboxMessageId } = await insertMessage(mailboxId, {
+      subject: 'deleted',
+    });
+
+    // Soft-delete the only message for this user (plain INSERT — post-0017
+    // the PK is (mailbox_message_id, user_id), so no row exists yet and
+    // ON CONFLICT(mailbox_message_id) matches no unique constraint).
+    await env.DB.prepare(
+      `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, is_deleted, deleted_at, updated_at)
+       VALUES (?, ?, 1, datetime('now'), 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(mailboxMessageId, ownerId)
+      .run();
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.items).toEqual([]);
+    expect(body.data.nextCursor).toBeNull();
   });
 });

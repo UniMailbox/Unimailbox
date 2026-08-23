@@ -30,6 +30,12 @@ export {
   listMessagesByMailbox,
   getMessageDetail,
   markMessageAsRead,
+  // CAP-043 Slice 1 / R-API-005: the typed CursorInvalidError so the
+  // route layer can map a tampered cursor to 400 INVALID_CURSOR without
+  // reaching into platform/cursor.ts. signCursor / verifyCursor are
+  // consumed by the repository directly (fix pass F8 removed the
+  // encodeCursor alias — it had no callers).
+  CursorInvalidError,
 } from './message-read-repository';
 export type {
   MessageListItem,

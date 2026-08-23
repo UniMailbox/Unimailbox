@@ -50,6 +50,12 @@ export interface ResourceState {
     // is a separate resource that this script creates/updates/skips on
     // its own track.
     betterAuthSecret: boolean;
+    // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY is the third
+    // independent Secrets Store binding (HMAC-SHA-256 cursor signing).
+    // Same generation discipline as the other two — fresh 32 random
+    // bytes, hex-encoded — but tracked separately so a rotation of one
+    // does not silently rotate the others.
+    cursorSigningKey: boolean;
   };
 }
 
@@ -577,6 +583,7 @@ const setSecrets = (state: ResourceState): ResourceState => {
     installationToken: false,
     credentialEncryptionKey: false,
     betterAuthSecret: false,
+    cursorSigningKey: false,
   };
 
   // INSTALLATION_TOKEN
@@ -751,6 +758,66 @@ const setSecrets = (state: ResourceState): ResourceState => {
     }
   } else {
     console.log('  BETTER_AUTH_SECRET already set (use --force-secrets to regenerate)');
+  }
+
+  // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY is the third
+  // independent Secrets Store binding (HMAC-SHA-256 cursor signing).
+  // Same generation discipline as the other secrets — fresh 32 random
+  // bytes, hex-encoded — but tracked separately so a rotation of one
+  // does not silently rotate the others. The deploy log line below
+  // names the capability so a reviewer can see the binding they own.
+  const cursorAction = computeSecretAction(secrets.cursorSigningKey, forceSecrets, dryRun);
+  if (cursorAction === 'create') {
+    const value = generateSecret();
+    if (dryRun) {
+      console.log('  [dry-run] Would set CURSOR_SIGNING_KEY');
+    } else {
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'create',
+          state.secretsStoreId,
+          '--name',
+          'CURSOR_SIGNING_KEY',
+          '--scopes',
+          'workers',
+        ],
+        value,
+      );
+      if (result.status !== 0) {
+        console.error('Failed to set CURSOR_SIGNING_KEY');
+        process.exit(result.status ?? 1);
+      }
+      console.log('  Set CURSOR_SIGNING_KEY (cursor HMAC signing key, CAP-043)');
+      secrets.cursorSigningKey = true;
+    }
+  } else if (cursorAction === 'update') {
+    const value = generateSecret();
+    if (dryRun) {
+      console.log('  [dry-run] Would update CURSOR_SIGNING_KEY');
+    } else {
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'update',
+          state.secretsStoreId,
+          '--name',
+          'CURSOR_SIGNING_KEY',
+          '--scopes',
+          'workers',
+        ],
+        value,
+      );
+      if (result.status !== 0) {
+        console.error('Failed to update CURSOR_SIGNING_KEY');
+        process.exit(result.status ?? 1);
+      }
+      console.log('  Updated CURSOR_SIGNING_KEY (cursor HMAC signing key, CAP-043)');
+    }
+  } else {
+    console.log('  CURSOR_SIGNING_KEY already set (use --force-secrets to regenerate)');
   }
 
   return { ...state, secrets };
@@ -1087,7 +1154,7 @@ const main = async (env: string): Promise<void> => {
       '\nWARNING: --force-secrets will overwrite INSTALLATION_TOKEN, CREDENTIAL_ENCRYPTION_KEY,',
     );
     console.error(
-      'and BETTER_AUTH_SECRET (CAP-042 / ADR-008). The downstream consequences differ per secret:',
+      'BETTER_AUTH_SECRET (CAP-042 / ADR-008), and CURSOR_SIGNING_KEY (CAP-043). The downstream consequences differ per secret:',
     );
     console.error(
       '  - INSTALLATION_TOKEN: ongoing setup sessions are invalidated; new claims are required.',
@@ -1103,6 +1170,18 @@ const main = async (env: string): Promise<void> => {
     );
     console.error(
       '    session cookie — all logged-in users will be silently signed out (CAP-042 / R-AUTH-004).',
+    );
+    console.error(
+      '  - CURSOR_SIGNING_KEY: rotating this secret invalidates every cursor the client is',
+    );
+    console.error(
+      '    holding (CAP-043 / D-CAP-043-D). Every inbox-list response will need to be re-fetched',
+    );
+    console.error(
+      '    from page 1; pagination forward in progress will land on the next fetch with',
+    );
+    console.error(
+      '    400 INVALID_CURSOR and the inbox will refetch from start (CAP-043 acceptance).',
     );
     console.error('\nType \'yes\' to continue: ');
 

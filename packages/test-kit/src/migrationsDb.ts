@@ -32,6 +32,18 @@ import webhookEventTimeSql from '../../../migrations/0012_webhook_event_time.sql
 import webhookDeliveryMessageIndexSql from '../../../migrations/0013_webhook_delivery_message_index.sql?raw';
 import betterAuthSubstrateSql from '../../../migrations/0014_better_auth_substrate.sql?raw';
 import credentialBackfillSql from '../../../migrations/0015_credential_backfill.sql?raw';
+// CAP-043 Slice 1 / D-CAP-043-B: per-user soft-delete columns + index on
+// message_user_state. The migrationsDb() loader is the canonical entry
+// point for the worker-pool test database; without this import the test
+// pool would never see the new columns and the inbox-list query would
+// fail with "no such column: is_deleted".
+import messageUserStateSoftDeleteSql from '../../../migrations/0016_message_user_state_soft_delete.sql?raw';
+// CAP-043 Slice 1 fix pass / D-CAP-043-F: rebuild message_user_state with
+// PRIMARY KEY (mailbox_message_id, user_id) so per-user state rows can
+// coexist (R-MESSAGE-005). Without this migration the worker-pool DB keeps
+// the 0006 single-column PK and a second member's read/delete row cannot
+// be written.
+import messageUserStateCompositePkSql from '../../../migrations/0017_message_user_state_composite_pk.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -116,6 +128,16 @@ const MIGRATIONS = [
     name: '0015_credential_backfill',
     fileName: '0015_credential_backfill.sql',
     sql: credentialBackfillSql,
+  },
+  {
+    name: '0016_message_user_state_soft_delete',
+    fileName: '0016_message_user_state_soft_delete.sql',
+    sql: messageUserStateSoftDeleteSql,
+  },
+  {
+    name: '0017_message_user_state_composite_pk',
+    fileName: '0017_message_user_state_composite_pk.sql',
+    sql: messageUserStateCompositePkSql,
   },
 ] as const;
 

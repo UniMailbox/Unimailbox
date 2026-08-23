@@ -8,13 +8,21 @@
 // R-MESSAGE-005: isRead resolves per requesting user (see message-read-repository).
 // R-API-004: PATCH /messages/:id/read requires Idempotency-Key; replays return
 // the stored response.
+// R-API-005: the list cursor is HMAC-SHA-256 signed
+// (CAP-043 Slice 1 / D-CAP-043-D). A tampered or malformed cursor surfaces
+// as 400 INVALID_CURSOR (R-API-002 stable code).
 
 import { Hono } from 'hono';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan } from '../../modules/tenancy';
 import { checkPermission } from '../../modules/admin';
-import { listMessagesByMailbox, getMessageDetail, markMessageAsRead } from '../../modules/messages';
+import {
+  listMessagesByMailbox,
+  getMessageDetail,
+  markMessageAsRead,
+  CursorInvalidError,
+} from '../../modules/messages';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors';
@@ -28,6 +36,7 @@ import {
   isIdempotencyUniqueViolation,
   replayAfterRace,
 } from '../../platform/idempotency';
+import { parseCursorSigningKey } from '../../platform/config';
 import type { AppEnv } from '../../platform/env';
 
 const MARK_READ_OPERATION = 'PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read';
@@ -44,8 +53,13 @@ export function messageRoutes(): Hono<AppEnv> {
    * Cursor-paginated inbox list, newest first.
    *
    * Query:
-   *   cursor — opaque base64 cursor returned by a prior page (optional)
+   *   cursor — opaque HMAC-signed cursor returned by a prior page (optional)
    *   limit  — page size, default 50, clamped to 50
+   *
+   * R-API-005: the cursor is signed with `env.CURSOR_SIGNING_KEY`
+   * (D-CAP-043-D). A tampered cursor surfaces as `CursorInvalidError`
+   * from the repository, which the route catches and maps to a
+   * single 400 INVALID_CURSOR response.
    */
   routes.get('/mailboxes/:mailboxId/messages', requirePermission('message.read'), async (c) => {
     const userId = c.get('userId');
@@ -71,10 +85,33 @@ export function messageRoutes(): Hono<AppEnv> {
     const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
     await assertCan(c.env.DB, userId, mailboxId, 'read', isAdmin);
 
-    const result = await listMessagesByMailbox(c.env.DB, mailboxId, userId, {
-      ...(cursor !== undefined && { cursor }),
-      limit,
-    });
+    // R-API-005: resolve the HMAC key from the Secrets Store binding
+    // (D-CAP-043-D). A missing key fails closed with INVALID_CURSOR_SIGNING_KEY
+    // via the ConfigError path in platform/config.ts.
+    const cursorSigningKey = await parseCursorSigningKey(c.env);
+
+    let result;
+    try {
+      result = await listMessagesByMailbox(c.env.DB, mailboxId, userId, {
+        ...(cursor !== undefined && { cursor }),
+        limit,
+        cursorSigningKey,
+      });
+    } catch (error) {
+      // R-API-005: a tampered or malformed cursor surfaces as a single
+      // stable 400 INVALID_CURSOR. We don't distinguish "bad shape"
+      // from "bad signature" because the two are observationally
+      // equivalent for an attacker; one error code keeps the API
+      // surface stable (R-API-002).
+      if (error instanceof CursorInvalidError) {
+        throw new DomainError({
+          code: 'INVALID_CURSOR',
+          message: 'The supplied cursor is invalid or has been tampered with',
+          httpStatus: 400,
+        });
+      }
+      throw error;
+    }
     return c.json({ data: result });
   });
 

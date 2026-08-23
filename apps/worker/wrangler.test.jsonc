@@ -59,6 +59,12 @@
   // BETTER_AUTH_SECRET is intentionally a fixed dev-only value; rotating
   // it invalidates every existing Better Auth cookie, so a real secret
   // lives only in the production Secrets Store.
+  //
+  // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY mirrors the new
+  // production binding. A fixed test value lets worker-pool tests assert
+  // cursor signing/verification without coupling to a real Secrets
+  // Store. Production rotation invalidates every existing cursor the
+  // same way BETTER_AUTH_SECRET invalidates sessions.
   "vars": {
     "ENVIRONMENT": "local",
     "BETTER_AUTH_URL": "http://localhost",
@@ -76,5 +82,6 @@
     "INSTALLATION_TOKEN": "test-installation-token",
     "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "BETTER_AUTH_SECRET": "test-better-auth-secret-do-not-use-elsewhere-32bytes",
+    "CURSOR_SIGNING_KEY": "test-cursor-signing-key-do-not-use-elsewhere-32bytes",
   },
 }

@@ -44,6 +44,7 @@ import {
   createRouter,
   Link,
   redirect,
+  useParams,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import type { ErrorComponentProps } from '@tanstack/react-router';
@@ -75,7 +76,8 @@ import {
   OutboundSmokeStep,
   CompleteStep,
 } from '../features/setup';
-import { MailboxShell } from '../features/mailbox/MailboxShell';
+import { MailboxListPage } from '../features/mailbox/MailboxListPage';
+import { InboxListPage } from '../features/mailbox/InboxListPage';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -177,6 +179,10 @@ const registerRoute = createRoute({
 // read the test and see the route tree mount with an empty session
 // store, navigate to `/mailbox`, and assert the final pathname is
 // `/login`.
+//
+// CAP-043 Slice 1 (AC 7): the placeholder MailboxShell is replaced
+// by the real MailboxListPage. The authorized-shell still exists as
+// an alternate entrypoint (kept for the Batch 5 sign-in test).
 const mailboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox',
@@ -189,7 +195,32 @@ const mailboxRoute = createRoute({
       throw redirect({ to: '/login' });
     }
   },
-  component: () => <MailboxShell />,
+  component: () => <MailboxListPage />,
+});
+
+// CAP-043 Slice 1 (AC 8): the inbox page for a single mailbox.
+// Path parameter `mailboxId` is required; `beforeLoad` enforces the
+// auth guard (D-CAP-041-1 / D-CAP-041-9) the same way the list
+// route does. The component reads `params.mailboxId` directly.
+const inboxRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mailbox/$mailboxId',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: function InboxListRoute(): ReactElement {
+    // The path parameter drives the inbox query key. `useParams` is
+    // a TanStack Router hook that resolves to the matched route's
+    // declared schema (`$mailboxId` → `mailboxId: string`).
+    const params = useParams({ strict: false });
+    return <InboxListPage mailboxId={params.mailboxId} />;
+  },
 });
 
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
@@ -333,6 +364,7 @@ const routeTree = rootRoute.addChildren([
   loginRoute,
   registerRoute,
   mailboxRoute,
+  inboxRoute,
   setupIndexRoute,
   setupChildren,
 ]);

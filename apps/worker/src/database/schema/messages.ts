@@ -1,10 +1,11 @@
 // apps/worker/src/database/schema/messages.ts — Drizzle typing for
 // messages-owned tables (messages, message_recipients, mailbox_messages, message_user_state).
-// SQL in migrations/0006_messages.sql is the deployable artifact;
-// these declarations are typing only and must not be used to regenerate the SQL.
+// SQL in migrations/0006_messages.sql (+ 0016/0017 for message_user_state) is
+// the deployable artifact; these declarations are typing only and must not be
+// used to regenerate the SQL.
 //
 // R-INBOUND-008: Message + recipients + mailbox_messages inserted in one D1 batch
-import { sqliteTable, text, index, uniqueIndex, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, index, uniqueIndex, integer, primaryKey } from 'drizzle-orm/sqlite-core';
 import { users } from './identity';
 import { mailboxes } from './tenancy';
 
@@ -109,12 +110,15 @@ export const mailboxMessages = sqliteTable(
 export type MailboxMessage = typeof mailboxMessages.$inferSelect;
 export type NewMailboxMessage = typeof mailboxMessages.$inferInsert;
 
-// message_user_state — CAP-021
+// message_user_state — CAP-021; CAP-043 Slice 1 (0016 + 0017).
+// D-CAP-043-B: per-user soft delete (is_deleted / deleted_at).
+// D-CAP-043-F: PK is (mailbox_message_id, user_id) — one row per user,
+// not one row per mailbox message (R-MESSAGE-005).
 export const messageUserState = sqliteTable(
   'message_user_state',
   {
     mailboxMessageId: text('mailbox_message_id')
-      .primaryKey()
+      .notNull()
       .references(() => mailboxMessages.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
@@ -122,9 +126,13 @@ export const messageUserState = sqliteTable(
     isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
     readAt: text('read_at'),
     updatedAt: text('updated_at').notNull(),
+    isDeleted: integer('is_deleted', { mode: 'boolean' }).notNull().default(false),
+    deletedAt: text('deleted_at'),
   },
   (table) => ({
     userIdx: index('message_user_state_user_idx').on(table.userId),
+    isDeletedIdx: index('message_user_state_is_deleted_idx').on(table.isDeleted),
+    compositePk: primaryKey({ columns: [table.mailboxMessageId, table.userId] }),
   }),
 );
 

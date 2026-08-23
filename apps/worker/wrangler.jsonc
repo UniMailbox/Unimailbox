@@ -112,6 +112,12 @@
   // derived from CREDENTIAL_ENCRYPTION_KEY. Production deploys create it
   // through scripts/deploy.ts:setSecrets; local/test bindings substitute
   // a plain string (see apps/worker/wrangler.test.jsonc).
+  //
+  // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY is a third
+  // independent Secrets Store binding. It signs the inbox-list cursor
+  // (R-API-005 / D-CAP-043-D) and MUST NOT share material with
+  // CREDENTIAL_ENCRYPTION_KEY (AES-GCM, different rotation cadence)
+  // or BETTER_AUTH_SECRET (cookie HMAC, different purpose).
   "secrets_store_secrets": [
     {
       "binding": "INSTALLATION_TOKEN",
@@ -127,6 +133,11 @@
       "binding": "BETTER_AUTH_SECRET",
       "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
       "secret_name": "BETTER_AUTH_SECRET",
+    },
+    {
+      "binding": "CURSOR_SIGNING_KEY",
+      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
+      "secret_name": "CURSOR_SIGNING_KEY",
     },
   ],
 

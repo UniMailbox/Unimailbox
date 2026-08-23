@@ -77,6 +77,10 @@ export const ERROR_CODES = {
   DOMAIN_ALREADY_MANAGED: 'DOMAIN_ALREADY_MANAGED',
   MAILBOX_NOT_FOUND: 'MAILBOX_NOT_FOUND',
   MESSAGE_NOT_FOUND: 'MESSAGE_NOT_FOUND',
+  // CAP-043 Slice 1 / R-API-005: the cursor HMAC returned a tampered or
+  // malformed payload (or the route layer received a signature mismatch).
+  // 400 with the stable code; clients should refetch from the start.
+  INVALID_CURSOR: 'INVALID_CURSOR',
   ROLE_NOT_FOUND: 'ROLE_NOT_FOUND',
   BLOCKLIST_ENTRY_NOT_FOUND: 'BLOCKLIST_ENTRY_NOT_FOUND',
   PROVIDER_CONNECTION_NOT_FOUND: 'PROVIDER_CONNECTION_NOT_FOUND',

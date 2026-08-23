@@ -552,8 +552,15 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * the web client can gate its Continue button on the same constant
  * without crossing module boundaries (CAP-041 AC #6). Bumped when a new
  * migration lands. Hand-written; intentionally not auto-generated.
+ *
+ * CAP-043 Slice 1: bumped from `'0015'` to `'0016'` after
+ * migrations/0016_message_user_state_soft_delete.sql (per-user
+ * is_deleted / deleted_at columns), then to `'0017'` by the Slice 1 fix
+ * pass after migrations/0017_message_user_state_composite_pk.sql
+ * (message_user_state PK becomes (mailbox_message_id, user_id) —
+ * D-CAP-043-F).
  */
-export const CURRENT_SCHEMA_VERSION = '0015' as const;
+export const CURRENT_SCHEMA_VERSION = '0017' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008

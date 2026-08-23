@@ -1,8 +1,19 @@
 // apps/web — mailbox feature public API.
 //
-// The router imports MailboxShell from here. MailboxLoading and
-// MailboxError are reusable across the mailbox subtree (CAP-043/044).
+// CAP-042 (Batch 5) AC 20. CAP-043 Slice 1 adds the list/inbox pages
+// and their state-surface components. The router imports MailboxShell
+// (kept as the placeholder authorized shell from Batch 5) and the new
+// `MailboxListPage` / `InboxListPage` directly; the loading/error
+// primitives remain reusable across the mailbox subtree (CAP-043/044).
 export { MailboxShell } from './MailboxShell';
 export { MailboxLoading } from './MailboxLoading';
 export { MailboxError } from './MailboxError';
 export type { MailboxErrorProps } from './MailboxError';
+export { MailboxListPage } from './MailboxListPage';
+export { InboxListPage } from './InboxListPage';
+export { MailboxListSkeleton } from './MailboxListSkeleton';
+export { InboxListSkeleton } from './InboxListSkeleton';
+export { InboxEmpty } from './InboxEmpty';
+export { InboxError } from './InboxError';
+export type { InboxErrorProps } from './InboxError';
+export type { InboxListPageProps } from './InboxListPage';

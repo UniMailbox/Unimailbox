@@ -53,14 +53,14 @@ Objectively checkable. No "works correctly". Each maps to a test or a demonstrab
 
 ### Slice 1 — Cursor HMAC + soft-delete + filtered inbox list
 
-- [ ] 1. `migrations/0016_message_user_state_soft_delete.sql` adds `is_deleted INTEGER NOT NULL DEFAULT 0` and `deleted_at TEXT` to `message_user_state`; the matching `.verify.sql` proves both columns exist with the right defaults and a UNIQUE constraint is NOT added.
-- [ ] 2. `apps/worker/src/platform/cursor.ts` exports `signCursor(payload)` and `verifyCursor(token)` using HMAC-SHA-256; `verifyCursor` returns `null` on tamper or signature mismatch. Sign key derived from `env.CURSOR_SIGNING_KEY` (new binding) via the same Secrets Store pattern as `BETTER_AUTH_SECRET` (CAP-042).
-- [ ] 3. `apps/worker/src/modules/messages/message-read-repository.ts` replaces base64 `encodeCursor`/`decodeCursor` with `signCursor`/`verifyCursor`; a tampered cursor yields `null` and the route returns `400 INVALID_CURSOR` (not 200 with the wrong page).
-- [ ] 4. `listMessagesByMailbox` LEFT JOINs `message_user_state` and filters `COALESCE(mus.is_deleted, 0) = 0` so a soft-deleted message disappears from user A's list but is still in user B's list (asserted with two seeded users).
-- [ ] 5. `wrangler.jsonc` and `wrangler.test.jsonc` both declare the `CURSOR_SIGNING_KEY` binding (Secrets Store); `platform/config.ts` adds a strict parser; `scaffold doctor` parity check passes.
-- [ ] 6. `GET /api/v1/mailboxes/:mailboxId/messages` returns the new opaque HMAC cursor; tampered cursor returns `400 INVALID_CURSOR` (worker-pool test); empty mailbox returns `{ data: { items: [], nextCursor: null } }` with HTTP 200.
-- [ ] 7. Web: `/mailbox` lists owned mailboxes (uses existing `GET /api/v1/mailboxes` from CAP-020); click navigates to `/mailbox/:mailboxId`.
-- [ ] 8. Web: `/mailbox/:mailboxId` renders the inbox list with cursor pagination (`useInfiniteQuery` or equivalent), per-message subject / from / snippet / date / read badge / star icon, loading skeleton, empty state ("Nothing here yet"), error state with retry, unauthorized state (redirect to `/login` if descriptor is `null`).
+- [x] 1. `migrations/0016_message_user_state_soft_delete.sql` adds `is_deleted INTEGER NOT NULL DEFAULT 0` and `deleted_at TEXT` to `message_user_state`; the matching `.verify.sql` proves both columns exist with the right defaults and a UNIQUE constraint is NOT added.
+- [x] 2. `apps/worker/src/platform/cursor.ts` exports `signCursor(payload)` and `verifyCursor(token)` using HMAC-SHA-256; `verifyCursor` returns `null` on tamper or signature mismatch. Sign key derived from `env.CURSOR_SIGNING_KEY` (new binding) via the same Secrets Store pattern as `BETTER_AUTH_SECRET` (CAP-042).
+- [x] 3. `apps/worker/src/modules/messages/message-read-repository.ts` uses `signCursor`/`verifyCursor` from `platform/cursor.ts` (the pre-CAP-043 base64 cursor helpers are gone); a tampered cursor yields `null` and the route returns `400 INVALID_CURSOR` (not 200 with the wrong page).
+- [x] 4. `listMessagesByMailbox` LEFT JOINs `message_user_state` and filters `COALESCE(mus.is_deleted, 0) = 0` so a soft-deleted message disappears from user A's list but is still in user B's list (asserted with two seeded users).
+- [x] 5. `wrangler.jsonc` and `wrangler.test.jsonc` both declare the `CURSOR_SIGNING_KEY` binding (Secrets Store); `platform/config.ts` adds a strict parser; `scaffold doctor` parity check passes.
+- [x] 6. `GET /api/v1/mailboxes/:mailboxId/messages` returns the new opaque HMAC cursor; tampered cursor returns `400 INVALID_CURSOR` (worker-pool test); empty mailbox returns `{ data: { items: [], nextCursor: null } }` with HTTP 200.
+- [x] 7. Web: `/mailbox` lists owned mailboxes (uses existing `GET /api/v1/mailboxes` from CAP-020); click navigates to `/mailbox/:mailboxId`.
+- [x] 8. Web: `/mailbox/:mailboxId` renders the inbox list with cursor pagination (`useInfiniteQuery` or equivalent), per-message subject / from / snippet / date / read badge / star icon, loading skeleton, empty state ("Nothing here yet"), error state with retry, unauthorized state (redirect to `/login` if descriptor is `null`).
 
 ### Slice 2 — Message detail + thread
 
@@ -79,9 +79,9 @@ Objectively checkable. No "works correctly". Each maps to a test or a demonstrab
 
 ### Cross-slice gates
 
-- [ ] 18. `pnpm scaffold doctor` 13/13 + `pnpm typecheck` clean + `pnpm lint` clean + `pnpm test:unit` and `pnpm test:worker` show only pre-existing D1-parallelism failures (no new flakes).
-- [ ] 19. `pnpm build` passes with `wrangler --dry-run` clean (every new binding declared in both wrangler configs).
-- [ ] 20. `apps/web/src/features/auth/auth-session-storage.test.ts` source-tree walk still rejects `localStorage`/`sessionStorage`/`indexedDB`/Zustand `persist` after the new inbox files are added.
+- [x] 18. `pnpm scaffold doctor` 13/13 + `pnpm typecheck` clean + `pnpm lint` clean + `pnpm test:unit` and `pnpm test:worker` show only pre-existing D1-parallelism failures (no new flakes).
+- [x] 19. `pnpm build` passes with `wrangler --dry-run` clean (every new binding declared in both wrangler configs).
+- [x] 20. `apps/web/src/features/auth/auth-session-storage.test.ts` source-tree walk still rejects `localStorage`/`sessionStorage`/`indexedDB`/Zustand `persist` after the new inbox files are added.
 
 ## Vertical slice
 
@@ -89,14 +89,14 @@ Layers each slice touches, in dependency order:
 
 ### Slice 1
 
-- [ ] domain — `apps/worker/src/platform/cursor.ts` (NEW: sign/verify)
-- [ ] migration — `migrations/0016_message_user_state_soft_delete.sql` (+ `.verify.sql`)
-- [ ] repository — `apps/worker/src/modules/messages/message-read-repository.ts` (cursor + delete filter)
-- [ ] use case — n/a (read-side; repository only)
-- [ ] contract schema — `packages/contracts/src/index.ts` (cursor opaque string; inbox list response stays the same)
-- [ ] route — `apps/worker/src/http/routes/messages.ts` (cursor 400 path)
-- [ ] client — `apps/web/src/features/mailbox/{MailboxListPage,InboxListPage,MailboxListSkeleton,InboxListSkeleton,InboxEmpty,InboxError}.tsx` (NEW)
-- [ ] tests — `apps/worker/src/http/routes/messages.worker.test.ts` (HMAC cursor tests), `apps/web/src/features/mailbox/InboxListPage.test.tsx` (NEW), `apps/web/src/features/mailbox/MailboxListPage.test.tsx` (NEW)
+- [x] domain — `apps/worker/src/platform/cursor.ts` (NEW: sign/verify)
+- [x] migration — `migrations/0016_message_user_state_soft_delete.sql` (+ `.verify.sql`)
+- [x] repository — `apps/worker/src/modules/messages/message-read-repository.ts` (cursor + delete filter)
+- [x] use case — n/a (read-side; repository only)
+- [x] contract schema — `packages/contracts/src/index.ts` (cursor opaque string; inbox list response stays the same)
+- [x] route — `apps/worker/src/http/routes/messages.ts` (cursor 400 path)
+- [x] client — `apps/web/src/features/mailbox/{MailboxListPage,InboxListPage,MailboxListSkeleton,InboxListSkeleton,InboxEmpty,InboxError}.tsx` (NEW)
+- [x] tests — `apps/worker/src/http/routes/messages.worker.test.ts` (HMAC cursor tests), `apps/web/src/features/mailbox/InboxListPage.test.tsx` (NEW), `apps/web/src/features/mailbox/MailboxListPage.test.tsx` (NEW)
 
 ### Slice 2
 
@@ -202,6 +202,56 @@ The cursor is opaque to clients but tamperable by them (it's URL-passed). HMAC-S
 ### D-CAP-043-E — `DELETE` returns `204 No Content`, not `200`
 
 The HTTP convention for a successful DELETE is `204 No Content`. The slice returns the empty body and the `Idempotency-Key` replay returns the same `204` with empty body. The Idempotency-Key table stores `responseStatus = 204` and `responseJson = ''` (the existing `prepareCreateIdempotencyRecord` already accepts this shape).
+
+### D-CAP-043-F — `message_user_state` PK becomes `(mailbox_message_id, user_id)` (Slice 1 review finding, H1)
+
+The CAP-021/0006 schema made `mailbox_message_id` the sole PRIMARY KEY of `message_user_state` — one row per mailbox message, not one row per user. That is incompatible with `R-MESSAGE-005` per-user semantics in two ways:
+
+1. **Pre-existing defect (CAP-022 `markMessageAsRead`)**: the UPSERT conflicts on `mailbox_message_id` alone and never rewrites `user_id`, so when a second member reads a shared message their INSERT conflicts, the DO UPDATE keeps the first reader's `user_id`, and the second reader's per-user row never exists. Every subsequent visit resolves `isRead = 0` for them (the list/detail queries join on `(mailbox_message_id, user_id)`), so the second reader's read state is silently dropped — the message shows unread forever for everyone except the first reader.
+2. **Blocks D-CAP-043-B**: a per-user `is_deleted` column on a table that can hold only one user's row means Slice 3's DELETE would clobber the other member's state.
+
+Migration **0017** rebuilds the table with `PRIMARY KEY (mailbox_message_id, user_id)` (SQLite cannot ALTER a PK; the migration creates `message_user_state_new`, copies rows, drops the old table, renames, recreates both indexes). The rebuild is lossless: the single-column PK guarantees no `(mailbox_message_id, user_id)` duplicates exist today. The writer-side alternative (re-assert `user_id = excluded.user_id` in the DO UPDATE, proposed during review) was **rejected** — it only changes whose state gets destroyed. `markMessageAsRead`'s conflict target becomes `(mailbox_message_id, user_id)`.
+
+### D-CAP-043-G — Rule of Three: `platform/cursor.ts` is pre-allocated CAP-034, accepted under the contract exception
+
+`signCursor`/`verifyCursor` currently have one concrete caller (`listMessagesByMailbox`). The abstraction is not justified by the Rule of Three; it is accepted because the CAP-043 contract explicitly pulls CAP-034 forward (§Out of scope, §Dependencies) and the execution plan allocates further cursor-paginated lists (drafts, sent, search) to the same helper. Recorded here so the acceptance is contractual, not tacit.
+
+## Slice 1 review outcome → fix pass
+
+Reviews returned: frontend **REJECT** (3 HIGH, 2 MEDIUM, 2 LOW) · QA **ACCEPT** (all AC verified) · security **ACCEPT-WITH-FOLLOWUPS** (2 MEDIUM, 3 LOW) · code **ACCEPT-WITH-FOLLOWUPS** (1 HIGH, 3 MEDIUM, 3 LOW) · architecture pending. The orchestrator independently confirmed the code H1 / security M2 root cause (single-column PK) by inspecting `schema/messages.ts:113-129` and `message-read-repository.ts:369-394`.
+
+### Fix-pass acceptance criteria
+
+- [x] F1. **Migration 0017** (`migrations/0017_message_user_state_composite_pk.sql` + `.verify.sql`) rebuilds `message_user_state` with `PRIMARY KEY (mailbox_message_id, user_id)`, preserving every column and default from 0006 + 0016 (`is_read`, `read_at`, `updated_at DEFAULT (datetime('now'))`, `is_deleted DEFAULT 0 CHECK`, `deleted_at`), both FK CASCADEs, and recreates `message_user_state_user_idx` + `message_user_state_is_deleted_idx`. Copy step preserves all rows (lossless — no duplicates possible under the old PK). Verify asserts both PK columns (`pk=1` in `PRAGMA table_info`), row-count preservation, both indexes, and the `d1_migrations` row.
+- [x] F2. **Drizzle schema** (`apps/worker/src/database/schema/messages.ts`) catches up with 0016 + 0017: adds `isDeleted` (`integer`, mode boolean, default false) and `deletedAt` (`text`, nullable) plus the `is_deleted` index (arch-review HIGH — 0016's columns were never mirrored), and declares the composite PK via `primaryKey({ columns: [mailboxMessageId, userId] })`. `CURRENT_SCHEMA_VERSION` is `'0017'` in both `apps/worker/src/database/schema-version.ts` and `packages/contracts/src/index.ts`; `packages/test-kit/src/migrationsDb.ts` imports and applies 0017 (and `migrationsDb.worker.test.ts` expectations updated).
+- [x] F3. **`markMessageAsRead`** conflict target becomes `(mailbox_message_id, user_id)`; the misleading "keeps the existing user_id" comment is replaced with the per-user row semantics. New worker test `R-MESSAGE-005`: two members read the same message → both have `message_user_state` rows with `is_read = 1`; each member's list shows the message read for themselves.
+- [x] F4. **AC-4 test strengthened**: the per-user soft-delete test seeds rows for BOTH users (owner `is_deleted = 1`, viewer row present `is_deleted = 0`), proving coexistence — only possible post-0017.
+- [x] F5. **`MailboxListPage`** renders the D-CAP-041-9 fallback: `descriptor === null` after the router guard renders `<Unauthorized variant="expired" />` (mirrors `MailboxShell`), not the empty state. The unauthorized test asserts the `expired-session` surface AND that no mailbox rows render — replacing the current `expect(router).toBeDefined()` tautology.
+- [x] F6. **`InboxListPage`** drops the `useEffect` navigate-to-`/login` double-handling; a null descriptor renders `<Unauthorized variant="expired" />` only (the Sign-in CTA inside it is the recovery path), matching `MailboxShell`.
+- [x] F7. **Loading-skeleton test** proves the skeleton branch: the messages fetch must never resolve during the assertion (pending promise), and the assertion is `inbox-list-skeleton` only — not `skeleton OR error`.
+- [x] F8. **Dead surface removed**: `encodeCursor` alias and its re-export in `modules/messages/index.ts` are gone (repository calls `signCursor` directly); `PlatformConfig.cursorSigningKey` stub field is deleted from `platform/config.ts` (the only key path is `parseCursorSigningKey(env)`); the `mailbox-queries.ts` comment referencing non-existent `INBOX_INVALID_CURSOR_REFETCH` describes the real `refetch()` recovery; `verifyCursor` drops the redundant `as BufferSource` casts; `mailboxMessagesInfiniteQuery` drops the inferable positional generics; `InboxError` copy says "inbox list", not "mailbox list".
+- [x] F9. Gates: `pnpm scaffold doctor` 13/13 (schema-version reads 0017), `pnpm typecheck` clean, `pnpm lint` clean, `pnpm test:worker` at the 661+new baseline (4 pre-existing D1-parallelism failures only), `pnpm build` clean, web mailbox tests green.
+- [x] F10. **0016 verify.sql CHECK probe fixed** (arch MEDIUM + sec LOW): the dead INSERT probe that never executes its failing insert is replaced with a `sqlite_master` DDL assertion (`SELECT … FROM sqlite_master WHERE name='message_user_state' AND sql LIKE '%is_deleted IN (0, 1)%'`-style, which survives the 0017 rebuild) or deleted outright. No verify file may carry statements that assert nothing.
+
+### Fix-pass file ownership (one implementer, same envelope as Slice 1 plus)
+
+`migrations/0017_*.sql` + `.verify.sql` (NEW) · `apps/worker/src/database/schema/messages.ts` · `apps/worker/src/database/schema-version.ts` · `packages/contracts/src/index.ts` (version bump only) · `packages/test-kit/src/migrationsDb.ts` · `apps/worker/src/modules/messages/message-read-repository.ts` · `apps/worker/src/modules/messages/index.ts` · `apps/worker/src/http/routes/messages.worker.test.ts` · `apps/worker/src/platform/config.ts` · `apps/worker/src/platform/cursor.ts` · `apps/web/src/features/mailbox/{MailboxListPage,InboxListPage,InboxError,mailbox-queries}.{tsx,ts}` · `apps/web/src/features/mailbox/{MailboxListPage,InboxListPage}.test.tsx`
+
+### Deferred to later slices / follow-ups (recorded, not fixed now)
+
+| Finding | Disposition |
+|---|---|
+| Cursor payload not bound to `mailboxId`/actor/TTL (sec LOW) | Slice 2 or follow-up — add `mailboxId` + `iat` to payload when a second cursor consumer exists |
+| `verifyCursor` payload format validation (UUID + datetime regex) (sec LOW) | Follow-up hardening |
+| 0016 verify.sql CHECK probe leaves dirty state on failure (sec LOW) | Follow-up — wrap probe rows in a transaction |
+| `MailboxListRow` button vs `<Link>` (fe LOW) | Follow-up refactor; Batch 8 L-3 chose button deliberately |
+| Card title shows raw mailbox UUID (fe LOW) | Slice 2 threads the mailbox address through the inbox route |
+| Auth-storage guard doesn't scan `features/mailbox/**` (fe follow-up) | Extend guard root when Slice 3 adds cache mutations |
+| Global installation-status → `/setup` redirect missing on web router (fe follow-up) | Pre-existing; separate capability (CAP-045 preview deployment surfaces it) |
+| `MailboxShell` retirement once `MailboxListPage` carries the D-CAP-041-9 fallback | Slice 2 cleanup — verify no importers first |
+| Slice 3 gate: star/delete UPSERTs MUST target `(mailbox_message_id, user_id)` post-0017 (sec M2) | Binding constraint on Slice 3's `deleteMessageForUser` |
+| Promote `mailboxListResponseSchema` from `apps/web/src/features/mailbox/mailbox-queries.ts:38-50` to `packages/contracts` (arch MEDIUM) | Before Slice 3 lands — cross-boundary wire shapes belong in contracts |
+| Verify comment cites nonexistent `.changes` semantics (arch LOW) | Fix in passing during the fix pass if trivially locatable; else follow-up |
 
 ## Open questions
 
