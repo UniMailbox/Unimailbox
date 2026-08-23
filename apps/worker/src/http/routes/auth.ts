@@ -291,195 +291,227 @@ export function authRoutes(): Hono<AppEnv> {
    * Returns 401 INVALID_CREDENTIALS for both wrong email and wrong password
    * (don't leak which factor failed per R-AUTH-008).
    */
-  routes.post('/login', requireIdempotencyKey, async (c) => {
-    // Read raw body for hashing
-    const rawBody = await c.req.text();
-    const requestHash = await sha256Hex(rawBody);
+  // CAP-042 (AC 23): AUTH_PROVIDER cutover. The legacy Bearer issuance
+  // surface must be unreachable in `better-auth` mode so a session is
+  // only minted via the Better Auth cookie path. The gate is placed
+  // BEFORE `requireIdempotencyKey` so it short-circuits before any
+  // body parsing or idempotency lookup — a stale idempotency record
+  // from a previous run cannot re-issue a token, and a body-parsing
+  // failure cannot surface as 400 instead of 401. Same no-probing
+  // envelope as the better-auth.ts gate — silent 401
+  // AUTHENTICATION_REQUIRED — so an attacker probing for the legacy
+  // surface cannot distinguish it from "no credential".
+  routes.post(
+    '/login',
+    async (c, next) => {
+      if (c.var.config?.authProvider === 'better-auth') {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 'AUTHENTICATION_REQUIRED',
+              message: 'Authentication required',
+              requestId: c.get('requestId') ?? '<unknown>',
+            },
+          }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+      await next();
+    },
+    requireIdempotencyKey,
+    async (c) => {
+      // Read raw body for hashing
+      const rawBody = await c.req.text();
+      const requestHash = await sha256Hex(rawBody);
 
-    // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays).
-    // D-CAP-031-C: see /register — local try/catch is required so the helper's
-    // schema validation does not run before the replay lookup.
-    let rawBodyJson: unknown;
-    try {
-      rawBodyJson = JSON.parse(rawBody);
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        // R-LOG-001: never log the body bytes. /login has no
-        // authenticated userId, so actorUserId is omitted (TS2379).
-        logger.warn({ event: 'auth.login.invalid_json' });
+      // Extract minimal data for actorId before replay check (Fix 9: avoid re-validating stored replays).
+      // D-CAP-031-C: see /register — local try/catch is required so the helper's
+      // schema validation does not run before the replay lookup.
+      let rawBodyJson: unknown;
+      try {
+        rawBodyJson = JSON.parse(rawBody);
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          // R-LOG-001: never log the body bytes. /login has no
+          // authenticated userId, so actorUserId is omitted (TS2379).
+          logger.warn({ event: 'auth.login.invalid_json' });
+          throw new DomainError({
+            code: 'INVALID_JSON',
+            message: 'Request body is not valid JSON',
+            httpStatus: 400,
+          });
+        }
+        throw error;
+      }
+      const email =
+        typeof (rawBodyJson as { email?: unknown })?.email === 'string'
+          ? (rawBodyJson as { email: string }).email
+          : '';
+      if (!email) {
+        // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
+        // email is extracted before schema.parse so the actorId hash
+        // can be computed before the replay lookup. A missing field
+        // is a 400 validation error.
         throw new DomainError({
-          code: 'INVALID_JSON',
-          message: 'Request body is not valid JSON',
+          code: 'VALIDATION_ERROR',
+          message: 'email is required',
           httpStatus: 400,
         });
       }
-      throw error;
-    }
-    const email =
-      typeof (rawBodyJson as { email?: unknown })?.email === 'string'
-        ? (rawBodyJson as { email: string }).email
-        : '';
-    if (!email) {
-      // Post-parse required-field guard (D-CAP-031-C / Fix 9). The
-      // email is extracted before schema.parse so the actorId hash
-      // can be computed before the replay lookup. A missing field
-      // is a 400 validation error.
-      throw new DomainError({
-        code: 'VALIDATION_ERROR',
-        message: 'email is required',
-        httpStatus: 400,
+
+      // Actor for login is sha256 of the email (R-SECRET-003)
+      const actorId = await opaqueActorId('email', email);
+
+      const idempotencyKey = c.get('idempotencyKey');
+      if (!idempotencyKey) {
+        throw new DomainError({
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'Idempotency-Key header required',
+          httpStatus: 400,
+        });
+      }
+
+      // Secret-bearing endpoint (Fix 1): re-execute on replay rather than serving
+      // stored tokens, which may have been revoked per R-AUTH-005. Delete the old
+      // record and fall through to the use case to mint fresh credentials.
+      const existing = await findIdempotencyRecord(
+        c.env.DB,
+        actorId,
+        LOGIN_OPERATION,
+        idempotencyKey,
+      );
+      if (existing) {
+        assertSameRequestHash(existing, requestHash);
+        // Same key + same hash: delete the old record and re-execute.
+        await c.env.DB.prepare(
+          `DELETE FROM idempotency_records
+             WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+        )
+          .bind(actorId, LOGIN_OPERATION, idempotencyKey)
+          .run();
+      }
+
+      const body = loginRequestSchema.parse(rawBodyJson);
+
+      // Find user by email
+      const user = await findUserByEmail(c.env.DB, body.email);
+      if (!user) {
+        throw new DomainError({
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password',
+          httpStatus: 401,
+        });
+      }
+
+      // Check user status
+      if (user.status === 'banned') {
+        throw new DomainError({
+          code: 'USER_BANNED',
+          message: 'User account is banned',
+          httpStatus: 403,
+        });
+      }
+      if (user.status === 'deleted') {
+        throw new DomainError({
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password',
+          httpStatus: 401,
+        });
+      }
+
+      // Verify password
+      const storedHash = {
+        algorithm: user.password_algorithm as 'pbkdf2-sha256',
+        iterations: user.password_iterations,
+        salt: new Uint8Array(user.password_salt),
+        hash: new Uint8Array(user.password_hash),
+      };
+      const isValid = await verifyPassword(body.password, storedHash);
+      if (!isValid) {
+        throw new DomainError({
+          code: 'INVALID_CREDENTIALS',
+          message: 'Invalid email or password',
+          httpStatus: 401,
+        });
+      }
+
+      // Generate tokens
+      const accessToken = systemIds.uuid();
+      const refreshToken = systemIds.uuid();
+      const refreshTokenHash = await hashToken(refreshToken);
+
+      // Calculate expiry times
+      const now = systemClock.now();
+      const accessTokenExpirySeconds = 15 * 60; // 15 minutes
+      const refreshTokenExpirySeconds = 30 * 24 * 60 * 60; // 30 days
+      const expiresAt = Math.floor(now.getTime() / 1000) + refreshTokenExpirySeconds;
+
+      // Store access token in CACHE KV with 15-minute TTL
+      await c.env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId: user.id }), {
+        expirationTtl: accessTokenExpirySeconds,
       });
-    }
 
-    // Actor for login is sha256 of the email (R-SECRET-003)
-    const actorId = await opaqueActorId('email', email);
-
-    const idempotencyKey = c.get('idempotencyKey');
-    if (!idempotencyKey) {
-      throw new DomainError({
-        code: 'IDEMPOTENCY_KEY_REQUIRED',
-        message: 'Idempotency-Key header required',
-        httpStatus: 400,
+      // Create session in D1
+      const sessionId = systemIds.uuid();
+      const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For');
+      const userAgent = c.req.header('User-Agent');
+      await createSession(c.env.DB, {
+        id: sessionId,
+        userId: user.id,
+        refreshTokenHash,
+        expiresAt,
+        ...(ip !== undefined && { ip }),
+        ...(userAgent !== undefined && { userAgent }),
+        createdAt: now.toISOString(),
       });
-    }
 
-    // Secret-bearing endpoint (Fix 1): re-execute on replay rather than serving
-    // stored tokens, which may have been revoked per R-AUTH-005. Delete the old
-    // record and fall through to the use case to mint fresh credentials.
-    const existing = await findIdempotencyRecord(
-      c.env.DB,
-      actorId,
-      LOGIN_OPERATION,
-      idempotencyKey,
-    );
-    if (existing) {
-      assertSameRequestHash(existing, requestHash);
-      // Same key + same hash: delete the old record and re-execute.
-      await c.env.DB.prepare(
-        `DELETE FROM idempotency_records
-           WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
-      )
-        .bind(actorId, LOGIN_OPERATION, idempotencyKey)
-        .run();
-    }
-
-    const body = loginRequestSchema.parse(rawBodyJson);
-
-    // Find user by email
-    const user = await findUserByEmail(c.env.DB, body.email);
-    if (!user) {
-      throw new DomainError({
-        code: 'INVALID_CREDENTIALS',
-        message: 'Invalid email or password',
-        httpStatus: 401,
-      });
-    }
-
-    // Check user status
-    if (user.status === 'banned') {
-      throw new DomainError({
-        code: 'USER_BANNED',
-        message: 'User account is banned',
-        httpStatus: 403,
-      });
-    }
-    if (user.status === 'deleted') {
-      throw new DomainError({
-        code: 'INVALID_CREDENTIALS',
-        message: 'Invalid email or password',
-        httpStatus: 401,
-      });
-    }
-
-    // Verify password
-    const storedHash = {
-      algorithm: user.password_algorithm as 'pbkdf2-sha256',
-      iterations: user.password_iterations,
-      salt: new Uint8Array(user.password_salt),
-      hash: new Uint8Array(user.password_hash),
-    };
-    const isValid = await verifyPassword(body.password, storedHash);
-    if (!isValid) {
-      throw new DomainError({
-        code: 'INVALID_CREDENTIALS',
-        message: 'Invalid email or password',
-        httpStatus: 401,
-      });
-    }
-
-    // Generate tokens
-    const accessToken = systemIds.uuid();
-    const refreshToken = systemIds.uuid();
-    const refreshTokenHash = await hashToken(refreshToken);
-
-    // Calculate expiry times
-    const now = systemClock.now();
-    const accessTokenExpirySeconds = 15 * 60; // 15 minutes
-    const refreshTokenExpirySeconds = 30 * 24 * 60 * 60; // 30 days
-    const expiresAt = Math.floor(now.getTime() / 1000) + refreshTokenExpirySeconds;
-
-    // Store access token in CACHE KV with 15-minute TTL
-    await c.env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId: user.id }), {
-      expirationTtl: accessTokenExpirySeconds,
-    });
-
-    // Create session in D1
-    const sessionId = systemIds.uuid();
-    const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For');
-    const userAgent = c.req.header('User-Agent');
-    await createSession(c.env.DB, {
-      id: sessionId,
-      userId: user.id,
-      refreshTokenHash,
-      expiresAt,
-      ...(ip !== undefined && { ip }),
-      ...(userAgent !== undefined && { userAgent }),
-      createdAt: now.toISOString(),
-    });
-
-    // Return tokens and user info
-    const successBody = JSON.stringify({
-      data: {
-        accessToken,
-        refreshToken,
-        user: {
-          id: user.id,
-          email: user.email,
-          displayName: user.display_name,
+      // Return tokens and user info
+      const successBody = JSON.stringify({
+        data: {
+          accessToken,
+          refreshToken,
+          user: {
+            id: user.id,
+            email: user.email,
+            displayName: user.display_name,
+          },
         },
-      },
-    });
+      });
 
-    // Write idempotency record after success (best-effort mode).
-    // Fix 1 (R-SECRET-003): redact tokens from the stored response — replay
-    // re-executes, so serving plaintext tokens would return dead credentials.
-    const redactedBody = JSON.stringify({
-      data: {
-        accessToken: 'redacted',
-        refreshToken: 'redacted',
-        user: {
-          id: user.id,
-          email: user.email,
-          displayName: user.display_name,
+      // Write idempotency record after success (best-effort mode).
+      // Fix 1 (R-SECRET-003): redact tokens from the stored response — replay
+      // re-executes, so serving plaintext tokens would return dead credentials.
+      const redactedBody = JSON.stringify({
+        data: {
+          accessToken: 'redacted',
+          refreshToken: 'redacted',
+          user: {
+            id: user.id,
+            email: user.email,
+            displayName: user.display_name,
+          },
         },
-      },
-    });
-    await writeIdempotencyRecord(c.env.DB, {
-      id: systemIds.uuid(),
-      actorId,
-      operation: LOGIN_OPERATION,
-      idempotencyKey,
-      requestHash,
-      responseStatus: 200,
-      responseJson: redactedBody,
-      createdAt: sqliteTimestamp(systemClock.now()),
-    });
+      });
+      await writeIdempotencyRecord(c.env.DB, {
+        id: systemIds.uuid(),
+        actorId,
+        operation: LOGIN_OPERATION,
+        idempotencyKey,
+        requestHash,
+        responseStatus: 200,
+        responseJson: redactedBody,
+        createdAt: sqliteTimestamp(systemClock.now()),
+      });
 
-    return new Response(successBody, {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  });
+      return new Response(successBody, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    },
+  );
 
   /**
    * POST /api/v1/auth/refresh

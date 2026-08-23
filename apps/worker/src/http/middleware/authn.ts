@@ -18,6 +18,24 @@
 //     (AC 14). The response carries no credential material so an
 //     attacker cannot use the error to enumerate.
 //
+// CAP-042 (AC 23) — AUTH_PROVIDER cutover matrix:
+//
+//   The `authProvider` value on `c.var.config` gates which credential
+//   surfaces this middleware accepts on a per-request basis:
+//
+//     - `'legacy'`     — only Bearer. The Better Auth cookie is
+//                        silently ignored (no D1 lookup); a request
+//                        with only a cookie falls through to a 401.
+//     - `'dual'`       — both surfaces (existing AC 13/14 behaviour).
+//     - `'better-auth'`— only Better Auth cookie. The Bearer header is
+//                        silently ignored (no CACHE lookup); a request
+//                        with only a Bearer falls through to a 401.
+//
+//   Silently ignoring a credential is the safe choice over a 401: a
+//   legacy-mode caller probing for Better Auth gets the same 401 they
+//   would get with no credential at all, and no error body reveals
+//   that the Better Auth surface exists.
+//
 // This middleware does NOT block unauthenticated requests — that
 // responsibility belongs to `requirePermission` (R-AUTHZ-001 +
 // R-AUTHZ-003). It only sets `c.var.userId` and surfaces the
@@ -110,12 +128,26 @@ async function resolveBetterAuthUserId(
  * authorization on top of this layer.
  */
 export const authn: MiddlewareHandler<AppEnv> = async (c, next) => {
+  // CAP-042 (AC 23): AUTH_PROVIDER cutover matrix. The `config`
+  // middleware populates `c.var.config` per request from the runtime
+  // env, so flipping `AUTH_PROVIDER` takes effect on the next request
+  // without a Worker restart. `authProvider === 'dual'` is the default
+  // behaviour the existing AC 13/14 tests cover; the two new branches
+  // gate which credential surfaces are read.
+  const authProvider = c.var.config?.authProvider ?? 'dual';
+  const acceptBearer = authProvider !== 'better-auth';
+  const acceptBetterAuth = authProvider !== 'legacy';
+
   // Resolve the legacy Bearer userId via CACHE KV. This is the
   // existing CAP-019 path; the lookup is local to a Worker and has
-  // no D1 cost.
+  // no D1 cost. `AUTH_PROVIDER === 'better-auth'` skips the lookup
+  // entirely — a Bearer header is silently ignored so a legacy
+  // bearer alone returns 401 from the downstream `requirePermission`,
+  // not a mode-specific rejection (defence in depth against probing
+  // for the Better Auth surface).
   const authHeader = c.req.header('Authorization');
   let bearerUserId: string | null = null;
-  if (authHeader?.startsWith('Bearer ')) {
+  if (acceptBearer && authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice('Bearer '.length);
     const data = await c.env.CACHE.get(`auth:${token}`);
     if (data) {
@@ -139,26 +171,32 @@ export const authn: MiddlewareHandler<AppEnv> = async (c, next) => {
   // on `c.req.header('cookie')` returning the same case-sensitive
   // header — RFC 6265 says the header is case-insensitive but the
   // browser may send any capitalisation.
+  //
+  // `AUTH_PROVIDER === 'legacy'` skips the lookup so a Better Auth
+  // cookie alone returns 401 (cookie silently ignored — see the file
+  // header for the no-probing rationale).
   let betterAuthUserId: string | null = null;
-  const cookieHeader = c.req.header('Cookie') ?? c.req.header('cookie');
-  const cookieToken = readCookieValue(cookieHeader, BETTER_AUTH_COOKIE_NAME);
-  if (cookieToken) {
-    const config = c.var.config;
-    if (!config) {
-      // The `config` middleware should have populated this; the
-      // absence indicates a router misconfiguration. Falling
-      // through with `betterAuthUserId = null` is the safe choice —
-      // the legacy Bearer path still runs, and `requirePermission`
-      // is the gate that decides whether unauthenticated requests
-      // are acceptable for the route.
-    } else {
-      try {
-        betterAuthUserId = await resolveBetterAuthUserId(c.env, config, cookieToken);
-      } catch {
-        // A Better Auth internal error must not deny a request that
-        // has a valid Bearer token. We swallow the error here; the
-        // conflict check below still runs and the caller can decide
-        // what to do if neither principal resolves.
+  if (acceptBetterAuth) {
+    const cookieHeader = c.req.header('Cookie') ?? c.req.header('cookie');
+    const cookieToken = readCookieValue(cookieHeader, BETTER_AUTH_COOKIE_NAME);
+    if (cookieToken) {
+      const config = c.var.config;
+      if (!config) {
+        // The `config` middleware should have populated this; the
+        // absence indicates a router misconfiguration. Falling
+        // through with `betterAuthUserId = null` is the safe choice —
+        // the legacy Bearer path still runs, and `requirePermission`
+        // is the gate that decides whether unauthenticated requests
+        // are acceptable for the route.
+      } else {
+        try {
+          betterAuthUserId = await resolveBetterAuthUserId(c.env, config, cookieToken);
+        } catch {
+          // A Better Auth internal error must not deny a request that
+          // has a valid Bearer token. We swallow the error here; the
+          // conflict check below still runs and the caller can decide
+          // what to do if neither principal resolves.
+        }
       }
     }
   }

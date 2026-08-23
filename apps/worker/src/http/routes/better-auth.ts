@@ -27,6 +27,19 @@
 // `/api/v1/auth/better/*` INSIDE `apiV1`, so the body-size cap is
 // inherited. Webhooks are still a sibling sub-app because their body
 // limit exemption is different (D-CAP-031-A).
+//
+// CAP-042 (AC 23) — AUTH_PROVIDER cutover:
+//
+//   The route handler short-circuits with 401 `AUTHENTICATION_REQUIRED`
+//   when `c.var.config.authProvider === 'legacy'`. The Hono mount at
+//   `/api/v1/auth/better` stays in place regardless of mode so a
+//   future mode switch is a one-line env change; the gate lives in
+//   the handler where it can also short-circuit before the
+//   `createBetterAuth` factory call (which would otherwise bind to
+//   the D1 adapter and silently accept the request). Returning the
+//   same code as a missing-credential 401 keeps the error envelope
+//   symmetric with the rest of the API — no probing vector reveals
+//   the Better Auth surface's existence in legacy mode.
 import { Hono } from 'hono';
 
 import { createBetterAuth } from '../../integrations/better-auth/factory';
@@ -56,6 +69,29 @@ export function betterAuthRoutes(): Hono<AppEnv> {
       // bound to an undefined base URL.
       throw new Error('PlatformConfig missing from request context');
     }
+
+    // CAP-042 (AC 23): AUTH_PROVIDER cutover matrix. In `'legacy'`
+    // mode the Better Auth HTTP surface is unreachable: the mount
+    // path is preserved so a future env flip re-enables it, but the
+    // handler short-circuits with the canonical 401 envelope before
+    // constructing the Better Auth instance. See the file header for
+    // the no-probing rationale.
+    if (config.authProvider === 'legacy') {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: 'AUTHENTICATION_REQUIRED',
+            message: 'Authentication required',
+            requestId: c.get('requestId') ?? '<unknown>',
+          },
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
+
     const auth = await createBetterAuth(c.env, config);
 
     // Rebuild a Request with the cached body that `enforceBodySize`

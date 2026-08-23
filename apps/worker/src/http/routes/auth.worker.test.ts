@@ -1357,3 +1357,154 @@ describe('POST /api/v1/auth/refresh — idempotency', () => {
     expect(secondBody.data).toHaveProperty('accessToken');
   });
 });
+
+// ---------------------------------------------------------------------------
+// CAP-042 AC 23 — AUTH_PROVIDER cutover matrix for POST /api/v1/auth/login.
+//
+// The route layer in `apps/worker/src/http/routes/auth.ts` short-circuits
+// with 401 AUTHENTICATION_REQUIRED when `c.var.config.authProvider ===
+// 'better-auth'`. The gate runs BEFORE `requireIdempotencyKey` so it
+// short-circuits before any body parsing or idempotency lookup. These
+// tests prove three things:
+//
+//   1. `better-auth` mode — POST /api/v1/auth/login returns 401 with
+//      the canonical envelope, no Bearer token is issued, and no
+//      `idempotency_records` row is written. A stale idempotency
+//      record from a previous run cannot re-issue a token.
+//   2. `dual` mode — the legacy issuance path still works (200,
+//      tokens issued). Regression coverage that the gate only fires
+//      for the `better-auth` value.
+//   3. `legacy` mode — the legacy issuance path still works (200,
+//      tokens issued). Regression coverage that the gate does not
+//      affect the existing CAP-019 surface.
+//
+// `env.AUTH_PROVIDER` is read by `parsePlatformConfig(c.env)` on every
+// request (`http/middleware/config.ts`), so this in-test mutation takes
+// effect on the next `SELF.fetch` without a Worker restart.
+// ---------------------------------------------------------------------------
+
+/**
+ * Force `AUTH_PROVIDER` for the current test. The committed
+ * `wrangler.test.jsonc` defaults to `'dual'`; each test in this block
+ * overrides to the mode under test in-line. The same pattern lives in
+ * `better-auth.worker.test.ts` and `authn.worker.test.ts`; the helper
+ * is duplicated here to avoid a cross-file test import.
+ */
+function forceAuthProvider(provider: 'legacy' | 'dual' | 'better-auth'): void {
+  (env as { AUTH_PROVIDER?: string }).AUTH_PROVIDER = provider;
+}
+
+describe('CAP-042 AC 23 — POST /api/v1/auth/login mode gating', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+    await createAdminUser();
+    // The default in wrangler.test.jsonc is `dual`; each test below
+    // overrides to the mode under test in-line so the cutover matrix
+    // is exercised cleanly within a single file.
+  });
+
+  it('better-auth mode: returns 401 AUTHENTICATION_REQUIRED with no Bearer token issued', async () => {
+    forceAuthProvider('better-auth');
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'admin@example.com',
+        password: 'adminPassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'cap042-ac23-login-better-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as {
+      error?: { code?: unknown; message?: unknown };
+    };
+    expect(body.error?.code).toBe('AUTHENTICATION_REQUIRED');
+    // The canonical envelope is `{ error: { code, message, requestId } }`
+    // — mirror of the better-auth.ts gate. We assert the presence of
+    // the inner error keys; the message is human-readable and may vary.
+    expect(typeof body.error?.message).toBe('string');
+
+    // Authoritative proof the gate ran BEFORE requireIdempotencyKey:
+    // no `idempotency_records` row was written. If the gate had run
+    // after requireIdempotencyKey, a previous-run record would have
+    // been re-executed and the route would have minted fresh tokens.
+    const idempotencyCount = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM idempotency_records WHERE operation = ?`)
+      .bind('POST /api/v1/auth/login')
+      .first<{ n: number }>();
+    expect(idempotencyCount?.n ?? 0).toBe(0);
+  });
+
+  it('better-auth mode: gate fires before requireIdempotencyKey (no body required)', async () => {
+    forceAuthProvider('better-auth');
+
+    // Send NO Idempotency-Key. In dual/legacy mode this would 400
+    // IDEMPOTENCY_KEY_REQUIRED. The gate must short-circuit before
+    // requireIdempotencyKey runs, so a missing header still produces
+    // 401 AUTHENTICATION_REQUIRED (not 400).
+    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'admin@example.com',
+        password: 'adminPassword123',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error?: { code?: unknown } };
+    expect(body.error?.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+
+  it('dual mode: legacy issuance path still works (200 with tokens)', async () => {
+    forceAuthProvider('dual');
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'admin@example.com',
+        password: 'adminPassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'cap042-ac23-login-dual-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data?: { accessToken?: unknown; refreshToken?: unknown; user?: { id?: unknown } };
+    };
+    expect(body.data?.accessToken).toBeTruthy();
+    expect(body.data?.refreshToken).toBeTruthy();
+    expect(body.data?.user?.id).toBeTruthy();
+  });
+
+  it('legacy mode: legacy issuance path still works (200 with tokens, no gate interference)', async () => {
+    forceAuthProvider('legacy');
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'admin@example.com',
+        password: 'adminPassword123',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'cap042-ac23-login-legacy-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data?: { accessToken?: unknown; refreshToken?: unknown; user?: { id?: unknown } };
+    };
+    expect(body.data?.accessToken).toBeTruthy();
+    expect(body.data?.refreshToken).toBeTruthy();
+  });
+});

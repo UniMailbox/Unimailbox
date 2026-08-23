@@ -34,6 +34,22 @@ import { migrationsDb, resetAndMigrate, seedInstallationState } from '@unimailbo
 import { betterAuthPassword } from '../../integrations/better-auth/password';
 import { BETTER_AUTH_BASE_PATH, BETTER_AUTH_COOKIE_NAME } from '../../integrations/better-auth/path';
 
+/**
+ * Force `AUTH_PROVIDER` for the current test. The committed
+ * `wrangler.test.jsonc` defaults to `'legacy'`; every test in this
+ * file needs Better Auth reachable, so the `beforeEach` blocks below
+ * override to a specific mode under test.
+ *
+ * `env.AUTH_PROVIDER` is read by `parsePlatformConfig(c.env)` on every
+ * request (`http/middleware/config.ts`), so this in-test mutation takes
+ * effect on the next `SELF.fetch` without a Worker restart. This is
+ * the same per-request override mechanism the cutover matrix relies
+ * on (CAP-042 AC 23).
+ */
+function forceAuthProvider(provider: 'legacy' | 'dual' | 'better-auth'): void {
+  (env as { AUTH_PROVIDER?: string }).AUTH_PROVIDER = provider;
+}
+
 const TEST_USER_ID = '00000000-0000-4000-8000-00000000ba01';
 const TEST_USER_EMAIL = 'cap042-ac12@example.test';
 const TEST_PASSWORD = 'cap042-ac12-password';
@@ -128,6 +144,12 @@ describe('CAP-042 AC 12 — Better Auth shadow handler at /api/v1/auth/better', 
     // the installation complete so the gate lets the request through.
     await seedInstallationState({ status: 'complete', currentStep: 'complete' });
     await seedUserAndCredential();
+    // The committed wrangler.test.jsonc defaults to AUTH_PROVIDER=legacy
+    // (so the new cutover matrix tests don't accidentally cross modes);
+    // AC 12 needs Better Auth reachable, which requires `dual` or
+    // `better-auth`. `dual` is the most permissive and exercises the
+    // shared path with the cutover suite.
+    forceAuthProvider('dual');
   });
 
   afterEach(async () => {
@@ -293,6 +315,131 @@ describe('CAP-042 AC 12 — Better Auth shadow handler at /api/v1/auth/better', 
 });
 
 // ---------------------------------------------------------------------------
+// CAP-042 AC 23 — AUTH_PROVIDER cutover matrix for the Better Auth
+// shadow handler.
+//
+// Each `beforeEach` reseeds the same canonical `users` + `auth_accounts`
+// row so the credential row survives across modes. The cutover matrix
+// proves three things:
+//
+//   1. `legacy` mode — the Better Auth HTTP surface is unreachable.
+//      The handler short-circuits with 401 AUTHENTICATION_REQUIRED
+//      before constructing a Better Auth instance, so no `auth_sessions`
+//      row is written. `users.password_*` rows still resolve via the
+//      legacy `/api/v1/auth/login` route (verified in the authn suite).
+//   2. `dual` mode — the surface is reachable (covered by AC 12 above).
+//   3. `better-auth` mode — the surface is reachable AND the legacy
+//      Bearer path is silently ignored by `authn` (covered in the
+//      authn suite).
+//
+// The 401 in legacy mode intentionally uses the same error code as a
+// missing credential: no probing vector reveals that the Better Auth
+// surface exists in legacy mode.
+// ---------------------------------------------------------------------------
+
+const CUTOVER_USER_ID = '00000000-0000-4000-8000-00000000ba23';
+const CUTOVER_USER_EMAIL = 'cap042-ac23@example.test';
+const CUTOVER_PASSWORD = 'cap042-ac23-password';
+const CUTOVER_DISPLAY_NAME = 'AC-23 Cutover User';
+
+const CUTOVER_NOW_MS = Date.UTC(2026, 7, 23, 12, 0, 0);
+
+async function seedCutoverUserAndCredential(): Promise<void> {
+  const passwordEnvelope = await hashTestPasswordFor(CUTOVER_PASSWORD);
+  await env.DB.batch([
+    env.DB
+      .prepare(
+        `INSERT INTO users (
+           id, email, display_name, email_verified, status,
+           password_algorithm, password_iterations, password_salt, password_hash,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
+      )
+      .bind(
+        CUTOVER_USER_ID,
+        CUTOVER_USER_EMAIL,
+        CUTOVER_DISPLAY_NAME,
+        new Uint8Array(16),
+        new Uint8Array(32),
+        new Date(CUTOVER_NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+        new Date(CUTOVER_NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+      ),
+    env.DB
+      .prepare(
+        `INSERT INTO auth_accounts (
+           id, issuer, account_id, provider_id, user_id, password,
+           created_at, updated_at
+         ) VALUES (?, 'local:credential', ?, 'credential', ?, ?, ?, ?)`,
+      )
+      .bind('ac23-account', CUTOVER_USER_ID, CUTOVER_USER_ID, passwordEnvelope, CUTOVER_NOW_MS, CUTOVER_NOW_MS),
+  ]);
+}
+
+describe('CAP-042 AC 23 — Better Auth handler mode gating', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await seedInstallationState({ status: 'complete', currentStep: 'complete' });
+    await seedCutoverUserAndCredential();
+  });
+
+  afterEach(async () => {
+    await resetAndMigrate();
+  });
+
+  it('legacy mode: sign-in returns 401 and never reaches the Better Auth factory', async () => {
+    forceAuthProvider('legacy');
+
+    const response = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: CUTOVER_USER_EMAIL, password: CUTOVER_PASSWORD }),
+    });
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error?: { code?: unknown } };
+    expect(body.error?.code).toBe('AUTHENTICATION_REQUIRED');
+
+    // Authoritative proof the factory never ran: no auth_sessions row.
+    const sessionCount = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+      .bind(CUTOVER_USER_ID)
+      .first<{ n: number }>();
+    expect(sessionCount?.n ?? 0).toBe(0);
+  });
+
+  it('legacy mode: get-session also short-circuits with 401', async () => {
+    forceAuthProvider('legacy');
+
+    const response = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/get-session`, {
+      headers: { Cookie: `${BETTER_AUTH_COOKIE_NAME}=anything-here` },
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it('better-auth mode: sign-in is reachable end-to-end', async () => {
+    forceAuthProvider('better-auth');
+
+    const response = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: CUTOVER_USER_EMAIL, password: CUTOVER_PASSWORD }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('set-cookie')).toContain(`${BETTER_AUTH_COOKIE_NAME}=`);
+  });
+
+  it('dual mode: sign-in is reachable end-to-end (matrix parity with AC 12)', async () => {
+    forceAuthProvider('dual');
+
+    const response = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: CUTOVER_USER_EMAIL, password: CUTOVER_PASSWORD }),
+    });
+    expect(response.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // CAP-042 AC 16 — existing PBKDF2 users log in via the backfilled
 // credential row without a forced password reset; wrong-password and
 // unknown-email responses are non-enumerating.
@@ -408,6 +555,7 @@ describe('CAP-042 AC 16 — legacy user signs in without forced reset', () => {
     await resetAndMigrate();
     await seedInstallationState({ status: 'complete', currentStep: 'complete' });
     await seedLegacyUserAndBackfill();
+    forceAuthProvider('dual');
   });
 
   afterEach(async () => {

@@ -62,7 +62,17 @@
   "vars": {
     "ENVIRONMENT": "local",
     "BETTER_AUTH_URL": "http://localhost",
-    "AUTH_PROVIDER": "legacy",
+    // CAP-042 (AC 23): default AUTH_PROVIDER is `'dual'` so the
+    // existing AC 12 / AC 13 / AC 14 / AC 15 / AC 16 / AC 19 suites
+    // that exercise Better Auth sign-in work without per-test
+    // override. The cutover matrix tests in
+    // `http/middleware/authn.worker.test.ts` and
+    // `http/routes/better-auth.worker.test.ts` flip this value
+    // explicitly per test via `env.AUTH_PROVIDER = '...'` (mutations
+    // propagate to the worker runtime because
+    // `http/middleware/config.ts` calls `parsePlatformConfig(c.env)`
+    // on every request).
+    "AUTH_PROVIDER": "dual",
     "INSTALLATION_TOKEN": "test-installation-token",
     "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "BETTER_AUTH_SECRET": "test-better-auth-secret-do-not-use-elsewhere-32bytes",
