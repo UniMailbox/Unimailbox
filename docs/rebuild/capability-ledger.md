@@ -27,10 +27,10 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | | |
 |---|---|
 | **Phase** | 2 — Reliable Business Loop (implementation in progress; Phase 0/1 delivery verification reopened) |
-| **Active capability** | CAP-042 — Better Auth integration and authorized mailbox shell. Slice 0 and migration 0014 are complete; runtime auth config/factory is next in `work/active/CAP-042-better-auth-shell/`. |
-| **Next capability** | CAP-043 — inbox and message reading, after CAP-042 is accepted. |
+| **Active capability** | CAP-043 — Inbox, message detail/thread, read and Phase 1 delete behavior. Contract at `work/active/CAP-043-inbox-message-thread/task.md`. Slice 1 (cursor HMAC + per-user soft delete + filtered inbox list, incl. migration 0017 composite-PK fix) committed at `422b4ab`; Slice 2 (message detail + thread) implemented and 5-way reviewed, fix pass in flight. |
+| **Next capability** | CAP-044 — compose/reply and admin surfaces, after CAP-043 is accepted. |
 | **Blocked** | Phase 0/1 `Verified` status is blocked by the missing CAP-042–044 browser workflows and CAP-045 fresh/repeat preview evidence. CAP-039–041 implement the local delivery substrate and setup wizard but do not constitute preview verification. |
-| **Repository state** | Local branch `cap/CAP-042-better-auth-shell`, no Git remote/upstream configured. CAP-027/028/029/030/031/032/035/037/038/039/040/041 are implemented; CAP-042 is active in the local working tree. Better Auth and its Drizzle adapter are pinned at 1.7.1; migration 0014 is local and uncommitted. Current gates pass (doctor 13/13, lint 0 errors, typecheck clean, unit 568/568, worker 603/603, build ✓, `wrangler --dry-run` clean). No push or preview deployment has run. |
+| **Repository state** | Local worktree branch `claude/cap-042-better-auth-integration-c47133` (CAP-042 + CAP-043 work; CAP-042 ledger entry has full history), no Git remote/upstream configured. CAP-027–042 are Implemented at code level; CAP-043 in progress. Better Auth and its Drizzle adapter are pinned at 1.7.1. Migrations through `0017` are committed. Latest full gates (post-CAP-043 Slice 1, orchestrator-run): doctor 13/13, lint/typecheck clean, unit 665/665, worker 670/674 (4 documented pre-existing D1-parallelism failures), web tests 131/131, build ✓. No push or preview deployment has run. |
 
 ## Phase progress
 
@@ -38,7 +38,7 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 |---|---|---|---|---|
 | 0 | Foundation | Reopened — preview unverified | Local `/setup`, asset serving, queue topology, and repeat-safe migration paths are implemented; fresh/repeat preview deploy is NOT MET | `docs/rebuild/phase-0-audit.md` is superseded for current status by the 2026-08-19 reality audit and CAP-039/041 evidence below |
 | 1 | Minimal Business Closed Loop | Reopened — user loop incomplete | Setup UI is implemented; auth, mailbox, inbox, compose/reply, admin UI, and real browser/email verification are NOT MET | `docs/rebuild/phase-1-audit.md` is superseded for current status by the 2026-08-19 reality audit and CAP-041 evidence below |
-| 2 | Reliable Business Loop | In Progress — CAP-042 active | CAP-033/034 and CAP-042–045 remain; CAP-042 Slice 0 and migration 0014 are complete, runtime auth config/factory next | — |
+| 2 | Reliable Business Loop | In Progress — CAP-043 active | CAP-033/034 and CAP-043–045 remain; CAP-043 Slice 1 complete (cursor HMAC + per-user soft delete + inbox list), Slice 2 (detail/thread) under fix pass | — |
 | 3 | Complete Core Business | Not started | drafts + attachments | — |
 | 4 | Operations + Data Import | Not started | ops tooling + legacy import | — |
 | 5 | Automation & Multi-Provider | Not started | — | — |
