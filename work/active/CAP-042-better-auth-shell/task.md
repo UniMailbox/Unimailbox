@@ -148,7 +148,7 @@ Objectively checkable. No criterion is complete from a typecheck or mocked Node-
       `localStorage`, `sessionStorage`, or IndexedDB.
 - [x] 22. D-CAP-041-1 and D-CAP-041-9 are closed with cache-backed router loading and at least one
       real router-context test before the mailbox shell reuses that pattern.
-- [ ] 23. Local `AUTH_PROVIDER=legacy|dual|better-auth` tests prove controlled cutover, legacy
+- [x] 23. Local `AUTH_PROVIDER=legacy|dual|better-auth` tests prove controlled cutover, legacy
       session invalidation at the final switch, and rollback on the same additive schema.
 - [ ] 24. All six gates pass after fixes: `pnpm scaffold doctor`, `pnpm lint`, `pnpm typecheck`,
       `pnpm test:unit`, `pnpm test:worker`, and `pnpm build`; relevant coverage remains at least 80%.
