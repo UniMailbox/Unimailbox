@@ -141,12 +141,12 @@ Objectively checkable. No criterion is complete from a typecheck or mocked Node-
 
 ### Browser shell and rollback
 
-- [ ] 20. The single React client implements login, registration, logout, session recovery,
+- [x] 20. The single React client implements login, registration, logout, session recovery,
       authorized mailbox navigation, and loading/error/unauthorized/expired-session states from
       shared contracts where applicable.
-- [ ] 21. Browser auth uses HttpOnly cookies and writes no access/refresh/session token to
+- [x] 21. Browser auth uses HttpOnly cookies and writes no access/refresh/session token to
       `localStorage`, `sessionStorage`, or IndexedDB.
-- [ ] 22. D-CAP-041-1 and D-CAP-041-9 are closed with cache-backed router loading and at least one
+- [x] 22. D-CAP-041-1 and D-CAP-041-9 are closed with cache-backed router loading and at least one
       real router-context test before the mailbox shell reuses that pattern.
 - [ ] 23. Local `AUTH_PROVIDER=legacy|dual|better-auth` tests prove controlled cutover, legacy
       session invalidation at the final switch, and rollback on the same additive schema.
