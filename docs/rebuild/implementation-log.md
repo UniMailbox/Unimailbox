@@ -2025,3 +2025,27 @@ worker 505/505, build ✓, doctor 10/10.
 - **Pre-existing parallelism failures (4)** — `migrationsDb.worker.test.ts > R-DATA-004: PRAGMA foreign_keys is ON` (hook timeout 10012ms), `0015_credential_backfill.worker.test.ts > seeds five legacy users at the 0014 boundary` (hook timeout 10003ms), `admin.worker.test.ts > creates all 20 permissions with correct IDs` (hook timeout 10005ms), `admin.worker.test.ts > creates the administrator role with all 20 permissions` (UNIQUE constraint on `d1_migrations.name`). All four fail in the parallel suite but pass when each file is run in isolation (`pnpm test:worker src/<file>`). Root cause is vitest-pool-workers shared Node.js process contention with PBKDF2 work in the parallel suite. Documented as separate capability concern, not Batch 4.
 
 **Deferred**: D-CAP-042-pre-existing-parallelism (4 cross-suite test-isolation failures not introduced by CAP-042 — separate capability).
+
+2026-08-23 — CAP-042 Batch 5 (AC 20-22): browser auth shell + mailbox protected route + D-CAP-041-1 / D-CAP-041-9 closure. Pure client slice; no backend changes; apps/worker/ untouched.
+
+**AC 20 — Login / registration / logout / session recovery / authorized mailbox navigation**. New files: `apps/web/src/features/auth/{auth-session-store,auth-queries,LoginPage,RegisterPage,LogoutButton,Unauthorized,AuthErrorBoundary}.tsx` + an `index.ts` public surface. The in-memory Zustand `auth-session-store.ts` holds only a non-secret descriptor (`{ userId, email, displayName, expiresAt }`); the cookie itself is HttpOnly and never touched by JS. `auth-queries.ts` exposes TanStack Query hooks for sign-in / sign-up / sign-out / get-session; each fetcher POSTs/GETs the worker route with `credentials: 'include'` so the browser receives `Set-Cookie: unimailbox.session_token=...; HttpOnly; SameSite=Lax` automatically (R-SECRET-003). `LoginPage` and `RegisterPage` use react-hook-form + zod and call the shared error/loading views. `LogoutButton` clears the in-memory store and navigates to `/login`. The mailbox feature (`apps/web/src/features/mailbox/{MailboxShell,MailboxLoading,MailboxError}.tsx`) is the protected surface.
+
+**AC 21 — HttpOnly cookies, no token in browser storage**. `apps/web/src/features/auth/auth-session-storage.test.ts` walks the auth source tree and asserts no file imports `localStorage`, `sessionStorage`, `IndexedDB`, or Zustand `persist` middleware (after stripping comments so docstrings are exempt). The test fails if a future contributor adds any of those — CI-enforced. The store is in-memory only; clearing the tab clears the descriptor, and the next navigation re-derives it from the cookie-backed `/get-session` call.
+
+**AC 22 — D-CAP-041-1 / D-CAP-041-9 closure**. `/mailbox` `beforeLoad` (in `apps/web/src/app/router.tsx`) calls `queryClient.ensureQueryData({ queryKey: authQueryKeys.session(), queryFn: fetchAuthSession })` so the GET warms both the route guard and the render — one HTTP round-trip per navigation, not two (D-CAP-041-1, mirrors the CAP-041 setupStatusQuery pattern). `apps/web/src/app/router.test.tsx` mounts a real router tree and asserts the `/mailbox → /login` redirect on three cache states (empty, `{user: null, session: null}`, pre-seeded valid session) — at least one router-context test exercising `beforeLoad` (D-CAP-041-9).
+
+**Files**:
+- `apps/web/src/features/auth/**` (15 new: 8 source + 6 test + 1 index)
+- `apps/web/src/features/mailbox/**` (4 new: 3 source + 1 index)
+- `apps/web/src/app/router.tsx` (modified — new routes + `beforeLoad`)
+- `apps/web/src/app/router.test.tsx` (new — D-CAP-041-9 closure)
+- `apps/web/src/App.tsx` (modified — wiring)
+- `apps/web/src/test-utils.tsx` (modified — `mountAppRouter` extended with auth fixtures)
+
+**Gates** (orchestrator-run, post-Batch 5): `pnpm scaffold doctor` 13/13 ✓, `pnpm typecheck` clean ✓, `pnpm lint` clean ✓, `pnpm test:unit` 637/637 ✓ (34 new Batch 5 cases; no regressions), `pnpm test:worker` 636/640 (4 pre-existing failures reproduced on `7449c3c` via `git stash`; not Batch 5 regressions), `pnpm --filter @unimailbox/web run build` ✓ (`dist/assets/index-Vs6dzkf-.js` 408.65 kB / 123.37 kB gz).
+
+**Findings**:
+- **MEDIUM — `AuthSessionDescriptor` is not in `packages/contracts`**. The shape (`{ userId, email, displayName, expiresAt }`) lives only in `apps/web/src/features/auth/auth-session-store.ts`. Per architecture rules, cross-boundary types come from contracts — but this descriptor currently doesn't cross the worker boundary. Batch 6 (which wires the worker's `getSession` route) is the right place to decide whether to promote it. Documented as D-CAP-042-auth-descriptor for the orchestrator.
+- **LOW — `RegisterPage` posts to `/api/v1/auth/register` (legacy endpoint)**. Better Auth's `sign-up/email` is intentionally disabled (`disableSignUp: true` in `factory.ts`); the legacy endpoint is the production registration path. Batch 6 may consider a unified Better Auth surface; out of scope for Batch 5.
+
+**Deferred**: D-CAP-042-auth-descriptor (orchestrator decision on whether to promote `AuthSessionDescriptor` into `packages/contracts/auth/session.ts` — Batch 6 territory).
