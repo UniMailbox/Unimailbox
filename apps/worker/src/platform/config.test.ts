@@ -60,9 +60,8 @@ describe('parseAuthProvider', () => {
     } catch (err) {
       captured = err as ConfigError;
     }
-    expect(captured).not.toBeNull();
-    expect(captured!.code).toBe('INVALID_AUTH_PROVIDER');
-    expect(captured!.message).toContain('postgres');
+    expect(captured?.code).toBe('INVALID_AUTH_PROVIDER');
+    expect(captured?.message).toContain('postgres');
   });
 
   it('rejects case-mutated values (closed enum, no aliasing)', () => {
