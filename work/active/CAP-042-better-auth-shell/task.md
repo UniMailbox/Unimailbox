@@ -126,9 +126,9 @@ Objectively checkable. No criterion is complete from a typecheck or mocked Node-
 
 ### Existing users and registration
 
-- [ ] 15. Credential backfill is repeat-safe and verifies source/target counts, duplicates, orphan
+- [x] 15. Credential backfill is repeat-safe and verifies source/target counts, duplicates, orphan
       rows, non-password users, and case-insensitive email behavior.
-- [ ] 16. Existing PBKDF2 users log in without a forced password reset; wrong-password behavior
+- [x] 16. Existing PBKDF2 users log in without a forced password reset; wrong-password behavior
       remains non-enumerating.
 - [ ] 17. Invitation registration atomically creates canonical user + credential + member role and
       consumes the invite once; injected failure rolls everything back or proves the accepted
