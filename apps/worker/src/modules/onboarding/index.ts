@@ -25,6 +25,7 @@ export {
   findKeyByCodeHash,
   prepareIncrementKeyUsage,
 } from './registration-key-repository';
+export { registerWithInvite } from './register-with-invite';
 export type { CreateAdministratorInput, CreateAdministratorResult } from './create-administrator';
 export type { CreateDomainInput, CreateDomainResult } from './create-domain';
 export type { CloudflareDashboardLinkResult } from './cloudflare-dashboard-link';
@@ -38,3 +39,8 @@ export type { SetupBrevoInput, SetupBrevoResult } from './setup-brevo';
 export type { OutboundSmokeTestInput, OutboundSmokeTestResult } from './outbound-smoke-test';
 export type { CompleteSetupInput, CompleteSetupResult } from './complete-setup';
 export type { CreateRegistrationKeyInput, RegistrationKeyRow } from './registration-key-repository';
+export type {
+  RegisterWithInviteInput,
+  RegisterWithInviteDeps,
+  RegisterWithInviteResult,
+} from './register-with-invite';

@@ -343,15 +343,15 @@ describe('verifyPassword', () => {
     expect(result).toBe(false);
   });
 
-  it('verifies minimum-length password (8 chars)', async () => {
-    const password = '12345678';
+  it('verifies R-AUTH-007 lower-bound password (6 chars)', async () => {
+    const password = '123456';
     const stored = await hashPassword(password);
     const result = await verifyPassword(password, stored);
     expect(result).toBe(true);
   });
 
-  it('verifies maximum-length password (72 chars)', async () => {
-    const password = 'a'.repeat(72);
+  it('verifies R-AUTH-007 upper-bound password (30 chars)', async () => {
+    const password = 'a'.repeat(30);
     const stored = await hashPassword(password);
     const result = await verifyPassword(password, stored);
     expect(result).toBe(true);

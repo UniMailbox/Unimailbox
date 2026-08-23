@@ -12,6 +12,28 @@ import { z } from 'zod';
 export const emailAddressSchema = z.string().trim().toLowerCase().email().max(254);
 
 /**
+ * R-AUTH-008 — minimum email-prefix length gate.
+ *
+ * `R-AUTH-008` requires the registration path to reject email prefixes
+ * shorter than `minEmailPrefix`. The application does not expose a
+ * runtime setting for this value (the value is owned by the contracts
+ * layer so the wire contract is one place to audit). Three characters
+ * is the chosen defensible default:
+ *
+ *   - At least two characters: a single-letter prefix is too easy to
+ *     collide with display preferences and to enumerate.
+ *   - At most common: 3-character prefixes (`"abc@example.com"`) are
+ *     the smallest realistic handle; anything below that is operator
+ *     error or probing traffic.
+ *
+ * A future product change that wants a different default updates the
+ * constant here; `registerRequestSchema` and any future
+ * `signUpRequestSchema` re-use the same constant so a single edit
+ * changes the wire contract end-to-end.
+ */
+export const MIN_EMAIL_PREFIX_LENGTH = 3;
+
+/**
  * Sample contract — a UUIDv4 string. The shape every other ID contract will
  * follow once CAP-004 lands the schema.
  *
@@ -575,7 +597,10 @@ export type SetupPreflightResponse = z.infer<typeof setupPreflightResponseSchema
  */
 export const setupAdministratorRequestSchema = z.object({
   email: emailAddressSchema,
-  password: z.string().min(8).max(72),
+  // R-AUTH-007 reconciled business rule: 6..30 characters.
+  // Same range as `registerRequestSchema` so setup and registration
+  // agree on the password policy.
+  password: z.string().min(6).max(30),
   displayName: z.string().max(100).optional(),
 });
 
@@ -719,13 +744,29 @@ export type CreateInviteCodeRequest = z.infer<typeof createInviteCodeRequestSche
  *
  * - code: 64-character hex registration code (32 bytes, SHA-256 hashed for storage)
  * - email: user's email address (case-insensitive, validated per R-DATA-001)
- * - password: 8-72 characters (enforced by API, hashed with PBKDF2-SHA256)
+ *         The local-part (before `@`) must be at least `MIN_EMAIL_PREFIX_LENGTH`
+ *         characters per R-AUTH-008 — too-short prefixes are rejected with 400
+ *         VALIDATION_ERROR at the route boundary.
+ * - password: 6-30 characters (enforced by API, hashed with PBKDF2-SHA256)
  * - displayName: optional display name (max 100 chars)
  */
 export const registerRequestSchema = z.object({
   code: z.string().length(64),
-  email: emailAddressSchema,
-  password: z.string().min(8).max(72),
+  email: emailAddressSchema.refine(
+    (value) => {
+      const atIdx = value.indexOf('@');
+      const prefix = atIdx >= 0 ? value.slice(0, atIdx) : value;
+      return prefix.length >= MIN_EMAIL_PREFIX_LENGTH;
+    },
+    {
+      message: `email prefix must be at least ${MIN_EMAIL_PREFIX_LENGTH} characters (R-AUTH-008)`,
+    },
+  ),
+  // R-AUTH-007 reconciled business rule: 6..30 characters.
+  // The legacy 8..72 was drift; Better Auth's
+  // `emailAndPassword.min/maxPasswordLength` (factory.ts) pins the
+  // runtime to the same range so the two surfaces agree.
+  password: z.string().min(6).max(30),
   displayName: z.string().max(100).optional(),
 });
 

@@ -125,16 +125,33 @@ export function betterAuthRoutes(): Hono<AppEnv> {
       // envelope instead of falling through to the global error
       // middleware's 500.
       //
+      // CAP-042 (M-1): the response envelope matches the rest of
+      // the API (`{ error: { code, message, requestId } }`) and never
+      // forwards Better Auth's raw `body` — that body can carry
+      // credential material (e.g. the password field for sign-in
+      // errors). A hand-built envelope with a stable `INTERNAL` code
+      // + generic message + request id keeps the response safe
+      // regardless of what Better Auth's `body` contained.
+      //
       // Anything that is NOT a Better Auth APIError is a genuine
       // bug; let it bubble so it surfaces as a 500.
       if (err && typeof err === 'object' && 'statusCode' in err) {
-        const apiErr = err as { statusCode?: number; body?: unknown };
+        const apiErr = err as { statusCode?: number };
         const status = apiErr.statusCode ?? 500;
-        const body = apiErr.body ?? { message: 'better_auth error' };
-        response = new Response(JSON.stringify(body), {
-          status,
-          headers: { 'content-type': 'application/json' },
-        });
+        const requestId = c.get('requestId');
+        response = new Response(
+          JSON.stringify({
+            error: {
+              code: 'INTERNAL',
+              message: 'Authentication error',
+              requestId: requestId ?? '<unknown>',
+            },
+          }),
+          {
+            status,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
       } else {
         throw err;
       }

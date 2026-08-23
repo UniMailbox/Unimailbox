@@ -7,12 +7,22 @@
 // so the descriptor is already in memory by the time we render (one
 // HTTP GET per navigation, not two — D-CAP-041-1).
 //
+// CAP-042 Batch 8 (L-4 fix): when the descriptor resolves to `null`
+// (session expired mid-render, the cookie was cleared between
+// `beforeLoad` and the component mount), we now render
+// `<Unauthorized variant="expired" />` instead of the infinite
+// `<MailboxLoading />` spinner. The router's `beforeLoad` *should*
+// have redirected to `/login` instead, but if the session was valid
+// at guard time and revoked between guard and render, we surface an
+// actionable error rather than an indefinite spinner.
+//
 // The full inbox + thread + compose shell lands with CAP-043/044. For
 // Batch 5 we render the placeholder body so a reviewer can navigate
 // /login → /mailbox end-to-end and exercise the LogoutButton.
 import type { ReactElement } from 'react';
 import { authSessionQuery } from '../auth/auth-queries';
 import { LogoutButton } from '../auth/LogoutButton';
+import { Unauthorized } from '../auth/Unauthorized';
 import { Card } from '../../components/ui/Card';
 import { MailboxLoading } from './MailboxLoading';
 
@@ -27,10 +37,14 @@ export function MailboxShell(): ReactElement {
     return <MailboxLoading />;
   }
   const descriptor = sessionQuery.data;
-  // The router's `beforeLoad` guarantees `descriptor !== null`; the
-  // null branch here exists only so the type narrows without a cast.
+  // CAP-042 Batch 8 (L-4 fix): the router's `beforeLoad` guarantees
+  // `descriptor !== null` under normal navigation. The `null` branch
+  // here is the deeper fallback for the case where the session was
+  // valid at guard time but revoked before this component mounted —
+  // surface an actionable "Session expired" view rather than a
+  // permanent spinner.
   if (descriptor === null) {
-    return <MailboxLoading />;
+    return <Unauthorized variant="expired" />;
   }
   return (
     <main className="mailbox-shell" data-testid="mailbox-shell">

@@ -8,6 +8,11 @@
 // string. The envelope is what Better Auth reads from / writes to its
 // `account.password` column.
 //
+// The encoder (`encodeAdr006Password`) lives in `platform/crypto` (B-1):
+// the credential repository (`modules/identity`) and the Better Auth
+// integration both depend on it, but neither depends on the other, and
+// `platform/*` is below both layers in the dependency direction.
+//
 // Envelope format (ADR-006 + self-describing for storage safety):
 //
 //   pbkdf2-sha256$<iterations>$<32 lowercase hex salt bytes>$<64 lowercase hex hash bytes>
@@ -28,13 +33,15 @@ import type { BetterAuthOptions } from 'better-auth';
 import {
   hashPassword as platformHashPassword,
   verifyPassword as platformVerifyPassword,
+  encodeAdr006Password,
   type PasswordHash,
 } from '../../platform/crypto';
 
-const ADR006_ALGORITHM = 'pbkdf2-sha256';
-const ADR006_ITERATIONS = 600_000;
-const ADR006_SALT_BYTES = 16;
-const ADR006_HASH_BYTES = 32;
+// Re-export so existing call sites (`password.worker.test.ts`) and the
+// legacy production callers continue to import from the integration
+// module. The canonical home is `platform/crypto`; this re-export keeps
+// the call surface stable.
+export { encodeAdr006Password };
 
 // Exact non-null `emailAndPassword.password` option type as declared by
 // Better Auth 1.7.1. Pinning our adapter to this type makes any callback
@@ -49,16 +56,7 @@ type BetterAuthEmailPasswordOption = NonNullable<
 // segment, missing segment, or non-canonical iteration) is rejected before
 // WebCrypto is invoked.
 const CANONICAL_RE = /^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/;
-const ALGORITHM_PREFIX = `${ADR006_ALGORITHM}$`;
-
-function bytesToHex(bytes: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < bytes.length; i++) {
-    const byte = bytes[i] ?? 0;
-    out += byte.toString(16).padStart(2, '0');
-  }
-  return out;
-}
+const ADR006_ITERATIONS = 600_000;
 
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
@@ -66,31 +64,6 @@ function hexToBytes(hex: string): Uint8Array {
     bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
   }
   return bytes;
-}
-
-/**
- * Encode a platform `PasswordHash` value into the canonical envelope.
- *
- * Throws on any deviation from ADR-006 so column-row mismatches fail loud
- * during migration and backfill rather than silently producing a hash that
- * the verifier will later reject. The iteration segment is always written
- * as the ADR-006 minimum; any other value reaches the wire only as a
- * rejection.
- */
-export function encodeAdr006Password(stored: PasswordHash): string {
-  if (stored.algorithm !== ADR006_ALGORITHM) {
-    throw new Error(`Unsupported algorithm: ${String(stored.algorithm)}`);
-  }
-  if (stored.iterations !== ADR006_ITERATIONS) {
-    throw new Error(`Unsupported iteration count: ${stored.iterations}`);
-  }
-  if (!(stored.salt instanceof Uint8Array) || stored.salt.byteLength !== ADR006_SALT_BYTES) {
-    throw new Error(`Salt must be exactly ${ADR006_SALT_BYTES} bytes`);
-  }
-  if (!(stored.hash instanceof Uint8Array) || stored.hash.byteLength !== ADR006_HASH_BYTES) {
-    throw new Error(`Hash must be exactly ${ADR006_HASH_BYTES} bytes`);
-  }
-  return `${ALGORITHM_PREFIX}${ADR006_ITERATIONS}$${bytesToHex(stored.salt)}$${bytesToHex(stored.hash)}`;
 }
 
 /**

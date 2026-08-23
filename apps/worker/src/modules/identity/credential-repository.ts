@@ -11,13 +11,12 @@
 //   email policy is enforced by the factory (`requireEmailVerification: false`),
 //   not by writing a verification row at this layer.
 // ADR-006: the password column is the canonical envelope produced by
-//   `encodeAdr006Password` / `encodeCredentialEnvelope`; the backfill
+//   `encodeAdr006Password` (now in `platform/crypto`, B-1); the backfill
 //   migration 0015 uses the same wire shape.
 // R-DATA-004: every value is bound via `.bind(...)`; no string concatenation.
 
 import type { Database } from '../../platform/database';
-import type { PasswordHash } from '../../platform/crypto';
-import { encodeAdr006Password } from '../../integrations/better-auth/password';
+import { encodeAdr006Password, type PasswordHash } from '../../platform/crypto';
 
 export interface CreateCredentialInput {
   readonly userId: string;

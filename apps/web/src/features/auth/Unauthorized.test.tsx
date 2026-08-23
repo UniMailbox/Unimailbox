@@ -4,12 +4,16 @@
 // renders the same body, with the only difference being the title and
 // a `data-testid` so a reviewer can verify which state was rendered.
 //
-// The component uses TanStack Router's `<Link>` so the test mounts it
-// inside a real router via `renderAuthPage`.
+// CAP-042 (Batch 8) L-3 fix: the CTA is a single `<Button>` whose
+// `onClick` navigates to `/login`. The previous test asserted a
+// `unauthorized-login-link` data-testid wrapping the button; the new
+// pattern exposes the click handler so the test now exercises the
+// navigation instead of the wrapping `<Link>`.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Unauthorized } from './Unauthorized';
-import { renderAuthPage, spyFetch } from '../../test-utils';
+import { renderAuthPage, spyFetch, lastPathname } from '../../test-utils';
 import { resetAuthSessionForTesting } from './auth-session-store';
 
 afterEach(() => {
@@ -40,13 +44,15 @@ describe('Unauthorized', () => {
     expect(screen.getByText(/your session ended/i)).toBeInTheDocument();
   });
 
-  it('exposes a link to /login', async () => {
-    const { fetchImpl } = spyFetch([]);
-    await renderAuthPage({
-      fetchImpl,
+  it('navigates to /login when the sign-in button is clicked (CAP-042 Batch 8 L-3)', async () => {
+    const user = userEvent.setup();
+    const { history } = await renderAuthPage({
+      fetchImpl: spyFetch([]).fetchImpl,
       mailbox: <Unauthorized />,
       initialPath: '/mailbox',
     });
-    expect(screen.getByTestId('unauthorized-login-link')).toBeInTheDocument();
+    expect(lastPathname(history)).toBe('/mailbox');
+    await user.click(screen.getByTestId('unauthorized-login-button'));
+    expect(lastPathname(history)).toBe('/login');
   });
 });

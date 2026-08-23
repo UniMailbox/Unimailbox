@@ -68,7 +68,11 @@ describe('LoginPage', () => {
     const user = userEvent.setup();
     await renderAuthPage({ fetchImpl, login: <LoginPage /> });
     await user.type(screen.getByLabelText(/email/i), 'wrong@b.test');
-    await user.type(screen.getByLabelText(/password/i), 'wrong');
+    // CAP-042 Batch 8 (L-2 fix): the schema rejects passwords shorter
+    // than 6 chars client-side, so this test now uses a 7-char
+    // password that zod accepts. The 5-char bound is covered by the
+    // dedicated validation-error test below.
+    await user.type(screen.getByLabelText(/password/i), 'wrongpw');
     await user.click(screen.getByTestId('login-submit'));
     const code = await screen.findByTestId('login-unauthorized');
     expect(code).toBeInTheDocument();
@@ -101,5 +105,41 @@ describe('LoginPage', () => {
     // the zod resolver rejects empty input.
     expect(calls.length).toBe(0);
     expect(useAuthSession.getState().session).toBeNull();
+  });
+
+  // CAP-042 Batch 8 (L-2 fix): the client-side schema now mirrors
+  // R-AUTH-007 (6..30 characters). Below-min and above-max passwords
+  // are rejected by zod before the request goes out — the server-side
+  // rule is the authoritative one, but the client surfaces the same
+  // bound so a user gets an immediate validation error.
+  it('rejects a 5-character password with a min-length validation error (R-AUTH-007)', async () => {
+    const { fetchImpl, calls } = spyFetch([]);
+    const user = userEvent.setup();
+    await renderAuthPage({ fetchImpl, login: <LoginPage /> });
+    await user.type(screen.getByLabelText(/email/i), 'short@b.test');
+    await user.type(screen.getByLabelText(/password/i), '12345');
+    await user.click(screen.getByTestId('login-submit'));
+    // zod rejects; no fetch, no submit error panel.
+    expect(calls.length).toBe(0);
+    expect(screen.queryByTestId('login-error')).toBeNull();
+    expect(screen.queryByTestId('login-unauthorized')).toBeNull();
+    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe(
+      'true',
+    );
+  });
+
+  it('rejects a 31-character password with a max-length validation error (R-AUTH-007)', async () => {
+    const { fetchImpl, calls } = spyFetch([]);
+    const user = userEvent.setup();
+    await renderAuthPage({ fetchImpl, login: <LoginPage /> });
+    await user.type(screen.getByLabelText(/email/i), 'long@b.test');
+    await user.type(screen.getByLabelText(/password/i), 'a'.repeat(31));
+    await user.click(screen.getByTestId('login-submit'));
+    expect(calls.length).toBe(0);
+    expect(screen.queryByTestId('login-error')).toBeNull();
+    expect(screen.queryByTestId('login-unauthorized')).toBeNull();
+    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe(
+      'true',
+    );
   });
 });

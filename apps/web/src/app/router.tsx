@@ -63,6 +63,7 @@ import {
 } from '../features/auth/auth-queries';
 import { LoginPage } from '../features/auth/LoginPage';
 import { RegisterPage } from '../features/auth/RegisterPage';
+import { AuthErrorBoundary } from '../features/auth/AuthErrorBoundary';
 import {
   ClaimStep,
   PreflightStep,
@@ -134,20 +135,33 @@ const indexRoute = createRoute({
 
 // CAP-042 Batch 5 — /login. The login form posts to
 // /api/v1/auth/better/sign-in/email; success navigates to /mailbox.
+// CAP-042 Batch 8 (M-1 fix): wrap the auth surface in
+// <AuthErrorBoundary> so a render-time error inside the form falls
+// through to the auth-styled fallback (not the outermost ErrorBoundary
+// in App.tsx, which would lose the auth design tokens).
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
-  component: () => <LoginPage />,
+  component: () => (
+    <AuthErrorBoundary>
+      <LoginPage />
+    </AuthErrorBoundary>
+  ),
 });
 
 // CAP-042 Batch 5 — /register. Self-service registration is the legacy
 // /api/v1/auth/register endpoint; success navigates to /login so the
 // user can sign in with the new credentials (registration is separate
 // from sign-in, per CAP-019 / R-AUTH-006).
+// CAP-042 Batch 8 (M-1 fix): same boundary wrap as /login.
 const registerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/register',
-  component: () => <RegisterPage />,
+  component: () => (
+    <AuthErrorBoundary>
+      <RegisterPage />
+    </AuthErrorBoundary>
+  ),
 });
 
 // CAP-042 Batch 5 — /mailbox.

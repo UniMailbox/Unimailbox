@@ -250,7 +250,12 @@ export function setupRoutes(): Hono<AppEnv> {
       { clock: systemClock, ids: systemIds },
     );
 
-    const successBody = JSON.stringify({ data: result });
+    // CAP-042 (AC 18): the use case now writes an `auth_accounts` row
+    // in the same batch, but the response shape stays { data: { userId } }
+    // — the existing wire contract — so we explicitly map the result.
+    // The `credentialId` lives on the result for audit / test surfaces
+    // but is not part of the operator-facing payload.
+    const successBody = JSON.stringify({ data: { userId: result.userId } });
     await writeIdempotencyRecord(c.env.DB, {
       id: systemIds.uuid(),
       actorId,

@@ -108,9 +108,18 @@ export function createApiClient(init: ApiClientInit): ApiClient {
       let lastError: unknown = null;
       while (true) {
         attempt += 1;
+        // CAP-042 Batch 8 (M-3 fix): set `credentials: 'include'`
+        // explicitly so the browser carries the HttpOnly Better Auth
+        // cookie on every fetch. The browser default (`same-origin`)
+        // already includes cookies for same-origin requests, but a
+        // future split-host deployment (CDN + Worker origin) would
+        // drop the cookie under the default policy. Explicit is
+        // defensive and matches the comment in `auth-queries.ts` and
+        // `auth-session-store.ts`.
         const fetchInit: RequestInit = {
           method,
           headers,
+          credentials: 'include',
         };
         if (requestBody !== undefined) {
           fetchInit.body = requestBody;

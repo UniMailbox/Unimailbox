@@ -158,9 +158,15 @@ export function useSignInMutation(): UseMutationResult<
       return descriptor;
     },
     onSuccess: async (descriptor) => {
+      // CAP-042 Batch 8 (M-2 fix): `setQueryData` writes the fresh
+      // descriptor into the cache synchronously. The prior
+      // `invalidateQueries({ queryKey: authQueryKeys.session() })` was
+      // redundant — it marked the cache stale so the next
+      // `ensureQueryData` in the router's `beforeLoad` re-fetched the
+      // descriptor the user had just produced (D-CAP-041-1 promise:
+      // one HTTP GET per navigation, not two).
       queryClient.setQueryData(authQueryKeys.session(), descriptor);
       setAuthSession(descriptor);
-      await queryClient.invalidateQueries({ queryKey: authQueryKeys.session() });
     },
   });
 }
@@ -179,9 +185,12 @@ export function useSignOutMutation(): UseMutationResult<void, ApiError, void> {
       await apiClient.fetch('/api/v1/auth/better/sign-out', { method: 'POST' });
     },
     onSuccess: async () => {
+      // Same rationale as `useSignInMutation.onSuccess` (CAP-042
+      // Batch 8 M-2): `setQueryData` is sufficient. `invalidateQueries`
+      // would force a fresh GET on the next navigation when we already
+      // know the user is signed out.
       queryClient.setQueryData(authQueryKeys.session(), null);
       clearAuthSession();
-      await queryClient.invalidateQueries({ queryKey: authQueryKeys.session() });
     },
   });
 }

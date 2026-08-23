@@ -5,7 +5,13 @@
 // router's `beforeLoad` redirects to /login instead, so this component
 // is the deeper fallback for components that render past the guard
 // (e.g. a fetched page whose session expired mid-flight).
-import { Link } from '@tanstack/react-router';
+//
+// CAP-042 Batch 8 (L-3 fix): the CTA is now a single `<Button>` whose
+// `onClick` calls `navigate({ to: '/login' })`. The previous
+// `<Link><Button></Button></Link>` pattern made screen readers announce
+// the action twice (once as a button, once as a link, with the same
+// label) — a known a11y defect.
+import { useNavigate } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -17,6 +23,7 @@ export interface UnauthorizedProps {
 export function Unauthorized({
   variant = 'unauthorized',
 }: UnauthorizedProps): ReactElement {
+  const navigate = useNavigate();
   const isExpired = variant === 'expired';
   return (
     <main className="auth-page" data-testid={isExpired ? 'expired-session' : 'unauthorized-page'}>
@@ -34,11 +41,16 @@ export function Unauthorized({
             : 'You need to be signed in to view this page.'}
         </p>
         <div className="wizard-actions">
-          <Link to="/login" data-testid="unauthorized-login-link">
-            <Button variant="primary" data-testid="unauthorized-login-button">
-              Sign in
-            </Button>
-          </Link>
+          <Button
+            type="button"
+            variant="primary"
+            data-testid="unauthorized-login-button"
+            onClick={() => {
+              void navigate({ to: '/login' });
+            }}
+          >
+            Sign in
+          </Button>
         </div>
       </Card>
     </main>

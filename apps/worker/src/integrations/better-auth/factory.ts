@@ -42,8 +42,9 @@
 //   - On every Better Auth session create it consults canonical
 //     `users.status` via the `databaseHooks.session.create.before` hook
 //     and rejects `banned`/`deleted` principals before any `auth_sessions`
-//     row is written. R-AUTH-002 end-to-end; the Hono bridge rechecks
-//     status on every protected request as a second layer.
+//     row is written. R-AUTH-002 end-to-end; the Hono authn middleware
+//     (`http/middleware/authn.ts`) re-runs the same status check on every
+//     protected request as a second layer (CAP-042 H-4).
 //
 // Schema mapping (`name` ↔ `display_name`):
 //

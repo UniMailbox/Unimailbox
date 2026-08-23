@@ -5,10 +5,16 @@
 // PBKDF2-hashed password. After successful creation, the installation step
 // advances from 'administrator' to 'domain'.
 //
-// The user insert + step update are batched as one D1 transaction (coding.md
-// §Data: "Multi-row writes that must be atomic go in a single D1 batch").
-// If either fails, both roll back — preventing a wedged setup state where
-// the user exists but the step didn't advance.
+// The user insert + credential insert + step update are batched as one
+// D1 transaction (coding.md §Data: "Multi-row writes that must be atomic
+// go in a single D1 batch"). If any one fails, all roll back — preventing
+// a wedged setup state where the user exists but the step didn't advance
+// or the credential is missing.
+//
+// CAP-042 (AC 18): the credential row (`auth_accounts`) is written in the
+// same batch as the canonical user + setup-step advance, so the setup
+// administrator has a sign-in surface from creation. R-AUTH-002:
+// users.status is 'active' for the new administrator.
 
 import type { Database } from '../../platform/database';
 import type { Clock } from '../../platform/clock';
@@ -16,7 +22,7 @@ import type { IdGenerator } from '../../platform/ids';
 import type { EmailAddress } from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 import { hashPassword } from '../../platform/crypto';
-import { prepareCreateUser } from '../identity';
+import { prepareCreateUser, prepareCreateCredential, encodeCredentialEnvelope } from '../identity';
 import { prepareUpdateInstallationStep } from './installation-state-repository';
 
 export interface CreateAdministratorInput {
@@ -28,6 +34,7 @@ export interface CreateAdministratorInput {
 
 export interface CreateAdministratorResult {
   readonly userId: string;
+  readonly credentialId: string;
 }
 
 /**
@@ -62,13 +69,22 @@ export async function createAdministrator(
   }
 
   const passwordHash = await hashPassword(input.password);
+  const credentialEnvelope = encodeCredentialEnvelope(passwordHash);
   const userId = deps.ids.uuid();
   // SQLite datetime format: 'YYYY-MM-DD HH:MM:SS' — matches datetime('now')
   // default in the DDL and the test-kit FIXED_TIMESTAMP convention.
   const now = deps.clock.now().toISOString().slice(0, 19).replace('T', ' ');
+  // Better Auth `auth_accounts` columns are integer epoch milliseconds.
+  const nowMs = deps.clock.unixMs();
 
-  // Prepare both statements and run them as one D1 batch (atomic).
-  // If either fails, both roll back — preventing a wedged setup state.
+  // Prepare the three statements and run them as one D1 batch (atomic).
+  // If any one fails, all roll back — preventing a wedged setup state
+  // where the user exists but the step didn't advance or the credential
+  // row is missing.
+  //
+  // CAP-042 (AC 18): the credential row uses the deterministic
+  // `cap042-credential-<userId>` id so a re-run of the batch rewrites
+  // the same row instead of failing on duplicate primary key.
   const insertUser = prepareCreateUser(input.db, {
     id: userId,
     email: input.email,
@@ -81,10 +97,15 @@ export async function createAdministrator(
     createdAt: now,
     updatedAt: now,
   });
+  const insertCredential = prepareCreateCredential(input.db, {
+    userId,
+    envelope: credentialEnvelope,
+    nowMs,
+  });
   const advanceStep = prepareUpdateInstallationStep(input.db, 'domain', now);
 
   try {
-    await input.db.batch([insertUser, advanceStep]);
+    await input.db.batch([insertUser, insertCredential, advanceStep]);
   } catch (err) {
     // Defensive backstop: race condition where two requests pass the
     // existence check simultaneously. D1's UNIQUE constraint catches this.
@@ -98,5 +119,5 @@ export async function createAdministrator(
     throw err;
   }
 
-  return { userId };
+  return { userId, credentialId: `cap042-credential-${userId}` };
 }

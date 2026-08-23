@@ -56,7 +56,7 @@ export interface PasswordHash {
  * See .claude/rules/security.md §Passwords and ADR-006.
  * Uses the Web Crypto API directly — no external dependencies.
  *
- * @param password - The plaintext password to hash (8–72 characters enforced by API)
+ * @param password - The plaintext password to hash (6–30 characters enforced by API)
  * @returns A PasswordHash containing algorithm, iterations, salt, and hash
  */
 export async function hashPassword(password: string): Promise<PasswordHash> {
@@ -210,4 +210,56 @@ function bufferToHex(buffer: Uint8Array): string {
   return Array.from(buffer)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+// ---------------------------------------------------------------------------
+// ADR-006 canonical credential envelope — CAP-042 (B-1, AC 17, 18)
+//
+// This helper was originally defined in `integrations/better-auth/password.ts`
+// alongside the `betterAuthPassword` callback adapter. Moving the encoder into
+// `platform/crypto` removes the forbidden `modules/* → integrations/*`
+// dependency edge: `identity/credential-repository.ts` (a module) imports
+// the encoder, and the encoder no longer reaches back through the
+// integration layer. `integrations/better-auth/password.ts` now imports
+// from here too, so both sides share one definition with no cycle.
+//
+// Envelope wire format:
+//
+//   pbkdf2-sha256$600000$<32 lowercase hex salt bytes>$<64 lowercase hex hash bytes>
+//
+// The encoder is pure: it accepts the platform `PasswordHash` value object
+// and returns a string. The verifier (in `integrations/better-auth/password.ts`)
+// still owns the regex gate, the iteration-count guard, and the WebCrypto
+// verification path — those are better-auth-specific concerns that belong
+// in the integration layer.
+// ---------------------------------------------------------------------------
+
+const ADR006_ALGORITHM = 'pbkdf2-sha256';
+const ADR006_ITERATIONS = 600_000;
+const ADR006_SALT_BYTES = 16;
+const ADR006_HASH_BYTES = 32;
+
+/**
+ * Encode a platform `PasswordHash` value into the canonical ADR-006 envelope.
+ *
+ * Throws on any deviation from ADR-006 so column-row mismatches fail loud
+ * during migration and backfill rather than silently producing a hash that
+ * the verifier will later reject. The iteration segment is always written
+ * as the ADR-006 minimum; any other value reaches the wire only as a
+ * rejection.
+ */
+export function encodeAdr006Password(stored: PasswordHash): string {
+  if (stored.algorithm !== ADR006_ALGORITHM) {
+    throw new Error(`Unsupported algorithm: ${String(stored.algorithm)}`);
+  }
+  if (stored.iterations !== ADR006_ITERATIONS) {
+    throw new Error(`Unsupported iteration count: ${stored.iterations}`);
+  }
+  if (!(stored.salt instanceof Uint8Array) || stored.salt.byteLength !== ADR006_SALT_BYTES) {
+    throw new Error(`Salt must be exactly ${ADR006_SALT_BYTES} bytes`);
+  }
+  if (!(stored.hash instanceof Uint8Array) || stored.hash.byteLength !== ADR006_HASH_BYTES) {
+    throw new Error(`Hash must be exactly ${ADR006_HASH_BYTES} bytes`);
+  }
+  return `pbkdf2-sha256$${ADR006_ITERATIONS}$${bufferToHex(stored.salt)}$${bufferToHex(stored.hash)}`;
 }

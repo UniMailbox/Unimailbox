@@ -50,6 +50,8 @@ import { BETTER_AUTH_COOKIE_NAME } from '../../integrations/better-auth/path';
 import type { PlatformConfig } from '../../platform/config';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+import { logger } from '../../platform/logger';
+import { systemClock } from '../../platform/clock';
 
 /**
  * Stable machine-readable error code for AC 14. Surfaced through the
@@ -189,13 +191,28 @@ export const authn: MiddlewareHandler<AppEnv> = async (c, next) => {
         // is the gate that decides whether unauthenticated requests
         // are acceptable for the route.
       } else {
+        const lookupStart = systemClock.unixMs();
         try {
           betterAuthUserId = await resolveBetterAuthUserId(c.env, config, cookieToken);
-        } catch {
-          // A Better Auth internal error must not deny a request that
-          // has a valid Bearer token. We swallow the error here; the
-          // conflict check below still runs and the caller can decide
-          // what to do if neither principal resolves.
+        } catch (error) {
+          // CAP-042 (H-3): the bare `catch {}` swallowed a Better Auth
+          // lookup failure with zero observability. A Better Auth internal
+          // error must not deny a request that has a valid Bearer token,
+          // but the swallowed failure has to be visible in the log so
+          // regressions surface. R-LOG-001: never log the cookie value;
+          // `event` + `requestId` + `durationMs` give operators enough to
+          // correlate without leaking credential material.
+          const durationMs = systemClock.unixMs() - lookupStart;
+          const requestId = c.get('requestId');
+          logger.warn(
+            requestId
+              ? { event: 'authn.better_auth_lookup_failed', requestId, durationMs }
+              : { event: 'authn.better_auth_lookup_failed', durationMs },
+            { error: error instanceof Error ? error.message : String(error) },
+          );
+          // Fall through with `betterAuthUserId = null`; the conflict
+          // check below still runs and the caller can decide what to do
+          // if neither principal resolves.
         }
       }
     }
@@ -213,9 +230,28 @@ export const authn: MiddlewareHandler<AppEnv> = async (c, next) => {
     });
   }
 
-  const userId = bearerUserId ?? betterAuthUserId;
-  if (userId) {
-    c.set('userId', userId);
+  // CAP-042 (H-4, R-AUTH-002): per-request `users.status` recheck. The
+  // Better Auth factory's `databaseHooks.session.create.before` hook
+  // gates *new* sign-ins on `users.status = 'active'`, but it does NOT
+  // gate every protected request that uses an existing session. A
+  // user banned or deleted between sign-in and the next protected
+  // request would otherwise continue to pass authn with a stale token.
+  // The second-layer status recheck is the canonical D1 column (not
+  // Better Auth's `banned` field); spike-evidence.md R-AUTH-002 row
+  // pins the canonical column as the source of truth.
+  //
+  // Returning `null` makes the middleware treat the request as
+  // unauthenticated — `requirePermission` will then issue a 401 with
+  // the standard envelope. We do NOT log the resolved userId (R-LOG-001).
+  const candidateUserId = bearerUserId ?? betterAuthUserId;
+  if (candidateUserId) {
+    const statusRow = await c.env.DB
+      .prepare(`SELECT status FROM users WHERE id = ? AND status = 'active' LIMIT 1`)
+      .bind(candidateUserId)
+      .first<{ status: string }>();
+    if (statusRow) {
+      c.set('userId', candidateUserId);
+    }
   }
 
   await next();

@@ -485,7 +485,7 @@ describe('POST /api/v1/setup/administrator', () => {
       expect(body.error.code).toBe('VALIDATION_ERROR');
     });
 
-    it('returns 400 VALIDATION_ERROR for short password (< 8 chars)', async () => {
+    it('returns 400 VALIDATION_ERROR for short password (< 6 chars)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
         method: 'POST',
         body: JSON.stringify({
@@ -504,12 +504,12 @@ describe('POST /api/v1/setup/administrator', () => {
       expect(body.error.code).toBe('VALIDATION_ERROR');
     });
 
-    it('returns 400 VALIDATION_ERROR for long password (> 72 chars)', async () => {
+    it('returns 400 VALIDATION_ERROR for long password (> 30 chars)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
         method: 'POST',
         body: JSON.stringify({
           email: 'admin@example.com',
-          password: 'a'.repeat(73),
+          password: 'a'.repeat(31),
         }),
         headers: {
           'Content-Type': 'application/json',
@@ -590,12 +590,12 @@ describe('POST /api/v1/setup/administrator', () => {
       sessionToken = await claimSession();
     });
 
-    it('accepts minimum password length (8 chars)', async () => {
+    it('accepts minimum password length (6 chars)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
         method: 'POST',
         body: JSON.stringify({
           email: 'admin@example.com',
-          password: '12345678',
+          password: '123456',
         }),
         headers: {
           'Content-Type': 'application/json',
@@ -609,12 +609,12 @@ describe('POST /api/v1/setup/administrator', () => {
       expect(body.data).toHaveProperty('userId');
     });
 
-    it('accepts maximum password length (72 chars)', async () => {
+    it('accepts maximum password length (30 chars)', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
         method: 'POST',
         body: JSON.stringify({
           email: 'admin@example.com',
-          password: 'a'.repeat(72),
+          password: 'a'.repeat(30),
         }),
         headers: {
           'Content-Type': 'application/json',

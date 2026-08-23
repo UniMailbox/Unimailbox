@@ -23,14 +23,15 @@ import { setAuthSession } from './auth-session-store';
 
 /**
  * Local form schema. R-AUTH-007's reconciled password bounds
- * (6-30) are enforced server-side; the client-side rule is permissive
- * enough to surface a real validation error (min 1, max 72) without
- * rejecting a credential that the server will accept. The contracts
- * `emailAddressSchema` is the canonical email normaliser.
+ * (6..30 characters) are enforced server-side; the client-side rule
+ * mirrors that bound so a too-short or too-long password is rejected
+ * with a real validation error rather than round-tripping to the
+ * server. The contracts `emailAddressSchema` is the canonical email
+ * normaliser.
  */
 const loginSchema = z.object({
   email: emailAddressSchema,
-  password: z.string().min(1).max(72),
+  password: z.string().min(6).max(30),
 });
 
 type LoginFormFields = z.infer<typeof loginSchema>;

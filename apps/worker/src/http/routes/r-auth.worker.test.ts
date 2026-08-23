@@ -105,6 +105,71 @@ async function completeSetupSeed(): Promise<void> {
   ]);
 }
 
+/**
+ * Seed a registration key for the /api/v1/auth/register route. The
+ * `registration_keys.created_by` foreign key requires an existing user;
+ * this helper creates a minimal creator if one does not already exist
+ * for the test, and returns the plaintext 64-hex code the route consumes.
+ */
+async function seedRegistrationKey(options: {
+  maxUses?: number;
+  expiresAt?: string | null;
+  creatorEmail?: string;
+}): Promise<string> {
+  const codeBytes = crypto.getRandomValues(new Uint8Array(32));
+  const code = Array.from(codeBytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  const codeHash = await crypto.subtle
+    .digest('SHA-256', new TextEncoder().encode(code))
+    .then((buffer) =>
+      Array.from(new Uint8Array(buffer))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join(''),
+    );
+
+  // Minimal creator user — `registration_keys.created_by` is FK to `users.id`.
+  const creatorId = crypto.randomUUID();
+  const creatorEmail = options.creatorEmail ?? 'r-auth-creator@example.test';
+  await env.DB
+    .prepare(
+      `INSERT INTO users (
+         id, email, display_name, email_verified, status,
+         password_algorithm, password_iterations, password_salt, password_hash,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
+    )
+    .bind(
+      creatorId,
+      creatorEmail,
+      'R-AUTH Creator',
+      PLACEHOLDER_SALT,
+      PLACEHOLDER_HASH,
+      NOW_TEXT,
+      NOW_TEXT,
+    )
+    .run();
+
+  await env.DB
+    .prepare(
+      `INSERT INTO registration_keys (
+         id, code_hash, role_id, max_uses, used_count,
+         expires_at, revoked_at, created_by, created_at
+       ) VALUES (?, ?, NULL, ?, 0, ?, NULL, ?, ?)`,
+    )
+    .bind(
+      crypto.randomUUID(),
+      codeHash,
+      options.maxUses ?? 1,
+      options.expiresAt ?? null,
+      creatorId,
+      NOW_TEXT,
+    )
+    .run();
+
+  return code;
+}
+
 describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
   beforeEach(async () => {
     await resetAndMigrate();
@@ -179,6 +244,46 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
         .bind(seeded.userId)
         .first<{ n: number }>();
       expect(sessions?.n ?? 0).toBe(0);
+
+      // CAP-042 (M-2): R-AUTHZ-002 factor-preservation — banned, deleted,
+      // and wrong-password all return the identical 401 envelope shape
+      // (same code family, same envelope keys). The Better Auth sign-in
+      // surface returns a flat `{ code, message }` envelope (not our
+      // nested `{ error: { code, message } }`); the parity assertion
+      // therefore compares the top-level shape — banned/deleted and
+      // wrong-password must produce byte-identical envelope keys.
+      const bannedDeletedBody = (await response.json()) as Record<string, unknown>;
+
+      const wrongPassword = await SELF.fetch(
+        `http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: `r-auth-002-wrong@example.test`,
+            password: 'definitely-not-the-shared-password',
+          }),
+        },
+      );
+      expect(wrongPassword.status).toBe(401);
+      const wrongPasswordBody = (await wrongPassword.json()) as Record<string, unknown>;
+
+      // Identical envelope keys — no factor can be distinguished by an
+      // attacker probing the response shape.
+      expect(Object.keys(bannedDeletedBody).sort()).toEqual(
+        Object.keys(wrongPasswordBody).sort(),
+      );
+      // And both responses carry `code` and `message` keys; the message
+      // text is not asserted (Better Auth may localise) but the
+      // `typeof` shape must match across the three responses.
+      const bdCode = (bannedDeletedBody as { code?: unknown }).code;
+      const wpCode = (wrongPasswordBody as { code?: unknown }).code;
+      const bdMessage = (bannedDeletedBody as { message?: unknown }).message;
+      const wpMessage = (wrongPasswordBody as { message?: unknown }).message;
+      expect(typeof bdCode).toBe('string');
+      expect(typeof wpCode).toBe('string');
+      expect(typeof bdMessage).toBe('string');
+      expect(typeof wpMessage).toBe('string');
     },
   );
 
@@ -436,43 +541,91 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     const thirty = 'a'.repeat(30);
     const thirtyOne = 'a'.repeat(31);
 
-    const verify = betterAuthPassword.verify as unknown as (
-      data: { password: string; hash: string },
-    ) => Promise<boolean>;
-
     const fiveEnvelope = await betterAuthPassword.hash(five);
     const sixEnvelope = await betterAuthPassword.hash(six);
     const thirtyEnvelope = await betterAuthPassword.hash(thirty);
     const thirtyOneEnvelope = await betterAuthPassword.hash(thirtyOne);
 
-    expect(await verify({ password: six, hash: sixEnvelope })).toBe(true);
-    expect(await verify({ password: thirty, hash: thirtyEnvelope })).toBe(true);
-    expect(await verify({ password: five, hash: fiveEnvelope })).toBe(true);
-    expect(await verify({ password: thirtyOne, hash: thirtyOneEnvelope })).toBe(true);
+    expect(await betterAuthPassword.verify({ password: six, hash: sixEnvelope })).toBe(true);
+    expect(await betterAuthPassword.verify({ password: thirty, hash: thirtyEnvelope })).toBe(true);
+    expect(await betterAuthPassword.verify({ password: five, hash: fiveEnvelope })).toBe(true);
+    expect(await betterAuthPassword.verify({ password: thirtyOne, hash: thirtyOneEnvelope })).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // R-AUTH-007 (M-3) — application registration path rejects passwords
+  // outside the 6..30 range with 400 VALIDATION_ERROR. The boundary test
+  // above proves the canonical envelope's hash/verify round-trip for any
+  // length; this test proves the registration schema gates the upper
+  // bound (a 31-char password is rejected before hashing).
+  // -------------------------------------------------------------------------
+  it('R-AUTH-007 (route boundary): 31-char password is rejected at /api/v1/auth/register with 400', async () => {
+    // The beforeEach already seeds installation_state to 'complete'
+    // and runs completeSetupSeed(); we just need a registration key
+    // for the /register endpoint to find.
+    const code = await seedRegistrationKey({ maxUses: 1 });
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'r-auth-007-31-char-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        code,
+        email: 'r-auth-007-31@example.test',
+        password: 'a'.repeat(31),
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: { code?: string } };
+    expect(body.error?.code).toBe('VALIDATION_ERROR');
   });
 
   // -------------------------------------------------------------------------
   // R-AUTH-008 — registration rejects email prefix shorter than the
   // configured minimum.
   //
-  // spike-evidence.md says: "Application-owned registration reads
-  // `minEmailPrefix` and rejects shorter prefixes before preparing its
-  // batch." The application does not currently expose a `minEmailPrefix`
-  // setting — the email schema is `z.string().trim().toLowerCase().email()`
-  // with no minimum prefix length. This test therefore asserts the
-  // current behaviour: a short-prefix email is rejected as 401 because
-  // the user is unknown, and the registered user is unchanged. A future
-  // minEmailPrefix integration will surface here as a failing test
-  // until the contract is honoured.
+  // CAP-042 (H-5): `packages/contracts` exports `MIN_EMAIL_PREFIX_LENGTH`
+  // (default 3) and `registerRequestSchema` enforces it as a zod refine.
+  // A 2-character prefix (`ab@example.test`) is rejected by the route's
+  // zod parse with 400 VALIDATION_ERROR; a 3-character prefix
+  // (`abc@example.test`) passes the gate and proceeds to the
+  // registration use case.
+  //
+  // The Better Auth sign-in endpoint does NOT enforce this gate (it's
+  // an application-registration policy, not a sign-in policy). The
+  // surface under test is therefore /api/v1/auth/register.
   // -------------------------------------------------------------------------
-  it('R-AUTH-008: current email validation has no prefix-length gate (gap — see comment)', async () => {
-    const short = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
+  it('R-AUTH-008: 2-char email prefix is rejected at /register with 400 VALIDATION_ERROR', async () => {
+    const code = await seedRegistrationKey({ maxUses: 1 });
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'ab@example.test', password: SHARED_PASSWORD }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'r-auth-008-short-prefix-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        code,
+        email: 'ab@example.test',
+        password: SHARED_PASSWORD,
+      }),
     });
-    // Unknown email returns 401 regardless of prefix length.
-    expect(short.status).toBe(401);
+
+    // 400 VALIDATION_ERROR from the zod refine; no user row is written.
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error?: { code?: string } };
+    expect(body.error?.code).toBe('VALIDATION_ERROR');
+
+    // No user row was created — the rejection happened at the route
+    // boundary, not deep in the use case.
+    const userCount = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM users WHERE email = ?`)
+      .bind('ab@example.test')
+      .first<{ n: number }>();
+    expect(userCount?.n ?? 0).toBe(0);
   });
 
   // -------------------------------------------------------------------------
@@ -503,5 +656,249 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
       },
     );
     expect(mixedCaseSignIn.status).toBe(200);
+  });
+
+  // -------------------------------------------------------------------------
+  // AC 17 — application /register writes auth_accounts alongside users
+  // and user_roles in one D1 batch. The canonical envelope (ADR-006)
+  // lands on the credential row in the same atomic write.
+  // -------------------------------------------------------------------------
+  it('AC 17: /register writes auth_accounts row with the canonical PBKDF2 envelope alongside users + user_roles', async () => {
+    const code = await seedRegistrationKey({ maxUses: 1 });
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'ac17-credential-write-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        code,
+        email: 'ac17-credential@example.test',
+        password: 'shared-password-ac17',
+      }),
+    });
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as { data?: { user?: { id?: string } } };
+    const userId = body.data?.user?.id;
+    expect(userId).toBeTruthy();
+
+    // auth_accounts row exists with the deterministic credential id and
+    // matches the canonical ADR-006 envelope.
+    const credential = await env.DB
+      .prepare(
+        `SELECT id, issuer, account_id, provider_id, user_id, password
+         FROM auth_accounts WHERE user_id = ?`,
+      )
+      .bind(userId)
+      .first<{
+        id: string;
+        issuer: string;
+        account_id: string;
+        provider_id: string;
+        user_id: string;
+        password: string;
+      }>();
+    expect(credential).not.toBeNull();
+    expect(credential?.id).toBe(`cap042-credential-${userId}`);
+    expect(credential?.issuer).toBe('local:credential');
+    expect(credential?.account_id).toBe(userId);
+    expect(credential?.provider_id).toBe('credential');
+    expect(credential?.user_id).toBe(userId);
+    expect(credential?.password).toMatch(
+      /^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/,
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // AC 17 failure injection — duplicate-email registration writes no
+  // auth_accounts row. The `users.email` UNIQUE constraint fires inside
+  // the same D1 batch, so the whole transaction rolls back; the
+  // credential row that would have been written must NOT be present.
+  // -------------------------------------------------------------------------
+  it('AC 17 failure injection: duplicate email leaves no auth_accounts row (atomic rollback)', async () => {
+    // Seed an existing user with the same email so the next registration
+    // hits the UNIQUE constraint inside the batch.
+    await seedUserAndCredential({ email: 'ac17-duplicate@example.test' });
+
+    // Snapshot the auth_accounts row count BEFORE the failing registration.
+    const before = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
+      .first<{ n: number }>();
+    const beforeN = before?.n ?? 0;
+
+    const code = await seedRegistrationKey({ maxUses: 1 });
+
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'ac17-duplicate-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        code,
+        email: 'ac17-duplicate@example.test',
+        password: 'duplicate-password-attempt',
+      }),
+    });
+    expect(response.status).toBe(409);
+
+    // The auth_accounts count is unchanged — the duplicate-email failure
+    // rolled back the entire batch, including the credential row that
+    // would have been written for the second user.
+    const after = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
+      .first<{ n: number }>();
+    expect(after?.n ?? 0).toBe(beforeN);
+  });
+
+  // -------------------------------------------------------------------------
+  // AC 18 — /setup/administrator writes an auth_accounts row alongside
+  // the canonical user + installation-state advance in one D1 batch.
+  // -------------------------------------------------------------------------
+  it('AC 18: /setup/administrator writes auth_accounts row with the canonical PBKDF2 envelope', async () => {
+    // The /setup/administrator route runs through the setup gate, which
+    // redirects away from non-/setup routes until the installation_state
+    // row says 'complete'. The suite's beforeEach seeds installation_state
+    // to 'complete' so the other tests behave like a finished install;
+    // for AC 18 we rewind the row to 'preflight' so /setup/claim accepts
+    // the request and mints a setup session token.
+    await env.DB.prepare(
+      `UPDATE installation_state SET status = 'setup', current_step = 'preflight' WHERE id = 1`,
+    ).run();
+    // Clear any idempotency record left by previous test runs so the
+    // claim can re-execute (claim deletes its own record on same hash
+    // and replays, but a stale row with the same key from a different
+    // body would 409).
+    await env.DB.prepare(`DELETE FROM idempotency_records`).run();
+
+    const claimResponse = await SELF.fetch('http://localhost/api/v1/setup/claim', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'ac18-claim-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({ token: 'test-installation-token' }),
+    });
+    expect(claimResponse.status).toBe(200);
+    const claimBody = (await claimResponse.json()) as { data?: { sessionToken?: string } };
+    const sessionToken = claimBody.data?.sessionToken;
+    expect(sessionToken).toBeTruthy();
+
+    const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'ac18-administrator-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        email: 'ac18-administrator@example.test',
+        password: 'ac18-shared-password',
+      }),
+    });
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as { data?: { userId?: string } };
+    const userId = body.data?.userId;
+    expect(userId).toBeTruthy();
+
+    const credential = await env.DB
+      .prepare(
+        `SELECT id, issuer, account_id, provider_id, user_id, password
+         FROM auth_accounts WHERE user_id = ?`,
+      )
+      .bind(userId)
+      .first<{
+        id: string;
+        issuer: string;
+        account_id: string;
+        provider_id: string;
+        user_id: string;
+        password: string;
+      }>();
+    expect(credential).not.toBeNull();
+    expect(credential?.id).toBe(`cap042-credential-${userId}`);
+    expect(credential?.issuer).toBe('local:credential');
+    expect(credential?.account_id).toBe(userId);
+    expect(credential?.provider_id).toBe('credential');
+    expect(credential?.user_id).toBe(userId);
+    expect(credential?.password).toMatch(
+      /^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/,
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // AC 18 failure injection — duplicate email leaves no auth_accounts row
+  // and the installation_state step is unchanged. The use case's existence
+  // pre-check (`SELECT 1 FROM users LIMIT 1`) catches the collision before
+  // the 3-statement batch runs, so no credential row is written and the
+  // setup-step advance does not occur. This proves the same atomic-
+  // rollback invariant AC 17's failure-injection test proves for
+  // /register: a rejected write produces no observable side effects.
+  // -------------------------------------------------------------------------
+  it('AC 18 failure injection: duplicate email leaves no auth_accounts row and installation_state step unchanged (atomic rollback)', async () => {
+    // Seed an existing user with the same email so the next administrator
+    // creation hits the existence pre-check inside the use case.
+    await seedUserAndCredential({ email: 'ac18-duplicate@example.test' });
+
+    // Snapshot the auth_accounts row count BEFORE the failing write.
+    const before = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
+      .first<{ n: number }>();
+    const beforeN = before?.n ?? 0;
+
+    // AC 18 happy-path pattern: rewind installation_state to 'preflight'
+    // and clear idempotency_records so /setup/claim accepts the request.
+    await env.DB.prepare(
+      `UPDATE installation_state SET status = 'setup', current_step = 'preflight' WHERE id = 1`,
+    ).run();
+    await env.DB.prepare(`DELETE FROM idempotency_records`).run();
+
+    const claimResponse = await SELF.fetch('http://localhost/api/v1/setup/claim', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': 'ac18-fi-claim-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({ token: 'test-installation-token' }),
+    });
+    expect(claimResponse.status).toBe(200);
+    const claimBody = (await claimResponse.json()) as { data?: { sessionToken?: string } };
+    const sessionToken = claimBody.data?.sessionToken;
+    expect(sessionToken).toBeTruthy();
+
+    const response = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': 'ac18-fi-administrator-' + crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        email: 'ac18-duplicate@example.test',
+        password: 'duplicate-password-attempt',
+      }),
+    });
+
+    // The existence pre-check throws SETUP_ADMINISTRATOR_EXISTS → 409.
+    expect(response.status).toBe(409);
+
+    // The auth_accounts count is unchanged — the duplicate-email failure
+    // was caught before the batch ran, so the credential row that would
+    // have been written for the second user is absent.
+    const after = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
+      .first<{ n: number }>();
+    expect(after?.n ?? 0).toBe(beforeN);
+
+    // The installation_state step is unchanged at 'preflight' — the
+    // 3-statement batch (insertUser + insertCredential + advanceStep) did
+    // not run, so the step advance did not occur.
+    const installState = await env.DB
+      .prepare(`SELECT status, current_step FROM installation_state WHERE id = 1`)
+      .first<{ status: string; current_step: string }>();
+    expect(installState?.current_step).toBe('preflight');
   });
 });

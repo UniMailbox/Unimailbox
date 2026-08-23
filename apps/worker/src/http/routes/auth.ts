@@ -18,10 +18,10 @@ import {
   refreshRequestSchema,
 } from '@unimailbox/contracts';
 import { findUserByEmail, createSession, findSessionByRefreshHash } from '../../modules/identity';
-import { findKeyByCodeHash, prepareIncrementKeyUsage } from '../../modules/onboarding';
+import { findKeyByCodeHash, registerWithInvite } from '../../modules/onboarding';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
-import { verifyPassword, hashPassword } from '../../platform/crypto';
+import { verifyPassword } from '../../platform/crypto';
 import { DomainError } from '../../platform/errors';
 import { logger } from '../../platform/logger';
 import type { AppEnv } from '../../platform/env';
@@ -195,62 +195,35 @@ export function authRoutes(): Hono<AppEnv> {
       });
     }
 
-    // Hash the password
-    const passwordHash = await hashPassword(body.password);
-
-    // Prepare all D1 statements for the batch
-    const now = systemClock.now().toISOString();
-    const userId = systemIds.uuid();
-
-    // 1. Insert user
-    const userStmt = c.env.DB.prepare(
-      `INSERT INTO users (id, email, display_name, status,
-        password_algorithm, password_iterations, password_salt, password_hash,
-        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      userId,
-      body.email,
-      body.displayName ?? null,
-      'active',
-      passwordHash.algorithm,
-      passwordHash.iterations,
-      passwordHash.salt,
-      passwordHash.hash,
-      now,
-      now,
+    // CAP-042 (AC 17): delegate to `registerWithInvite`, the atomic use
+    // case that writes the canonical user + Better Auth credential +
+    // user_roles row + invite-use increment in a single D1 batch.
+    // The use case resolves the invite role (`role_id ?? 'member'`)
+    // and the role-existence check before the batch — a missing role
+    // fails before PBKDF2 runs.
+    //
+    // R-OUTBOUND-006 atomic pattern: the use case's batch is
+    // application-owned (D1 cannot run SQL transactions); the
+    // `registration_keys` BEFORE UPDATE trigger raises an in-batch
+    // SQLite ABORT when the invite is exhausted, rolling all four
+    // writes back.
+    const result = await registerWithInvite(
+      {
+        db: c.env.DB,
+        codeHash,
+        registrationKeyId: key.id,
+        email: body.email,
+        password: body.password,
+        displayName: body.displayName ?? null,
+      },
+      { clock: systemClock, ids: systemIds },
     );
-
-    // 2. Find the member role ID (seed role from CAP-017)
-    const memberRoleResult = await c.env.DB.prepare(
-      `SELECT id FROM roles WHERE name = 'member' LIMIT 1`,
-    ).first<{ id: string }>();
-
-    if (!memberRoleResult) {
-      throw new DomainError({
-        code: 'ROLE_NOT_FOUND',
-        message: 'Member role not found',
-        httpStatus: 500,
-      });
-    }
-
-    // 3. Assign member role to user
-    const userRoleStmt = c.env.DB.prepare(
-      `INSERT INTO user_roles (user_id, role_id, granted_at, granted_by)
-       VALUES (?, ?, ?, NULL)`,
-    ).bind(userId, memberRoleResult.id, now);
-
-    // 4. Increment key usage
-    const incrementStmt = prepareIncrementKeyUsage(c.env.DB).bind(key.id);
-
-    // Execute all statements in a single batch
-    await c.env.DB.batch([userStmt, userRoleStmt, incrementStmt]);
 
     // Return user info (without password)
     const successBody = JSON.stringify({
       data: {
         user: {
-          id: userId,
+          id: result.userId,
           email: body.email,
           displayName: body.displayName ?? null,
         },

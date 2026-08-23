@@ -23,8 +23,11 @@ import { describe, expect, it } from 'vitest';
 
 // Glob the source tree relative to this file. Vite evaluates the glob
 // at build time and produces a map from module path to file content.
+// CAP-042 Batch 8 (L-1 fix): scan the whole subtree recursively
+// (`./**/*.{ts,tsx}`) so guard coverage includes nested helpers, not
+// only the files in this directory. Test files are filtered out below.
 const RAW_SOURCE: Readonly<Record<string, string>> = import.meta.glob(
-  './*.{ts,tsx}',
+  './**/*.{ts,tsx}',
   { query: '?raw', import: 'default', eager: true },
 );
 
