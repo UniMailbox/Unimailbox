@@ -8,17 +8,38 @@
 //     hook so the inbox list can scroll forward through HMAC-signed
 //     cursors without re-implementing pagination state.
 //
+// CAP-043 Slice 2 adds the message-detail surface:
+//   - `messageDetailQuery` / `messageThreadQuery` — the detail page's
+//     two reads (`GET .../messages/:messageId` + `GET .../thread`),
+//     keyed inside the existing `['mailbox', 'messages', mailboxId]`
+//     family so they extend, not fork, the cache tree.
+//   - `useMarkMessageReadMutation` — `PATCH .../messages/:messageId/read`
+//     fired once per detail-page mount when the message is unread
+//     (R-MESSAGE-005). D-CAP-041-2: ApiClient mints the fresh
+//     Idempotency-Key; components never touch that header.
+//
 // The hook keyed on `['mailbox', mailboxId, 'messages']` so a navigation
 // to a different mailbox invalidates by query key (D-CAP-041-1 cache
 // pattern). The cursor is opaque to the client; we never inspect it.
-import { useInfiniteQuery, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type UseQueryResult,
+} from '@tanstack/react-query';
+import {
+  messageDetailSchema,
   messageListResponseSchema,
+  messageThreadResponseSchema,
+  type MessageDetail,
   type MessageListResponse,
+  type MessageThreadResponse,
 } from '@unimailbox/contracts';
 import { z } from 'zod';
 import type { ApiClient } from '../../infrastructure/api/client';
-import type { ApiError } from '../../infrastructure/api/errors';
+import { ApiError } from '../../infrastructure/api/errors';
 import { useApiClient } from '../../infrastructure/api/client-provider';
 
 /**
@@ -53,6 +74,10 @@ export const mailboxQueryKeys = {
   list: () => [...mailboxQueryKeys.all, 'list'] as const,
   messages: (mailboxId: string) =>
     [...mailboxQueryKeys.all, 'messages', mailboxId] as const,
+  message: (mailboxId: string, messageId: string) =>
+    [...mailboxQueryKeys.all, 'messages', mailboxId, 'detail', messageId] as const,
+  thread: (mailboxId: string, messageId: string) =>
+    [...mailboxQueryKeys.all, 'messages', mailboxId, 'thread', messageId] as const,
 };
 
 /**
@@ -129,5 +154,150 @@ export function mailboxMessagesInfiniteQuery(mailboxId: string) {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     staleTime: 0,
+  });
+}
+
+/**
+ * Fetcher for `GET .../messages/:messageId` — the message detail. Parsed
+ * through the contracts schema; the caller gets a typed `MessageDetail`
+ * (CAP-043 Slice 2 / AC 11).
+ */
+export async function fetchMessageDetail(
+  apiClient: ApiClient,
+  mailboxId: string,
+  messageId: string,
+): Promise<MessageDetail> {
+  const response = await apiClient.fetch<{
+    readonly data: MessageDetail;
+  }>(`/api/v1/mailboxes/${mailboxId}/messages/${messageId}`);
+  return messageDetailSchema.parse(response.data);
+}
+
+/**
+ * Query hook for the message detail. Keyed inside the
+ * `['mailbox', 'messages', mailboxId]` family (extend, not fork) so the
+ * detail cache lives beside the inbox pages it is opened from.
+ */
+export function messageDetailQuery(
+  mailboxId: string,
+  messageId: string,
+): UseQueryResult<MessageDetail, ApiError> {
+  const apiClient = useApiClient();
+  return useQuery({
+    queryKey: mailboxQueryKeys.message(mailboxId, messageId),
+    queryFn: () => fetchMessageDetail(apiClient, mailboxId, messageId),
+    staleTime: 0,
+  });
+}
+
+/**
+ * Fetcher for `GET .../messages/:messageId/thread` — the thread panel's
+ * same-thread messages, oldest-first, per D-CAP-043-C / AC 10.
+ */
+export async function fetchMessageThread(
+  apiClient: ApiClient,
+  mailboxId: string,
+  messageId: string,
+): Promise<MessageThreadResponse> {
+  const response = await apiClient.fetch<{
+    readonly data: MessageThreadResponse;
+  }>(`/api/v1/mailboxes/${mailboxId}/messages/${messageId}/thread`);
+  return messageThreadResponseSchema.parse(response.data);
+}
+
+/**
+ * Query hook for the thread. Same key family as the detail query; the
+ * thread is keyed by the anchor message the user opened.
+ */
+export function messageThreadQuery(
+  mailboxId: string,
+  messageId: string,
+): UseQueryResult<MessageThreadResponse, ApiError> {
+  const apiClient = useApiClient();
+  return useQuery({
+    queryKey: mailboxQueryKeys.thread(mailboxId, messageId),
+    queryFn: () => fetchMessageThread(apiClient, mailboxId, messageId),
+    staleTime: 0,
+  });
+}
+
+export interface MarkMessageReadInput {
+  readonly mailboxId: string;
+  readonly messageId: string;
+}
+
+/**
+ * Mark-read mutation (CAP-043 Slice 2 / AC 12, R-MESSAGE-005).
+ *
+ * The detail page fires this exactly once per mount when the message is
+ * unread. D-CAP-041-2: ApiClient mints a fresh `Idempotency-Key` for
+ * every non-GET request and components never touch that header — one
+ * mutation invocation per mount therefore means one fresh key per
+ * mount.
+ *
+ * On success BOTH caches flip via targeted `setQueryData` writes — only
+ * the affected entries change; no refetch, no full invalidation
+ * (D-CAP-041-1):
+ *   - the INBOX list entry for this message turns read (the infinite
+ *     query's page is copied structurally);
+ *   - the DETAIL entry turns read too (Slice 2 fix G6, fe M1 / code M1).
+ *     Without the detail flip the cached detail still said `isRead: 0`,
+ *     so every reopen of an already-read message re-fired a redundant
+ *     PATCH on mount.
+ *
+ * On failure the mutation warns once (Slice 2 fix G9, fe L1 / code L3):
+ * a failed mark-read is genuinely ignorable — the page keeps rendering —
+ * but not silent. Never swallow an error to keep a happy path green.
+ */
+export function useMarkMessageReadMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: MarkMessageReadInput): Promise<void> => {
+      await apiClient.fetch(
+        `/api/v1/mailboxes/${input.mailboxId}/messages/${input.messageId}/read`,
+        { method: 'PATCH' },
+      );
+    },
+    onSuccess: (_result, input) => {
+      // R-MESSAGE-005: flip the inbox row for THIS message only. The
+      // write is structurally additive (pages/items copies) so an
+      // in-flight fetch of the same key is not torn.
+      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
+        mailboxQueryKeys.messages(input.mailboxId),
+        (existing) => {
+          if (existing === undefined) {
+            return existing;
+          }
+          return {
+            ...existing,
+            pages: existing.pages.map((page) => ({
+              ...page,
+              items: page.items.map((item) =>
+                item.id === input.messageId ? { ...item, isRead: 1 } : item,
+              ),
+            })),
+          };
+        },
+      );
+      // G6: flip the detail cache with the same additive-copy strategy —
+      // a cached entry that is absent stays absent (nothing to correct).
+      queryClient.setQueryData<MessageDetail>(
+        mailboxQueryKeys.message(input.mailboxId, input.messageId),
+        (existing) =>
+          existing === undefined ? existing : { ...existing, isRead: 1 },
+      );
+    },
+    onError: (error, input) => {
+      // G9: the code lives on ApiError at runtime (every ApiClient
+      // rejection is one); anything else narrows to a generic code.
+      const code = error instanceof ApiError ? error.code : 'UNKNOWN';
+      console.warn('mark-message-read failed', {
+        mailboxId: input.mailboxId,
+        messageId: input.messageId,
+        code,
+        message: error.message,
+      });
+    },
   });
 }

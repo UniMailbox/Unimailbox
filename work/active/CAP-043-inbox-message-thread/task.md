@@ -64,10 +64,10 @@ Objectively checkable. No "works correctly". Each maps to a test or a demonstrab
 
 ### Slice 2 — Message detail + thread
 
-- [ ] 9. `apps/worker/src/modules/messages/message-read-repository.ts` exports `getMessageThread(db, mailboxId, messageId)` returning the same-thread messages for the mailbox, ordered oldest-first. The thread root is computed as the first non-empty of: `messages.thread_id`, the first `<…>` from `messages.references_header`, `messages.in_reply_to_header`, the message's own `message_id_header` (singleton).
-- [ ] 10. `GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread` returns `{ data: { rootId, items: MessageListItem[] } }` with the items ordered oldest-first; non-existent message → `404 MESSAGE_NOT_FOUND`; cross-mailbox message → `404` (no leak).
-- [ ] 11. Web: `/mailbox/:mailboxId/messages/:messageId` renders the message detail (text body, from, to, cc, subject, date, headers collapsed by default), and a thread panel listing all messages in the thread with the active one highlighted and clickable navigation.
-- [ ] 12. Opening a message detail fires `PATCH .../read` once (idempotent, no second fetch on re-render); unread → read transition updates the inbox list cache for that entry.
+- [x] 9. `apps/worker/src/modules/messages/message-read-repository.ts` exports `getMessageThread(db, mailboxId, messageId)` returning the same-thread messages for the mailbox, ordered oldest-first. The thread root is computed as the first non-empty of: `messages.thread_id`, the first `<…>` from `messages.references_header`, `messages.in_reply_to_header`, the message's own `message_id_header` (singleton).
+- [x] 10. `GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread` returns `{ data: { rootId, items: MessageListItem[] } }` with the items ordered oldest-first; non-existent message → `404 MESSAGE_NOT_FOUND`; cross-mailbox message → `404` (no leak).
+- [x] 11. Web: `/mailbox/:mailboxId/messages/:messageId` renders the message detail (text body, from, to, cc, subject, date, headers collapsed by default), and a thread panel listing all messages in the thread with the active one highlighted and clickable navigation.
+- [x] 12. Opening a message detail fires `PATCH .../read` once (idempotent, no second fetch on re-render); unread → read transition updates the inbox list cache for that entry.
 
 ### Slice 3 — Star + delete
 
@@ -143,7 +143,7 @@ One writer per file. Reading anything is fine; writing outside your list is not.
 | Agent | Slice | Owns |
 |---|---|---|
 | `implementer-slice-1` | Slice 1 | `migrations/0016_*.sql`, `migrations/0016_*.verify.sql`, `apps/worker/src/platform/cursor.ts`, `apps/worker/src/platform/config.ts`, `apps/worker/src/platform/secrets.ts`, `apps/worker/src/modules/messages/message-read-repository.ts`, `apps/worker/src/http/routes/messages.ts`, `apps/worker/wrangler.jsonc`, `apps/worker/wrangler.test.jsonc`, `scripts/deploy.ts`, `apps/web/src/features/mailbox/{MailboxListPage,InboxListPage,MailboxListSkeleton,InboxListSkeleton,InboxEmpty,InboxError}.tsx`, `apps/web/src/features/mailbox/MailboxListPage.test.tsx`, `apps/web/src/features/mailbox/InboxListPage.test.tsx`, `apps/web/src/features/mailbox/index.ts` |
-| `implementer-slice-2` | Slice 2 | `apps/worker/src/modules/messages/message-read-repository.ts`, `apps/worker/src/http/routes/messages.ts`, `packages/contracts/src/index.ts`, `apps/web/src/features/mailbox/{MessageDetailPage,MessageThreadPanel,MessageDetailSkeleton}.tsx`, `apps/web/src/features/mailbox/MessageDetailPage.test.tsx` |
+| `implementer-slice-2` | Slice 2 | `apps/worker/src/modules/messages/message-read-repository.ts`, `apps/worker/src/http/routes/messages.ts`, `packages/contracts/src/index.ts`, `packages/contracts/src/index.test.ts` (schema-coverage tests — required by doctor's tests-cover-contracts check; ratified post-review), `apps/web/src/features/mailbox/{MessageDetailPage,MessageThreadPanel,MessageDetailSkeleton}.tsx`, `apps/web/src/features/mailbox/MessageDetailPage.test.tsx`, **+ amendment after Slice 1 review**: `apps/web/src/app/router.tsx` (detail route), `apps/web/src/features/mailbox/mailbox-queries.ts` (detail/thread queries + mark-read mutation), `apps/web/src/features/mailbox/InboxListPage.tsx` (deferred fe-LOW: show mailbox address from the mailbox-list cache instead of the raw UUID) |
 | `implementer-slice-3` | Slice 3 | `apps/worker/src/modules/messages/message-read-repository.ts`, `apps/worker/src/http/routes/messages.ts`, `packages/contracts/src/index.ts`, `apps/web/src/components/ui/AlertDialog.tsx`, `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton,ConfirmDeleteDialog}.tsx`, `apps/web/src/features/mailbox/{StarButton,DeleteMessageButton}.test.tsx` |
 | `architecture-reviewer` (parallel after slice) | per slice | reads only; produces findings |
 | `code-reviewer` (parallel after slice) | per slice | reads only; produces findings |
@@ -252,6 +252,39 @@ Reviews returned: frontend **REJECT** (3 HIGH, 2 MEDIUM, 2 LOW) · QA **ACCEPT**
 | Slice 3 gate: star/delete UPSERTs MUST target `(mailbox_message_id, user_id)` post-0017 (sec M2) | Binding constraint on Slice 3's `deleteMessageForUser` |
 | Promote `mailboxListResponseSchema` from `apps/web/src/features/mailbox/mailbox-queries.ts:38-50` to `packages/contracts` (arch MEDIUM) | Before Slice 3 lands — cross-boundary wire shapes belong in contracts |
 | Verify comment cites nonexistent `.changes` semantics (arch LOW) | Fix in passing during the fix pass if trivially locatable; else follow-up |
+
+## Slice 2 review outcome → fix pass
+
+Reviews returned (all five in parallel on the uncommitted Slice 2 tree): architecture **ACCEPT-WITH-FOLLOWUPS** · code **ACCEPT-WITH-FOLLOWUPS** · security **ACCEPT-WITH-FOLLOWUPS** · frontend **ACCEPT-WITH-FOLLOWUPS** · QA **ACCEPT**. Full reports in `work/reviews/CAP-043-architecture-review-slice2.md` and the other four slice-2 review files; the consolidated record lands in `work/reviews/CAP-043-slice2-review.md` at fix-pass completion. The orchestrator independently confirmed the three worker findings below against `message-read-repository.ts:335-509`.
+
+### Fix-pass acceptance criteria (G1–G12)
+
+- [x] G1. **Thread query B is capped; recipients fetch bounded** (sec M1 — D1 rejects >100 bound parameters). The root-matching branch of query B changes from unbounded ASC to `ORDER BY m.created_at DESC, m.id DESC LIMIT 50` with the results reversed in JS to the ASC presentation order (newest-50 window: the root may fall outside a 50+ thread; `rootId` in the response stays correct and the anchor is rendered by the detail query, so the window is presentation-only). A named constant (`THREAD_MAX_ITEMS = 50`) cites the D1 parameter limit. The singleton branch is unchanged (structurally ≤1 row by the unique index). The recipients `IN` clause therefore binds ≤50 ids — always under the limit; no chunking. Boundary worker test: a thread with 120 same-root members returns 200 with exactly 50 items, includes the NEWEST member, excludes the oldest/root member, and every item carries parsed recipients (proving the bounded IN-clause executed). Before the fix this scenario fails the whole request.
+- [x] G2. **`getMessageDetail` respects per-user soft delete** (arch M1 / code M4 / sec L2 — detail currently 404s nothing the list hides). The WHERE gains `AND COALESCE(mus.is_deleted, 0) = 0`. Worker test: seed `message_user_state` with `is_deleted = 1` for user A on a message → GET detail as A → 404 `MESSAGE_NOT_FOUND`; GET as B (no row) → 200.
+- [x] G3. **`THREAD_ROOT_SQL` final tier uses `NULLIF(m.message_id_header, '')`** (code L1 — an empty-string `message_id_header` currently resolves root `''`, and every other header-less empty-string message also resolves `''`, fusing unrelated messages). With NULLIF, empty string resolves NULL → singleton. Worker test: two messages with `message_id_header = ''`, no references / in_reply_to / thread_id → two separate singleton threads (each thread response has exactly 1 item).
+- [x] G4. **Malformed-References worker tests** (code M2): `references_header` values `'no brackets here'`, `'<'`, `'><'` must fall through the first-token tier (no garbage root like `''` or a partial) to the in_reply_to / message-id tiers — each case asserts the resolved root matches the next valid tier (or singleton when no tiers apply).
+- [x] G5. **in_reply_to-only tier test** (QA L1): message M1 with `message_id_header = '<root@x>'`, message M2 with no references but `in_reply_to_header = '<root@x>'` → both resolve root `<root@x>` → M2's thread contains both, oldest-first.
+- [x] G6. **Mark-read flips the detail cache too** (fe M1 / code M1 — today only the inbox infinite cache flips; the cached detail still says `isRead: 0`, so every reopen of an already-read message fires a redundant PATCH). `onSuccess` additionally `setQueryData` on `mailboxQueryKeys.message(mailboxId, messageId)` setting `isRead: 1` (additive copy). Regression test: open unread message → 1 PATCH; navigate back; reopen → still exactly 1 PATCH total.
+- [x] G7. **Sibling-navigation mark-read test** (fe M2 / code L7 — the route reuses the component instance on param change, so `remountDeps` behavior must be proven, not assumed): render at unread A → exactly 1 PATCH for A; rerender with unread B → exactly 1 PATCH for B and no further PATCH for A.
+- [x] G8. **Thread-error branch test** (code M3): thread fetch rejects → message body still renders, `message-thread-error` panel visible with the retry control, retry re-issues the thread fetch.
+- [x] G9. **Mark-read failures are not silent** (fe L1 / code L3): the mutation gains an `onError` handler that `console.warn`s once with `mailboxId`, `messageId`, and the error code+message (genuinely ignorable failure — the page keeps rendering; warn with a reason). Test: PATCH rejects → warn called once with both ids, page does not crash.
+- [x] G10. **From address renders once** (fe L2): the Card description no longer duplicates the `message-from` meta row. Test: the formatted from string appears exactly once in the rendered detail.
+- [x] G11. **InboxListPage address-lookup test** (fe L3 — the lookup landed at `InboxListPage.tsx:80` without a test): cached mailbox list hit → the Card title shows the mailbox address; empty cache → falls back to the raw mailbox UUID without crashing.
+- [x] G12. Gates: `pnpm scaffold doctor` 13/13 · `pnpm typecheck` · `pnpm lint` · `pnpm test:unit` ≥ 665 · `pnpm test:worker` at baseline + new passing (only the 4 documented pre-existing D1-parallelism failures) · web mailbox tests green · `pnpm build` EXIT=0.
+
+### Fix-pass file ownership (one implementer, Slice 2 envelope only)
+
+`apps/worker/src/modules/messages/message-read-repository.ts` · `apps/worker/src/http/routes/messages.worker.test.ts` · `apps/web/src/features/mailbox/mailbox-queries.ts` · `apps/web/src/features/mailbox/MessageDetailPage.tsx` · `apps/web/src/features/mailbox/MessageDetailPage.test.tsx` · `apps/web/src/features/mailbox/InboxListPage.test.tsx` (address-lookup test only — `InboxListPage.tsx` is NOT owned; if the test exposes a defect there, report it, do not fix it).
+
+### Deferred to Slice 3 / closure (recorded, not fixed now)
+
+| Finding | Disposition |
+|---|---|
+| Detail + thread routes duplicate the authz stanza; a shared helper needs a 6th site first | Slice 3 — extract when the star/delete routes add it |
+| `THREAD_ROOT_SQL` CASE evaluation per row (no index) on the thread query | Follow-up with the `thread_id` backfill capability (D-CAP-043-C already records read-time resolution as deliberate) |
+| `message-read-repository.ts` approaching 250+ lines | Split decision at Slice 3 completion |
+| `assertCan` 404-vs-403 oracle (deny shape for cross-tenant IDs) | Closure-time recorded decision |
+| Detail page Back link + title show raw mailbox UUID | Cosmetic; ride along with Slice 3 web work if touched |
 
 ## Open questions
 

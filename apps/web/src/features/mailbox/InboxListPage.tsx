@@ -21,11 +21,16 @@
 // returns 400 INVALID_CURSOR; the client resets its cursor chain by
 // calling `refetch()` which restarts from page 1 (the only valid page).
 import type { ReactElement } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { MessageListItem } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
-import { mailboxMessagesInfiniteQuery } from './mailbox-queries';
+import {
+  mailboxMessagesInfiniteQuery,
+  mailboxQueryKeys,
+} from './mailbox-queries';
+import type { MailboxListItem } from './mailbox-queries';
 import { InboxListSkeleton } from './InboxListSkeleton';
 import { InboxEmpty } from './InboxEmpty';
 import { InboxError } from './InboxError';
@@ -61,6 +66,19 @@ interface InboxListContentProps {
 function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
   const sessionQuery = authSessionQuery();
   const query = mailboxMessagesInfiniteQuery(mailboxId);
+
+  // fe-LOW (Slice 1 review, deferred to Slice 2): the card title shows
+  // the mailbox ADDRESS, not the raw UUID. The mailbox list is already
+  // cached from MailboxListPage (the user navigated through it), so a
+  // non-subscribing cache read is enough — a cache miss (direct URL
+  // entry) falls back to the UUID rather than firing a fetch here.
+  const queryClient = useQueryClient();
+  const cachedMailboxes = queryClient.getQueryData<MailboxListItem[]>(
+    mailboxQueryKeys.list(),
+  );
+  const mailboxAddress =
+    cachedMailboxes?.find((mailbox) => mailbox.id === mailboxId)?.address ??
+    `Mailbox ${mailboxId}`;
 
   if (query.isLoading && query.data === undefined) {
     return <InboxListSkeleton />;
@@ -109,7 +127,7 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
         </div>
       </header>
       <Card
-        title={`Mailbox ${mailboxId}`}
+        title={mailboxAddress}
         description="Messages in this mailbox, newest first."
       >
         {items.length === 0 ? (

@@ -29,6 +29,9 @@ export type {
 export {
   listMessagesByMailbox,
   getMessageDetail,
+  // CAP-043 Slice 2 / AC 9: same-thread messages for one mailbox,
+  // oldest-first, root resolved at read time (D-CAP-043-C).
+  getMessageThread,
   markMessageAsRead,
   // CAP-043 Slice 1 / R-API-005: the typed CursorInvalidError so the
   // route layer can map a tampered cursor to 400 INVALID_CURSOR without
@@ -40,6 +43,7 @@ export {
 export type {
   MessageListItem,
   MessageDetail,
+  MessageThread,
   RecipientInfo,
   ListMessagesResult,
 } from './message-read-repository';

@@ -1,5 +1,6 @@
 // http/routes/messages — CAP-022 inbox routes.
-// Hono sub-app for /api/v1/mailboxes/:mailboxId/messages endpoints: list, detail, mark-read.
+// Hono sub-app for /api/v1/mailboxes/:mailboxId/messages endpoints: list,
+// detail, thread (CAP-043 Slice 2), mark-read.
 //
 // R-AUTHZ-003: Two layers — requirePermission('message.read') on every route,
 // then mailbox-scoped assertCan(..., 'read', isAdmin) inside the handler.
@@ -20,6 +21,7 @@ import { checkPermission } from '../../modules/admin';
 import {
   listMessagesByMailbox,
   getMessageDetail,
+  getMessageThread,
   markMessageAsRead,
   CursorInvalidError,
 } from '../../modules/messages';
@@ -148,6 +150,51 @@ export function messageRoutes(): Hono<AppEnv> {
         });
       }
       return c.json({ data: message });
+    },
+  );
+
+  /**
+   * GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread
+   *
+   * CAP-043 AC 10. Same-thread messages for the mailbox, oldest-first.
+   * The thread root is resolved at read time (D-CAP-043-C — see
+   * message-read-repository THREAD_ROOT_SQL). Authz mirrors the detail
+   * route exactly: requirePermission('message.read') + assertCan on the
+   * path mailboxId (R-AUTHZ-003 / R-AUTHZ-004).
+   *
+   * 404 MESSAGE_NOT_FOUND (the detail route's code — no new code) when
+   * the anchor is not in this mailbox, or is soft-deleted for the
+   * calling user. A message that exists in ANOTHER mailbox returns the
+   * same envelope as a non-existent one — no existence leak.
+   */
+  routes.get(
+    '/mailboxes/:mailboxId/messages/:messageId/thread',
+    requirePermission('message.read'),
+    async (c) => {
+      const userId = c.get('userId');
+      if (!userId) {
+        throw new DomainError({
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Authentication required',
+          httpStatus: 401,
+        });
+      }
+
+      const mailboxId = c.req.param('mailboxId');
+      const messageId = c.req.param('messageId');
+
+      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
+      await assertCan(c.env.DB, userId, mailboxId, 'read', isAdmin);
+
+      const thread = await getMessageThread(c.env.DB, mailboxId, messageId, userId);
+      if (!thread) {
+        throw new DomainError({
+          code: 'MESSAGE_NOT_FOUND',
+          message: 'Message not found',
+          httpStatus: 404,
+        });
+      }
+      return c.json({ data: thread });
     },
   );
 

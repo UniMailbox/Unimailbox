@@ -902,6 +902,30 @@ export const messageDetailSchema = z.object({
 
 export type MessageDetail = z.infer<typeof messageDetailSchema>;
 
+/**
+ * Response envelope for GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread
+ * (CAP-043 AC 10).
+ *
+ * `rootId` is the thread's resolved root per D-CAP-043-C — the first
+ * non-empty of `messages.thread_id`, the first `<…>` msg-id token of
+ * `references_header` (brackets kept: every threading header is stored
+ * verbatim from RFC 5322, so a stripped token would never match a root
+ * message's `message_id_header`), `in_reply_to_header`, or the anchor's
+ * own `message_id_header` for a singleton. Nullable when the anchor
+ * carries no threading headers at all — the thread is then the singleton
+ * anchor itself.
+ *
+ * `items` are the same-mailbox messages resolving to the same root,
+ * oldest-first, with per-user isRead (R-MESSAGE-005) and the calling
+ * user's soft-deleted rows excluded.
+ */
+export const messageThreadResponseSchema = z.object({
+  rootId: z.string().nullable(),
+  items: z.array(messageListItemSchema),
+});
+
+export type MessageThreadResponse = z.infer<typeof messageThreadResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // Compose — CAP-023
 // ---------------------------------------------------------------------------

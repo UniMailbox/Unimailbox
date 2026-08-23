@@ -23,6 +23,12 @@
 // tampered or malformed cursor surfaces as `null` from verifyCursor and
 // the repository throws CursorInvalidError so the route can map it to
 // a stable 400 INVALID_CURSOR envelope.
+//
+// CAP-043 Slice 2 / D-CAP-043-C: getMessageThread computes the thread
+// root at READ time (thread_id → first <…> token of references_header →
+// in_reply_to_header → own message_id_header). See THREAD_ROOT_SQL —
+// the priority order exists only there so the anchor and the candidate
+// rows can never drift apart.
 
 import type { Database } from '../../platform/database';
 import { signCursor, verifyCursor } from '../../platform/cursor';
@@ -67,6 +73,11 @@ export interface ListMessagesResult {
   nextCursor: string | null;
 }
 
+export interface MessageThread {
+  rootId: string | null;
+  items: MessageListItem[];
+}
+
 interface MessageListRow {
   id: string;
   from_address: string;
@@ -109,6 +120,53 @@ interface CursorPayload {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 50;
+
+// Slice 2 fix G1 (sec M1): D1 rejects a statement that binds more than
+// 100 parameters. The thread's recipients fetch binds one id per item,
+// so the root-matching branch of getMessageThread caps its window at 50
+// — the recipients IN clause then binds ≤50 ids under every condition.
+// The window is the NEWEST 50 members; the oldest-first presentation
+// order is restored in JS after the fetch.
+const THREAD_MAX_ITEMS = 50;
+
+/**
+ * D-CAP-043-C: the thread root, resolved at read time. One SQL
+ * expression, interpolated into both thread queries so the anchor and
+ * the candidate rows can never drift apart on priority order.
+ *
+ * Priority (first non-empty wins):
+ *   1. `m.thread_id` — the column wins when set (it will become the
+ *      authoritative value once a future capability backfills it).
+ *   2. The first `<…>` msg-id token of `references_header`, brackets
+ *      KEPT. Threading headers are stored verbatim from RFC 5322
+ *      (§3.6.3: msg-id includes the angle brackets), so `message_id_header`
+ *      and `in_reply_to_header` carry `<id@host>` strings. A bracket-
+ *      stripped token would never equal them and threads would never
+ *      assemble.
+ *   3. `m.in_reply_to_header` (verbatim).
+ *   4. `m.message_id_header` (verbatim) — the singleton case. An EMPTY
+ *      string normalises to NULL via NULLIF (G3): an empty-string
+ *      Message-ID must resolve like a missing one, otherwise every
+ *      header-less message whose writer stored `''` would share the
+ *      root `''` and unrelated messages would fuse into one thread.
+ *
+ * The References guard is `instr(…) > instr(… '<')` so a malformed
+ * value with a `>` before any `<` cannot produce a negative-length
+ * substr; a references value with no `<…>` pair falls through to the
+ * next priority.
+ *
+ * Resolves to NULL only when all four sources are empty/NULL — the
+ * caller treats that as a singleton thread (the anchor alone).
+ */
+const THREAD_ROOT_SQL = `CASE
+  WHEN m.thread_id IS NOT NULL AND m.thread_id != '' THEN m.thread_id
+  WHEN instr(m.references_header, '<') > 0
+       AND instr(m.references_header, '>') > instr(m.references_header, '<') THEN
+    substr(m.references_header, instr(m.references_header, '<'),
+           instr(m.references_header, '>') - instr(m.references_header, '<') + 1)
+  WHEN m.in_reply_to_header IS NOT NULL AND m.in_reply_to_header != '' THEN m.in_reply_to_header
+  ELSE NULLIF(m.message_id_header, '')
+END`;
 
 /**
  * Thrown when the cursor the client supplied cannot be verified.
@@ -277,7 +335,12 @@ export async function listMessagesByMailbox(
 /**
  * Loads a single message with its recipients, scoped to a mailbox.
  *
- * R-MESSAGE-005: isRead is resolved per user, same strategy as the list query.
+ * R-MESSAGE-005: isRead is resolved per user, same strategy as the list
+ * query. Soft-delete is too (Slice 2 fix G2, arch M1 / code M4 / sec L2):
+ * `COALESCE(mus.is_deleted, 0) = 0` filters the calling user's
+ * soft-deleted rows so the detail 404s exactly what the inbox list
+ * hides — without it the detail leaked messages the caller had deleted
+ * (D-CAP-043-B).
  * Returns null when the message is not associated with the given mailbox so
  * the caller can surface a 404 without leaking existence across mailboxes.
  *
@@ -305,7 +368,8 @@ export async function getMessageDetail(
               ON mus.mailbox_message_id = mm.id
              AND mus.user_id = ?
         WHERE mm.mailbox_id = ?
-          AND mm.message_id = ?`,
+          AND mm.message_id = ?
+          AND COALESCE(mus.is_deleted, 0) = 0`,
     )
     .bind(userId, mailboxId, messageId)
     .first<MessageDetailRow>();
@@ -340,6 +404,164 @@ export async function getMessageDetail(
     createdAt: row.created_at,
     recipients: groupRecipients(recipientRows.results ?? []),
   };
+}
+
+/**
+ * Returns the same-thread messages for one mailbox, oldest-first
+ * (CAP-043 AC 9).
+ *
+ * The thread root of the ANCHOR message is resolved first (query A),
+ * then every message in the SAME MAILBOX whose own resolved root equals
+ * it is returned (query B). Both sides use THREAD_ROOT_SQL, so the
+ * D-CAP-043-C priority order lives in exactly one place. Cross-mailbox:
+ * only rows joined through this mailbox's `mailbox_messages` are
+ * considered — a message that exists in another mailbox is invisible
+ * here (no existence leak; the caller surfaces 404).
+ *
+ * R-MESSAGE-005: per-user semantics on both sides —
+ *   - the ANCHOR must not be soft-deleted for the calling user (a
+ *     soft-deleted anchor is "gone" for that user, same as the inbox
+ *     list treats it), otherwise null → 404;
+ *   - thread ITEMS exclude the calling user's soft-deleted rows, so
+ *     one member's delete shrinks their thread but not another
+ *     member's (D-CAP-043-B).
+ *
+ * When the anchor's resolved root is NULL (no thread_id, no usable
+ * references token, no in-reply-to, no message-id header) the thread is
+ * the singleton anchor: NULL-root rows are not matched against each
+ * other, because two unrelated header-less messages must never fuse
+ * into one thread.
+ *
+ * Slice 2 fix G1 (sec M1): the root-matching branch returns only the
+ * NEWEST THREAD_MAX_ITEMS members (see the constant's comment for the
+ * D1 bound-parameter limit). `rootId` in the response stays correct and
+ * the anchor itself is rendered by the detail query, so the window is
+ * presentation-only; the oldest members (including, in a 50+ thread,
+ * possibly the root) fall outside it.
+ *
+ * @param db — D1 database binding
+ * @param mailboxId — target mailbox (caller must have asserted read access)
+ * @param messageId — the anchor message (the one the user opened)
+ * @param userId — requesting user; drives per-user isRead + is_deleted
+ */
+export async function getMessageThread(
+  db: Database,
+  mailboxId: string,
+  messageId: string,
+  userId: string,
+): Promise<MessageThread | null> {
+  // Query A: resolve the anchor's thread root. The soft-delete filter
+  // rides along so a soft-deleted-for-caller anchor returns null (404)
+  // instead of a thread the caller's inbox would not link to.
+  const anchor = await db
+    .prepare(
+      `SELECT ${THREAD_ROOT_SQL} AS resolved_root
+         FROM mailbox_messages mm
+         JOIN messages m ON mm.message_id = m.id
+    LEFT JOIN message_user_state mus
+              ON mus.mailbox_message_id = mm.id
+             AND mus.user_id = ?
+        WHERE mm.mailbox_id = ?
+          AND mm.message_id = ?
+          AND COALESCE(mus.is_deleted, 0) = 0`,
+    )
+    .bind(userId, mailboxId, messageId)
+    .first<{ resolved_root: string | null }>();
+
+  if (!anchor) {
+    return null;
+  }
+
+  const rootId: string | null = anchor.resolved_root;
+
+  // Query B: same-mailbox members of the resolved root, excluding the
+  // calling user's soft-deleted rows, capped at the newest
+  // THREAD_MAX_ITEMS (G1 — see the constant). A NULL root is the
+  // singleton case — match the anchor by id only (see doc comment);
+  // structurally ≤1 row by the unique index, so no cap is needed.
+  const rows = await db
+    .prepare(
+      rootId === null
+        ? `SELECT m.id, m.from_address, m.from_name, m.subject,
+                  mm.is_starred, mm.folder, m.created_at,
+                  COALESCE(mus.is_read, 0) AS user_is_read
+             FROM mailbox_messages mm
+             JOIN messages m ON mm.message_id = m.id
+        LEFT JOIN message_user_state mus
+                  ON mus.mailbox_message_id = mm.id
+                 AND mus.user_id = ?
+            WHERE mm.mailbox_id = ?
+              AND COALESCE(mus.is_deleted, 0) = 0
+              AND mm.message_id = ?
+         ORDER BY m.created_at ASC, m.id ASC`
+        : `SELECT m.id, m.from_address, m.from_name, m.subject,
+                  mm.is_starred, mm.folder, m.created_at,
+                  COALESCE(mus.is_read, 0) AS user_is_read
+             FROM mailbox_messages mm
+             JOIN messages m ON mm.message_id = m.id
+        LEFT JOIN message_user_state mus
+                  ON mus.mailbox_message_id = mm.id
+                 AND mus.user_id = ?
+            WHERE mm.mailbox_id = ?
+              AND COALESCE(mus.is_deleted, 0) = 0
+              AND ${THREAD_ROOT_SQL} = ?
+         ORDER BY m.created_at DESC, m.id DESC
+            LIMIT ?`,
+    )
+    .bind(
+      ...(rootId === null
+        ? [userId, mailboxId, messageId]
+        : [userId, mailboxId, rootId, THREAD_MAX_ITEMS]),
+    )
+    .all<MessageListRow>();
+
+  // G1: the root branch fetched newest-first under the cap; restore the
+  // oldest-first presentation order the contract promises. The
+  // singleton branch already returns ASC and needs no reversal.
+  const orderedRows =
+    rootId === null
+      ? (rows.results ?? [])
+      : [...(rows.results ?? [])].reverse();
+  const items: MessageListItem[] = orderedRows.map((row) => ({
+    id: row.id,
+    fromAddress: row.from_address,
+    fromName: row.from_name,
+    subject: row.subject,
+    isRead: row.user_is_read,
+    isStarred: row.is_starred,
+    folder: row.folder,
+    createdAt: row.created_at,
+    recipients: { to: [], cc: [] },
+  }));
+
+  // Recipients for the thread's message IDs (same shape as the list query).
+  if (items.length > 0) {
+    const ids = items.map((i) => i.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const recipientRows = await db
+      .prepare(
+        `SELECT message_id, address, display_name, type
+           FROM message_recipients
+          WHERE message_id IN (${placeholders})`,
+      )
+      .bind(...ids)
+      .all<RecipientRow>();
+
+    const byMessage = new Map<string, RecipientRow[]>();
+    for (const r of recipientRows.results ?? []) {
+      const list = byMessage.get(r.message_id) ?? [];
+      list.push(r);
+      byMessage.set(r.message_id, list);
+    }
+    for (const item of items) {
+      const list = byMessage.get(item.id);
+      if (list) {
+        item.recipients = groupRecipients(list);
+      }
+    }
+  }
+
+  return { rootId, items };
 }
 
 /**

@@ -167,6 +167,14 @@ interface InsertMessageOptions {
   readonly createdAt?: string;
   readonly subject?: string;
   readonly fromAddress?: string;
+  /** RFC 5322 Message-ID, stored verbatim (typically `<id@host>`). */
+  readonly messageIdHeader?: string | null;
+  /** RFC 5322 In-Reply-To, stored verbatim (typically `<id@host>`). */
+  readonly inReplyToHeader?: string | null;
+  /** RFC 5322 References, stored verbatim (`<a@x> <b@y>`). */
+  readonly referencesHeader?: string;
+  /** D-CAP-043-C: when set, the column wins over header-derived roots. */
+  readonly threadId?: string | null;
 }
 
 /**
@@ -188,11 +196,22 @@ async function insertMessage(
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body,
-         message_id_header, in_reply_to_header, references_header, status,
+         thread_id, message_id_header, in_reply_to_header, references_header, status,
          received_at, created_at, updated_at)
        VALUES (?, ?, 'Sender', ?, '<p>body</p>', 'body',
-         NULL, NULL, '', 'delivered', ?, ?, ?)`,
-    ).bind(messageId, fromAddress, subject, createdAt, createdAt, createdAt),
+         ?, ?, ?, ?, 'delivered', ?, ?, ?)`,
+    ).bind(
+      messageId,
+      fromAddress,
+      subject,
+      opts.threadId ?? null,
+      opts.messageIdHeader ?? null,
+      opts.inReplyToHeader ?? null,
+      opts.referencesHeader ?? '',
+      createdAt,
+      createdAt,
+      createdAt,
+    ),
     env.DB.prepare(
       `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
        VALUES (?, ?, ?, 0, 0, 'inbox', ?)`,
@@ -425,6 +444,49 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages/:messageId', () => {
     expect(response.status).toBe(404);
     const body = await response.json();
     expect(body.error.code).toBe('MESSAGE_NOT_FOUND');
+  });
+
+  // Slice 2 fix G2 (arch M1 / code M4 / sec L2): before the filter, the
+  // detail query 404'd nothing the inbox list hid — a soft-deleted
+  // message was still fully readable at its detail URL.
+  it('returns 404 MESSAGE_NOT_FOUND for a message soft-deleted for the calling user, 200 for another member (R-MESSAGE-005)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId, {
+      subject: 'soft-deleted detail',
+    });
+
+    // Owner soft-deletes (D-CAP-043-B seeding: plain INSERT — post-0017
+    // the PK is (mailbox_message_id, user_id) and no row exists yet).
+    await env.DB.prepare(
+      `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, is_deleted, deleted_at, updated_at)
+       VALUES (?, ?, 0, NULL, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(mailboxMessageId, ownerId)
+      .run();
+
+    const ownerResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect(ownerResponse.status).toBe(404);
+    const ownerBody = await ownerResponse.json();
+    expect(ownerBody.error.code).toBe('MESSAGE_NOT_FOUND');
+
+    // The viewer has no state row — the message is fully readable.
+    const viewerResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerResponse.status).toBe(200);
+    const viewerBody = await viewerResponse.json();
+    expect(viewerBody.data.id).toBe(messageId);
   });
 
   it('blocks a non-member from reading (IDOR)', async () => {
@@ -1049,5 +1111,572 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-de
     const body = await response.json();
     expect(body.data.items).toEqual([]);
     expect(body.data.nextCursor).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-043 Slice 2 — GET .../messages/:messageId/thread (AC 9 + AC 10).
+// D-CAP-043-C: the thread root resolves at read time, priority
+// [thread_id, references[0], in_reply_to, message_id_header], with the
+// `<…>` token brackets KEPT so a reply's extracted root equals the root
+// message's verbatim Message-ID header. R-MESSAGE-005: soft-delete and
+// isRead resolve per user inside the thread, same as the inbox list.
+// ---------------------------------------------------------------------------
+
+describe('GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread — CAP-043 Slice 2', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+  });
+
+  it('assembles a 3-message thread from references/in-reply-to, oldest-first, with the resolved rootId', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // Root: own Message-ID only. Replies: references + in-reply-to chain.
+    // Bracket-ful ids exactly as email-core stores the verbatim headers.
+    const root = await insertMessage(mailboxId, {
+      subject: 'Thread root',
+      messageIdHeader: '<root@example.com>',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const reply1 = await insertMessage(mailboxId, {
+      subject: 'Reply 1',
+      messageIdHeader: '<reply-1@example.com>',
+      inReplyToHeader: '<root@example.com>',
+      referencesHeader: '<root@example.com>',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    const reply2 = await insertMessage(mailboxId, {
+      subject: 'Reply 2',
+      messageIdHeader: '<reply-2@example.com>',
+      inReplyToHeader: '<reply-1@example.com>',
+      referencesHeader: '<root@example.com> <reply-1@example.com>',
+      createdAt: '2026-01-03T00:00:00.000Z',
+    });
+    // Unrelated message — must not join the thread.
+    await insertMessage(mailboxId, {
+      subject: 'Unrelated',
+      messageIdHeader: '<unrelated@example.com>',
+      createdAt: '2026-01-04T00:00:00.000Z',
+    });
+
+    // Anchor the NEWEST reply — resolution must walk back to the root.
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${reply2.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.rootId).toBe('<root@example.com>');
+    expect(body.data.items).toHaveLength(3);
+    expect(body.data.items.map((item: { id: string }) => item.id)).toEqual([
+      root.messageId,
+      reply1.messageId,
+      reply2.messageId,
+    ]);
+  });
+
+  it('D-CAP-043-C: a set thread_id column wins over header-derived roots', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // M1 has BOTH a thread_id and a decoy references root — the column wins.
+    const m1 = await insertMessage(mailboxId, {
+      subject: 'column root 1',
+      threadId: 'T-1',
+      referencesHeader: '<decoy@example.com>',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const m2 = await insertMessage(mailboxId, {
+      subject: 'column root 2',
+      threadId: 'T-1',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    // Same decoy references root but NO thread_id — resolves to the decoy,
+    // which is a different root than T-1, so it must NOT join.
+    await insertMessage(mailboxId, {
+      subject: 'decoy only',
+      referencesHeader: '<decoy@example.com>',
+      createdAt: '2026-01-03T00:00:00.000Z',
+    });
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${m1.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.rootId).toBe('T-1');
+    expect(body.data.items.map((item: { id: string }) => item.id)).toEqual([
+      m1.messageId,
+      m2.messageId,
+    ]);
+  });
+
+  it('returns a singleton thread (rootId = own Message-ID) for a message with no references', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    const solo = await insertMessage(mailboxId, {
+      subject: 'solo',
+      messageIdHeader: '<solo@example.com>',
+    });
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${solo.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.rootId).toBe('<solo@example.com>');
+    expect(body.data.items).toHaveLength(1);
+    expect(body.data.items[0].id).toBe(solo.messageId);
+  });
+
+  it('a message with no threading headers at all is a singleton and never fuses with other header-less messages', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // Both resolve to a NULL root. NULL-root rows must not match each
+    // other — two unrelated header-less messages are separate threads.
+    const a = await insertMessage(mailboxId, {
+      subject: 'no headers A',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    await insertMessage(mailboxId, {
+      subject: 'no headers B',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${a.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.rootId).toBeNull();
+    expect(body.data.items).toHaveLength(1);
+    expect(body.data.items[0].id).toBe(a.messageId);
+  });
+
+  it('returns 404 MESSAGE_NOT_FOUND for a non-existent message and for a message in ANOTHER mailbox (no leak)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailbox1 = await createMailbox(domainId, ownerId, 'one');
+    const mailbox2 = await createMailbox(domainId, ownerId, 'two');
+
+    // The message lives in mailbox2; the request targets mailbox1.
+    const { messageId } = await insertMessage(mailbox2, {
+      subject: 'other mailbox',
+      messageIdHeader: '<cross@example.com>',
+    });
+
+    const crossMailbox = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailbox1}/messages/${messageId}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const nonExistent = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailbox1}/messages/${crypto.randomUUID()}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(crossMailbox.status).toBe(404);
+    expect(nonExistent.status).toBe(404);
+    const crossBody = await crossMailbox.json();
+    const missingBody = await nonExistent.json();
+    // Identical code + shape: an attacker cannot distinguish "exists
+    // elsewhere" from "does not exist" (R-AUTHZ-004 no-leak).
+    expect(crossBody.error.code).toBe('MESSAGE_NOT_FOUND');
+    expect(missingBody.error.code).toBe('MESSAGE_NOT_FOUND');
+    expect(Object.keys(crossBody.error).sort()).toEqual(
+      Object.keys(missingBody.error).sort(),
+    );
+  });
+
+  it('excludes a soft-deleted-for-caller thread member but keeps it for another member (R-MESSAGE-005)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+
+    const root = await insertMessage(mailboxId, {
+      subject: 'thread root',
+      messageIdHeader: '<root@example.com>',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    await insertMessage(mailboxId, {
+      subject: 'reply',
+      referencesHeader: '<root@example.com>',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    const anchor = await insertMessage(mailboxId, {
+      subject: 'anchor',
+      referencesHeader: '<root@example.com>',
+      createdAt: '2026-01-03T00:00:00.000Z',
+    });
+
+    // Owner soft-deletes the ROOT message only (D-CAP-043-B seeding:
+    // plain INSERT, no row exists yet under the 0017 composite PK).
+    await env.DB.prepare(
+      `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, is_deleted, deleted_at, updated_at)
+       VALUES (?, ?, 0, NULL, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(root.mailboxMessageId, ownerId)
+      .run();
+
+    // Owner's thread drops the deleted member (2 items)…
+    const ownerResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${anchor.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect(ownerResponse.status).toBe(200);
+    const ownerBody = await ownerResponse.json();
+    expect(ownerBody.data.items).toHaveLength(2);
+    expect(
+      ownerBody.data.items.map((item: { id: string }) => item.id),
+    ).not.toContain(root.messageId);
+
+    // …the viewer still sees the full thread (3 items).
+    const viewerResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${anchor.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerResponse.status).toBe(200);
+    const viewerBody = await viewerResponse.json();
+    expect(viewerBody.data.items).toHaveLength(3);
+  });
+
+  it('returns 404 when the ANCHOR itself is soft-deleted for the calling user, 200 for another member', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+
+    const anchor = await insertMessage(mailboxId, {
+      subject: 'deleted anchor',
+      messageIdHeader: '<anchor@example.com>',
+    });
+
+    await env.DB.prepare(
+      `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, is_deleted, deleted_at, updated_at)
+       VALUES (?, ?, 0, NULL, 1, datetime('now'), datetime('now'))`,
+    )
+      .bind(anchor.mailboxMessageId, ownerId)
+      .run();
+
+    const ownerResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${anchor.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect(ownerResponse.status).toBe(404);
+    const ownerBody = await ownerResponse.json();
+    expect(ownerBody.error.code).toBe('MESSAGE_NOT_FOUND');
+
+    const viewerResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${anchor.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerResponse.status).toBe(200);
+  });
+
+  it('resolves per-user isRead inside the thread (R-MESSAGE-005)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const viewerId = await createUserWithRole('member', 'viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+
+    const root = await insertMessage(mailboxId, {
+      subject: 'thread root',
+      messageIdHeader: '<root@example.com>',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const reply = await insertMessage(mailboxId, {
+      subject: 'reply',
+      referencesHeader: '<root@example.com>',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    // Owner has read the reply; the root is unread for both users.
+    await env.DB.prepare(
+      `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, is_deleted, deleted_at, updated_at)
+       VALUES (?, ?, 1, datetime('now'), 0, NULL, datetime('now'))`,
+    )
+      .bind(reply.mailboxMessageId, ownerId)
+      .run();
+
+    const ownerThread = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${root.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect(ownerThread.status).toBe(200);
+    const ownerBody = await ownerThread.json();
+    expect(ownerBody.data.items).toHaveLength(2);
+    expect(ownerBody.data.items[0].id).toBe(root.messageId);
+    expect(ownerBody.data.items[0].isRead).toBe(0);
+    expect(ownerBody.data.items[1].id).toBe(reply.messageId);
+    expect(ownerBody.data.items[1].isRead).toBe(1);
+
+    // Viewer has no message_user_state rows — everything reads 0.
+    const viewerThread = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${root.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect(viewerThread.status).toBe(200);
+    const viewerBody = await viewerThread.json();
+    expect(viewerBody.data.items.map((item: { isRead: number }) => item.isRead)).toEqual([0, 0]);
+  });
+
+  // Slice 2 fix G1 (sec M1): D1 rejects statements binding >100
+  // parameters. Before the cap, this scenario bound 120 ids in the
+  // recipients IN clause and the whole request failed.
+  it('caps the thread at the newest 50 members — 120 same-root members return 200 with exactly 50 items (G1)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // Root (member 0) + 119 replies sharing the references root.
+    const total = 120;
+    const ids: string[] = [];
+    const statements: Array<ReturnType<typeof env.DB.prepare>> = [];
+    const base = Date.parse('2026-01-01T00:00:00.000Z');
+    for (let i = 0; i < total; i++) {
+      const messageId = crypto.randomUUID();
+      ids.push(messageId);
+      const createdAt = new Date(base + i * 60_000).toISOString();
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body,
+             thread_id, message_id_header, in_reply_to_header, references_header, status,
+             received_at, created_at, updated_at)
+           VALUES (?, ?, 'Sender', ?, '<p>body</p>', 'body',
+             NULL, ?, NULL, ?, 'delivered', ?, ?, ?)`,
+        ).bind(
+          messageId,
+          'sender@example.com',
+          `member ${i}`,
+          i === 0 ? '<big-thread@example.com>' : `<member-${i}@example.com>`,
+          i === 0 ? '' : '<big-thread@example.com>',
+          createdAt,
+          createdAt,
+          createdAt,
+        ),
+        env.DB.prepare(
+          `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
+           VALUES (?, ?, ?, 0, 0, 'inbox', ?)`,
+        ).bind(crypto.randomUUID(), mailboxId, messageId, createdAt),
+        env.DB.prepare(
+          `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
+           VALUES (?, ?, 'recipient@example.com', 'Recipient', 'to', ?)`,
+        ).bind(crypto.randomUUID(), messageId, createdAt),
+      );
+    }
+    // Keep each batch modest; every statement is tiny and binds ≤13 ids.
+    for (let i = 0; i < statements.length; i += 120) {
+      await env.DB.batch(statements.slice(i, i + 120));
+    }
+
+    // Anchor the NEWEST member; the response must be the newest-50
+    // window (replies 70..119), presented oldest-first.
+    const anchorId = ids[total - 1] as string;
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${anchorId}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    // rootId stays correct even though the root fell outside the window.
+    expect(body.data.rootId).toBe('<big-thread@example.com>');
+    const items: Array<{ id: string; recipients: { to: Array<{ address: string }> } }> =
+      body.data.items;
+    expect(items).toHaveLength(50);
+    // Oldest-first window: first item is member 70, last is the anchor.
+    expect(items[0].id).toBe(ids[70]);
+    expect(items[49].id).toBe(anchorId);
+    // The oldest members — including the root — are excluded.
+    const itemIds = new Set(items.map((item) => item.id));
+    expect(itemIds.has(ids[0] as string)).toBe(false);
+    expect(itemIds.has(ids[1] as string)).toBe(false);
+    // Every item carries parsed recipients — proof the bounded
+    // IN-clause (≤50 ids) actually executed.
+    for (const item of items) {
+      expect(item.recipients.to).toHaveLength(1);
+      expect(item.recipients.to[0]?.address).toBe('recipient@example.com');
+    }
+  });
+
+  // Slice 2 fix G3 (code L1): an empty-string message_id_header must
+  // resolve NULL (singleton), not fuse every header-less message onto
+  // the shared root ''.
+  it('treats an empty-string message_id_header as header-less — two such messages are separate singleton threads (G3)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    const a = await insertMessage(mailboxId, {
+      subject: 'empty id A',
+      messageIdHeader: '',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const b = await insertMessage(mailboxId, {
+      subject: 'empty id B',
+      messageIdHeader: '',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    for (const [message, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const response = await SELF.fetch(
+        `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${message.messageId}/thread`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.rootId).toBeNull();
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0].id).toBe(message.messageId);
+      expect(body.data.items[0].id).not.toBe(other.messageId);
+    }
+  });
+
+  // Slice 2 fix G4 (code M2): malformed References values must fall
+  // through the first-<…>-token tier — no garbage root like '' or a
+  // partial — onto the next valid tier.
+  it('malformed references_header values fall through to the in_reply_to tier (G4)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    const root = await insertMessage(mailboxId, {
+      subject: 'G4 fallback root',
+      messageIdHeader: '<fallback@example.com>',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const malformedValues = ['no brackets here', '<', '><'];
+    const malformed = malformedValues.map(
+      (value, index) =>
+        insertMessage(mailboxId, {
+          subject: `G4 malformed ${index}`,
+          referencesHeader: value,
+          inReplyToHeader: '<fallback@example.com>',
+          messageIdHeader: `<self-${index}@example.com>`,
+          createdAt: `2026-01-0${index + 2}T00:00:00.000Z`,
+        }),
+    );
+    const [m0, m1, m2] = await Promise.all(malformed);
+
+    // Each malformed message must resolve root '<fallback@example.com>'
+    // via its In-Reply-To and join the full thread.
+    for (const message of [m0, m1, m2]) {
+      const response = await SELF.fetch(
+        `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${message.messageId}/thread`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.rootId).toBe('<fallback@example.com>');
+      expect(body.data.items.map((item: { id: string }) => item.id)).toEqual([
+        root.messageId,
+        m0.messageId,
+        m1.messageId,
+        m2.messageId,
+      ]);
+    }
+  });
+
+  it('malformed references_header values with no in_reply_to fall through to the own message-id tier as singletons (G4)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // Each message's own Message-ID is its only remaining root source.
+    const malformedValues = ['no brackets here', '<', '><'];
+    const seeded = await Promise.all(
+      malformedValues.map((value, index) =>
+        insertMessage(mailboxId, {
+          subject: `G4 singleton ${index}`,
+          referencesHeader: value,
+          messageIdHeader: `<only-root-${index}@example.com>`,
+          createdAt: `2026-01-0${index + 1}T00:00:00.000Z`,
+        }),
+      ),
+    );
+
+    for (const [index, message] of seeded.entries()) {
+      const response = await SELF.fetch(
+        `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${message.messageId}/thread`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.rootId).toBe(`<only-root-${index}@example.com>`);
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0].id).toBe(message.messageId);
+    }
+  });
+
+  // Slice 2 fix G5 (QA L1): pin the in_reply_to-only tier — no
+  // References header, but In-Reply-To points at the root's Message-ID.
+  it('threads a reply carrying only In-Reply-To with the root holding that Message-ID (G5)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    const m1 = await insertMessage(mailboxId, {
+      subject: 'G5 root',
+      messageIdHeader: '<root@x>',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const m2 = await insertMessage(mailboxId, {
+      subject: 'G5 reply',
+      inReplyToHeader: '<root@x>',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${m2.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.rootId).toBe('<root@x>');
+    expect(body.data.items.map((item: { id: string }) => item.id)).toEqual([
+      m1.messageId,
+      m2.messageId,
+    ]);
   });
 });

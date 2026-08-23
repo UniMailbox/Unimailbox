@@ -23,6 +23,7 @@ import {
   messageListItemSchema,
   messageListResponseSchema,
   messageDetailSchema,
+  messageThreadResponseSchema,
   composeRecipientSchema,
   composeRequestSchema,
   messageStatusSchema,
@@ -1024,6 +1025,47 @@ describe('messageDetailSchema', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       recipients: { to: [], cc: [] },
     });
+    expect(result.success).toBe(false);
+  });
+});
+
+// CAP-043 (AC 10): the thread response wraps the list-item shape with the
+// resolved thread root. `rootId` is nullable — a message with no threading
+// headers at all is its own singleton thread and resolves to null
+// (D-CAP-043-C).
+describe('messageThreadResponseSchema', () => {
+  it('accepts a response with a rootId and items', () => {
+    const result = messageThreadResponseSchema.parse({
+      rootId: '<root@example.com>',
+      items: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          fromAddress: 'sender@example.com',
+          fromName: 'Sender',
+          subject: 'Hello',
+          isRead: 0,
+          isStarred: 0,
+          folder: 'inbox',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          recipients: { to: [], cc: [] },
+        },
+      ],
+    });
+    expect(result.rootId).toBe('<root@example.com>');
+    expect(result.items).toHaveLength(1);
+  });
+
+  it('accepts a null rootId for a singleton thread', () => {
+    const result = messageThreadResponseSchema.parse({
+      rootId: null,
+      items: [],
+    });
+    expect(result.rootId).toBeNull();
+    expect(result.items).toEqual([]);
+  });
+
+  it('rejects a missing rootId via safeParse', () => {
+    const result = messageThreadResponseSchema.safeParse({ items: [] });
     expect(result.success).toBe(false);
   });
 });

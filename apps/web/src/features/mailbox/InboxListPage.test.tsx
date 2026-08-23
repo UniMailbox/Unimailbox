@@ -38,6 +38,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 import { InboxListPage } from './InboxListPage';
+import { mailboxQueryKeys, type MailboxListItem } from './mailbox-queries';
 import { authQueryKeys } from '../auth/auth-queries';
 import {
   errorResponse,
@@ -63,6 +64,12 @@ const MAILBOX_ID = 'mb-1';
 interface RenderInboxOptions {
   readonly resolvers: Array<(call: { url: string; method: string }) => Response>;
   readonly session: unknown;
+  /**
+   * G11: pre-seeds the mailbox-list cache exactly as MailboxListPage
+   * would have left it after the user navigated through it. Omit it to
+   * test the empty-cache fallback.
+   */
+  readonly mailboxList?: ReadonlyArray<MailboxListItem>;
 }
 
 function renderInbox(options: RenderInboxOptions): {
@@ -110,6 +117,9 @@ function renderInbox(options: RenderInboxOptions): {
     },
   });
   queryClient.setQueryData(authQueryKeys.session(), options.session);
+  if (options.mailboxList !== undefined) {
+    queryClient.setQueryData(mailboxQueryKeys.list(), [...options.mailboxList]);
+  }
   render(
     <QueryClientProvider client={queryClient}>
       <ApiClientProvider client={apiClient}>
@@ -364,5 +374,58 @@ describe('InboxListPage', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]?.getAttribute('data-message-id')).toBe(ownMessageId);
     });
+  });
+
+  // G11 (fe L3): the address lookup at InboxListPage.tsx:75-81 reads
+  // the cached mailbox list (no fetch) and falls back to the raw UUID.
+  it('shows the mailbox address from the cached mailbox list in the Card title (G11)', async () => {
+    renderInbox({
+      resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
+      session: SESSION,
+      mailboxList: [
+        {
+          id: 'other-mailbox',
+          address: 'other@example.com',
+          displayName: '',
+          status: 'active',
+          domainId: 'd-1',
+          localPart: 'other',
+          ownerUserId: 'u-1',
+        },
+        {
+          id: MAILBOX_ID,
+          address: 'inbox@example.com',
+          displayName: '',
+          status: 'active',
+          domainId: 'd-1',
+          localPart: 'inbox',
+          ownerUserId: 'u-1',
+        },
+      ],
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
+    });
+    // The Card title shows THIS mailbox's address, not another's and
+    // not the raw UUID.
+    expect(screen.getByText('inbox@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('other@example.com')).not.toBeInTheDocument();
+    expect(screen.queryByText(`Mailbox ${MAILBOX_ID}`)).not.toBeInTheDocument();
+  });
+
+  it('falls back to the raw mailbox UUID when the mailbox-list cache is empty, without crashing (G11)', async () => {
+    // No mailboxList seed — the non-subscribing cache read misses and
+    // the fallback renders. It must not fire a mailbox-list fetch.
+    const { fetchCalls } = renderInbox({
+      resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
+    });
+    expect(screen.getByText(`Mailbox ${MAILBOX_ID}`)).toBeInTheDocument();
+    expect(
+      fetchCalls.some((call) => call.method === 'GET' && call.url.endsWith('/api/v1/mailboxes')),
+    ).toBe(false);
   });
 });

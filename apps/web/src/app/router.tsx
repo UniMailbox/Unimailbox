@@ -78,6 +78,7 @@ import {
 } from '../features/setup';
 import { MailboxListPage } from '../features/mailbox/MailboxListPage';
 import { InboxListPage } from '../features/mailbox/InboxListPage';
+import { MessageDetailPage } from '../features/mailbox/MessageDetailPage';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -223,6 +224,33 @@ const inboxRoute = createRoute({
   },
 });
 
+// CAP-043 Slice 2 (AC 11): the message-detail page. Same
+// D-CAP-041-1 session-cache hydration + D-CAP-041-9 guard as the
+// inbox route. The component reads both path parameters directly; the
+// mark-read side effect (AC 12) lives in MessageDetailPage, not here.
+const messageDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mailbox/$mailboxId/messages/$messageId',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: function MessageDetailRoute(): ReactElement {
+    const params = useParams({ strict: false });
+    return (
+      <MessageDetailPage
+        mailboxId={params.mailboxId}
+        messageId={params.messageId}
+      />
+    );
+  },
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -365,6 +393,7 @@ const routeTree = rootRoute.addChildren([
   registerRoute,
   mailboxRoute,
   inboxRoute,
+  messageDetailRoute,
   setupIndexRoute,
   setupChildren,
 ]);
