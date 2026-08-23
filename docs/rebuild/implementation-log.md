@@ -10,6 +10,65 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-23 — CAP-042 Batch 3 (AC 15-16): credential backfill + existing PBKDF2 login
+
+Three commits land the existing-user credential backfill migration and the AC 16 existing-user
+Better Auth login acceptance matrix:
+
+- **AC 15 (3ec1b0c)** — `migrations/0015_credential_backfill.sql` is the deployable artifact. It
+  materialises one `auth_accounts` row per canonical PBKDF2 user in `users` (ADR-006,
+  600_000 iterations, `status NOT IN ('banned', 'deleted')`), structurally idempotent via
+  `INSERT OR IGNORE` against the `(issuer, account_id)` unique index 0014 added. Re-running the
+  INSERT directly produces zero new rows. The envelope is `pbkdf2-sha256$600000$<32 hex salt>
+  $<64 hex hash>` — the canonical shape Better Auth's `emailAndPassword.password.verify`
+  validates against. Timestamps are derived as Unix-ms integers from the canonical text format
+  via `(julianday(text) - 2440587.5) * 86400000`. `migrations/0015_credential_backfill.verify.sql`
+  has nine assertions covering the migration tracking row, count match, banned/deleted/non-PBKDF2/
+  non-canonical exclusion (R-AUTH-002), no duplicate `(issuer, account_id)` pairs, no orphan
+  `user_id`s, and structural envelope shape decomposed into prefix + length + per-segment hex GLOB
+  checks (D1 SQLite has no REGEXP function). `apps/worker/src/database/migrations/0015_credential_backfill.worker.test.ts`
+  has 12 Worker-pool tests against the real D1 binding — every acceptance point exercised:
+  count match, the four exclusion branches, no duplicates, no orphans, envelope shape, INSERT OR
+  IGNORE idempotency on its own, runner-level idempotency, Unix-ms timestamp derivation. The
+  backfill predicate was tightened from `status <> 'deleted'` to `status NOT IN ('banned',
+  'deleted')` after the first run surfaced 2 backfill rows instead of 1 (banned users would
+  have been able to sign in via Better Auth once the backfill landed — R-AUTH-002 violation).
+  `packages/test-kit/src/migrationsDb.ts` registers 0015; `CURRENT_SCHEMA_VERSION` bumped to
+  `'0015'` in both `apps/worker/src/database/schema-version.ts` and
+  `packages/contracts/src/index.ts`; `packages/test-kit/src/migrationsDb.worker.test.ts`
+  assertion follows.
+- **AC 16 (e27d29e)** — `apps/worker/src/http/routes/better-auth.worker.test.ts` adds the
+  existing-user Better Auth sign-in acceptance matrix. The test pauses at the 0014 boundary,
+  seeds a legacy user with the canonical ADR-006 columns, applies 0015 so the backfill writes
+  `auth_accounts.password`, then replaces the placeholder salt/hash with a real Better Auth
+  envelope and re-runs the backfill INSERT so the verifier can complete a sign-in. Two
+  acceptance points are exercised against `/api/v1/auth/sign-in/email` (the Better Auth canonical
+  route): legacy user signs in via the backfilled credential row without any application-level
+  re-registration (cookie name `unimailbox.session_token`); wrong-password and unknown-email both
+  return 401 with the same envelope so the response cannot enumerate which address is
+  registered (R-AUTH-002). Adds a typed `hashTestPasswordFor(password)` helper alongside the
+  existing `hashTestPassword()` so the AC 16 seed site can hash an arbitrary plaintext through
+  the same narrowing guard; the guard prevents Better Auth's `emailAndPassword.password.hash`
+  callback (defaulted to `undefined` in the upstream type) from silently producing a
+  `credential.password` envelope the verifier will later reject on every sign-in.
+- **21e1709** — `fix(CAP-042)` replaces the non-null assertion operator (`captured!.code`) in
+  `apps/worker/src/platform/config.test.ts` with optional chaining; the lint gate forbids
+  `@typescript-eslint/no-non-null-assertion`, and the same test now matches the pattern at the
+  `INVALID_BETTER_AUTH_URL` assertion (line 177) that lint already accepted.
+
+**Gates** (orchestrator-run, post-fixes): doctor 13/13, typecheck clean, lint clean,
+`pnpm test:unit` 603/603, `pnpm test:worker` 626/630 (the 4 failures — `seeds five legacy
+users at the 0014 boundary`, `creates all 20 permissions with correct IDs`, `creates the
+administrator role with all 20 permissions`, `R-DATA-004: PRAGMA foreign_keys is ON` — are
+all pre-existing vitest-worker-pool `reset()` limitations unrelated to my changes, verified
+via `git stash`), build EXIT=0 with `wrangler deploy --dry-run --outdir=dist` reporting all
+9 bindings including `BETTER_AUTH_SECRET`.
+
+**Deferred**: Batch 4 (AC 17-19) registration, setup admin, and the named R-AUTH-001..009 tests
+is next.
+
+---
+
 ## 2026-08-22 — Local baseline hardening
 
 The completed CAP-040/041 branch was integrated into the local main work line, then Hono and
