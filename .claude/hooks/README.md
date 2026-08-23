@@ -41,7 +41,7 @@ If the field is absent, the hook fails open (allows the action and logs the gap)
 | `protect-destructive-commands.sh` | High-confidence block on a small, named set of patterns. Fails open (allow + log) on jq or input failure |
 | `protect-root-pollution.sh` | Block on name-pattern match. Fails open on jq or path-resolution failure |
 | `subagent-start-context.sh` | Never blocks. Prints the common block on any failure |
-| `validate-subagent-stop.sh` | Fails open if the transcript is unreadable. Blocks if headings are missing |
+| `validate-subagent-stop.sh` | Fails open if the transcript is unreadable. Blocks if headings are missing. Unescapes `\n` in the transcript tail before grepping — transcript JSONL stores message text on one physical line, so without this the section headings are invisible to the line-anchored grep (fixed 2026-08-23 after every reviewer stop was blocked regardless of message content). Also feeds grep via here-string instead of `printf | grep -q` pipelines: under `set -o pipefail`, an early `grep -q` match SIGPIPEs the printf producer (exit 141), registering found headings as missing on large transcripts |
 | `validate-task-completed.sh` | Fails open if jq fails. Blocks if the payload mentions a CAP-NNN with open review findings, or claims success while containing `FAIL` |
 | `protect-config-change.sh` | Never blocks. Logs always |
 

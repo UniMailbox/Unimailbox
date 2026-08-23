@@ -40,37 +40,55 @@ if [ -n "${transcript}" ] && [ -r "${transcript}" ]; then
   transcript_body="$(tail -n 400 "${transcript}" 2>/dev/null || echo "")"
 fi
 
+# Unescape newlines before any grep. Transcript JSONL stores message text as one
+# physical line with "\n" escape sequences, so a required heading like "## BLOCKER"
+# never sits at a physical line start and the anchored section greps below could not
+# match ANY final message — every reviewer stop was blocked regardless of content
+# (observed 2026-08-23: 6 consecutive architecture-reviewer blocks, plus parallel
+# code-reviewer blocks, zero recorded passes for any reviewer role). Splitting on the
+# escape puts message-text headings at grep-visible line starts. This is a detection
+# repair, not a weakening: every section heading below is still required.
+#
+# Second defect, same day: `printf '%s' "$body" | grep -q ...` under `set -o pipefail`
+# returns 141 (SIGPIPE on the printf producer) whenever grep -q exits on an early
+# match in a large body — a FOUND heading registered as missing. The greps below
+# therefore feed grep via here-string instead of a pipeline: no producer, no SIGPIPE,
+# and the exit status seen by `if !` is grep's alone.
+if [ -n "${transcript_body}" ]; then
+  transcript_body="$(printf '%s\n' "${transcript_body}" | awk '{ gsub(/\\n/, "\n"); print }')"
+fi
+
 # Detect role. Prefer the explicit `[role: X]` marker; fall back to a path reference.
 # Order matters: more specific markers first.
 role="unknown"
 if [ -n "${transcript_body}" ]; then
-  if printf '%s' "${transcript_body}" | grep -qE '\[role:[[:space:]]*implementer\]'; then
+  if grep -qE '\[role:[[:space:]]*implementer\]' <<<"${transcript_body}"; then
     role="implementer"
-  elif printf '%s' "${transcript_body}" | grep -qE '\[role:[[:space:]]*code-reviewer\]'; then
+  elif grep -qE '\[role:[[:space:]]*code-reviewer\]' <<<"${transcript_body}"; then
     role="code-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -qE '\[role:[[:space:]]*architecture-reviewer\]'; then
+  elif grep -qE '\[role:[[:space:]]*architecture-reviewer\]' <<<"${transcript_body}"; then
     role="architecture-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -qE '\[role:[[:space:]]*qa-reviewer\]'; then
+  elif grep -qE '\[role:[[:space:]]*qa-reviewer\]' <<<"${transcript_body}"; then
     role="qa-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -qE '\[role:[[:space:]]*security-reviewer\]'; then
+  elif grep -qE '\[role:[[:space:]]*security-reviewer\]' <<<"${transcript_body}"; then
     role="security-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -qE '\[role:[[:space:]]*frontend-reviewer\]'; then
+  elif grep -qE '\[role:[[:space:]]*frontend-reviewer\]' <<<"${transcript_body}"; then
     role="frontend-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -qE '\[role:[[:space:]]*investigator\]'; then
+  elif grep -qE '\[role:[[:space:]]*investigator\]' <<<"${transcript_body}"; then
     role="investigator"
-  elif printf '%s' "${transcript_body}" | grep -q '\.claude/agents/implementer\.md'; then
+  elif grep -q '\.claude/agents/implementer\.md' <<<"${transcript_body}"; then
     role="implementer"
-  elif printf '%s' "${transcript_body}" | grep -q '\.claude/agents/code-reviewer\.md'; then
+  elif grep -q '\.claude/agents/code-reviewer\.md' <<<"${transcript_body}"; then
     role="code-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -q '\.claude/agents/architecture-reviewer\.md'; then
+  elif grep -q '\.claude/agents/architecture-reviewer\.md' <<<"${transcript_body}"; then
     role="architecture-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -q '\.claude/agents/qa-reviewer\.md'; then
+  elif grep -q '\.claude/agents/qa-reviewer\.md' <<<"${transcript_body}"; then
     role="qa-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -q '\.claude/agents/security-reviewer\.md'; then
+  elif grep -q '\.claude/agents/security-reviewer\.md' <<<"${transcript_body}"; then
     role="security-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -q '\.claude/agents/frontend-reviewer\.md'; then
+  elif grep -q '\.claude/agents/frontend-reviewer\.md' <<<"${transcript_body}"; then
     role="frontend-reviewer"
-  elif printf '%s' "${transcript_body}" | grep -q '\.claude/agents/investigator\.md'; then
+  elif grep -q '\.claude/agents/investigator\.md' <<<"${transcript_body}"; then
     role="investigator"
   fi
 fi
@@ -132,13 +150,13 @@ case "${role}" in
   implementer)
     # The implementer format uses "Tests added:" and "Tests run:" rather than a bare
     # "Tests:" line. Match any of the three, case-insensitively.
-    if ! printf '%s' "${transcript_body}" | grep -qiE "^[[:space:]]*[*_#-]*[[:space:]]*Status:"; then
+    if ! grep -qiE "^[[:space:]]*[*_#-]*[[:space:]]*Status:" <<<"${transcript_body}"; then
       missing+=("Status:")
     fi
-    if ! printf '%s' "${transcript_body}" | grep -qiE "^[[:space:]]*[*_#-]*[[:space:]]*Files:"; then
+    if ! grep -qiE "^[[:space:]]*[*_#-]*[[:space:]]*Files:" <<<"${transcript_body}"; then
       missing+=("Files:")
     fi
-    if ! printf '%s' "${transcript_body}" | grep -qiE "^[[:space:]]*[*_#-]*[[:space:]]*(Tests:|Tests added:|Tests run:)"; then
+    if ! grep -qiE "^[[:space:]]*[*_#-]*[[:space:]]*(Tests:|Tests added:|Tests run:)" <<<"${transcript_body}"; then
       missing+=("Tests: (or Tests added: / Tests run:)")
     fi
     ;;
@@ -146,7 +164,7 @@ case "${role}" in
     # All reviewers use the same severity-headed structure. An empty section is
     # legitimate; the heading itself is the requirement.
     for h in "BLOCKER" "HIGH" "MEDIUM" "LOW"; do
-      if ! printf '%s' "${transcript_body}" | grep -qE "^[[:space:]]*##[[:space:]]+${h}"; then
+      if ! grep -qE "^[[:space:]]*##[[:space:]]+${h}" <<<"${transcript_body}"; then
         missing+=("## ${h}")
       fi
     done
