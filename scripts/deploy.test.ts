@@ -22,6 +22,7 @@ import {
   computePendingMigrations,
   parseAppliedMigrationNames,
   NO_PENDING_LOG_FORMAT,
+  evaluateDeployConfigForTarget,
   type ResourceState,
 } from './deploy.js';
 
@@ -215,6 +216,7 @@ describe('scripts/deploy.ts — pure logic', () => {
         secrets: {
           installationToken: true,
           credentialEncryptionKey: true,
+          betterAuthSecret: true,
         },
       };
 
@@ -238,6 +240,7 @@ describe('scripts/deploy.ts — pure logic', () => {
         secrets: {
           installationToken: true,
           credentialEncryptionKey: false,
+          betterAuthSecret: false,
         },
       };
 
@@ -366,6 +369,78 @@ describe('scripts/deploy.ts — pure logic', () => {
     it('throws on a success=false batch with a non-fresh-DB error', () => {
       const raw = JSON.stringify([{ success: false, error: 'D1_EXEC_ERROR: some other error' }]);
       expect(() => parseAppliedMigrationNames(raw)).toThrow(/some other error/);
+    });
+  });
+
+  // CAP-042 (AC 11): deployment-time config guard. The committed
+  // `wrangler.jsonc` ships with local-friendly defaults; the script
+  // refuses to deploy them as-is to any non-local target. The pure
+  // evaluator is the testable kernel of that refusal.
+  describe('evaluateDeployConfigForTarget (CAP-042 AC 11)', () => {
+    const localResolved = JSON.stringify({
+      ENVIRONMENT: 'local',
+      BETTER_AUTH_URL: 'http://localhost',
+    });
+
+    it('allows local defaults when the target is local', () => {
+      const r = evaluateDeployConfigForTarget(localResolved, 'local');
+      expect(r.ok).toBe(true);
+    });
+
+    it('refuses ENVIRONMENT=local when the target is preview', () => {
+      const r = evaluateDeployConfigForTarget(localResolved, 'preview');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('ENVIRONMENT is "local"');
+      expect(r.error).toContain('preview');
+    });
+
+    it('refuses ENVIRONMENT=local when the target is production', () => {
+      const r = evaluateDeployConfigForTarget(localResolved, 'production');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('production');
+    });
+
+    it('refuses BETTER_AUTH_URL=http://localhost for any non-local target', () => {
+      const resolved = JSON.stringify({
+        ENVIRONMENT: 'preview',
+        BETTER_AUTH_URL: 'http://localhost',
+      });
+      const r = evaluateDeployConfigForTarget(resolved, 'preview');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('http://localhost');
+    });
+
+    it('refuses a non-https BETTER_AUTH_URL for a non-local target', () => {
+      const resolved = JSON.stringify({
+        ENVIRONMENT: 'preview',
+        BETTER_AUTH_URL: 'http://preview.example.com',
+      });
+      const r = evaluateDeployConfigForTarget(resolved, 'preview');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('https');
+    });
+
+    it('accepts an https BETTER_AUTH_URL for a non-local target', () => {
+      const resolved = JSON.stringify({
+        ENVIRONMENT: 'preview',
+        BETTER_AUTH_URL: 'https://preview.example.com',
+      });
+      const r = evaluateDeployConfigForTarget(resolved, 'preview');
+      expect(r.ok).toBe(true);
+    });
+
+    it('refuses when ENVIRONMENT is missing for a non-local target', () => {
+      const resolved = JSON.stringify({ BETTER_AUTH_URL: 'https://app.example.com' });
+      const r = evaluateDeployConfigForTarget(resolved, 'production');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('missing ENVIRONMENT');
+    });
+
+    it('refuses when BETTER_AUTH_URL is missing for a non-local target', () => {
+      const resolved = JSON.stringify({ ENVIRONMENT: 'production' });
+      const r = evaluateDeployConfigForTarget(resolved, 'production');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('missing BETTER_AUTH_URL');
     });
   });
 });

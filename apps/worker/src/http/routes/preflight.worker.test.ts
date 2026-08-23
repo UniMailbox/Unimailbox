@@ -61,7 +61,7 @@ describe('POST /api/v1/setup/preflight', () => {
       expect(body.data).toHaveProperty('schemaVersion');
     });
 
-    it('reports all 7 bindings as present', async () => {
+    it('reports all 8 bindings as present', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
         method: 'POST',
         headers: {
@@ -73,7 +73,11 @@ describe('POST /api/v1/setup/preflight', () => {
       const body = await response.json();
       const { bindings } = body.data;
 
-      // All 7 bindings should be present and true
+      // All 8 bindings should be present and true.
+      // CAP-042 (AC 11): BETTER_AUTH_SECRET is an independent binding read
+      // through readSecret() in preflight.ts. The test pool provides a
+      // plain-string value (apps/worker/wrangler.test.jsonc), and
+      // readSecret() handles both forms.
       expect(bindings).toEqual({
         DB: true,
         ATTACHMENTS: true,
@@ -82,10 +86,11 @@ describe('POST /api/v1/setup/preflight', () => {
         OUTBOUND: true,
         INSTALLATION_TOKEN: true,
         CREDENTIAL_ENCRYPTION_KEY: true,
+        BETTER_AUTH_SECRET: true,
       });
 
-      // Exactly 7 keys
-      expect(Object.keys(bindings).length).toBe(7);
+      // Exactly 8 keys
+      expect(Object.keys(bindings).length).toBe(8);
     });
 
     it('reports schema version from d1_migrations', async () => {

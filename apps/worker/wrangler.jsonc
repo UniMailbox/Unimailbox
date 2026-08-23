@@ -107,6 +107,11 @@
   },
 
   // ---- Secrets Store — secrets the Worker reads via env.<name> ----
+  // CAP-042 (AC 11): BETTER_AUTH_SECRET is an independent Secrets Store
+  // binding (ADR-008 §HTTP and browser session contract). It must not be
+  // derived from CREDENTIAL_ENCRYPTION_KEY. Production deploys create it
+  // through scripts/deploy.ts:setSecrets; local/test bindings substitute
+  // a plain string (see apps/worker/wrangler.test.jsonc).
   "secrets_store_secrets": [
     {
       "binding": "INSTALLATION_TOKEN",
@@ -118,10 +123,28 @@
       "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
       "secret_name": "CREDENTIAL_ENCRYPTION_KEY",
     },
+    {
+      "binding": "BETTER_AUTH_SECRET",
+      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
+      "secret_name": "BETTER_AUTH_SECRET",
+    },
   ],
 
-  // ---- Vars — non-secret env vars (placeholder values only) ----
+  // ---- Vars — non-secret env vars ----
+  // CAP-042 (AC 11):
+  //   - ENVIRONMENT: deployment target. Allowed values: local|preview|
+  //     staging|production. Doctor's ENVIRONMENT guard rejects 'local' for
+  //     deploys.
+  //   - BETTER_AUTH_URL: bare http(s) origin for the Better Auth base URL.
+  //     Local-only default; non-local deploys must replace this value
+  //     before the config is shipped (scripts/deploy.ts refuses the
+  //     http://localhost default outside the local environment).
+  //   - AUTH_PROVIDER: closed enum (legacy|dual|better-auth) that selects
+  //     the auth mode the running Worker uses (ADR-008 §Rollout and
+  //     rollback). Defaults to 'legacy' so the cutover is opt-in.
   "vars": {
     "ENVIRONMENT": "local",
+    "BETTER_AUTH_URL": "http://localhost",
+    "AUTH_PROVIDER": "legacy",
   },
 }

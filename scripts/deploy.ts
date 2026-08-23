@@ -44,6 +44,12 @@ export interface ResourceState {
   secrets?: {
     installationToken: boolean;
     credentialEncryptionKey: boolean;
+    // CAP-042 (AC 11): BETTER_AUTH_SECRET is an independent Secrets
+    // Store binding (ADR-008 §HTTP and browser session contract). It
+    // must never be derived from CREDENTIAL_ENCRYPTION_KEY — the field
+    // is a separate resource that this script creates/updates/skips on
+    // its own track.
+    betterAuthSecret: boolean;
   };
 }
 
@@ -567,7 +573,11 @@ const setSecrets = (state: ResourceState): ResourceState => {
     process.exit(1);
   }
 
-  const secrets = state.secrets ?? { installationToken: false, credentialEncryptionKey: false };
+  const secrets = state.secrets ?? {
+    installationToken: false,
+    credentialEncryptionKey: false,
+    betterAuthSecret: false,
+  };
 
   // INSTALLATION_TOKEN
   const tokenAction = computeSecretAction(secrets.installationToken, forceSecrets, dryRun);
@@ -683,12 +693,130 @@ const setSecrets = (state: ResourceState): ResourceState => {
     console.log('  CREDENTIAL_ENCRYPTION_KEY already set (use --force-secrets to regenerate)');
   }
 
+  // CAP-042 (AC 11): BETTER_AUTH_SECRET is an independent Secrets Store
+  // binding — it is NOT a re-encryption of CREDENTIAL_ENCRYPTION_KEY. The
+  // two are tracked separately so a rotation of one does not silently
+  // rotate the other. A freshly-created secret is 32 random bytes hex
+  // (matching the existing `generateSecret()` shape); the secret value is
+  // piped through stdin and never echoed in the deploy log.
+  const authAction = computeSecretAction(secrets.betterAuthSecret, forceSecrets, dryRun);
+  if (authAction === 'create') {
+    const value = generateSecret();
+    if (dryRun) {
+      console.log('  [dry-run] Would set BETTER_AUTH_SECRET');
+    } else {
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'create',
+          state.secretsStoreId,
+          '--name',
+          'BETTER_AUTH_SECRET',
+          '--scopes',
+          'workers',
+        ],
+        value,
+      );
+      if (result.status !== 0) {
+        console.error('Failed to set BETTER_AUTH_SECRET');
+        process.exit(result.status ?? 1);
+      }
+      console.log('  Set BETTER_AUTH_SECRET (Better Auth cookie signing key, CAP-042)');
+      secrets.betterAuthSecret = true;
+    }
+  } else if (authAction === 'update') {
+    const value = generateSecret();
+    if (dryRun) {
+      console.log('  [dry-run] Would update BETTER_AUTH_SECRET');
+    } else {
+      const result = wranglerSecret(
+        [
+          'secrets-store',
+          'secret',
+          'update',
+          state.secretsStoreId,
+          '--name',
+          'BETTER_AUTH_SECRET',
+          '--scopes',
+          'workers',
+        ],
+        value,
+      );
+      if (result.status !== 0) {
+        console.error('Failed to update BETTER_AUTH_SECRET');
+        process.exit(result.status ?? 1);
+      }
+      console.log('  Updated BETTER_AUTH_SECRET (Better Auth cookie signing key, CAP-042)');
+    }
+  } else {
+    console.log('  BETTER_AUTH_SECRET already set (use --force-secrets to regenerate)');
+  }
+
   return { ...state, secrets };
 };
 
 // ---------------------------------------------------------------------
 // Config resolution
 // ---------------------------------------------------------------------
+
+// CAP-042 (AC 11): deployment-time config guard. The committed
+// `wrangler.jsonc` ships with local-friendly defaults (BETTER_AUTH_URL=
+// http://localhost, ENVIRONMENT=local). A real deploy target must have
+// these values overwritten by the operator; the script refuses to ship
+// them as-is. The check is exposed as a pure evaluator so the unit
+// suite can drive it without mutating the real config.
+export interface DeployConfigGuard {
+  ok: boolean;
+  error?: string;
+}
+
+export const evaluateDeployConfigForTarget = (
+  resolved: string,
+  targetEnv: string,
+): DeployConfigGuard => {
+  // Refuse ENVIRONMENT=local in a non-local deploy.
+  const envMatch = resolved.match(/"ENVIRONMENT"\s*:\s*"([^"]+)"/);
+  const envValue = envMatch?.[1];
+  if (envValue === 'local' && targetEnv !== 'local') {
+    return {
+      ok: false,
+      error: `wrangler.jsonc ENVIRONMENT is "local" but the deploy target is "${targetEnv}"; update ENVIRONMENT and BETTER_AUTH_URL before re-running`,
+    };
+  }
+  if (envValue === undefined && targetEnv !== 'local') {
+    return {
+      ok: false,
+      error: `wrangler.jsonc is missing ENVIRONMENT; the deploy target is "${targetEnv}"`,
+    };
+  }
+  // Refuse BETTER_AUTH_URL=http://localhost in a non-local deploy — Better
+  // Auth would sign cookies against a non-routable origin and reject every
+  // browser sign-in.
+  const urlMatch = resolved.match(/"BETTER_AUTH_URL"\s*:\s*"([^"]+)"/);
+  const urlValue = urlMatch?.[1];
+  if (typeof urlValue === 'string') {
+    if (urlValue === 'http://localhost' && targetEnv !== 'local') {
+      return {
+        ok: false,
+        error: `wrangler.jsonc BETTER_AUTH_URL is "http://localhost" but the deploy target is "${targetEnv}"; replace with the real https origin before re-running`,
+      };
+    }
+    if (urlValue.startsWith('http://') && targetEnv !== 'local') {
+      return {
+        ok: false,
+        error: `wrangler.jsonc BETTER_AUTH_URL is "${urlValue}" (http) but the deploy target is "${targetEnv}"; use https for non-local environments`,
+      };
+    }
+  } else if (targetEnv !== 'local') {
+    return {
+      ok: false,
+      error: `wrangler.jsonc is missing BETTER_AUTH_URL; the deploy target is "${targetEnv}"`,
+    };
+  }
+  return { ok: true };
+};
+
 export const resolveConfigTemplate = (template: string, state: ResourceState): string => {
   let resolved = template;
 
@@ -713,12 +841,21 @@ export const resolveConfigTemplate = (template: string, state: ResourceState): s
   return resolved;
 };
 
-const resolveConfig = (state: ResourceState): void => {
+const resolveConfig = (state: ResourceState, targetEnv: string): void => {
   console.log('Generating wrangler.resolved.jsonc…');
   const templatePath = resolve(WORKER_DIR, 'wrangler.jsonc');
   const template = readFileSync(templatePath, 'utf-8');
 
   const resolved = resolveConfigTemplate(template, state);
+
+  // CAP-042 (AC 11): refuse to ship local-default config to a non-local
+  // target. Better Auth cookies would be signed against a non-routable
+  // origin, and ENVIRONMENT=local would skip preflight entirely.
+  const guard = evaluateDeployConfigForTarget(resolved, targetEnv);
+  if (!guard.ok) {
+    console.error(`Refusing to deploy: ${guard.error}`);
+    process.exit(1);
+  }
 
   writeFileSync(RESOLVED_CONFIG_PATH, resolved, 'utf-8');
   console.log(`  Wrote ${RESOLVED_CONFIG_PATH}`);
@@ -947,16 +1084,27 @@ const main = async (env: string): Promise<void> => {
   // F5: Confirmation prompt for --force-secrets
   if (forceSecrets && !dryRun) {
     console.error(
-      '\nWARNING: --force-secrets will overwrite INSTALLATION_TOKEN and CREDENTIAL_ENCRYPTION_KEY.',
+      '\nWARNING: --force-secrets will overwrite INSTALLATION_TOKEN, CREDENTIAL_ENCRYPTION_KEY,',
     );
     console.error(
-      'If CREDENTIAL_ENCRYPTION_KEY is overwritten, all encrypted credentials in the database',
+      'and BETTER_AUTH_SECRET (CAP-042 / ADR-008). The downstream consequences differ per secret:',
     );
     console.error(
-      'will become permanently undecryptable (ADR-007). A re-encryption maintenance job does',
+      '  - INSTALLATION_TOKEN: ongoing setup sessions are invalidated; new claims are required.',
     );
-    console.error('not yet exist.\n');
-    console.error("Type 'yes' to continue: ");
+    console.error(
+      '  - CREDENTIAL_ENCRYPTION_KEY: all encrypted credentials in the database will become',
+    );
+    console.error(
+      '    permanently undecryptable (ADR-007). A re-encryption maintenance job does not yet exist.',
+    );
+    console.error(
+      '  - BETTER_AUTH_SECRET: rotating this secret invalidates every existing Better Auth',
+    );
+    console.error(
+      '    session cookie — all logged-in users will be silently signed out (CAP-042 / R-AUTH-004).',
+    );
+    console.error('\nType \'yes\' to continue: ');
 
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {
@@ -990,7 +1138,7 @@ const main = async (env: string): Promise<void> => {
   }
 
   // Resolve config always (local file write)
-  resolveConfig(state);
+  resolveConfig(state, env);
   runRemoteMigrations();
   await deploy();
 

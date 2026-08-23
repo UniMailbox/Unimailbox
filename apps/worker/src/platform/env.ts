@@ -10,6 +10,31 @@
 // the platform's `not_found_handling: "single-page-application"` returns
 // `index.html` for any non-API GET, so the Worker-side `http/router.ts`
 // only mounts a catch-all for `/` itself.
+//
+// CAP-042 (AC 11):
+//   - `BETTER_AUTH_SECRET` is a Secrets Store binding in production and a
+//     plain string in the worker-pool test (the test config provides it as
+//     a var). `readSecret()` from `platform/secrets.ts` handles both forms,
+//     so the Worker code does not need a type-narrowing branch.
+//   - `BETTER_AUTH_URL` and `AUTH_PROVIDER` are non-secret vars typed as
+//     strings here; their closed-enum/origin validation lives in
+//     `platform/config.ts:parseAuthProvider` and
+//     `platform/config.ts:parseBetterAuthUrl`. The union literal type for
+//     `AUTH_PROVIDER` is duplicated as a string at the runtime layer so a
+//     bad var still fails closed in `parseAuthProvider` before any module
+//     reads it.
+//
+// CAP-042 (AC 12): the `Variables.config` slot is set by the config
+// middleware before any Better-Auth-aware route runs. It carries the
+// strict-parsed `PlatformConfig` so the factory and the route read the
+// same canonical values without re-parsing env. The type lives in
+// `platform/config.ts`; we use a forward reference to avoid a runtime
+// cycle (env ↔ config import each other at the type level only).
+
+export type AuthProviderName = 'legacy' | 'dual' | 'better-auth';
+
+import type { PlatformConfig } from './config';
+
 export type Env = {
   DB: D1Database;
   ATTACHMENTS: R2Bucket;
@@ -19,7 +44,10 @@ export type Env = {
   ASSETS: Fetcher;
   INSTALLATION_TOKEN: SecretsStoreSecret;
   CREDENTIAL_ENCRYPTION_KEY: SecretsStoreSecret;
+  BETTER_AUTH_SECRET: SecretsStoreSecret | string;
   ENVIRONMENT?: string;
+  BETTER_AUTH_URL?: string;
+  AUTH_PROVIDER?: string;
 };
 
 // Hono's `Bindings` slot on the app env. Lives here so middleware files
@@ -34,5 +62,14 @@ export type AppEnv = {
     /** Idempotency-Key header (CAP-027 / ADR-004). Set by
      *  http/middleware/idempotency.ts after format validation. */
     idempotencyKey?: string;
+    // CAP-042 (AC 12): strict-parsed PlatformConfig (authProvider,
+    // betterAuthUrl, environment). Built once per request by the
+    // config middleware so the Better Auth factory and any future
+    // auth-aware route can read the same canonical values without
+    // re-parsing raw env. The actual type is `PlatformConfig` from
+    // `./config`; we name it via the string-keyed `config` field
+    // shape Hono exposes on `Variables` and let TypeScript narrow
+    // it at use sites.
+    config?: PlatformConfig;
   };
 };

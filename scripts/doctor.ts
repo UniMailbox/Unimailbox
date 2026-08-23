@@ -137,6 +137,17 @@ function walk(d: string): string[] {
   return out;
 }
 
+// CAP-001 + CAP-042 — the canonical binding/var name set. The same
+// names must appear in `apps/worker/wrangler.jsonc`,
+// `apps/worker/wrangler.test.jsonc`, AND the `Env` type in
+// `apps/worker/src/platform/env.ts`. Any drift between the three
+// surfaces means the worker-pool tests cannot exercise the same
+// bindings the deployed Worker reads — a class of bug the unit suite
+// alone will not catch.
+//
+// CAP-042 (AC 11): BETTER_AUTH_SECRET, BETTER_AUTH_URL, AUTH_PROVIDER
+// are required on every surface. The pre-existing INSTALLATION_TOKEN
+// and CREDENTIAL_ENCRYPTION_KEY bindings stay (they predate CAP-042).
 const BINDS = [
   'DB',
   'ATTACHMENTS',
@@ -146,26 +157,28 @@ const BINDS = [
   'ASSETS',
   'INSTALLATION_TOKEN',
   'CREDENTIAL_ENCRYPTION_KEY',
+  'BETTER_AUTH_SECRET',
   'ENVIRONMENT',
+  'BETTER_AUTH_URL',
+  'AUTH_PROVIDER',
 ];
-async function checkWranglerBindings(): Promise<R> {
-  const w = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
+
+function extractBindingNames(cfg: Record<string, unknown>): Set<string> {
   const have = new Set<string>();
-  for (const x of (w['d1_databases'] as Array<{ binding: string }> | undefined) ?? [])
+  for (const x of (cfg['d1_databases'] as Array<{ binding: string }> | undefined) ?? [])
     have.add(x.binding);
-  for (const x of (w['r2_buckets'] as Array<{ binding: string }> | undefined) ?? [])
+  for (const x of (cfg['r2_buckets'] as Array<{ binding: string }> | undefined) ?? [])
     have.add(x.binding);
-  for (const x of (w['kv_namespaces'] as Array<{ binding: string }> | undefined) ?? [])
+  for (const x of (cfg['kv_namespaces'] as Array<{ binding: string }> | undefined) ?? [])
     have.add(x.binding);
-  for (const x of (w['queues'] as { producers?: Array<{ binding: string }> } | undefined)
+  for (const x of (cfg['queues'] as { producers?: Array<{ binding: string }> } | undefined)
     ?.producers ?? [])
     have.add(x.binding);
-  for (const x of (w['secrets_store_secrets'] as Array<{ binding: string }> | undefined) ?? [])
+  for (const x of (cfg['secrets_store_secrets'] as Array<{ binding: string }> | undefined) ?? [])
     have.add(x.binding);
-  // CAP-039: `assets` block adds a binding too. Wrangler produces an
-  // ASSETS Fetcher binding from `assets: { binding: "ASSETS" }`. The
-  // block is either a single object or an array of objects in wrangler 4.x.
-  const assets = w['assets'];
+  // `assets` block produces a Fetcher binding; the schema permits either
+  // a single object or an array of objects in wrangler 4.x.
+  const assets = cfg['assets'];
   if (Array.isArray(assets)) {
     for (const a of assets) {
       if (a && typeof a === 'object' && 'binding' in a)
@@ -174,27 +187,50 @@ async function checkWranglerBindings(): Promise<R> {
   } else if (assets && typeof assets === 'object' && 'binding' in assets) {
     have.add((assets as { binding: string }).binding);
   }
-  for (const k of Object.keys((w['vars'] as Record<string, unknown> | undefined) ?? {}))
+  for (const k of Object.keys((cfg['vars'] as Record<string, unknown> | undefined) ?? {}))
     have.add(k);
+  return have;
+}
+
+// CAP-042 (AC 11): cross-surface parity check. The check
+// `wrangler-bindings` runs as a single doctor entry but reports the
+// three pairwise diffs as one combined detail. The pure evaluator
+// `evaluateWranglerBindings` is exported so `apps/worker/scripts/
+// doctor.test.ts` can drive it with synthetic fixtures without
+// mutating the real config files.
+export function evaluateWranglerBindings(
+  prod: Record<string, unknown>,
+  test: Record<string, unknown>,
+  envKeys: ReadonlySet<string>,
+): R {
+  const prodNames = extractBindingNames(prod);
+  const testNames = extractBindingNames(test);
+  const missingProd = BINDS.filter((n) => !prodNames.has(n));
+  const missingTest = BINDS.filter((n) => !testNames.has(n));
+  const missingEnv = BINDS.filter((n) => !envKeys.has(n));
+  const bad: string[] = [];
+  if (missingProd.length)
+    bad.push(`wrangler.jsonc missing: ${missingProd.join(', ')}`);
+  if (missingTest.length)
+    bad.push(`wrangler.test.jsonc missing: ${missingTest.join(', ')}`);
+  if (missingEnv.length) bad.push(`env.ts missing: ${missingEnv.join(', ')}`);
+  if (bad.length)
+    return { name: 'wrangler-bindings', ok: false, detail: bad.join('; ') };
+  return { name: 'wrangler-bindings', ok: true };
+}
+
+async function checkWranglerBindings(): Promise<R> {
+  const prod = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
+  const test = readJsonc(
+    join(REPO, 'apps/worker/wrangler.test.jsonc'),
+  ) as Record<string, unknown>;
   const envBody =
     readFileSync(join(REPO, 'apps/worker/src/platform/env.ts'), 'utf-8').match(
       /type\s+Env\s*=\s*\{([\s\S]*?)\}/,
     )?.[1] ?? '';
   const envKeys = new Set<string>();
   for (const m of envBody.matchAll(/(\w+)\s*[?:]/g)) envKeys.add(m[1] ?? '');
-  if (BINDS.some((n) => !have.has(n)))
-    return {
-      name: 'wrangler-bindings',
-      ok: false,
-      detail: `wrangler.jsonc missing: ${BINDS.filter((n) => !have.has(n)).join(', ')}`,
-    };
-  if (BINDS.some((n) => !envKeys.has(n)))
-    return {
-      name: 'wrangler-bindings',
-      ok: false,
-      detail: `env.ts missing: ${BINDS.filter((n) => !envKeys.has(n)).join(', ')}`,
-    };
-  return { name: 'wrangler-bindings', ok: true };
+  return evaluateWranglerBindings(prod, test, envKeys);
 }
 
 async function checkWranglerCompat(): Promise<R> {

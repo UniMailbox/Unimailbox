@@ -15,6 +15,10 @@ import { readSecret } from '../../platform/secrets';
  * Narrow port for the bindings preflight inspects. Deliberately NOT the full
  * Cloudflare Env — modules must not import Env (architecture.md §Forbidden).
  * The route handler passes `c.env`, which is structurally compatible.
+ *
+ * CAP-042 (AC 11): BETTER_AUTH_SECRET is added so the preflight reports
+ * eight binding/resource checks (was seven). readSecret() handles both the
+ * SecretsStoreSecret (production) and plain string (test pool) forms.
  */
 export interface PreflightBindings {
   readonly DB: Database;
@@ -24,6 +28,7 @@ export interface PreflightBindings {
   readonly OUTBOUND: Queue;
   readonly INSTALLATION_TOKEN: SecretLike;
   readonly CREDENTIAL_ENCRYPTION_KEY: SecretLike;
+  readonly BETTER_AUTH_SECRET: SecretLike;
 }
 
 export interface PreflightResult {
@@ -62,6 +67,12 @@ async function checkSecret(secret: SecretLike): Promise<boolean> {
  */
 export async function runPreflight(db: Database, env: PreflightBindings): Promise<PreflightResult> {
   // Check each binding's existence
+  // CAP-042 (AC 11): eight binding/resource checks now that
+  // BETTER_AUTH_SECRET is provisioned independently (ADR-008 §HTTP and
+  // browser session contract). The secret is read via readSecret so the
+  // diagnostic reports the same shape the runtime would see; a missing
+  // or unreadable secret fails this check the same way a missing
+  // KV namespace would.
   const bindings: Record<string, boolean> = {
     DB: !!env.DB,
     ATTACHMENTS: !!env.ATTACHMENTS,
@@ -71,6 +82,7 @@ export async function runPreflight(db: Database, env: PreflightBindings): Promis
     // For secrets, check the value is accessible
     INSTALLATION_TOKEN: await checkSecret(env.INSTALLATION_TOKEN),
     CREDENTIAL_ENCRYPTION_KEY: await checkSecret(env.CREDENTIAL_ENCRYPTION_KEY),
+    BETTER_AUTH_SECRET: await checkSecret(env.BETTER_AUTH_SECRET),
   };
 
   // Read schema version from d1_migrations. If the table doesn't exist

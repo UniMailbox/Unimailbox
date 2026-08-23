@@ -51,9 +51,20 @@
 
   "triggers": { "crons": ["*/2 * * * *"] },
 
+  // CAP-042 (AC 11): mirror the production env surface in the test
+  // bindings so worker-pool tests exercise the same names the production
+  // route handler reads. readSecret() handles the string form (test pool)
+  // and the SecretsStoreSecret.get() form (production) identically.
+  //
+  // BETTER_AUTH_SECRET is intentionally a fixed dev-only value; rotating
+  // it invalidates every existing Better Auth cookie, so a real secret
+  // lives only in the production Secrets Store.
   "vars": {
     "ENVIRONMENT": "local",
+    "BETTER_AUTH_URL": "http://localhost",
+    "AUTH_PROVIDER": "legacy",
     "INSTALLATION_TOKEN": "test-installation-token",
     "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "BETTER_AUTH_SECRET": "test-better-auth-secret-do-not-use-elsewhere-32bytes",
   },
 }

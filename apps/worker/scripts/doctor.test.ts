@@ -13,6 +13,7 @@ import {
   evaluateWebAssetsBinding,
   evaluateQueueConsumerTopology,
   evaluateMigrationStrategyPendingOnly,
+  evaluateWranglerBindings,
   parseJsonc,
   type R,
 } from '../../scripts/doctor';
@@ -223,6 +224,129 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       };
       const r = evaluateMigrationStrategyPendingOnly(mutated);
       expect(r.ok).toBe(true);
+    });
+  });
+
+  // CAP-042 (AC 11): the wrangler-bindings check now compares the full
+  // binding/var name set across three surfaces:
+  //   1. apps/worker/wrangler.jsonc (production)
+  //   2. apps/worker/wrangler.test.jsonc (worker-pool tests)
+  //   3. apps/worker/src/platform/env.ts (typed Env surface)
+  // Drift between any two is a blocking finding. The pure evaluator is
+  // `evaluateWranglerBindings`; the fixtures below mirror the real
+  // three surfaces so a regression on any name surfaces immediately.
+  describe('wrangler-bindings (CAP-042 AC 11)', () => {
+    const requiredEnvKeys = new Set([
+      'DB',
+      'ATTACHMENTS',
+      'SETUP_SESSION',
+      'CACHE',
+      'OUTBOUND',
+      'ASSETS',
+      'INSTALLATION_TOKEN',
+      'CREDENTIAL_ENCRYPTION_KEY',
+      'BETTER_AUTH_SECRET',
+      'ENVIRONMENT',
+      'BETTER_AUTH_URL',
+      'AUTH_PROVIDER',
+    ]);
+
+    const fullProd: Record<string, unknown> = {
+      d1_databases: [{ binding: 'DB' }],
+      r2_buckets: [{ binding: 'ATTACHMENTS' }],
+      kv_namespaces: [{ binding: 'SETUP_SESSION' }, { binding: 'CACHE' }],
+      queues: { producers: [{ binding: 'OUTBOUND' }] },
+      secrets_store_secrets: [
+        { binding: 'INSTALLATION_TOKEN' },
+        { binding: 'CREDENTIAL_ENCRYPTION_KEY' },
+        { binding: 'BETTER_AUTH_SECRET' },
+      ],
+      assets: { binding: 'ASSETS' },
+      vars: {
+        ENVIRONMENT: 'local',
+        BETTER_AUTH_URL: 'http://localhost',
+        AUTH_PROVIDER: 'legacy',
+      },
+    };
+
+    const fullTest: Record<string, unknown> = {
+      d1_databases: [{ binding: 'DB' }],
+      r2_buckets: [{ binding: 'ATTACHMENTS' }],
+      kv_namespaces: [{ binding: 'SETUP_SESSION' }, { binding: 'CACHE' }],
+      queues: { producers: [{ binding: 'OUTBOUND' }] },
+      assets: { binding: 'ASSETS' },
+      vars: {
+        ENVIRONMENT: 'local',
+        BETTER_AUTH_URL: 'http://localhost',
+        AUTH_PROVIDER: 'legacy',
+        INSTALLATION_TOKEN: 'x',
+        CREDENTIAL_ENCRYPTION_KEY: 'x',
+        BETTER_AUTH_SECRET: 'x',
+      },
+    };
+
+    it('passes when every required name appears in all three surfaces', () => {
+      const r = evaluateWranglerBindings(fullProd, fullTest, requiredEnvKeys);
+      expect(r).toEqual<R>({ name: 'wrangler-bindings', ok: true });
+    });
+
+    it('fails when wrangler.jsonc omits BETTER_AUTH_SECRET', () => {
+      const prod = {
+        ...fullProd,
+        secrets_store_secrets: [
+          { binding: 'INSTALLATION_TOKEN' },
+          { binding: 'CREDENTIAL_ENCRYPTION_KEY' },
+        ],
+      };
+      const r = evaluateWranglerBindings(prod, fullTest, requiredEnvKeys);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('wrangler.jsonc missing');
+      expect(r.detail).toContain('BETTER_AUTH_SECRET');
+    });
+
+    it('fails when wrangler.test.jsonc omits BETTER_AUTH_SECRET', () => {
+      const test = {
+        ...fullTest,
+        vars: {
+          ENVIRONMENT: 'local',
+          BETTER_AUTH_URL: 'http://localhost',
+          AUTH_PROVIDER: 'legacy',
+          INSTALLATION_TOKEN: 'x',
+          CREDENTIAL_ENCRYPTION_KEY: 'x',
+        },
+      };
+      const r = evaluateWranglerBindings(fullProd, test, requiredEnvKeys);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('wrangler.test.jsonc missing');
+      expect(r.detail).toContain('BETTER_AUTH_SECRET');
+    });
+
+    it('fails when env.ts omits AUTH_PROVIDER', () => {
+      const envKeys = new Set([...requiredEnvKeys]);
+      envKeys.delete('AUTH_PROVIDER');
+      const r = evaluateWranglerBindings(fullProd, fullTest, envKeys);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('env.ts missing');
+      expect(r.detail).toContain('AUTH_PROVIDER');
+    });
+
+    it('fails when BETTER_AUTH_URL is missing from a non-test var list', () => {
+      const prod = {
+        ...fullProd,
+        vars: { ENVIRONMENT: 'local', AUTH_PROVIDER: 'legacy' },
+      };
+      const r = evaluateWranglerBindings(prod, fullTest, requiredEnvKeys);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('BETTER_AUTH_URL');
+    });
+
+    it('reports every drift in a single failure detail', () => {
+      const prod = { ...fullProd, vars: { ENVIRONMENT: 'local' } };
+      const test = { ...fullTest, vars: { ENVIRONMENT: 'local' } };
+      const r = evaluateWranglerBindings(prod, test, requiredEnvKeys);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('BETTER_AUTH_URL');
+      expect(r.detail).toContain('AUTH_PROVIDER');
     });
   });
 });
