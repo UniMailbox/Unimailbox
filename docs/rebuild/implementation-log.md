@@ -10,6 +10,46 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-24 — CAP-044 Slice 2 landed: audit-event query API + /admin audit page (CAP-033 absorbed; 5-way review + 7-item fix pass)
+
+ACs 8–14 verified (verdicts + evidence in `work/reviews/CAP-044-slice2-review.md`; all five
+reviewers ACCEPT-WITH-FOLLOWUPS). `audit.read` added to the closed PermissionKey enum
+(D-CAP-044-D — administrator 21 permissions, member unchanged), composable cursor-paginated
+query repository, `GET /api/v1/admin/audit-events`, `/admin` section + AuditEventsPage with
+draft/committed filters. Gates after the fix pass: unit 797/797, worker 718/722 (only the 4
+documented pre-existing D1-parallelism failures).
+
+**The finding that mattered (architecture H1 ≡ QA M1):** AC 9's "served by the existing
+indexes" was empirically false. The single-statement `? IS NULL OR …` shape lets one query
+text serve every filter combination, but SQLite picks its plan at prepare time and never
+changes it with bindings — `EXPLAIN QUERY PLAN` proved every combination, filtered or not,
+scanned the whole table via `audit_events_created_idx` with a temp-B-tree sort, on the one
+append-only unbounded-growth table, billed by D1 rows-read. Fix (a) composes bare
+parameterized predicates per ACTIVE filter (messages-repository precedent; null-bound slots
+for the cursor boundary only) so `audit_events_actor_idx` / `audit_events_resource_idx` are
+actually selectable. General lesson recorded: `? IS NULL OR …` around a FILTER column
+silently defeats index selection; it is only acceptable around page-boundary terms.
+
+Also landed in the fix pass: server-side `auditActionSchema.safeParse` per row (corrupt row →
+500 `AUDIT_ROW_INVALID`, new stable code in `ERROR_CODES` — never a 200 the client cannot
+parse, never a silently skipped forensic row); cursor **surface discriminator**
+(`CursorPayload.surface` + `verifyCursor(token, key, expectedSurface)`) so a cursor minted by
+the messages API cannot be replayed against the audit API — the primitive now has two
+consumers; a third consumer or a filter-binding need triggers promoting it into `contracts`
+with filter context in the signed payload; data-first error states on the audit page
+(accumulated rows + filter form survive errors; INVALID_CURSOR recovers via `resetQueries`
+"Start over" because TanStack v5 `refetch()` replays all stored pageParams — the same hazard
+D-CAP-044-L records for the messages surfaces); half-pair guard; +7 worker +4 unit tests.
+
+Rulings recorded in the contract: AC 13's nav clause AMENDED (session descriptor carries no
+role signal — "visible only when the session can read" is unmeetable client-side; nav entry +
+probe gating are D-CAP-044-K into Slice 3); upgrade-path seed gap D-CAP-044-N (audit.read
+exists only after the setup seed re-runs — fresh installs fine, CAP-045 asserts the preview);
+new deferred rows D-CAP-044-L (messages-side INVALID_CURSOR ≥2-page replay) and
+D-CAP-044-M (admin filters not URL-addressable). Process gap noted for closure: worker test
+files are excluded from `tsc --build`, so test-only type errors are invisible to the
+typecheck gate.
+
 ## 2026-08-24 — CAP-044 Slice 1 landed: compose + reply (review round + 9-item fix pass)
 
 Commit `2fded28`. ACs 1–7 verified with evidence by the five-way round (verdicts + positive
