@@ -14,8 +14,6 @@ export { InboxListPage } from './InboxListPage';
 export { MailboxListSkeleton } from './MailboxListSkeleton';
 export { InboxListSkeleton } from './InboxListSkeleton';
 export { InboxEmpty } from './InboxEmpty';
-export { InboxError } from './InboxError';
-export type { InboxErrorProps } from './InboxError';
 export type { InboxListPageProps } from './InboxListPage';
 // CAP-044 Slice 1: the composer. (Fix pass i: buildReplyContext /
 // ReplyContext left the barrel — every consumer deep-imports

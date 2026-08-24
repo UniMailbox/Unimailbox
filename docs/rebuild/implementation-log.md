@@ -10,6 +10,72 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-24 — CAP-044 closed: Implemented (CAP-033 flips with it, D-CAP-044-E)
+
+All 23 ACs met across three slices, each through the full loop (implementer → 5-way parallel
+review → single-implementer fix pass → orchestrator-validated gates → commit). Final commit
+`2c2b4ae`; final gates: doctor 13/13, typecheck/lint clean, unit 863/863, worker 732/736
+(exactly the 4 documented `D-CAP-042-pre-existing-parallelism` failures, verified by name),
+build EXIT=0. 15 reviewer verdicts across 3 rounds, all ACCEPT or ACCEPT-WITH-FOLLOWUPS;
+consolidated records at `work/reviews/CAP-044-slice{1,2,3}-review.md`. Decisions
+D-CAP-044-A..T in the archived contract (`work/archive/2026-08/CAP-044/task.md`); deferred
+rows I–T in the ledger (K and L RESOLVED by Slice 3; N matters for CAP-045's upgrade-path
+assertion).
+
+Closure housekeeping: `InboxError.tsx` deleted (unused after the data-first restructure —
+`InboxListPage` renders the error shell inline); `security.md` PermissionKey prose list
+gained `audit.read` (was stale since D-CAP-044-D; the seed cites it as source of truth);
+`complete-setup.ts` seed-count comment corrected (21 permissions / 49 statements).
+
+**Contracts deviation now logged (architecture L3):** `userListItemSchema` is deliberately
+the only `.strict()` schema in `packages/contracts` — the R-SECRET-003 credential exclusion
+made structural. The repository enumerates exactly five non-credential columns, so a
+well-formed server row can never fail on strictness; a future fat-fingered field name fails
+parse instead of leaking. It is the template for any future secret-adjacent list schema.
+
+**Verified still requires CAP-045** (fresh + repeat preview deploy) — code-level closure only,
+per documentation rules.
+
+## 2026-08-24 — CAP-044 Slice 3 landed: admin users + connections/webhook-events + AppNav + styling (5-way review + 8-item fix pass)
+
+Commit `2c2b4ae`. ACs 15–23 verified (verdicts + evidence in
+`work/reviews/CAP-044-slice3-review.md`; all five reviewers ACCEPT-WITH-FOLLOWUPS, QA's
+independent gate run showed zero baseline divergence). Landed: identity-owned `listUsers`
+(five-column credential-excluding SELECT, per-row `userStatusSchema.safeParse` detection
+point), `GET /api/v1/admin/users` (`user.read`), `CursorPayload` + closed `CursorSurface`
+union promoted into contracts (the Slice 2 third-consumer trigger firing — `platform/cursor.ts`
+keeps crypto only, one schema definition repo-wide), UsersPage/ConnectionsPage/
+WebhookEventsPage + AdminLandingPage, the `AppNav` admin probe (D-CAP-044-K resolved: one
+`GET /admin/audit-events?limit=1`, 200 → link, 403 → nothing), and the AC 22 styling pass
+(closes D-CAP-043-L; reviewer-verified zero unresolved classNames, zero inline styles).
+
+**The finding that mattered (code H1 ≡ security M1):** admin data query keys were not
+user-scoped — only the nav probe was. On a shared browser, user B signing in after admin A's
+sign-out could open `/admin/users` by URL and see A's cached rows under a 403 banner,
+persistently (data-first contract + `retry: false` keeps rows mounted beside the error). Fix
+(a): every admin data key carries the session userId (the probe precedent, applied
+everywhere; `'anonymous'` placeholder never fetches — `enabled` gating). The sign-out
+cache-sweep alternative was ruled out: it enumerates session-transition events and misses
+cookie-expiry-then-new-sign-in. The CAP-043 mailbox-key twin is D-CAP-044-O, not silently
+absorbed.
+
+Rulings: `USER_ROW_INVALID` added to `ERROR_CODES` (overruling architecture's accept-as-is —
+three of four reviewers wanted the Slice 2 `AUDIT_ROW_INVALID` precedent, and the grant is
+cheaper than a permanent deferred row; the branch stays untested because `users.status`'s
+CHECK makes a corrupt row unmanufacturable without forbidden D1 mocking); local zod schemas
+for connections/webhook-events/reveal stay client-local until the legacy phase-1 list
+conversion promotes them WITH the route refactor (D-CAP-044-P — promoting schemas beside a
+hand-mapped route would create the second-source-of-truth anti-pattern); D-CAP-044-L decided
+and CLOSED in this pass (`InboxListPage` gained the `resetQueries` start-over in both
+data-first branches; its two false "`refetch()` restarts from page 1" comments corrected).
+Fix pass also: `isPending` loading gates (offline-paused first fetch has `isLoading ===
+false` — the empty state rendered terminal claims with zero requests completed), probe
+`retryOnMount: false` + `gcTime: Infinity` (errored queries refetch on every remount by
+default — AppNav remounts per route change; unobserved entries are GC'd after ~5 min), reveal
+mutation `gcTime: 0` + stale-error clear, one-sided unread dividers (old adjacency rules drew
+some boundaries twice, some never), leak-regex extended to `/password|salt|…/i`. +13 unit
+tests (863 vs 850 baseline).
+
 ## 2026-08-24 — CAP-044 Slice 2 landed: audit-event query API + /admin audit page (CAP-033 absorbed; 5-way review + 7-item fix pass)
 
 ACs 8–14 verified (verdicts + evidence in `work/reviews/CAP-044-slice2-review.md`; all five
