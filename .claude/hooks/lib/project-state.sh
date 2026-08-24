@@ -112,7 +112,15 @@ ps_ledger_next_capability() {
 }
 
 ps_ledger_active_cap_id() {
-  ps_cap_id_from_text "$(ps_ledger_active_capability)"
+  local value
+  value="$(ps_ledger_active_capability)"
+  # An intentionally-inactive row ("None. CAP-043 closed 2026-08-24 …") legitimately
+  # contains a CAP id in its closure note; reading it as active would report false
+  # STATE DRIFT against an empty work/active/.
+  case "${value}" in
+    None|None[[:punct:][:space:]]*) return 0 ;;
+  esac
+  ps_cap_id_from_text "${value}"
 }
 
 # ps_state_drift — emits semicolon-separated drift findings, or nothing when state agrees.
