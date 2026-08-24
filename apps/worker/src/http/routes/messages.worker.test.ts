@@ -938,11 +938,13 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-de
 
     // A syntactically well-formed cursor signed with a *different* key.
     // Tampering the signature with the right shape must surface as a
-    // single 400 INVALID_CURSOR — not 500, not 200.
+    // single 400 INVALID_CURSOR — not 500, not 200. (Fix (d): the payload
+    // now names this endpoint's surface, so this test still exercises the
+    // SIGNATURE check rather than accidentally relying on shape rejection.)
     const { signCursor } = await import('../../platform/cursor');
     const otherKey = 'attacker-supplied-key-different-from-env';
     const foreignCursor = await signCursor(
-      { createdAt: '2026-01-01 00:00:00', id: crypto.randomUUID() },
+      { createdAt: '2026-01-01 00:00:00', id: crypto.randomUUID(), surface: 'messages' },
       otherKey,
     );
 
@@ -967,6 +969,38 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-de
     // or 500.
     const response = await SELF.fetch(
       `http://localhost/api/v1/mailboxes/${mailboxId}/messages?cursor=not-a-cursor`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_CURSOR');
+  });
+
+  it('CAP-044 Slice 2 fix (d): rejects a cursor minted for the audit-events surface', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // Signed with the REAL CURSOR_SIGNING_KEY (a plain string var in the
+    // worker-pool test) but naming the audit-events API's surface. Both
+    // paginated surfaces share the signing key; the surface discriminator
+    // is the only thing keeping an audit-events cursor from being replayed
+    // as a messages page boundary (and vice versa — the audit test file
+    // covers the other direction).
+    const { signCursor } = await import('../../platform/cursor');
+    const key = env.CURSOR_SIGNING_KEY;
+    if (typeof key !== 'string') {
+      throw new Error('worker-pool test expects CURSOR_SIGNING_KEY as a plain string var');
+    }
+    const auditSurfaceCursor = await signCursor(
+      { createdAt: '2026-01-01 00:00:00', id: crypto.randomUUID(), surface: 'audit-events' },
+      key,
+    );
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages?cursor=${encodeURIComponent(auditSurfaceCursor)}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
 

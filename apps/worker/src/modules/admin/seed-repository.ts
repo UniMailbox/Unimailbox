@@ -12,8 +12,9 @@ import type { Database } from '../../platform/database';
 import type { PermissionKey } from '@unimailbox/contracts';
 
 /**
- * All 20 permission keys with human-readable descriptions.
- * From .claude/rules/security.md §Authorization.
+ * All 21 permission keys with human-readable descriptions.
+ * From .claude/rules/security.md §Authorization; `audit.read` added by
+ * CAP-044 Slice 2 (D-CAP-044-D).
  */
 const ALL_PERMISSIONS: ReadonlyArray<{
   key: PermissionKey;
@@ -39,6 +40,7 @@ const ALL_PERMISSIONS: ReadonlyArray<{
   { key: 'webhook_event.read', description: 'Read webhook events' },
   { key: 'webhook_event.delete', description: 'Delete webhook events' },
   { key: 'analytics.read', description: 'Read analytics' },
+  { key: 'audit.read', description: 'Read audit events' },
 ];
 
 /**
@@ -74,10 +76,10 @@ const ROLE_PERMISSIONS: ReadonlyArray<{
  * Uses INSERT OR IGNORE for idempotency — safe to run multiple times.
  * Permission ID = permission key, role ID = role name (deterministic).
  *
- * The seeding generates ~27 statements:
- * - 20 permissions
+ * The seeding generates 49 statements:
+ * - 21 permissions
  * - 2 roles
- * - 25 role_permissions (20 for admin + 5 for member)
+ * - 26 role_permissions (21 for admin + 5 for member)
  *
  * @param db — D1 database binding
  * @param timestamp — ISO datetime string for created_at columns

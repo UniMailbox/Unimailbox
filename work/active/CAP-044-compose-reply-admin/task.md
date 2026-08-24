@@ -101,29 +101,43 @@ review rounds reference these IDs.
 
 ### Slice 2 — audit-event query (CAP-033)
 
-- [ ] 8. `audit.read` is added to the closed `PermissionKey` enum in `packages/contracts`
+- [x] 8. `audit.read` is added to the closed `PermissionKey` enum in `packages/contracts`
   (D-CAP-044-D) with enum-closure tests updated; the seeded `administrator` role gains it; the
   `member` role does not.
-- [ ] 9. An audit-event query repository in `modules/admin` filters composable:
+- [x] 9. An audit-event query repository in `modules/admin` filters composable:
   `actorUserId?`, `resourceType?` + `resourceId?` (pair), `action?`, each optional; ordered
   `created_at DESC, id DESC`; cursor-paginated via `platform/cursor.ts`; served by the existing
-  `audit_events_actor_idx` / `audit_events_resource_idx`.
-- [ ] 10. `GET /api/v1/admin/audit-events` — `requirePermission('audit.read')` + authn; query
+  `audit_events_actor_idx` / `audit_events_resource_idx`. (Fix pass (a), after the review's
+  EXPLAIN QUERY PLAN finding: the single-statement `? IS NULL OR …` shape never selected the
+  indexes — the query now composes bare predicates per active filter, null-bound slots for the
+  cursor boundary only, so the actor/resource indexes are selectable; verified by the
+  cross-reviewer evidence and behavior-identical tests.)
+- [x] 10. `GET /api/v1/admin/audit-events` — `requirePermission('audit.read')` + authn; query
   params validated with a zod schema from contracts; response `{ data: { items: AuditEvent[],
   nextCursor } }`; `metadata` returned as the stored JSON string (opaque, `string | null`).
-- [ ] 11. Worker tests: anonymous 401; member (no `audit.read`) 403; administrator 200; filter by
+  (Fix pass (b) added the server-side enum detection point: an out-of-enum `action` row is a
+  500 `AUDIT_ROW_INVALID`, never a 200 the client cannot parse.)
+- [x] 11. Worker tests: anonymous 401; member (no `audit.read`) 403; administrator 200; filter by
   actor; filter by resource pair; combined actor+resource; cursor walk across a page edge returns
   disjoint pages and a null cursor at the end; empty result → `{ items: [], nextCursor: null }`;
-  every returned row's shape matches `auditEventSchema` (contracts test parity).
-- [ ] 12. `auditEventSchema` + `auditEventListResponseSchema` + the query-params schema live in
+  every returned row's shape matches `auditEventSchema` (contracts test parity). (Fix pass (g)
+  added: created_at tie-breaker across a page edge; exact-limit tail; cross-surface cursor
+  rejection both directions; corrupt-row 500; half-pair repository throws.)
+- [x] 12. `auditEventSchema` + `auditEventListResponseSchema` + the query-params schema live in
   `packages/contracts` (admin/audit.ts or index.ts per existing layout) with tests.
-- [ ] 13. Web: an `/admin` section (session-guarded; nav entry visible only when the session can
+- [x] 13. Web: an `/admin` section (session-guarded; nav entry visible only when the session can
   read admin surfaces — hide, do not 403-crash, for members) with an AuditEventsPage: actor and
   resource filters, action filter, cursor pagination ("load more"), and explicit
-  loading/error/empty states.
-- [ ] 14. Web tests: audit query hook builds the right query string per filter combination;
+  loading/error/empty states. (Nav-entry clause AMENDED by the Slice 2 review ruling — the
+  session descriptor carries no role signal, so "visible only when the session can read" is
+  unmeetable client-side; the member-side half (one request → not-authorized panel, no crash
+  loop, `role="status"`) is met and test-proven. The nav entry + probe gating are D-CAP-044-K
+  into Slice 3. Fix pass (e) hardened the error states: data-first, filter form always mounted,
+  INVALID_CURSOR start-over.)
+- [x] 14. Web tests: audit query hook builds the right query string per filter combination;
   member-without-permission renders the not-authorized state (no API crash loop); pagination
-  accumulates rows.
+  accumulates rows. (Fix pass (g): the accumulation test now asserts the second fetch URL
+  carries the cursor parameter.)
 
 ### Slice 3 — admin users + webhook metadata + styling
 
@@ -400,3 +414,182 @@ there. The genuinely un-matchable corner is a parent whose tier-3 root is a NON-
 in-reply-to value (direct-API compose shape only, pre-existing, worker-structural). Both fold
 into **D-CAP-044-I** at closure: the durable fix is server-side normalization of threading
 headers at send + ingest (extract/validate bracket tokens), which also carries the size caps.
+
+## Slice 2 review outcome → fix pass (2026-08-24)
+
+Five-way parallel review (architecture, code, security, frontend, QA; none wrote the code).
+The implementation was orchestrator-validated before dispatch: 17-file diff exactly matching
+the slice-2 ownership row, 12/12 SQL bind slots verified by hand, and all six gates re-run
+(doctor 13/13 · typecheck/lint/build EXIT=0 · unit **793/793** (52 files) · worker **711/715**
+with exactly the 4 documented `D-CAP-042-pre-existing-parallelism` failures, verified by name).
+
+| Reviewer | Verdict | BLOCKER | HIGH | MEDIUM | LOW |
+|---|---|---|---|---|---|
+| architecture | ACCEPT-WITH-FOLLOWUPS | 0 | 1 | 2 | 4 |
+| code | ACCEPT-WITH-FOLLOWUPS | 0 | 1 | 2 | 6 |
+| security | ACCEPT-WITH-FOLLOWUPS | 0 | 0 | 2 | 2 |
+| frontend | ACCEPT-WITH-FOLLOWUPS | 0 | 1 | 2 | 5 |
+| QA | ACCEPT-WITH-FOLLOWUPS | 0 | 0 | 2 | 5 |
+
+Orchestrator ruling: **fix pass mandatory.** Architecture H1 and frontend H1 are ship-blocking
+for this slice (details below). Code H1 (AC 13 unmet + unruled) is resolved by ruling, not by
+code. QA independently confirmed every AC 8–14 clause PASS on evidence — the fix pass closes
+deviations, it does not reopen the slice.
+
+### Rulings recorded
+
+- **AC 13 nav-entry clause (code H1 ≡ architecture M2 ≡ QA M2 ≡ frontend M2) — RULED: amend
+  the AC; nav deferred as D-CAP-044-K into Slice 3.** The AC's letter ("nav entry visible
+  only when the session can read admin surfaces") is unmeetable inside Slice 2: the session
+  descriptor (Better Auth `get-session`) carries no role/permission signal, and widening it is
+  a cross-module identity/auth decision that belongs to the orchestrator. What IS met and
+  test-proven: member → exactly one request → not-authorized panel, no crash loop; all
+  authorization server-side. Decision recorded for Slice 3 (contract amendment): add the Admin
+  entry to the shared app header, gated by an authenticated probe — a `useQuery` on the
+  existing `GET /api/v1/admin/audit-events?limit=1` (`retry: false`, session-stable
+  `staleTime`); 200 shows the link, 403 hides it. No new server surface, no session-contract
+  widening. The same row covers the Slice 3 users/connections/webhook-events pages (surface
+  compounds, mechanism does not).
+- **AC 9 index claim (architecture H1 ≡ QA M1) — RULED: fix, don't reword.** Both reviewers
+  proved with `EXPLAIN QUERY PLAN` that the single-statement `? IS NULL OR …` shape always
+  scans via `audit_events_created_idx` (the plan is chosen at prepare time and never changes
+  with bindings), while literal-folded per-shape statements DO select the actor/resource
+  indexes. `audit_events` is the one append-only, unbounded-growth table, billed by D1
+  rows-read. Fix criterion (a) below adopts the messages-module precedent (bare equality per
+  active filter; null-bound slots for the cursor boundary only). Fallback if the fix pass hits
+  a blocking complication: reword AC 9 deliberately + a deferred row — never a silent re-check.
+- **Upgrade-path seed gap (security M2 ≡ code L6) — RULED: deferred row D-CAP-044-N.**
+  `seedRolesAndPermissions` is idempotent but runs only during setup; a deployment installed
+  before Slice 2 lacks the `audit.read` row (admin sees 403, failing closed). Fresh installs
+  — CAP-045's preview path — seed correctly. First post-launch enum/seed change must ship a
+  re-seed mechanism (migration-invoked or scheduled); CAP-045 asserts `audit.read` works on
+  the fresh preview.
+- **Messages-side INVALID_CURSOR ≥2-page replay (code M2) — RULED: deferred row
+  D-CAP-044-L.** `refetch()` on an infinite query replays ALL stored pageParams, so after a
+  `CURSOR_SIGNING_KEY` rotation a stored ≥2-page chain fails forever under Retry. Inherited
+  verbatim from `InboxListPage.tsx:94-99` (CAP-043 code, outside slice-2 ownership). Slice 2's
+  copy is fixed by criterion (e); the messages page fix (resetQueries start-over, or an
+  operator dual-accept window) is decided at Slice 3 dispatch or CAP-045.
+
+### Fix criteria (single implementer; slice-2 ownership plus the files granted in (d))
+
+- **(a) Per-combination WHERE composition in `audit-query-repository.ts`** (architecture H1 ≡
+  QA M1): stop guarding filter columns with `? IS NULL OR …`. Append bare parameterized
+  predicates per ACTIVE filter (`actor_user_id = ?`; `resource_type = ? AND resource_id = ?`
+  as a pair; `action = ?`), matching bind order; keep the null-bound slots ONLY for the cursor
+  boundary — exactly the `message-read-repository.ts:261-278` precedent. Rewrite the file
+  header's "Index shaping" comment (lines 17–21) to describe per-shape composition honestly.
+  Behavior-identical: the existing `admin-audit-events.worker.test.ts` suite must pass
+  UNMODIFIED. SQL fragments are fixed strings — no user input is ever concatenated.
+- **(b) Server-side enum detection point** (code M1 ≡ architecture L2): the repository maps
+  rows with `row.action as AuditAction` and nothing ever validates it server-side; a corrupt
+  row (out-of-enum action) currently 200s and then takes the client page down with a raw
+  ZodError. Add a per-row `auditActionSchema.safeParse` in the repository mapping; on failure
+  throw a typed `AuditRowInvalidError`, caught by the route and mapped to
+  `DomainError('AUDIT_ROW_INVALID', 500)`. Never silently skip — this is a forensic surface;
+  a contract-violating row must be a visible server-side error. Worker test: insert a corrupt
+  row directly via D1, request → 500 `AUDIT_ROW_INVALID`.
+- **(c) Pair-rule guard** (architecture L3): the exported repository function must throw on a
+  half-set resource pair (`resourceType` xor `resourceId`) instead of silently matching
+  nothing. Unreachable via the validated route; the exported contract becomes honest. Short
+  unit test or worker test.
+- **(d) Cursor surface discriminator** (security M1; adjacent code L4/L5) — **ownership
+  grant**: the fix pass additionally owns `apps/worker/src/platform/cursor.ts`,
+  `apps/worker/src/modules/messages/message-read-repository.ts`, and
+  `apps/worker/src/http/routes/messages.worker.test.ts`. Extend `CursorPayload` with
+  `readonly surface: string`; `verifyCursor(token, key, expectedSurface)` returns `null` on
+  surface mismatch (payload-shape check requires all three fields). Call sites: messages
+  signs/verifies with `'messages'` (`message-read-repository.ts:246,327`), audit with
+  `'audit-events'` (`audit-query-repository.ts:99,161`). Update the direct `signCursor` use
+  in `messages.worker.test.ts:942` and ADD cross-surface rejection tests in both directions
+  (messages cursor → audit endpoint → 400 INVALID_CURSOR; audit cursor → messages list → 400).
+  Update cursor.ts's header comment (now multi-surface). Deploy-time note: in-flight cursors
+  (payload without `surface`) fail verify after this change — accepted pre-launch; CAP-045
+  verifies fresh flows.
+- **(e) `AuditEventsPage.tsx` error-state restructure** (frontend H1 ≡ frontend M3/M4):
+  data-first ordering, same class as Slice 1 fix (c). (1) When page data exists, the filter
+  form and the accumulated rows STAY mounted; errors render as a banner above the list — a
+  failed background refetch or a failed load-more must never wipe loaded rows. (2) When there
+  is NO data and the query errored, render the error panel WITH the filter form still mounted,
+  so an invalid `actorUserId` can be corrected and Applied (dead-end Retry fixed — a new
+  filter value is a new query key and a fresh first page). (3) The INVALID_CURSOR banner
+  offers "Start over" via `queryClient.resetQueries` on the audit key (the old comment claims
+  `refetch()` restarts page 1 — false, it replays stored pageParams); fix the comment.
+  (4) The not-authorized panel gets `role="status"` (silent today). Tests: invalid uuid →
+  error + form mounted → correct + Apply recovers; ≥2 pages loaded then failing fetch → rows
+  retained + banner; not-authorized reachable via role query.
+- **(f) Fetcher + contract comment honesty** (code M1 note ≡ architecture L1, security L2):
+  wrap `auditEventListResponseSchema.parse` in try/catch →
+  `ApiError('INVALID_RESPONSE', <readable message>, 0)` (Slice 1 fix (f) convention) instead
+  of a raw ZodError; correct the false comment at `admin-queries.ts:78-81` (ApiClient emits
+  INVALID_RESPONSE only for non-JSON bodies); soften the `ip` field comment in
+  `packages/contracts/src/admin/audit.ts` — no current writer populates it (verified across
+  all 14 audit-writer call sites); the field stays reserved.
+- **(g) Test hardening** (code L1/L2/L3): worker — a tie-breaker seed (≥2 rows sharing one
+  `created_at`, distinct ids, walked across a page edge) pinning the `id DESC` branch; an
+  exact-limit tail (4 rows / limit 2 → last full page emits a NON-null cursor, the walk's
+  final page is empty with `nextCursor: null`). Web — the accumulation test must assert the
+  second fetch URL contains the cursor parameter.
+
+### Deferred rows to record at closure (Slice 2 additions)
+
+- **D-CAP-044-K** — admin discoverability: no nav entry to `/admin` exists for any user
+  (admins included); session descriptor carries no role signal. Slice 3 implements the
+  probe-gated header entry per the AC 13 ruling above.
+- **D-CAP-044-L** — INVALID_CURSOR ≥2-page replay recovery on the messages surfaces
+  (`InboxListPage`, thread if applicable): `refetch()` replays stored pageParams; durable fix
+  is the (e)-style resetQueries start-over or a `CURSOR_SIGNING_KEY` dual-accept window.
+  Surfaced by key rotation; decided at Slice 3 dispatch or CAP-045.
+- **D-CAP-044-M** — admin filter state is component-local, not URL search params: refresh or
+  a shared link loses filters. Adopt the route `validateSearch` pattern if admin deep-linking
+  ever matters.
+- **D-CAP-044-N** — upgrade-path re-seed: `audit.read` exists only after
+  `seedRolesAndPermissions` re-runs (setup or backfill); fresh installs fine; CAP-045 asserts
+  the fresh preview; the first post-launch enum/seed change ships the re-seed mechanism.
+
+### Accepted as-is / routed elsewhere
+
+- security.md `PermissionKey` list lags the code (missing `audit.read`) — orchestrator closure
+  duty with the ledger flip (rules-change policy; subagents correctly did not edit it).
+- Session header/logout absence — AC 22 (Slice 3) by contract; not a Slice 2 gap.
+- Cursor not bound to its filter set (code L4) — house-consistent; post-(d) the residual is
+  same-surface cross-filter replay (silent skip, no authz impact — `audit.read` is global).
+  Recorded with the cursor-primitive promotion note: it now has two consumers; a third
+  consumer or a filter-binding need triggers promoting it into `contracts` with filter
+  context in the signed payload.
+- Empty-cursor divergence (`?cursor=` → audit 400, messages treats as first page; code L5) —
+  harmless inconsistency; align opportunistically at the next cursor.ts touch.
+- Worker-flake note (architecture L4): the orchestrator's gate runs name-verify the 4
+  documented failures; re-verified after the fix pass.
+
+### Slice 2 fix-pass outcome (validated 2026-08-24)
+
+Two implementer runs: the first was cut off by an infrastructure timeout after completing the
+worker-side code of (a)–(d); a continuation run finished (e)–(g), the `:172` narrowing fix,
+and every missing test proof. The orchestrator validated the combined diff file-by-file —
+per-composition binds, the enum detection point, the pair guard, the surface discriminator
+across `cursor.ts` + both call sites, the data-first page restructure — and re-ran all gates.
+
+**Grant acceptance note:** `platform/errors.ts` (`ERROR_CODES.AUDIT_ROW_INVALID`) was edited
+outside the explicit fix-pass file list. Accepted post-hoc: it is the mechanically-required
+registry home for the new stable error code, the addition is 8 commented lines, and no rule
+constrains the file. Recorded here rather than silently absorbed.
+
+Gates after the fix pass: doctor 13/13 · typecheck EXIT=0 · lint EXIT=0 · unit **797/797**
+(52 files; 793 baseline + 4 new) · worker **718/722** with exactly the 4 documented
+`D-CAP-042-pre-existing-parallelism` failures (verified by name: `migrationsDb R-DATA-004`;
+`0015 seeds five legacy users`; `seedRolesAndPermissions` ×2) — +7 worker tests against the
+711/715 review baseline · build EXIT=0.
+
+Pre-fix failure evidence (continuation run): 5 web tests fail against the pre-fix
+AuditEventsPage (not-authorized `getByRole('status')`, the error-panel form-mounted
+assertion, and the three new fix-(e) tests).
+
+Implementer findings routed at closure:
+- Worker test files are excluded from `tsc --build` (`apps/worker/tsconfig.json`) — test-only
+  type errors (like the pre-continuation missing `surface` field) are invisible to the
+  typecheck gate. Process gap; decide at closure whether the gate should typecheck tests.
+- The banner's plain Retry refetches every accumulated page sequentially — valid for
+  transient failures; same replay class as D-CAP-044-L.
+- `admin-error-banner` (and the audit/admin classes generally) have no `tokens.css`
+  definitions yet — added to AC 22's Slice 3 checklist.

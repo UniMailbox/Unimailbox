@@ -123,6 +123,99 @@ describe('router (D-CAP-041-9 closure)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// CAP-044 Slice 2 (AC 13): the /admin section's session guard. Same
+// beforeLoad shape as /mailbox — mirrored 1:1 from app/router.tsx so a
+// regression in the admin routes' cache-backed guard is caught here.
+// Authorization is deliberately NOT part of this tree: the session
+// descriptor carries no role signal, so the guard only checks "is there
+// a session"; the audit-events PAGE owns the 403 not-authorized surface
+// (covered in features/admin/AuditEventsPage.test.tsx).
+// ---------------------------------------------------------------------------
+function buildAdminRouteTree(
+  rootRoute: RootRoute<
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    any,
+    undefined,
+    RouterContext
+  >,
+): AnyRoute {
+  const loginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/login',
+    component: () => <div data-testid="arrived-login">login</div>,
+  });
+  const adminLandingRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin">admin</div>,
+  });
+  const adminAuditEventsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/audit-events',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin-audit-events">audit events</div>,
+  });
+  return rootRoute.addChildren([loginRoute, adminLandingRoute, adminAuditEventsRoute]);
+}
+
+describe('router — /admin guard (CAP-044 Slice 2 / AC 13)', () => {
+  it('redirects /admin to /login when there is no session', async () => {
+    const { fetchImpl } = spyFetch([() => jsonResponse({ data: null })]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: ['/admin'],
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/login');
+  });
+
+  it('redirects /admin/audit-events to /login when there is no session', async () => {
+    const { fetchImpl } = spyFetch([() => jsonResponse({ user: null, session: null })]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: ['/admin/audit-events'],
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/login');
+  });
+
+  it('renders /admin/audit-events when the cache is pre-seeded with a valid session', async () => {
+    const { fetchImpl, calls } = spyFetch([]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: ['/admin/audit-events'],
+      authSession: {
+        userId: 'u-admin',
+        email: 'admin@b.test',
+        displayName: 'Admin',
+        expiresAt: '2099-01-01T00:00:00Z',
+      },
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/admin/audit-events');
+    // The warm cache means zero additional fetches for the guard.
+    expect(calls.length).toBe(0);
+  });
+});
+
 // CAP-044 Slice 1 (AC 1): the compose route's optional `?replyTo=`
 // search param is validated at the route boundary — only a non-empty
 // string survives, so the composer never receives a bogus parent id

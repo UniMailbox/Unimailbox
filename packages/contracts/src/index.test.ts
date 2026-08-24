@@ -28,6 +28,9 @@ import {
   messageThreadResponseSchema,
   toggleStarResponseSchema,
   auditActionSchema,
+  auditEventSchema,
+  auditEventListResponseSchema,
+  auditEventQueryParamsSchema,
   composeRecipientSchema,
   composeRequestSchema,
   composeResponseSchema,
@@ -448,6 +451,9 @@ describe('permissionKeySchema', () => {
       'webhook_event.read',
       'webhook_event.delete',
       'analytics.read',
+      // D-CAP-044-D (CAP-044 Slice 2): audit reading is a distinct
+      // authority from user.read / webhook_event.read.
+      'audit.read',
     ];
 
     for (const key of keys) {
@@ -480,11 +486,15 @@ describe('permissionKeySchema', () => {
     }
   });
 
-  it('has exactly 20 permission keys', () => {
-    // Verify the enum has the expected size
+  it('has exactly 21 permission keys (D-CAP-044-D adds audit.read)', () => {
+    // Verify the enum has the expected size. The enum is closed
+    // (R-AUTHZ-001): the count moving means a deliberate change — the
+    // seed (modules/admin/seed-repository.ts) and the closure test must
+    // move with it.
     const allKeys = permissionKeySchema.options;
-    expect(allKeys).toHaveLength(20);
-    expect(new Set(allKeys).size).toBe(20);
+    expect(allKeys).toHaveLength(21);
+    expect(new Set(allKeys).size).toBe(21);
+    expect(allKeys).toContain('audit.read');
   });
 });
 
@@ -1251,6 +1261,158 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
   it('rejects an undeclared action (the enum is closed)', () => {
     const result = auditActionSchema.safeParse('message.hard_deleted');
     expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-044 Slice 2 (AC 12; CAP-033 absorbed, D-CAP-044-E): the audit-event
+// read-side schemas — one response row, the list envelope, and the
+// query-params contract for GET /api/v1/admin/audit-events.
+// ---------------------------------------------------------------------------
+
+describe('auditEventSchema — response row (CAP-044 Slice 2)', () => {
+  const FULL_ROW = {
+    id: '00000000-0000-4000-8000-000000000001',
+    actorUserId: '00000000-0000-4000-8000-000000000002',
+    action: 'message.send',
+    resourceType: 'message',
+    resourceId: '00000000-0000-4000-8000-000000000003',
+    requestId: 'req-1',
+    metadata: '{"connectionId":"c-1"}',
+    ip: '203.0.113.7',
+    createdAt: '2026-01-01 00:00:00',
+  };
+
+  it('accepts a fully populated row', () => {
+    const result = auditEventSchema.parse(FULL_ROW);
+    expect(result).toEqual(FULL_ROW);
+  });
+
+  it('accepts the null-bearing shape — actor/resource/request/metadata/ip are nullable', () => {
+    // R-AUDIT-003/004: system-emitted rows (e.g. message.receive) carry a
+    // null actor; metadata/request_id/ip are optional at every emit point.
+    // The stored metadata text is OPAQUE — never re-shaped by the schema.
+    const result = auditEventSchema.parse({
+      id: '00000000-0000-4000-8000-000000000001',
+      actorUserId: null,
+      action: 'message.receive',
+      resourceType: 'message',
+      resourceId: null,
+      requestId: null,
+      metadata: null,
+      ip: null,
+      createdAt: '2026-01-01 00:00:00',
+    });
+    expect(result.actorUserId).toBeNull();
+    expect(result.metadata).toBeNull();
+  });
+
+  it('rejects a row whose action is outside the closed audit-action enum', () => {
+    const result = auditEventSchema.safeParse({ ...FULL_ROW, action: 'message.hard_deleted' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-uuid id', () => {
+    const result = auditEventSchema.safeParse({ ...FULL_ROW, id: 'not-a-uuid' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('auditEventListResponseSchema — cursor envelope (R-API-004/005)', () => {
+  it('accepts a page with items and a next cursor', () => {
+    const result = auditEventListResponseSchema.parse({
+      items: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          actorUserId: null,
+          action: 'setup.claim',
+          resourceType: 'system',
+          resourceId: null,
+          requestId: null,
+          metadata: null,
+          ip: null,
+          createdAt: '2026-01-01 00:00:00',
+        },
+      ],
+      nextCursor: 'opaque-hmac-token',
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.nextCursor).toBe('opaque-hmac-token');
+  });
+
+  it('accepts the empty end-of-chain page — items: [], nextCursor: null', () => {
+    const result = auditEventListResponseSchema.parse({ items: [], nextCursor: null });
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('rejects a missing nextCursor (the field is required, nullable)', () => {
+    const result = auditEventListResponseSchema.safeParse({ items: [] });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('auditEventQueryParamsSchema — query contract (CAP-044 Slice 2)', () => {
+  const ACTOR = '00000000-0000-4000-8000-00000000000a';
+
+  it('accepts the bare query (no filters)', () => {
+    const result = auditEventQueryParamsSchema.parse({});
+    expect(result).toEqual({});
+  });
+
+  it('accepts each filter on its own', () => {
+    expect(auditEventQueryParamsSchema.parse({ actorUserId: ACTOR })).toEqual({
+      actorUserId: ACTOR,
+    });
+    expect(
+      auditEventQueryParamsSchema.parse({ resourceType: 'message', resourceId: 'm-1' }),
+    ).toEqual({ resourceType: 'message', resourceId: 'm-1' });
+    expect(auditEventQueryParamsSchema.parse({ action: 'message.send' })).toEqual({
+      action: 'message.send',
+    });
+  });
+
+  it('accepts every filter composed', () => {
+    const input = {
+      actorUserId: ACTOR,
+      resourceType: 'mailbox',
+      resourceId: 'mb-1',
+      action: 'mailbox.create',
+      cursor: 'opaque-token',
+      limit: '25',
+    };
+    const result = auditEventQueryParamsSchema.parse(input);
+    expect(result.actorUserId).toBe(ACTOR);
+    expect(result.action).toBe('mailbox.create');
+    expect(result.cursor).toBe('opaque-token');
+    // limit arrives as a query STRING and coerces to a number.
+    expect(result.limit).toBe(25);
+  });
+
+  it('rejects resourceType without resourceId (the pair rule)', () => {
+    const result = auditEventQueryParamsSchema.safeParse({ resourceType: 'message' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects resourceId without resourceType (the pair rule)', () => {
+    const result = auditEventQueryParamsSchema.safeParse({ resourceId: 'm-1' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an action outside the closed audit-action enum', () => {
+    const result = auditEventQueryParamsSchema.safeParse({ action: 'not.an.action' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-uuid actorUserId', () => {
+    const result = auditEventQueryParamsSchema.safeParse({ actorUserId: 'nope' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-numeric or non-positive limit', () => {
+    expect(auditEventQueryParamsSchema.safeParse({ limit: 'abc' }).success).toBe(false);
+    expect(auditEventQueryParamsSchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(auditEventQueryParamsSchema.safeParse({ limit: '-5' }).success).toBe(false);
   });
 });
 

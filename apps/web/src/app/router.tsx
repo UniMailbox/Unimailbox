@@ -80,6 +80,8 @@ import { MailboxListPage } from '../features/mailbox/MailboxListPage';
 import { InboxListPage } from '../features/mailbox/InboxListPage';
 import { MessageDetailPage } from '../features/mailbox/MessageDetailPage';
 import { ComposeEmail } from '../features/mailbox/ComposeEmail';
+import { AdminLandingPage } from '../features/admin/AdminLandingPage';
+import { AuditEventsPage } from '../features/admin/AuditEventsPage';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -303,6 +305,47 @@ const composeRoute = createRoute({
   },
 });
 
+// CAP-044 Slice 2 (AC 13; CAP-033 absorbed, D-CAP-044-E): the /admin
+// section. Session-guarded exactly like /mailbox (D-CAP-041-1 cache
+// hydration + D-CAP-041-9 redirect). Authorization is NOT decided here —
+// the session descriptor carries no role/permission signal (see
+// features/admin/admin-queries.ts), so each admin page enforces its
+// permission server-side and renders the not-authorized state for
+// members. The nav-signal gap is reported to the orchestrator; widening
+// the session endpoint is not this slice's call.
+const adminLandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: AdminLandingPage,
+});
+
+// CAP-044 Slice 2 (AC 13): the audit-trail viewer. Same session guard;
+// requirePermission('audit.read') runs server-side (D-CAP-044-D) and a
+// member's 403 renders the page's not-authorized surface (AC 14).
+const adminAuditEventsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/audit-events',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: AuditEventsPage,
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -447,6 +490,8 @@ const routeTree = rootRoute.addChildren([
   inboxRoute,
   messageDetailRoute,
   composeRoute,
+  adminLandingRoute,
+  adminAuditEventsRoute,
   setupIndexRoute,
   setupChildren,
 ]);

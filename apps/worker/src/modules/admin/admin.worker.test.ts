@@ -2,7 +2,7 @@
 //
 // Worker-pool tests for the admin module's permission system.
 // Tests:
-// - seedRolesAndPermissions creates all 20 permissions, 2 roles, and 25 role_permissions
+// - seedRolesAndPermissions creates all 21 permissions, 2 roles, and 26 role_permissions
 // - checkPermission returns true/false correctly
 // - getUserRoleIds returns assigned roles
 // - assignRole creates user_roles rows
@@ -43,7 +43,7 @@ async function createTestUser(db: D1Database, userId?: string): Promise<string> 
 describe('admin module — seedRolesAndPermissions', () => {
   beforeEach(resetAndMigrate);
 
-  it('creates all 20 permissions with correct IDs (key = id)', async () => {
+  it('creates all 21 permissions with correct IDs (key = id)', async () => {
     const db = await migrationsDb();
     await seedRolesAndPermissions(db, FIXED_TIMESTAMP);
 
@@ -51,7 +51,7 @@ describe('admin module — seedRolesAndPermissions', () => {
       .prepare('SELECT id, key, description FROM permissions ORDER BY key')
       .all<{ id: string; key: string; description: string }>();
 
-    expect(permissions.results).toHaveLength(20);
+    expect(permissions.results).toHaveLength(21);
 
     // Verify deterministic IDs: id = key
     for (const perm of permissions.results ?? []) {
@@ -80,9 +80,11 @@ describe('admin module — seedRolesAndPermissions', () => {
     expect(keys).toContain('webhook_event.read');
     expect(keys).toContain('webhook_event.delete');
     expect(keys).toContain('analytics.read');
+    // D-CAP-044-D (CAP-044 Slice 2): audit.read joins the closed set.
+    expect(keys).toContain('audit.read');
   });
 
-  it('creates the administrator role with all 20 permissions', async () => {
+  it('creates the administrator role with all 21 permissions', async () => {
     const db = await migrationsDb();
     await seedRolesAndPermissions(db, FIXED_TIMESTAMP);
 
@@ -102,7 +104,7 @@ describe('admin module — seedRolesAndPermissions', () => {
       .bind('administrator')
       .all<{ permission_id: string }>();
 
-    expect(adminPerms.results).toHaveLength(20);
+    expect(adminPerms.results).toHaveLength(21);
   });
 
   it('creates the member role with 5 permissions', async () => {
@@ -139,7 +141,7 @@ describe('admin module — seedRolesAndPermissions', () => {
     ]);
   });
 
-  it('creates exactly 25 role_permissions rows (20 admin + 5 member)', async () => {
+  it('creates exactly 26 role_permissions rows (21 admin + 5 member)', async () => {
     const db = await migrationsDb();
     await seedRolesAndPermissions(db, FIXED_TIMESTAMP);
 
@@ -147,7 +149,7 @@ describe('admin module — seedRolesAndPermissions', () => {
       .prepare('SELECT COUNT(*) as count FROM role_permissions')
       .first<{ count: number }>();
 
-    expect(count?.count).toBe(25);
+    expect(count?.count).toBe(26);
   });
 
   it('is idempotent — calling twice does not duplicate rows', async () => {
@@ -165,9 +167,9 @@ describe('admin module — seedRolesAndPermissions', () => {
       .prepare('SELECT COUNT(*) as count FROM role_permissions')
       .first<{ count: number }>();
 
-    expect(permCount?.count).toBe(20);
+    expect(permCount?.count).toBe(21);
     expect(roleCount?.count).toBe(2);
-    expect(rpCount?.count).toBe(25);
+    expect(rpCount?.count).toBe(26);
   });
 });
 
@@ -205,6 +207,7 @@ describe('admin module — checkPermission', () => {
       'webhook_event.read',
       'webhook_event.delete',
       'analytics.read',
+      'audit.read',
     ] as const;
 
     for (const perm of allPerms) {
@@ -242,6 +245,8 @@ describe('admin module — checkPermission', () => {
       'signature.manage',
       'settings.manage',
       'provider.sync',
+      // D-CAP-044-D (CAP-044 Slice 2): audit.read is admin-only.
+      'audit.read',
     ] as const;
 
     for (const perm of nonMemberPerms) {
@@ -378,9 +383,9 @@ describe('completeSetup integration', () => {
       .prepare('SELECT COUNT(*) as count FROM role_permissions')
       .first<{ count: number }>();
 
-    expect(permCount?.count).toBe(20);
+    expect(permCount?.count).toBe(21);
     expect(roleCount?.count).toBe(2);
-    expect(rpCount?.count).toBe(25);
+    expect(rpCount?.count).toBe(26);
 
     // Verify administrator role was assigned to the first user
     const userRole = await db
@@ -430,7 +435,7 @@ describe('completeSetup integration', () => {
       .bind(userId)
       .first<{ count: number }>();
 
-    expect(permCount?.count).toBe(20);
+    expect(permCount?.count).toBe(21);
     expect(roleCount?.count).toBe(2);
     expect(userRoleCount?.count).toBe(1);
   });

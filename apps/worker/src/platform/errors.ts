@@ -124,6 +124,14 @@ export const ERROR_CODES = {
 
   // Server-side (500)
   INTERNAL: 'INTERNAL',
+
+  // CAP-044 Slice 2 fix (b): a stored audit_events row failed the read
+  // contract (e.g. an `action` outside the closed AuditAction enum). The
+  // audit trail is a forensic surface — the violation must surface as a
+  // visible 500, never as a silently skipped row or a 200 the client
+  // cannot parse. Distinct from INTERNAL so operators can tell data
+  // corruption apart from a generic failure.
+  AUDIT_ROW_INVALID: 'AUDIT_ROW_INVALID',
 } as const satisfies Readonly<Record<string, string>>;
 
 /**

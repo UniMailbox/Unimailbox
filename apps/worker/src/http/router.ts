@@ -41,6 +41,7 @@ import { adminRoutes } from './routes/admin';
 import { adminBlocklistRoutes } from './routes/admin-blocklist';
 import { adminRolePolicyRoutes } from './routes/admin-role-policies';
 import { adminWebhookRoutes } from './routes/admin-webhooks';
+import { adminAuditEventRoutes } from './routes/admin-audit-events';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
@@ -89,6 +90,11 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-025: Admin webhook events + connections view.
   apiV1.route('/', adminWebhookRoutes());
+
+  // CAP-044 Slice 2 (D-CAP-044-E, CAP-033 absorbed): audit-event query API.
+  // Same mount style as adminWebhookRoutes — paths are fully qualified
+  // inside the sub-app (/admin/audit-events).
+  apiV1.route('/', adminAuditEventRoutes());
 
   // CAP-020: Mailbox routes.
   apiV1.route('/', mailboxRoutes());

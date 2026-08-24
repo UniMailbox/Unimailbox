@@ -13,6 +13,19 @@ export {
   type AuditEventInput,
 } from './audit-event-repository';
 
+// CAP-044 Slice 2 (D-CAP-044-E, CAP-033 absorbed): audit-event query API.
+// Slice 2 fix pass: AuditRowInvalidError (fix (b), 500 AUDIT_ROW_INVALID
+// on an out-of-enum stored row) and AuditFilterPairError (fix (c), half
+// resource pair on the exported repository contract).
+export {
+  queryAuditEvents,
+  AuditCursorInvalidError,
+  AuditFilterPairError,
+  AuditRowInvalidError,
+  type AuditEventFilters,
+  type AuditEventQueryResult,
+} from './audit-query-repository';
+
 // D-CAP-021 / CAP-035: blocklist + role policies.
 export {
   createBlocklistEntry,

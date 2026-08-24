@@ -31,7 +31,7 @@
 // rows can never drift apart.
 
 import type { Database } from '../../platform/database';
-import { signCursor, verifyCursor } from '../../platform/cursor';
+import { signCursor, verifyCursor, type CursorPayload } from '../../platform/cursor';
 import { sqliteTimestamp } from '../../platform/idempotency';
 import { systemClock } from '../../platform/clock';
 
@@ -113,11 +113,6 @@ interface RecipientRow {
   address: string;
   display_name: string;
   type: 'to' | 'cc' | 'bcc';
-}
-
-interface CursorPayload {
-  createdAt: string;
-  id: string;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -243,7 +238,10 @@ export async function listMessagesByMailbox(
   // point can be misinterpreted as a valid page boundary.
   let cursor: CursorPayload | null = null;
   if (opts.cursor !== undefined && opts.cursor.length > 0) {
-    const verified = await verifyCursor(opts.cursor, opts.cursorSigningKey);
+    // CAP-044 Slice 2 fix (d): this endpoint's surface is 'messages' — a
+    // cursor minted by any other cursor-paginated API (audit-events) is
+    // rejected here as INVALID_CURSOR, not replayed across surfaces.
+    const verified = await verifyCursor(opts.cursor, opts.cursorSigningKey, 'messages');
     if (verified === null) {
       throw new CursorInvalidError();
     }
@@ -325,7 +323,7 @@ export async function listMessagesByMailbox(
     const last = items[items.length - 1];
     if (last) {
       nextCursor = await signCursor(
-        { createdAt: last.createdAt, id: last.id },
+        { createdAt: last.createdAt, id: last.id, surface: 'messages' },
         opts.cursorSigningKey,
       );
     }

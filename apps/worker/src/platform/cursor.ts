@@ -1,12 +1,19 @@
-// platform/cursor — CAP-043 Slice 1 / D-CAP-043-D.
+// platform/cursor — CAP-043 Slice 1 / D-CAP-043-D; multi-surface since
+// CAP-044 Slice 2.
 //
-// HMAC-SHA-256 signed cursor tokens for the inbox list pagination
-// (R-API-005). The cursor is opaque to clients yet tamperable by them
-// (it's URL-passed); an HMAC over the `(created_at, id)` payload prevents
-// a malicious client from jumping the cursor or guessing another user's
-// position. The signing key is independent from `CREDENTIAL_ENCRYPTION_KEY`
-// (provider secrets, AES-GCM) and `BETTER_AUTH_SECRET` (session-cookie
-// HMAC) so a rotation of one does not silently rotate the other.
+// HMAC-SHA-256 signed cursor tokens for cursor-paginated list endpoints
+// (R-API-005): the inbox messages list since CAP-043, the audit-events
+// list since CAP-044 Slice 2. The cursor is opaque to clients yet
+// tamperable by them (it's URL-passed); an HMAC over the
+// `(created_at, id, surface)` payload prevents a malicious client from
+// jumping the cursor or guessing another user's position. The `surface`
+// discriminator (CAP-044 Slice 2 fix (d)) prevents a cursor minted by
+// one API from being replayed against another — every consumer signs
+// and verifies with its own surface string ('messages',
+// 'audit-events') even though both share the signing key. The key is
+// independent from `CREDENTIAL_ENCRYPTION_KEY` (provider secrets,
+// AES-GCM) and `BETTER_AUTH_SECRET` (session-cookie HMAC) so a rotation
+// of one does not silently rotate the other.
 //
 // Format: `<base64url(payload)>.<base64url(signature)>` — a single dot
 // separator and URL-safe base64 (no `+/=` padding) so the cursor can
@@ -14,9 +21,15 @@
 // (32 bytes), base64url-encoded; we never truncate or hash it again.
 //
 // The helpers in this file never throw — `verifyCursor` returns `null`
-// for any failure mode (malformed base64, wrong shape, signature
-// mismatch) so the route layer surfaces a single 400 INVALID_CURSOR to
-// the client without distinguishing "bad token" from "tampered token".
+// for any failure mode (malformed base64, wrong shape, wrong surface,
+// signature mismatch) so the route layer surfaces a single 400
+// INVALID_CURSOR to the client without distinguishing "bad token" from
+// "tampered token".
+//
+// Deploy note (CAP-044 Slice 2 fix (d)): the payload now REQUIRES the
+// `surface` field, so every cursor minted before the field existed
+// fails verification. Accepted pre-launch; CAP-045 verifies fresh flows
+// end-to-end.
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,14 +37,19 @@
 
 /**
  * The opaque payload encoded in every cursor. `createdAt` is the SQLite
- * datetime string ('YYYY-MM-DD HH:MM:SS' UTC) the inbox query uses as
- * the page-boundary tie-breaker; `id` is the message UUID (the second
- * sort key for deterministic ordering when two messages share a
- * `created_at`).
+ * datetime string ('YYYY-MM-DD HH:MM:SS' UTC) the list query uses as
+ * the page-boundary tie-breaker; `id` is the row UUID (the second sort
+ * key for deterministic ordering when two rows share a `created_at`);
+ * `surface` names the API that minted the cursor ('messages' since
+ * CAP-043, 'audit-events' since CAP-044 Slice 2). `verifyCursor` rejects
+ * a token whose surface does not match the verifying endpoint, so a
+ * cursor cannot be replayed across APIs even though both share one
+ * signing key.
  */
 export interface CursorPayload {
   readonly createdAt: string;
   readonly id: string;
+  readonly surface: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,14 +127,20 @@ export async function signCursor(payload: CursorPayload, key: string): Promise<s
 
 /**
  * Verify a cursor token and return the payload, or `null` on any
- * failure (malformed token, malformed payload, signature mismatch).
+ * failure (malformed token, malformed payload, surface other than
+ * `expectedSurface`, signature mismatch).
  *
  * The function never throws: the route layer maps `null` to a single
  * 400 INVALID_CURSOR response. We do not distinguish "bad shape" from
- * "tampered" because the two are observationally equivalent for an
- * attacker and a single error code keeps the API surface stable.
+ * "wrong surface" from "tampered" because all three are observationally
+ * equivalent for an attacker and a single error code keeps the API
+ * surface stable.
  */
-export async function verifyCursor(token: string, key: string): Promise<CursorPayload | null> {
+export async function verifyCursor(
+  token: string,
+  key: string,
+  expectedSurface: string,
+): Promise<CursorPayload | null> {
   // 1. Split the token at the single dot. A second dot is a malformed
   // token; we reject it without trying to recover.
   const dotIndex = token.indexOf('.');
@@ -148,9 +172,12 @@ export async function verifyCursor(token: string, key: string): Promise<CursorPa
   );
   if (!signatureOk) return null;
 
-  // 4. Parse the JSON payload. The schema is a closed object with two
-  // string fields; anything else returns null so a future schema change
-  // cannot be silently accepted by a verifier that doesn't know it yet.
+  // 4. Parse the JSON payload. The schema is a closed object with three
+  // string fields (createdAt, id, surface); anything else returns null so
+  // a future schema change cannot be silently accepted by a verifier that
+  // doesn't know it yet. A payload without `surface` fails here — which
+  // intentionally invalidates every pre-surface cursor (accepted
+  // pre-launch; see the header note).
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(payloadBytes));
@@ -161,12 +188,23 @@ export async function verifyCursor(token: string, key: string): Promise<CursorPa
     parsed === null ||
     typeof parsed !== 'object' ||
     typeof (parsed as { createdAt?: unknown }).createdAt !== 'string' ||
-    typeof (parsed as { id?: unknown }).id !== 'string'
+    typeof (parsed as { id?: unknown }).id !== 'string' ||
+    typeof (parsed as { surface?: unknown }).surface !== 'string'
   ) {
     return null;
   }
-  return {
+  const payload = {
     createdAt: (parsed as { createdAt: string }).createdAt,
     id: (parsed as { id: string }).id,
+    surface: (parsed as { surface: string }).surface,
   };
+
+  // 5. Surface binding (CAP-044 Slice 2 fix (d)): a token signed for one
+  // API must not page another. Both surfaces share the signing key, so
+  // the discriminator is the only thing keeping a messages cursor from
+  // being accepted as an audit-events boundary (and vice versa).
+  if (payload.surface !== expectedSurface) {
+    return null;
+  }
+  return payload;
 }

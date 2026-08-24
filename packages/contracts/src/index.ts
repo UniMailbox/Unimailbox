@@ -698,6 +698,8 @@ export type SetupBrevoRequest = z.infer<typeof setupBrevoRequestSchema>;
  * - provider.sync
  * - webhook_event.read, webhook_event.delete
  * - analytics.read
+ * - audit.read (D-CAP-044-D — added by CAP-044 Slice 2; distinct authority
+ *   from user.read and webhook_event.read)
  */
 export const permissionKeySchema = z.enum([
   'message.read',
@@ -720,6 +722,7 @@ export const permissionKeySchema = z.enum([
   'webhook_event.read',
   'webhook_event.delete',
   'analytics.read',
+  'audit.read',
 ]);
 
 export type PermissionKey = z.infer<typeof permissionKeySchema>;
@@ -1074,10 +1077,18 @@ export {
 
 // CAP-040: cross-module audit-event write seam (outbound-mail → admin via
 // contracts). Same pattern as BlocklistReader / RolePolicyReader above.
+// CAP-044 Slice 2 adds the read-side schemas (audit-event query API,
+// D-CAP-044-E / AC 12).
 export {
   auditActionSchema,
+  auditEventSchema,
+  auditEventListResponseSchema,
+  auditEventQueryParamsSchema,
   type AuditAction,
   type AuditEventInput,
+  type AuditEventItem,
+  type AuditEventListResponse,
+  type AuditEventQueryParams,
   type AuditEventWriter,
   type D1StatementLike,
 } from './admin/audit';
