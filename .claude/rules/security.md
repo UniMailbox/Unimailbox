@@ -36,7 +36,8 @@ Two independent layers; **both** must pass, and there is no implicit bypass (`R-
 1. **Global** — `requirePermission(key)` middleware against the closed `PermissionKey` enum:
    `message.{read,send,delete}` · `mailbox.{create,manage,share}` · `user.{read,manage}` ·
    `role.{read,manage}` · `domain.{read,manage}` · `signature.{read,manage}` ·
-   `settings.{read,manage}` · `provider.sync` · `webhook_event.{read,delete}` · `analytics.read`.
+   `settings.{read,manage}` · `provider.sync` · `webhook_event.{read,delete}` ·
+   `analytics.read` · `audit.read` (added by CAP-044 for the audit-event query API).
    The enum is closed — adding a key is a deliberate change, not an ad-hoc string.
 2. **Mailbox-scoped** — `mailboxes.assertCan(userId, mailboxId, op)` at use-case entry.
 

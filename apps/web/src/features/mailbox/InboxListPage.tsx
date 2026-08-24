@@ -2,12 +2,17 @@
 //
 // CAP-043 Slice 1 (AC 8). The paginated inbox view for a single mailbox.
 // Built on TanStack Query's `useInfiniteQuery` keyed on
-// `['mailbox', mailboxId, 'messages']` (D-CAP-041-1 cache pattern).
+// `['mailbox', 'messages', mailboxId]` (D-CAP-041-1 cache pattern).
 //
-// State surface (mirrors `MailboxListPage`):
+// State surface (data-first since the CAP-044 Slice 3 fix pass (g) —
+// the D-CAP-044-L fold-in; the admin pages' contract):
 //   - Loading first page — `<InboxListSkeleton />`.
 //   - Empty — `<InboxEmpty />` ("Nothing here yet").
-//   - Error — `<InboxError />` with retry (calls `refetch`).
+//   - Error with NO data — the error panel. INVALID_CURSOR offers
+//     "Start over" (see below); every other error offers Retry.
+//   - Error WITH data — the rows STAY mounted; the error renders as a
+//     banner (role="alert") above the list. A failed background
+//     refetch or a failed load-more never wipes loaded pages.
 //   - Unauthorized — descriptor was `null` after the router guard. We
 //     render `<Unauthorized variant="expired" />` so the user can recover
 //     via the Sign-in CTA (D-CAP-041-9 fallback for the post-guard
@@ -18,8 +23,13 @@
 //
 // The pagination-forward button (`<button>Load more</button>`) calls
 // `fetchNextPage`. When the cursor HMAC fails server-side, the route
-// returns 400 INVALID_CURSOR; the client resets its cursor chain by
-// calling `refetch()` which restarts from page 1 (the only valid page).
+// returns 400 INVALID_CURSOR (R-API-005). The recovery is
+// `queryClient.resetQueries`, NOT `refetch()`: on an infinite query
+// TanStack v5 `refetch()` replays EVERY stored pageParam (page 1 AND
+// the broken cursor), so a chain broken mid-walk — e.g. a
+// CURSOR_SIGNING_KEY rotation — fails again on every Retry.
+// `resetQueries` drops the accumulated chain and restarts from page 1
+// (D-CAP-044-L; the same recovery the admin pages shipped).
 import type { ReactElement } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -34,8 +44,10 @@ import {
 import type { MailboxListItem } from './mailbox-queries';
 import { InboxListSkeleton } from './InboxListSkeleton';
 import { InboxEmpty } from './InboxEmpty';
-import { InboxError } from './InboxError';
 import { Card } from '../../components/ui/Card';
+import { ErrorPanel } from '../../components/ui/ErrorPanel';
+import { Button } from '../../components/ui/Button';
+import { AppNav } from '../../components/AppNav';
 import { LogoutButton } from '../auth/LogoutButton';
 // CAP-043 Slice 3 / AC 16: the inbox row's star + delete actions. Both
 // live here, not on the detail page — detail-page actions ride with
@@ -86,35 +98,55 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
     cachedMailboxes?.find((mailbox) => mailbox.id === mailboxId)?.address ??
     `Mailbox ${mailboxId}`;
 
-  if (query.isLoading && query.data === undefined) {
+  // Fix (g), data-first ordering: `query.data` survives a failed
+  // background refetch and a failed load-more, so the accumulated rows
+  // keep rendering and the error becomes a banner — never a wipe.
+  const hasData = query.data !== undefined;
+  const apiError =
+    query.error === null
+      ? null
+      : query.error instanceof ApiError
+        ? query.error
+        : new ApiError('UNKNOWN', query.error.message, 0);
+
+  // Fix (g) / D-CAP-044-L: INVALID_CURSOR recovery. `refetch()` is the
+  // WRONG tool — an infinite query's refetch replays every stored
+  // pageParam (page 1 AND the broken cursor), so a chain broken by a
+  // CURSOR_SIGNING_KEY rotation fails forever under Retry.
+  // `resetQueries` drops the accumulated chain and refetches page 1.
+  const startOver = (): void => {
+    void queryClient.resetQueries({ queryKey: mailboxQueryKeys.messages(mailboxId) });
+  };
+
+  // isPending, not isLoading (fix (b) applied to this file by follow-
+  // through): an offline-paused first fetch has isLoading === false with
+  // no data and no error, which would fall through to the empty state's
+  // "Nothing here yet" — a terminal claim with zero requests completed.
+  if (!hasData && query.isPending) {
     return <InboxListSkeleton />;
   }
 
-  if (query.error !== null) {
-    // CAP-043 Slice 1 / R-API-005: a 400 INVALID_CURSOR means the
-    // cursor chain broke (rotation, or the user pasted a stale cursor
-    // into the URL). The only valid recovery is to restart from
-    // page 1; we explicitly call `refetch()` (which re-issues the
-    // first-page GET) rather than `fetchNextPage()` (which would
-    // re-issue the failed cursor). The query key does not change.
-    //
-    // Fix pass F8: the infinite query's generics are fully inferred, so
-    // the error narrows via `instanceof ApiError` — every ApiClient
-    // rejection is an ApiError; anything else (network failure) falls
-    // back to a generic code.
-    const apiError =
-      query.error instanceof ApiError
-        ? query.error
-        : new ApiError('UNKNOWN', query.error.message, 0);
-    const refetch = (): void => {
-      void query.refetch();
-    };
+  if (!hasData && apiError !== null) {
+    // R-API-005: a 400 INVALID_CURSOR means the cursor chain broke
+    // (rotation, or a stale cursor pasted into the URL); the only valid
+    // recovery restarts from page 1. Every other error retries the
+    // same request. Fix pass F8 lineage: every ApiClient rejection is
+    // an ApiError; anything else (network failure) falls back to a
+    // generic code via the `apiError` narrowing above.
     return (
-      <InboxError
-        message={apiError.message}
-        code={apiError.code}
-        onRetry={refetch}
-      />
+      <main className="auth-page" data-testid="inbox-error">
+        <Card title="Could not load inbox" description="The inbox list is unavailable.">
+          <ErrorPanel
+            message={apiError.message}
+            code={apiError.code}
+            onRetry={apiError.code === 'INVALID_CURSOR' ? startOver : () => {
+              void query.refetch();
+            }}
+            retryLabel={apiError.code === 'INVALID_CURSOR' ? 'Start over' : 'Retry'}
+            testId="inbox-error-panel"
+          />
+        </Card>
+      </main>
     );
   }
 
@@ -129,6 +161,9 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
           <span data-testid="mailbox-user-email">
             {sessionQuery.data?.email ?? ''}
           </span>
+          {/* CAP-044 Slice 3 (D-CAP-044-K): the admin link, rendered only
+              when the nav probe succeeds (member → nothing). */}
+          <AppNav />
           <LogoutButton />
         </div>
       </header>
@@ -149,6 +184,35 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
         title={mailboxAddress}
         description="Messages in this mailbox, newest first."
       >
+        {apiError !== null ? (
+          // Fix (g): errors with data on screen render as a banner ABOVE
+          // the list; the loaded rows below are never wiped by a failed
+          // background refetch or a failed load-more.
+          <div className="inbox-error-banner" role="alert" data-testid="inbox-error-banner">
+            <p>Could not load messages: {apiError.message}</p>
+            {apiError.code === 'INVALID_CURSOR' ? (
+              <Button
+                type="button"
+                variant="secondary"
+                data-testid="inbox-start-over"
+                onClick={startOver}
+              >
+                Start over
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                data-testid="inbox-banner-retry"
+                onClick={() => {
+                  void query.refetch();
+                }}
+              >
+                Retry
+              </Button>
+            )}
+          </div>
+        ) : null}
         {items.length === 0 ? (
           <InboxEmpty />
         ) : (

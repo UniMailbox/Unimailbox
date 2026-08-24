@@ -82,6 +82,9 @@ import { MessageDetailPage } from '../features/mailbox/MessageDetailPage';
 import { ComposeEmail } from '../features/mailbox/ComposeEmail';
 import { AdminLandingPage } from '../features/admin/AdminLandingPage';
 import { AuditEventsPage } from '../features/admin/AuditEventsPage';
+import { UsersPage } from '../features/admin/UsersPage';
+import { ConnectionsPage } from '../features/admin/ConnectionsPage';
+import { WebhookEventsPage } from '../features/admin/WebhookEventsPage';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -346,6 +349,56 @@ const adminAuditEventsRoute = createRoute({
   component: AuditEventsPage,
 });
 
+// CAP-044 Slice 3 (AC 19–21): the users / connections / webhook-events
+// pages. Same session guard as the sibling admin routes; each page's
+// permission (user.read / webhook_event.read / provider.sync) runs
+// server-side and a member's 403 renders that page's not-authorized
+// surface.
+const adminUsersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/users',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: UsersPage,
+});
+
+const adminConnectionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/connections',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: ConnectionsPage,
+});
+
+const adminWebhookEventsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/webhook-events',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: WebhookEventsPage,
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -492,6 +545,9 @@ const routeTree = rootRoute.addChildren([
   composeRoute,
   adminLandingRoute,
   adminAuditEventsRoute,
+  adminUsersRoute,
+  adminConnectionsRoute,
+  adminWebhookEventsRoute,
   setupIndexRoute,
   setupChildren,
 ]);

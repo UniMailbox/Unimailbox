@@ -173,7 +173,58 @@ function buildAdminRouteTree(
     },
     component: () => <div data-testid="arrived-admin-audit-events">audit events</div>,
   });
-  return rootRoute.addChildren([loginRoute, adminLandingRoute, adminAuditEventsRoute]);
+  // CAP-044 Slice 3 (ACs 19–21): the users / connections / webhook-events
+  // routes, mirrored 1:1 from app/router.tsx.
+  const adminUsersRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/users',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin-users">users</div>,
+  });
+  const adminConnectionsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/connections',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin-connections">connections</div>,
+  });
+  const adminWebhookEventsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/webhook-events',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin-webhook-events">webhook events</div>,
+  });
+  return rootRoute.addChildren([
+    loginRoute,
+    adminLandingRoute,
+    adminAuditEventsRoute,
+    adminUsersRoute,
+    adminConnectionsRoute,
+    adminWebhookEventsRoute,
+  ]);
 }
 
 describe('router — /admin guard (CAP-044 Slice 2 / AC 13)', () => {
@@ -212,6 +263,38 @@ describe('router — /admin guard (CAP-044 Slice 2 / AC 13)', () => {
     });
     expect(lastPathname(history)).toBe('/admin/audit-events');
     // The warm cache means zero additional fetches for the guard.
+    expect(calls.length).toBe(0);
+  });
+
+  // CAP-044 Slice 3 (ACs 19–21): each new admin page route carries the
+  // same session guard as its siblings.
+  it.each(['/admin/users', '/admin/connections', '/admin/webhook-events'])(
+    'redirects %s to /login when there is no session',
+    async (initial) => {
+      const { fetchImpl } = spyFetch([() => jsonResponse({ data: null })]);
+      const { history } = await mountAppRouter({
+        fetchImpl,
+        initialEntries: [initial],
+        buildRouteTree: buildAdminRouteTree,
+      });
+      expect(lastPathname(history)).toBe('/login');
+    },
+  );
+
+  it('renders /admin/users when the cache is pre-seeded with a valid session', async () => {
+    const { fetchImpl, calls } = spyFetch([]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: ['/admin/users'],
+      authSession: {
+        userId: 'u-admin',
+        email: 'admin@b.test',
+        displayName: 'Admin',
+        expiresAt: '2099-01-01T00:00:00Z',
+      },
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/admin/users');
     expect(calls.length).toBe(0);
   });
 });

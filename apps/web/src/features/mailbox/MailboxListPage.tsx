@@ -33,6 +33,7 @@ import { mailboxListQuery } from './mailbox-queries';
 import { MailboxLoading } from './MailboxLoading';
 import { MailboxError } from './MailboxError';
 import { Card } from '../../components/ui/Card';
+import { AppNav } from '../../components/AppNav';
 
 export function MailboxListPage(): ReactElement {
   const navigate = useNavigate();
@@ -76,6 +77,11 @@ export function MailboxListPage(): ReactElement {
     <main className="mailbox-shell" data-testid="mailbox-list-page">
       <header className="mailbox-header">
         <h1 className="mailbox-title">Mailboxes</h1>
+        {/* CAP-044 Slice 3 (D-CAP-044-K): the admin link, rendered only
+            when the nav probe succeeds (member → nothing). */}
+        <div className="mailbox-header-meta">
+          <AppNav />
+        </div>
       </header>
       <Card
         title="Your mailboxes"

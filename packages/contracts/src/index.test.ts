@@ -31,6 +31,12 @@ import {
   auditEventSchema,
   auditEventListResponseSchema,
   auditEventQueryParamsSchema,
+  cursorSurfaceSchema,
+  cursorPayloadSchema,
+  userStatusSchema,
+  userListItemSchema,
+  userListResponseSchema,
+  userListQueryParamsSchema,
   composeRecipientSchema,
   composeRequestSchema,
   composeResponseSchema,
@@ -1413,6 +1419,244 @@ describe('auditEventQueryParamsSchema — query contract (CAP-044 Slice 2)', () 
     expect(auditEventQueryParamsSchema.safeParse({ limit: 'abc' }).success).toBe(false);
     expect(auditEventQueryParamsSchema.safeParse({ limit: '0' }).success).toBe(false);
     expect(auditEventQueryParamsSchema.safeParse({ limit: '-5' }).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-044 Slice 3 amendment (cursor-payload promotion): the cursor payload
+// schema + closed surface union moved from the worker's platform/cursor.ts
+// into contracts so every paginated API (worker verifiers and any client)
+// agrees on one wire shape. `listUsers` is the third consumer that fired
+// the promotion trigger.
+// ---------------------------------------------------------------------------
+
+describe('cursorSurfaceSchema — closed surface union (R-API-005)', () => {
+  it('contains exactly the three minting surfaces', () => {
+    expect([...cursorSurfaceSchema.options].sort()).toEqual(
+      ['admin-users', 'audit-events', 'messages'].sort(),
+    );
+  });
+
+  it('accepts every declared surface (parse round-trip)', () => {
+    for (const surface of cursorSurfaceSchema.options) {
+      expect(cursorSurfaceSchema.parse(surface)).toBe(surface);
+    }
+  });
+
+  it('rejects an undeclared surface (the union is closed)', () => {
+    expect(cursorSurfaceSchema.safeParse('sessions').success).toBe(false);
+    expect(cursorSurfaceSchema.safeParse('').success).toBe(false);
+  });
+});
+
+describe('cursorPayloadSchema — payload contract (CAP-044 Slice 3 amendment)', () => {
+  it('accepts a payload for every surface', () => {
+    for (const surface of cursorSurfaceSchema.options) {
+      const result = cursorPayloadSchema.parse({
+        createdAt: '2026-08-24 00:00:00',
+        id: '00000000-0000-4000-8000-000000000001',
+        surface,
+      });
+      expect(result.surface).toBe(surface);
+    }
+  });
+
+  it('rejects a payload missing any field', () => {
+    expect(
+      cursorPayloadSchema.safeParse({ id: 'x', surface: 'messages' }).success,
+    ).toBe(false);
+    expect(
+      cursorPayloadSchema.safeParse({ createdAt: '2026-08-24 00:00:00', surface: 'messages' })
+        .success,
+    ).toBe(false);
+    expect(
+      cursorPayloadSchema.safeParse({ createdAt: '2026-08-24 00:00:00', id: 'x' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects an empty-string createdAt or id (min(1))', () => {
+    expect(
+      cursorPayloadSchema.safeParse({ createdAt: '', id: 'x', surface: 'messages' }).success,
+    ).toBe(false);
+    expect(
+      cursorPayloadSchema.safeParse({ createdAt: '2026-08-24 00:00:00', id: '', surface: 'messages' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('rejects a payload without a surface — pre-surface cursors are invalid by design', () => {
+    // CAP-044 Slice 2 fix (d): the field is required so every cursor minted
+    // before surfaces existed fails verification (accepted pre-launch).
+    expect(
+      cursorPayloadSchema.safeParse({ createdAt: '2026-08-24 00:00:00', id: 'x' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a non-object payload', () => {
+    expect(cursorPayloadSchema.safeParse('token').success).toBe(false);
+    expect(cursorPayloadSchema.safeParse(null).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-044 Slice 3 (AC 18): the admin users-list read contract for
+// GET /api/v1/admin/users.
+// ---------------------------------------------------------------------------
+
+describe('userStatusSchema — closed account-status enum (R-AUTH-002)', () => {
+  it('accepts every stored status value', () => {
+    for (const status of ['active', 'banned', 'deleted'] as const) {
+      expect(userStatusSchema.parse(status)).toBe(status);
+    }
+  });
+
+  it('rejects any value outside the users.status CHECK', () => {
+    for (const status of ['pending', 'suspended', '', 'ACTIVE', 'active ']) {
+      expect(userStatusSchema.safeParse(status).success).toBe(false);
+    }
+  });
+});
+
+describe('userListItemSchema — response row (AC 16 / R-SECRET-003)', () => {
+  const FULL_ROW = {
+    id: '00000000-0000-4000-8000-000000000001',
+    email: 'user@example.com',
+    displayName: 'User Person',
+    status: 'active',
+    createdAt: '2026-01-01 00:00:00',
+  };
+
+  it('accepts a fully populated row', () => {
+    const result = userListItemSchema.parse(FULL_ROW);
+    expect(result).toEqual(FULL_ROW);
+  });
+
+  it('accepts a null displayName', () => {
+    const result = userListItemSchema.parse({ ...FULL_ROW, displayName: null });
+    expect(result.displayName).toBeNull();
+  });
+
+  it('accepts every status value (soft-deleted users stay visible to admins)', () => {
+    for (const status of ['active', 'banned', 'deleted'] as const) {
+      const result = userListItemSchema.parse({ ...FULL_ROW, status });
+      expect(result.status).toBe(status);
+    }
+  });
+
+  it('rejects a non-uuid id', () => {
+    expect(userListItemSchema.safeParse({ ...FULL_ROW, id: 'not-a-uuid' }).success).toBe(false);
+  });
+
+  it('rejects an empty email', () => {
+    expect(userListItemSchema.safeParse({ ...FULL_ROW, email: '' }).success).toBe(false);
+  });
+
+  it('rejects a missing createdAt', () => {
+    const { createdAt: _createdAt, ...rowWithoutCreatedAt } = FULL_ROW;
+    expect(userListItemSchema.safeParse(rowWithoutCreatedAt).success).toBe(false);
+  });
+
+  it('rejects an undefined displayName (nullable, not optional)', () => {
+    const { displayName: _displayName, ...rowWithoutDisplayName } = FULL_ROW;
+    expect(userListItemSchema.safeParse(rowWithoutDisplayName).success).toBe(false);
+  });
+});
+
+describe('userListResponseSchema — cursor envelope (R-API-004/005)', () => {
+  it('accepts a page with items and a next cursor', () => {
+    const result = userListResponseSchema.parse({
+      items: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          email: 'one@example.com',
+          displayName: null,
+          status: 'active',
+          createdAt: '2026-01-01 00:00:00',
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          email: 'two@example.com',
+          displayName: 'Two',
+          status: 'banned',
+          createdAt: '2026-01-02 00:00:00',
+        },
+      ],
+      nextCursor: 'opaque-hmac-token',
+    });
+    expect(result.items).toHaveLength(2);
+    expect(result.items[1]?.email).toBe('two@example.com');
+    expect(result.nextCursor).toBe('opaque-hmac-token');
+  });
+
+  it('accepts the empty end-of-chain page — items: [], nextCursor: null', () => {
+    const result = userListResponseSchema.parse({ items: [], nextCursor: null });
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('rejects a missing nextCursor (required, nullable)', () => {
+    expect(userListResponseSchema.safeParse({ items: [] }).success).toBe(false);
+  });
+
+  it('rejects a row carrying credential material — no /hash|credential|secret|token/i key parses (R-SECRET-003)', () => {
+    // The exclusion contract is structural: the schema admits exactly the
+    // five enumerated fields, so a response row leaking a password column
+    // cannot parse. Both spellings (camelCase wire form and the raw
+    // snake_case column name) are pinned.
+    expect(
+      userListResponseSchema.safeParse({
+        items: [
+          {
+            id: '00000000-0000-4000-8000-000000000001',
+            email: 'one@example.com',
+            displayName: null,
+            status: 'active',
+            createdAt: '2026-01-01 00:00:00',
+            passwordHash: 'leak',
+          },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      userListResponseSchema.safeParse({
+        items: [
+          {
+            id: '00000000-0000-4000-8000-000000000001',
+            email: 'one@example.com',
+            displayName: null,
+            status: 'active',
+            createdAt: '2026-01-01 00:00:00',
+            password_salt: 'leak',
+          },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('userListQueryParamsSchema — query contract (AC 16)', () => {
+  it('accepts the bare query', () => {
+    const result = userListQueryParamsSchema.parse({});
+    expect(result).toEqual({});
+  });
+
+  it('accepts cursor and limit composed; limit coerces from the string wire form', () => {
+    const result = userListQueryParamsSchema.parse({ cursor: 'opaque-token', limit: '25' });
+    expect(result.cursor).toBe('opaque-token');
+    expect(result.limit).toBe(25);
+  });
+
+  it('rejects an empty cursor string', () => {
+    expect(userListQueryParamsSchema.safeParse({ cursor: '' }).success).toBe(false);
+  });
+
+  it('rejects a non-numeric, non-integer, or non-positive limit', () => {
+    expect(userListQueryParamsSchema.safeParse({ limit: 'abc' }).success).toBe(false);
+    expect(userListQueryParamsSchema.safeParse({ limit: '1.5' }).success).toBe(false);
+    expect(userListQueryParamsSchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(userListQueryParamsSchema.safeParse({ limit: '-5' }).success).toBe(false);
   });
 });
 

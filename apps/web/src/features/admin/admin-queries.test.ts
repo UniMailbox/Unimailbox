@@ -84,21 +84,46 @@ describe('auditEventsPath (CAP-044 Slice 2 / AC 14)', () => {
 
 describe('adminQueryKeys.auditEvents (CAP-044 Slice 2)', () => {
   it('keys identical filter sets identically — the key derives from the path', () => {
-    expect(adminQueryKeys.auditEvents({ action: 'message.send' })).toEqual(
-      adminQueryKeys.auditEvents({ action: 'message.send' }),
+    expect(adminQueryKeys.auditEvents('u-1', { action: 'message.send' })).toEqual(
+      adminQueryKeys.auditEvents('u-1', { action: 'message.send' }),
     );
   });
 
   it('keys different filter sets differently', () => {
-    expect(adminQueryKeys.auditEvents({ action: 'message.send' })).not.toEqual(
-      adminQueryKeys.auditEvents({ action: 'setup.claim' }),
+    expect(adminQueryKeys.auditEvents('u-1', { action: 'message.send' })).not.toEqual(
+      adminQueryKeys.auditEvents('u-1', { action: 'setup.claim' }),
     );
   });
 
   it('lives inside the admin family so future invalidation can sweep it', () => {
-    const key = adminQueryKeys.auditEvents({});
+    const key = adminQueryKeys.auditEvents('u-1', {});
     expect(key[0]).toBe('admin');
     expect(key[1]).toBe('audit-events');
+  });
+});
+
+describe('adminQueryKeys userId scoping (Slice 3 fix (a) — cross-user cache disclosure)', () => {
+  // Ruling 1: sign-out nulls only the session entry; admin keys survive.
+  // Without the userId in the key, user B's mount after user A signs out
+  // would render A's cached rows under B's 403 session (the data-first
+  // contract keeps them on screen). A different user is a different key.
+  it("scopes every data key to the userId — a different user never reuses another user's cache entry", () => {
+    expect(adminQueryKeys.auditEvents('u-1', {})).not.toEqual(
+      adminQueryKeys.auditEvents('u-2', {}),
+    );
+    expect(adminQueryKeys.users('u-1')).not.toEqual(adminQueryKeys.users('u-2'));
+    expect(adminQueryKeys.connections('u-1')).not.toEqual(
+      adminQueryKeys.connections('u-2'),
+    );
+    expect(adminQueryKeys.webhookEvents('u-1')).not.toEqual(
+      adminQueryKeys.webhookEvents('u-2'),
+    );
+  });
+
+  it('keys the same user stably — the scoping adds no instability within one session', () => {
+    expect(adminQueryKeys.users('u-1')).toEqual(adminQueryKeys.users('u-1'));
+    expect(adminQueryKeys.connections('u-1')).toEqual(adminQueryKeys.connections('u-1'));
+    expect(adminQueryKeys.webhookEvents('u-1')).toEqual(adminQueryKeys.webhookEvents('u-1'));
   });
 });
 

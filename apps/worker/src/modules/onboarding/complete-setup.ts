@@ -40,7 +40,7 @@ export async function completeSetup(
   const now = deps.clock.now().toISOString().slice(0, 19).replace('T', ' ');
 
   // 1. Seed roles and permissions (idempotent, can run multiple times)
-  // This generates ~27 statements (20 permissions + 2 roles + 25 role_permissions)
+  // This generates 49 statements (21 permissions + 2 roles + 26 role_permissions)
   await seedRolesAndPermissions(input.db, now);
 
   // 2. Assign administrator role to the first user and flip status in one batch

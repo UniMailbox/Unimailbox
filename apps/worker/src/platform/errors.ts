@@ -132,6 +132,16 @@ export const ERROR_CODES = {
   // cannot parse. Distinct from INTERNAL so operators can tell data
   // corruption apart from a generic failure.
   AUDIT_ROW_INVALID: 'AUDIT_ROW_INVALID',
+
+  // CAP-044 Slice 3 fix (d): the users twin of AUDIT_ROW_INVALID — a
+  // stored users row failed the read contract (e.g. a status outside
+  // the closed users.status enum). Same posture: a visible 500, never a
+  // silently skipped row or a 200 the client cannot parse; distinct
+  // from INTERNAL so operators can tell data corruption apart from a
+  // generic failure. (Unreachable through D1 today — users.status
+  // carries a CHECK constraint — the repository's safeParse is
+  // defense-in-depth against schema drift.)
+  USER_ROW_INVALID: 'USER_ROW_INVALID',
 } as const satisfies Readonly<Record<string, string>>;
 
 /**

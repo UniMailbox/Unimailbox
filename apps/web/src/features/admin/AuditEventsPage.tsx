@@ -85,6 +85,8 @@ function AuditEventsContent(): ReactElement {
   const [pairError, setPairError] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
+  // Fix (a): the reset target must match the hook's userId-scoped key.
+  const sessionQuery = authSessionQuery();
   const query = auditEventsInfiniteQuery(applied);
 
   const applyFilters = (event: FormEvent<HTMLFormElement>): void => {
@@ -124,10 +126,16 @@ function AuditEventsContent(): ReactElement {
   // fails again on every page. `resetQueries` drops the accumulated
   // chain and refetches page 1 of the CURRENT filter set.
   const startOver = (): void => {
-    void queryClient.resetQueries({ queryKey: adminQueryKeys.auditEvents(applied) });
+    void queryClient.resetQueries({
+      queryKey: adminQueryKeys.auditEvents(sessionQuery.data?.userId ?? 'anonymous', applied),
+    });
   };
 
-  if (!hasData && query.isLoading) {
+  // Fix (b): isPending, NOT isLoading — an offline-paused first fetch
+  // has isFetching=false (so isLoading=false) and would fall through to
+  // the no-data error/empty branches; isPending stays true until data
+  // or an error exists. See UsersPage for the full note.
+  if (!hasData && query.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
         <p>Loading…</p>

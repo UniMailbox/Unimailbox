@@ -23,6 +23,21 @@ export function AdminLandingPage(): ReactElement {
               Audit events
             </Link>
           </li>
+          <li>
+            <Link to="/admin/users" data-testid="admin-users-link">
+              Users
+            </Link>
+          </li>
+          <li>
+            <Link to="/admin/connections" data-testid="admin-connections-link">
+              Connections
+            </Link>
+          </li>
+          <li>
+            <Link to="/admin/webhook-events" data-testid="admin-webhook-events-link">
+              Webhook events
+            </Link>
+          </li>
         </ul>
       </Card>
     </main>

@@ -42,6 +42,7 @@ import { adminBlocklistRoutes } from './routes/admin-blocklist';
 import { adminRolePolicyRoutes } from './routes/admin-role-policies';
 import { adminWebhookRoutes } from './routes/admin-webhooks';
 import { adminAuditEventRoutes } from './routes/admin-audit-events';
+import { adminUserRoutes } from './routes/admin-users';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
@@ -95,6 +96,11 @@ export function buildRouter(): Hono<AppEnv> {
   // Same mount style as adminWebhookRoutes — paths are fully qualified
   // inside the sub-app (/admin/audit-events).
   apiV1.route('/', adminAuditEventRoutes());
+
+  // CAP-044 Slice 3 (AC 17): admin users-list API, served by the identity
+  // module's public listUsers (D-CAP-044-H). Same mount style as the
+  // audit-event routes (/admin/users).
+  apiV1.route('/', adminUserRoutes());
 
   // CAP-020: Mailbox routes.
   apiV1.route('/', mailboxRoutes());

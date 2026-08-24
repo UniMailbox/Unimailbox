@@ -1092,3 +1092,29 @@ export {
   type AuditEventWriter,
   type D1StatementLike,
 } from './admin/audit';
+
+// CAP-044 Slice 3 (AC 18): the admin users-list read contract. The
+// users table stays identity-owned (D-CAP-044-H); these schemas are the
+// only shape crossing the admin route → identity listUsers boundary.
+export {
+  userStatusSchema,
+  userListItemSchema,
+  userListResponseSchema,
+  userListQueryParamsSchema,
+  type UserStatus,
+  type UserListItem,
+  type UserListResponse,
+  type UserListQueryParams,
+} from './admin/users';
+
+// CAP-044 Slice 3 amendment (cursor-payload promotion): the payload
+// schema + closed surface union moved here from the worker's
+// platform/cursor.ts (its third consumer — listUsers — fired the
+// promotion trigger recorded in the Slice 2 review note). The crypto
+// stays in the worker; contracts owns the wire shape.
+export {
+  cursorSurfaceSchema,
+  cursorPayloadSchema,
+  type CursorSurface,
+  type CursorPayload,
+} from './cursor';

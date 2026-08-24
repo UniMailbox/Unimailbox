@@ -49,11 +49,11 @@ const SESSION: AuthSessionDescriptor = {
 };
 
 /**
- * The session query has `staleTime: 0`, so subscribing to it (the F5
- * fallback reads the descriptor) triggers a refetch on mount whose
- * spyFetch call would otherwise consume a resolver slot meant for the
- * mailbox-list endpoint. Prepend this Better Auth–shaped response — the
- * same convention as InboxListPage.test.tsx.
+ * The Better Auth–shaped session response `withAdminProbeDenied`
+ * dispatches for every get-session refetch (the session query has
+ * `staleTime: 0`, so each new observer — including the AppNav probe's —
+ * refetches on mount; the dispatch keeps those refetches from consuming
+ * a sequential resolver slot meant for the mailbox-list endpoint).
  */
 function authSessionResolver(): Response {
   return jsonResponse({
@@ -75,6 +75,31 @@ type TestRootRoute = RootRoute<
   undefined,
   RouterContext
 >;
+
+/**
+ * CAP-044 Slice 3: MailboxListPage now mounts <AppNav />, whose probe
+ * fires `GET /api/v1/admin/audit-events?limit=1` once per session, and
+ * whose embedded session observer subscribes after the header renders —
+ * an extra get-session refetch under `staleTime: 0`. Dispatch BOTH URLs
+ * around the sequential spy: get-session always answers with the SESSION
+ * descriptor (the member-shaped case — every wrapper-using test signs a
+ * member in), and the probe answers with a member's 403 (no Admin link).
+ * Everything else falls through to the sequential resolvers, so the
+ * resolver lists serve only the mailbox-list endpoint. Same convention
+ * as AuditEventsPage.test.tsx.
+ */
+function withAdminProbeDenied(inner: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/api/v1/auth/better/get-session')) {
+      return authSessionResolver();
+    }
+    if (url.startsWith('/api/v1/admin/audit-events')) {
+      return errorResponse('PERMISSION_DENIED', 'Forbidden', 403);
+    }
+    return inner(input, init);
+  };
+}
 
 function buildMailboxRoutes(rootRoute: TestRootRoute) {
   const mailboxRoute = createRoute({
@@ -100,7 +125,6 @@ function buildMailboxRoutes(rootRoute: TestRootRoute) {
 describe('MailboxListPage', () => {
   it('renders one mailbox row whose click navigates to /mailbox/$mailboxId', async () => {
     const { fetchImpl } = spyFetch([
-      authSessionResolver,
       () =>
         jsonResponse({
           data: {
@@ -121,7 +145,7 @@ describe('MailboxListPage', () => {
     setAuthSession(SESSION);
     const user = userEvent.setup();
     const { history } = await mountAppRouter({
-      fetchImpl,
+      fetchImpl: withAdminProbeDenied(fetchImpl),
       authSession: SESSION,
       initialEntries: ['/mailbox'],
       buildRouteTree: buildMailboxRoutes,
@@ -131,18 +155,20 @@ describe('MailboxListPage', () => {
       expect(screen.getByTestId('mailbox-list')).toBeInTheDocument();
     });
     expect(screen.getByTestId('mailbox-list-row')).toBeInTheDocument();
+    // CAP-044 Slice 3 (D-CAP-044-K): a member's probe 403 renders NO
+    // admin link in the header.
+    expect(screen.queryByTestId('app-nav')).not.toBeInTheDocument();
     await user.click(screen.getByTestId('mailbox-list-row-button'));
     expect(lastPathname(history)).toBe('/mailbox/mb-1');
   });
 
   it('renders the empty state when the user has no mailboxes', async () => {
     const { fetchImpl } = spyFetch([
-      authSessionResolver,
       () => jsonResponse({ data: { items: [] } }),
     ]);
     setAuthSession(SESSION);
     await mountAppRouter({
-      fetchImpl,
+      fetchImpl: withAdminProbeDenied(fetchImpl),
       authSession: SESSION,
       initialEntries: ['/mailbox'],
       buildRouteTree: buildMailboxRoutes,
@@ -159,14 +185,13 @@ describe('MailboxListPage', () => {
     // fast and deterministic we use 400 instead). R-API-002: the error
     // envelope's `code` is what the panel surfaces under the message.
     const { fetchImpl } = spyFetch([
-      authSessionResolver,
       () => errorResponse('INTERNAL', 'fail', 400),
       () => jsonResponse({ data: { items: [] } }),
     ]);
     setAuthSession(SESSION);
     const user = userEvent.setup();
     await mountAppRouter({
-      fetchImpl,
+      fetchImpl: withAdminProbeDenied(fetchImpl),
       authSession: SESSION,
       initialEntries: ['/mailbox'],
       buildRouteTree: buildMailboxRoutes,

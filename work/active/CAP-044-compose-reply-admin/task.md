@@ -141,33 +141,41 @@ review rounds reference these IDs.
 
 ### Slice 3 — admin users + webhook metadata + styling
 
-- [ ] 15. The identity module exports a public `listUsers` read (cursor-paginated, ordered
+- [x] 15. The identity module exports a public `listUsers` read (cursor-paginated, ordered
   `created_at DESC, id DESC`) — the ONLY new code inside `modules/identity`; the `users` table
   stays identity-owned.
-- [ ] 16. `GET /api/v1/admin/users` — `requirePermission('user.read')`; response rows carry id,
+- [x] 16. `GET /api/v1/admin/users` — `requirePermission('user.read')`; response rows carry id,
   email, display name, created_at (as stored), and account status IF a status column exists — and
   NEVER password-hash or credential columns; a worker test asserts the response JSON contains no
-  key matching /hash|credential|secret|token/i.
-- [ ] 17. Worker tests for users list: anonymous 401; member 403; administrator 200; cursor walk;
-  empty deployment edge (only the admin themselves); shape matches the contracts schema.
-- [ ] 18. `userListItemSchema` + list response schema in `packages/contracts` with tests.
-- [ ] 19. Web UsersPage: table with the list fields, cursor pagination, loading/error/empty
-  states; linked from the admin section nav.
-- [ ] 20. Web ConnectionsPage over `GET /api/v1/admin/connections` (`webhook_event.read`):
+  key matching /hash|credential|secret|token/i. *(Status exists — 0001 CHECK; regex extended to
+  /password\|salt\|hash\|credential\|secret\|token/i by fix (h).)*
+- [x] 17. Worker tests for users list: anonymous 401; member 403; administrator 200; cursor walk;
+  empty deployment edge (only the admin themselves); shape matches the contracts schema. *(QA
+  evidence additionally pinned: exact-limit tail, created_at tie-breaker, tamper, cross-surface
+  ×2, limit validation + clamp.)*
+- [x] 18. `userListItemSchema` + list response schema in `packages/contracts` with tests.
+- [x] 19. Web UsersPage: table with the list fields, cursor pagination, loading/error/empty
+  states; linked from the admin section nav. *(Rendered as the house `ul/li` row list — QA L3,
+  accepted.)*
+- [x] 20. Web ConnectionsPage over `GET /api/v1/admin/connections` (`webhook_event.read`):
   connection rows with provider, status, `webhookConfigured`, `webhookUrl`; a reveal action calls
   the existing `POST .../webhook-secret/reveal` behind a confirm dialog, displays the value once
   with an explicit "this is shown once / the reveal is audited" note, and never logs or persists
-  it (asserted in a web test via the logging spy pattern used in CAP-043).
-- [ ] 21. Web WebhookEventsPage over `GET /api/v1/admin/webhook-events`: rows with delivery
+  it (asserted in a web test via the logging spy pattern used in CAP-043). *(Fix (f): mutation
+  gcTime 0, stale error cleared on retry.)*
+- [x] 21. Web WebhookEventsPage over `GET /api/v1/admin/webhook-events`: rows with delivery
   metadata as the API returns them; loading/error/empty states.
-- [ ] 22. Styling pass (closes D-CAP-043-L): `tokens.css` gains the real class definitions for
+- [x] 22. Styling pass (closes D-CAP-043-L): `tokens.css` gains the real class definitions for
   the inbox surfaces (`.inbox-*`), the composer, and the admin pages; every state variant
   (default/loading/error/empty) remains distinguishable after styling; no inline style props
-  where a token class exists.
-- [ ] 23. Gates (orchestrator-run after each fix pass): `pnpm scaffold doctor` 13/13;
+  where a token class exists. *(Reviewer-verified zero unresolved classes / zero inline styles;
+  divider defect fixed by fix (e). Closes D-CAP-043-L.)*
+- [x] 23. Gates (orchestrator-run after each fix pass): `pnpm scaffold doctor` 13/13;
   `pnpm typecheck` clean; `pnpm lint` clean; `pnpm test:unit` all green (count grows by the new
   tests); `pnpm test:worker` green except exactly the 4 documented
-  `D-CAP-042-pre-existing-parallelism` failures; `pnpm build` EXIT=0.
+  `D-CAP-042-pre-existing-parallelism` failures; `pnpm build` EXIT=0. *(Post-fix-pass
+  orchestrator run: doctor 13/13 · typecheck 0 · lint 0 · unit **863/863** (850 + 13 fix-pass
+  tests) · worker **732/736**, the 4 failures verified by name · build 0.)*
 
 ## Vertical slice
 
@@ -593,3 +601,211 @@ Implementer findings routed at closure:
   transient failures; same replay class as D-CAP-044-L.
 - `admin-error-banner` (and the audit/admin classes generally) have no `tokens.css`
   definitions yet — added to AC 22's Slice 3 checklist.
+
+### Slice 3 contract amendment (recorded 2026-08-24, before Slice 3 dispatch)
+
+- **D-CAP-044-K implementation lands in Slice 3.** A small `AppNav` component
+  (`apps/web/src/components/AppNav.tsx`, new) renders an "Admin" link in the mailbox page
+  headers, gated by an authenticated probe: `useQuery` over
+  `GET /api/v1/admin/audit-events?limit=1` with `retry: false` and a session-stable
+  `staleTime` — 200 shows the link, 403/error hides it. No session-contract widening, no new
+  server surface (403 probes are request logs, never audit events). Ownership extension:
+  the new component plus NON-styling header edits in `InboxListPage.tsx` and
+  `MailboxListPage.tsx` to mount it.
+- **Cursor-primitive promotion trigger fires (Slice 2 review note):** `listUsers` is the
+  THIRD consumer of `platform/cursor.ts`. Honor the recorded trigger: `CursorPayload` (zod
+  schema + type) and the closed `CursorSurface` union (`'messages' | 'audit-events' |
+  'admin-users'`) move into `packages/contracts`; `platform/cursor.ts` imports them from
+  contracts and keeps only the crypto. Ownership extension: `apps/worker/src/platform/cursor.ts`
+  (import swap only).
+- **AC 22 class checklist** (styling pass must define, at minimum): all `admin-*` classes used
+  by the Slice 2 pages (incl. `admin-error-banner`, `audit-*`), `inbox-compose-entry`,
+  `message-detail-actions`, `compose-confirmation`, `compose-body`, plus the Slice 3 pages'
+  own classes. Every state variant stays distinguishable; no inline styles where a token
+  class exists.
+
+## Slice 3 review outcome → fix pass (2026-08-24)
+
+Five independent reviews (none wrote the code). All five verdicts ACCEPT-WITH-FOLLOWUPS;
+zero BLOCKERs; one HIGH total. QA re-ran every gate on the review tree: zero divergence —
+doctor 13/13 · typecheck 0 · lint 0 · unit **850/850** (57 files) · worker **732/736** with
+exactly the 4 documented `D-CAP-042-pre-existing-parallelism` failures verified by name ·
+build 0. ACs 15–23 all PASS on QA's clause-by-clause evidence table.
+
+| Reviewer | Verdict | B/H/M/L | Anchor findings |
+|---|---|---|---|
+| architecture | ACCEPT-WITH-FOLLOWUPS | 0/0/1/6 | local wire schemas (M1); USER_ROW_INVALID accept-as-is (L1); users index (L2); probe comment (L4) |
+| code | ACCEPT-WITH-FOLLOWUPS | 0/1/2/6 | **cross-user admin cache retention (H1)**; probe `retryOnMount` (M1); USER_ROW_INVALID grant (M2) |
+| security | ACCEPT-WITH-FOLLOWUPS | 0/0/2/6 | admin cache retention (M1); reveal Idempotency-Key (M2); leak regex (L3) |
+| frontend | ACCEPT-WITH-FOLLOWUPS | 0/0/2/5 | unread divider CSS (M1); offline-paused false empty (M2); probe gcTime (L1) |
+| qa | ACCEPT-WITH-FOLLOWUPS | 0/0/3/6 | loading-state tests (M1); USER_ROW_INVALID (M2); schema promotion (M3) |
+
+Positive evidence worth keeping (full lists in `work/reviews/CAP-044-slice3-review.md`): the
+users vertical mirrors the audit precedent at every checked dimension (boundary-only null
+slots hand-verified bind-for-bind, per-row `safeParse` detection point, tie-breaker arm,
+exact-limit tail, cross-surface rejection both directions); the cursor promotion is the
+recorded trigger executed with a single schema definition repo-wide; R-SECRET-003 holds
+end-to-end on the reveal flow (confirm-gated POST, one-time display, audit-row-before-return
+ordering, five-method console spy + full storage sweep); the Slice 1/2 error-before-data
+defect class came back clean on all three new pages with pinned tests; every className
+resolves to a tokens.css rule, zero inline styles.
+
+### Rulings recorded
+
+1. **Cross-user admin-data cache retention (code H1 ≡ security M1) — FIX via userId-scoped
+   admin data keys.** `admin-queries.ts:96-99` documents the hazard and mitigates it for the
+   probe only. Failure: shared workstation — A signs out (SPA; only the session entry is
+   nulled), B signs in, opens `/admin/users` by URL → A's cached rows render under the 403
+   banner, and the data-first contract + `retry: false` keeps them mounted persistently. The
+   alternative — a sign-out cache sweep in `LogoutButton`/`auth-queries.ts` — is rejected:
+   it enumerates session-transition events (explicit sign-out misses
+   cookie-expiry-then-B-signs-in); userId-scoping is structural and matches the probe
+   precedent. The CAP-043 mailbox-query twin is systemic, not silently absorbed →
+   **D-CAP-044-O**.
+2. **USER_ROW_INVALID — fix now, overruling architecture's accept-as-is.** Architecture's
+   substance is correct (the path is unreachable through D1 — `users.status` has a CHECK —
+   and the branch is untestable without forbidden D1 mocking, so no new test). But three of
+   four reviewers independently recommend the registry grant, Slice 2 set the precedent that
+   `errors.ts` registry additions are mechanically-required orchestrator grants, the addition
+   is additive and backward-compatible (architecture's own note), and a permanent deferred
+   row costs more than the 8-line edit. `platform/errors.ts` granted to the fix pass.
+3. **Local zod schemas (architecture M1 ≡ QA M3 ≡ security L5) — DEFER, folded with the
+   legacy-lists conversion.** Promoting the schemas while `admin-webhooks.ts` keeps
+   hand-mapping responses would create a second source of truth — the exact anti-pattern.
+   The promotion + route refactor belong to the same touch → **D-CAP-044-P** (carries
+   security's note: the client schemas are non-strict, so a server-side `webhook_secret`
+   regression would be silently stripped rather than surfaced).
+4. **Reveal endpoint Idempotency-Key (security M2) — deferred row D-CAP-044-Q.** Pre-existing
+   CAP-040 code outside every slice's ownership; non-destructive (reveal is a read + audit
+   write) but a 5xx-after-commit retry mints two `webhook_secret.reveal` audit rows, and a
+   headerless script bypasses the ADR-004 rule entirely.
+5. **D-CAP-044-L decided: fixed in this fix pass** (its recorded fork was "Slice 3 fix pass
+   or CAP-045"). The start-over pattern now exists on four admin pages; `InboxListPage`
+   adopts it and its two false `refetch()` comments are corrected. This **closes
+   D-CAP-044-L** — recorded distinct from D-CAP-043-L (the styling-pass row AC 22 closes).
+6. **Probe honesty cluster (code M1 + frontend L1 + architecture L4 ≡ security L7) — fixed
+   together.** The "exactly one 403 per session" claim is false twice over: errored queries
+   refetch on every remount (`retryOnMount` defaults true — AppNav remounts on every
+   Inbox ↔ Mailboxes navigation), and the unobserved entry is GC'd after ~5 min so the link
+   vanishes then pops in on return. The staleTime rationale also rests on a false premise
+   ("role grants need a re-login anyway" — `requirePermission` reads `user_roles` per
+   request). `retryOnMount: false` + `gcTime: Infinity` + comments rewritten to the true
+   argument (server authorizes per request; the probe is a client-side visibility cache that
+   may lag a mid-session grant; reload recovers).
+7. **Offline-paused false empty (frontend M2) + loading-state tests (QA M1) — one pattern
+   fix, four pages.** `isLoading` (= `isPending && isFetching`) is false while a first fetch
+   is paused offline, so every guard falls through to "No users exist yet." — a terminal
+   claim about deployment state with zero requests completed. Gate on `isPending`. "Rule
+   once, fix everywhere" pulls in Slice 2's `AuditEventsPage` (granted below).
+
+### Fix criteria (single implementer; slice-3 ownership plus the grants after the list)
+
+- **(a) userId-scoped admin data keys.** `adminQueryKeys.{auditEvents,users,connections,
+  webhookEvents}` include the session userId exactly like `navProbe`
+  (`admin-queries.ts:96-99` precedent). Pages/tests/`admin-queries.test.ts` updated for the
+  new key shape. A different user's cached rows become unreachable (different key), closing
+  the retention disclosure on all four surfaces.
+- **(b) `isPending` loading gate + loading-state tests.** All four admin pages gate their
+  loading branch on `query.isPending` (covers paused) instead of `query.isLoading`. Each
+  page gets a never-resolving-resolver test asserting the loading UI renders (not the empty
+  state, not the error panel).
+- **(c) probe correctness.** `useAdminNavProbe`: `retryOnMount: false`, `gcTime: Infinity`;
+  comments in `admin-queries.ts` (:349-377), `AppNav.tsx` (:3-12), `AppNav.test.tsx`
+  (:8-10) rewritten per ruling 6. New test: 403 → unmount → remount → still exactly one
+  probe request.
+- **(d) USER_ROW_INVALID registry grant.** `platform/errors.ts`: `ERROR_CODES` gains
+  `USER_ROW_INVALID` (comment parity with `AUDIT_ROW_INVALID`); `admin-users.ts` maps
+  `UserRowInvalidError` → 500 `USER_ROW_INVALID`. No new worker test (branch unmanufacturable
+  without forbidden D1 mocking — documented in the test file).
+- **(e) tokens.css.** Unread divider drawn on exactly one side of each boundary (fixes the
+  double divider on `[read, unread]` and the missing divider on `[unread, read, read]`);
+  add the `admin-connection-status-disabled` variant; correct the comment's domain claim.
+- **(f) reveal hygiene.** Reveal mutation `gcTime: 0`; the dialog's stale error clears when
+  a retry starts; the "NEVER written to TanStack Query cache" comment amended to the
+  gcTime-0 reality; spy-scope comment states the actual swept set. Tests: Cancel fires no
+  POST; the admin case (probe 200 → header link) asserted in one mailbox page test in situ.
+- **(g) D-CAP-044-L fold-in.** `InboxListPage`: INVALID_CURSOR renders the Start-over
+  affordance (`queryClient.resetQueries`) in both the no-data and with-data branches,
+  mirroring the admin pages; the two false `refetch()` comments (:19-22, :95-100)
+  corrected. Tests for both branches; pin the one-extra-get-session count (QA L5) while in
+  the file.
+- **(h) worker test hygiene.** `admin-users.worker.test.ts`: leak regex extended to
+  `/password|salt|hash|credential|secret|token/i`; duplicated near-empty assertions removed.
+
+Grants beyond slice-3 ownership: `apps/web/src/features/admin/AuditEventsPage.tsx` (+ test)
+for (b); `apps/worker/src/platform/errors.ts` for (d); behavioral (non-styling) edits to
+`apps/web/src/features/mailbox/InboxListPage.tsx` (+ test) for (g). `auth-queries.ts`,
+`LogoutButton.tsx`, `platform/cursor.ts`, `admin-webhooks.ts`: NOT granted — report, don't
+edit.
+
+### Deferred rows to record at closure (Slice 3 additions)
+
+- **D-CAP-044-O** — userId-scope the remaining web query keys (mailbox, compose,
+  attachments): the CAP-043 twin of fix (a). One systemic sweep, not per-feature patches.
+  Includes the companion loading-gate fix: `MessageDetailPage.tsx:96` still gates on
+  `isLoading` (same offline-paused false-empty class as fix (b); the inbox twin was fixed in
+  this fix pass, the detail page is a CAP-043 file unreviewed here).
+- **D-CAP-044-P** — promote `adminConnectionSchema` / `webhookEventDeliverySchema` /
+  `webhookSecretRevealSchema` into contracts AND refactor `admin-webhooks.ts` to map through
+  them, in the same touch as the legacy phase-1 list conversion (same files). Carries the
+  non-strict-silently-strips regression note from ruling 3.
+- **D-CAP-044-Q** — the reveal POST mounts no `requireIdempotencyKey` and writes no
+  idempotency record (pre-existing CAP-040 file): enforce the mandatory header; batch the
+  idempotency record with the audit write.
+- **D-CAP-044-R** — `users_created_idx` + boundary composition, only when a deployment's
+  user count makes the keyset scan measurable (the index alone would not be selected under
+  the `? IS NULL OR` boundary shape).
+- **D-CAP-044-S** — the cross-surface cursor matrix's two unproven cells: an
+  admin-users-minted cursor rejected by the messages and audit-events verifiers (4 of 6
+  cells proven; the discriminator is one shared string compare).
+- **D-CAP-044-T** — onboarding hygiene: `modules/onboarding/create-administrator.ts:62`
+  reads `FROM users` directly instead of identity's exported `getFirstUser` (pre-existing).
+
+### Accepted as-is / routed elsewhere
+
+- Extra get-session per inbox load (code L2): accepted; now pinned by the (g) count test.
+- Users list as `ul/li` rather than a semantic table (QA L3): house-consistent with the
+  audit page.
+- `components/AppNav` importing from `features/admin` (architecture L5): no rule violated,
+  location pinned by the amendment; revisit only if a second cross-feature nav element
+  appears (a `features/shell/` home).
+- AlertDialog focus trap (frontend L4): the CAP-043 H12 deferral stands; note at closure
+  that the reveal confirm extends it (secret-producing, audited action).
+- Probe signals `audit.read` only — a custom role with `user.read` but not `audit.read`
+  gets no link: correct per the amendment's mechanism while only seeded roles exist
+  (recorded on D-CAP-044-K).
+- Worker test files excluded from `tsc --build` (Slice 2 fix-pass finding): still open for
+  the closure decision.
+
+### Slice 3 fix-pass outcome (validated 2026-08-24)
+
+Single implementer, COMPLETE on all eight criteria. The orchestrator validated every criterion
+by direct inspection — key factories + `enabled` gating for (a), all four `isPending` gates for
+(b), probe options + rewritten comments for (c), registry + route mapping for (d), one-sided
+divider rules for (e), `gcTime: 0` + `onMutate` error-clear for (f), the data-first
+InboxListPage with start-over in both branches for (g), regex + dedup for (h) — and re-ran all
+six gates.
+
+**Orchestrator follow-through (one token + comment):** the fix pass flagged that
+`InboxListPage`'s own loading gate still used `isLoading` (criterion (b) was scoped to the four
+admin pages). Applied by the orchestrator directly (`isPending`, same why-comment) — the file
+was already granted this slice and the change completes (b)'s rule-once-fix-everywhere. The
+same class remains in `MessageDetailPage.tsx:96` (CAP-043 file, unreviewed this slice) →
+folded into D-CAP-044-O's scope rather than review-blind-edited.
+
+Gates (orchestrator-run, post-fix): doctor 13/13 · typecheck EXIT=0 · lint EXIT=0 · unit
+**863/863** (57 files; 850 baseline + 13 fix-pass tests) · worker **732/736** with exactly the
+4 documented `D-CAP-042-pre-existing-parallelism` failures verified by name · build EXIT=0.
+
+Fix-pass findings routed at closure:
+- `features/mailbox/InboxError.tsx` is now unused (only its barrel export references it) —
+  DELETE at the closure lifecycle resolution (with the barrel line).
+- The (b) never-resolving-resolver tests are guards, not pre-fix discriminators (an in-flight
+  fetch has `isLoading === true` too); the true discriminator needs
+  `onlineManager.setOnline(false)`. Accepted — the gate fix is still proven by inspection, and
+  the tests pin the loading contract.
+- `gcTime: 0`/`Infinity` retention is not directly asserted (needs fake timers + devtools
+  internals); covered indirectly via the remount tests. Accepted.
+- The (g) get-session count pin (2 get-session + 1 probe per inbox load) encodes the current
+  observer topology; the test comment says a future header session observer legitimately
+  changes it. Accepted.

@@ -553,3 +553,721 @@ body {
   gap: 0.5rem;
   margin-top: 0.25rem;
 }
+
+/* ---- Shared skeleton pulse (CAP-043 / CAP-044 AC 22) ----
+ * Loading placeholders animate opacity only — no layout shift, no
+ * spinner-in-a-list. Used by the inbox rows, the mailbox rows, and the
+ * message-detail header/body bars.
+ */
+@keyframes unimailbox-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.inbox-list-row-skeleton,
+.mailbox-list-row-skeleton,
+.message-detail-skeleton-header,
+.message-detail-skeleton-body {
+  background-color: hsl(var(--unimailbox-muted));
+  border-radius: var(--unimailbox-radius);
+  animation: unimailbox-pulse 1.6s ease-in-out infinite;
+}
+
+.inbox-list-row-skeleton {
+  height: 3.5rem;
+}
+
+.mailbox-list-row-skeleton {
+  height: 2.75rem;
+}
+
+.message-detail-skeleton-header {
+  height: 5.5rem;
+}
+
+.message-detail-skeleton-body {
+  height: 10rem;
+}
+
+/* ---- Auth page shell (CAP-042) ----
+ * The login / register / unauthorized surfaces: one centered card on a
+ * plain background — narrower than the wizard because auth forms are
+ * single-purpose.
+ */
+.auth-page {
+  max-width: 420px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+/* ---- Mailbox app shell (CAP-043) ----
+ * The authorized surface container: wider than the wizard, with a
+ * header band (title + user meta + nav) above the content cards.
+ */
+.mailbox-shell {
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.mailbox-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mailbox-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.mailbox-subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+.mailbox-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+.mailbox-loading {
+  margin: 0;
+  padding: 2rem 0;
+  text-align: center;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+/* ---- App nav (CAP-044 Slice 3, D-CAP-044-K) ----
+ * A quiet inline link — it must read as navigation, not a call to
+ * action, next to the user meta in the header.
+ */
+.app-nav {
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-nav a {
+  color: hsl(var(--unimailbox-primary));
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.app-nav a:hover {
+  border-bottom-color: hsl(var(--unimailbox-primary));
+}
+
+.app-nav a:focus-visible {
+  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---- Mailbox list (CAP-043) ---- */
+.mailbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mailbox-list-row {
+  border-bottom: 1px solid hsl(var(--unimailbox-border));
+}
+
+.mailbox-list-row:last-child {
+  border-bottom: none;
+}
+
+.mailbox-list-row-button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.75rem 0.5rem;
+  background-color: transparent;
+  border: none;
+  border-radius: var(--unimailbox-radius);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  color: hsl(var(--unimailbox-foreground));
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.mailbox-list-row-button:hover {
+  background-color: hsl(var(--unimailbox-muted));
+}
+
+.mailbox-list-row-button:focus-visible {
+  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline-offset: -2px;
+}
+
+.mailbox-list-row-address {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+}
+
+.mailbox-list-row-display-name {
+  color: hsl(var(--unimailbox-muted-foreground));
+  font-size: 0.8125rem;
+}
+
+/* ---- Inbox (CAP-043 / CAP-044 AC 22) ---- */
+.inbox-compose-entry {
+  margin: 0;
+}
+
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Every row carries the divider on exactly ONE side (its bottom), so a
+ * boundary between two rows — whatever their read/unread order — is one
+ * line, never two and never zero. (Fix pass (e): the old adjacency rules
+ * drew read→unread boundaries twice and unread→read→read boundaries
+ * not at all.) */
+.inbox-list-row {
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid hsl(var(--unimailbox-border));
+}
+
+.inbox-list-row:last-child {
+  border-bottom: none;
+}
+
+/* Unread rows carry the CAP-043 visual weight: a bolded subject and a
+ * soft tint so the unread subset is scannable without a color change
+ * that would clash with the semantic status palette. The bottom border
+ * stays: hiding it (the old `border-bottom-color: transparent`) would
+ * erase the boundary below an unread row. */
+.inbox-list-row-unread {
+  background-color: hsl(var(--unimailbox-muted));
+  border-radius: var(--unimailbox-radius);
+}
+
+.inbox-list-row-subject {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.inbox-list-row-unread .inbox-list-row-subject {
+  font-weight: 600;
+}
+
+.inbox-list-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+.inbox-list-row-from {
+  overflow-wrap: anywhere;
+}
+
+.inbox-list-row-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-list-row-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--unimailbox-info));
+  background-color: hsl(var(--unimailbox-info-soft));
+  color: hsl(var(--unimailbox-info));
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inbox-list-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+/* The error-with-data banner (fix (g), D-CAP-044-L): same danger
+ * palette as .error-panel and the admin pages' .admin-error-banner,
+ * but laid out as a slim alert row above the surviving list. */
+.inbox-error-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid hsl(var(--unimailbox-danger));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-danger-soft));
+  color: hsl(var(--unimailbox-danger));
+}
+
+.inbox-error-banner p {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* Compact ghost icon buttons (star / delete) — the Button primitive
+ * supplies the ghost chrome; these only tighten the metrics so the
+ * actions fit inside the row's meta line. */
+.inbox-star-button,
+.inbox-delete-button {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.inbox-star-button[aria-pressed='true'] {
+  color: hsl(var(--unimailbox-warning));
+}
+
+.inbox-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+/* ---- Message detail (CAP-043 Slice 2 / AC 22) ---- */
+.message-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.message-detail-back {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+}
+
+.message-detail-headers {
+  padding: 0.75rem 1rem;
+  border: 1px solid hsl(var(--unimailbox-border));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-muted));
+  margin: 0 0 1rem;
+}
+
+.message-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+.message-detail-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  font-size: 0.9375rem;
+}
+
+/* ---- Message thread panel (CAP-043 Slice 2 / AC 22) ---- */
+.message-thread-panel {
+  padding: 1rem;
+  border: 1px solid hsl(var(--unimailbox-border));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-card));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.message-thread-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.message-thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.message-thread-item-button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--unimailbox-radius);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: hsl(var(--unimailbox-foreground));
+  transition: background-color 120ms ease;
+}
+
+.message-thread-item-button:hover {
+  background-color: hsl(var(--unimailbox-muted));
+}
+
+.message-thread-item-button:focus-visible {
+  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline-offset: -2px;
+}
+
+.message-thread-item-active .message-thread-item-button {
+  background-color: hsl(var(--unimailbox-muted));
+  border-color: hsl(var(--unimailbox-primary));
+}
+
+.message-thread-item-subject {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.message-thread-item-meta {
+  font-size: 0.75rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+.message-thread-loading {
+  margin: 0;
+  padding: 0.5rem 0;
+  text-align: center;
+  font-size: 0.875rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+/* ---- Composer (CAP-044 Slice 1 / AC 22) ----
+ * compose-body rides on the .input primitive; only the textarea-specific
+ * metrics live here.
+ */
+.compose-body {
+  min-height: 10rem;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.compose-confirmation {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid hsl(var(--unimailbox-success));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-success-soft));
+  color: hsl(var(--unimailbox-success));
+  font-size: 0.875rem;
+}
+
+/* ---- Alert dialog (CAP-043 Slice 3 / AC 22) ----
+ * Inline confirmation panel (not a modal): a bordered block that opens
+ * in place below its trigger. The inner Alert supplies the danger
+ * palette; this positions the actions row.
+ */
+.alert-dialog {
+  margin-top: 0.5rem;
+}
+
+.alert-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* ---- Admin section (CAP-044 Slice 2 + 3 / ACs 13–22) ---- */
+.admin-page {
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.admin-index {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-index a {
+  color: hsl(var(--unimailbox-primary));
+  font-size: 0.9375rem;
+  text-decoration: underline;
+}
+
+.admin-index a:focus-visible {
+  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.admin-pagination {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+/* The error-with-data banner: same danger palette as .error-panel, but
+ * laid out as a slim alert row above the surviving list. */
+.admin-error-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid hsl(var(--unimailbox-danger));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-danger-soft));
+  color: hsl(var(--unimailbox-danger));
+}
+
+.admin-error-banner p {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* ---- Audit trail rows (CAP-044 Slice 2) ---- */
+.audit-event-list,
+.admin-user-list,
+.admin-connection-list,
+.admin-webhook-event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.audit-event-row,
+.admin-user-row,
+.admin-connection-row,
+.admin-webhook-event-row {
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid hsl(var(--unimailbox-border));
+}
+
+.audit-event-row:last-child,
+.admin-user-row:last-child,
+.admin-connection-row:last-child,
+.admin-webhook-event-row:last-child {
+  border-bottom: none;
+}
+
+.audit-event-row-meta,
+.admin-user-row-meta,
+.admin-connection-row-meta,
+.admin-webhook-event-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.audit-event-row-action {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.audit-event-row-date,
+.admin-webhook-event-row-date {
+  font-size: 0.75rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.audit-event-row-detail,
+.admin-user-row-detail,
+.admin-connection-row-detail,
+.admin-webhook-event-row-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+/* ---- Status pills (CAP-044 Slice 3 / AC 22) ----
+ * Shared pill shape; each family colors its own closed status domain.
+ * Values outside the styled variants fall back to the neutral pill, so
+ * a future status string degrades gracefully instead of rendering
+ * unstyled.
+ */
+.admin-user-status,
+.admin-connection-status,
+.admin-webhook-event-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--unimailbox-border));
+  background-color: hsl(var(--unimailbox-muted));
+  color: hsl(var(--unimailbox-muted-foreground));
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Users: active | banned | deleted (users.status CHECK, migration 0001). */
+.admin-user-status-active {
+  border-color: hsl(var(--unimailbox-success));
+  background-color: hsl(var(--unimailbox-success-soft));
+  color: hsl(var(--unimailbox-success));
+}
+
+.admin-user-status-banned {
+  border-color: hsl(var(--unimailbox-warning));
+  background-color: hsl(var(--unimailbox-warning-soft));
+  color: hsl(var(--unimailbox-warning));
+}
+
+.admin-user-status-deleted {
+  border-color: hsl(var(--unimailbox-danger));
+  background-color: hsl(var(--unimailbox-danger-soft));
+  color: hsl(var(--unimailbox-danger));
+}
+
+/* Connections: active | disabled | invalid
+ * (provider_connections.status CHECK, migration 0003). `disabled` is
+ * deliberately NEUTRAL, not warning: it is an operator-chosen steady
+ * state, not a fault — restating the base pill keeps it explicit (and
+ * greppable) instead of relying on the fallback. */
+.admin-connection-status-active {
+  border-color: hsl(var(--unimailbox-success));
+  background-color: hsl(var(--unimailbox-success-soft));
+  color: hsl(var(--unimailbox-success));
+}
+
+.admin-connection-status-disabled {
+  border-color: hsl(var(--unimailbox-border));
+  background-color: hsl(var(--unimailbox-muted));
+  color: hsl(var(--unimailbox-muted-foreground));
+}
+
+.admin-connection-status-invalid {
+  border-color: hsl(var(--unimailbox-danger));
+  background-color: hsl(var(--unimailbox-danger-soft));
+  color: hsl(var(--unimailbox-danger));
+}
+
+/* Webhook deliveries: 'processed' is the only status the processor
+ * writes today (webhook-repository.ts); anything else stays neutral. */
+.admin-webhook-event-status-processed {
+  border-color: hsl(var(--unimailbox-success));
+  background-color: hsl(var(--unimailbox-success-soft));
+  color: hsl(var(--unimailbox-success));
+}
+
+/* ---- Users rows (CAP-044 Slice 3 / AC 19) ---- */
+.admin-user-row-email {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+}
+
+/* ---- Connections rows + one-time secret reveal (AC 20) ---- */
+.admin-connection-row-provider,
+.admin-webhook-event-row-type {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.admin-connection-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* The one-time secret display: warning palette — it must read as
+ * "attention" without implying failure. The value breaks anywhere so a
+ * long secret never overflows the card. */
+.admin-secret-reveal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid hsl(var(--unimailbox-warning));
+  border-radius: var(--unimailbox-radius);
+  background-color: hsl(var(--unimailbox-warning-soft));
+}
+
+.admin-secret-reveal-note {
+  margin: 0;
+  font-size: 0.8125rem;
+  /* The main warning hue, not *-foreground: in dark mode warning-soft
+   * and warning-foreground are the same value (invisible text). The
+   * Alert primitive uses the same pairing. */
+  color: hsl(var(--unimailbox-warning));
+  flex-basis: 100%;
+}
+
+.admin-secret-reveal-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875rem;
+  color: hsl(var(--unimailbox-foreground));
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}

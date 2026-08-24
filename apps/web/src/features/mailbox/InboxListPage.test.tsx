@@ -5,8 +5,12 @@
 //
 //   - Loading — `<InboxListSkeleton />` while the first page is in-flight.
 //   - Empty — `<InboxEmpty />` ("No messages in this mailbox yet.").
-//   - Error — `<InboxError />` with retry; on a 400 INVALID_CURSOR the
-//     retry button restarts from page 1 (R-API-005 recovery path).
+//   - Error — data-first (CAP-044 Slice 3 fix pass (g), the D-CAP-044-L
+//     fold-in): with NO data the error panel renders — INVALID_CURSOR
+//     offers "Start over" via resetQueries (refetch() would replay
+//     every stored pageParam and fail forever), everything else offers
+//     Retry; WITH data the rows stay mounted and the error renders as a
+//     banner (role="alert") above the list.
 //   - Unauthorized — descriptor was `null` after the router guard; the
 //     page renders <Unauthorized variant="expired" /> and the Sign-in
 //     CTA navigates to /login.
@@ -17,6 +21,15 @@
 //     button whose click fetches page 2 via the HMAC cursor.
 //   - IDOR-safe — the inbox renders only the requested mailbox's
 //     messages, not a global view.
+//
+// Slice 3 fix pass (g)/(f) additions:
+//   - INVALID_CURSOR Start over in BOTH the no-data and with-data
+//     branches (D-CAP-044-L closed on this surface).
+//   - QA L5: the inbox load's request footprint is pinned — exactly
+//     TWO get-session requests (the page's deduped mount refetch +
+//     AppNav's late session observer) and ONE probe.
+//   - The admin case in situ: a GRANTED probe renders the header Admin
+//     link on the inbox page (the member case is asserted throughout).
 //
 // Tests render the page inside `QueryClientProvider` +
 // `ApiClientProvider` + a minimal memory-history router (CAP-044 Slice 1
@@ -63,6 +76,47 @@ const SESSION = {
 
 const MAILBOX_ID = 'mb-1';
 
+/**
+ * CAP-044 Slice 3: InboxListPage mounts <AppNav />, whose probe fires
+ * `GET /api/v1/admin/audit-events?limit=1` once per session — and whose
+ * embedded session observer subscribes LATE (the content early-returns
+ * the skeleton until the first page resolves, so AppNav mounts only
+ * then), firing a second get-session refetch that a purely sequential
+ * mock would mis-serve. Dispatch BOTH URLs around the sequential spy:
+ * get-session always answers with the session shape for this render,
+ * and the probe answers `probeResponse` (member 403 or admin 200, fix
+ * (f)). Everything else falls through to the sequential resolvers, so
+ * the resolver lists serve only the messages endpoint. Same convention
+ * as AuditEventsPage.test.tsx. Duplicated from MailboxListPage.test.tsx:
+ * test-utils.tsx is outside this slice's file ownership.
+ */
+function withAdminProbe(
+  inner: typeof fetch,
+  sessionResponse: () => Response,
+  probeResponse: () => Response,
+): typeof fetch {
+  return async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/api/v1/auth/better/get-session')) {
+      return sessionResponse();
+    }
+    if (url.startsWith('/api/v1/admin/audit-events')) {
+      return probeResponse();
+    }
+    return inner(input, init);
+  };
+}
+
+/** The member surface: the probe answers 403, so no Admin link renders. */
+function withAdminProbeDenied(
+  inner: typeof fetch,
+  sessionResponse: () => Response,
+): typeof fetch {
+  return withAdminProbe(inner, sessionResponse, () =>
+    errorResponse('PERMISSION_DENIED', 'Forbidden', 403),
+  );
+}
+
 interface RenderInboxOptions {
   readonly resolvers: Array<(call: { url: string; method: string }) => Response>;
   readonly session: unknown;
@@ -72,6 +126,12 @@ interface RenderInboxOptions {
    * test the empty-cache fallback.
    */
   readonly mailboxList?: ReadonlyArray<MailboxListItem>;
+  /**
+   * Fix (f): when true, the probe answers 200 (an administrator), so
+   * AppNav renders the Admin link — the in-situ admin case. Default
+   * false: member 403, no link.
+   */
+  readonly adminProbe?: boolean;
 }
 
 /**
@@ -101,8 +161,15 @@ function mountInboxRouter(
     path: '/login',
     component: () => <div data-testid="arrived-login">login</div>,
   });
+  // '/admin' sentinel so AppNav's <Link to="/admin"> resolves when the
+  // probe succeeds (the admin in-situ test, fix (f)).
+  const adminRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin',
+    component: () => <div data-testid="arrived-admin">admin</div>,
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([inboxRoute, composeRoute, loginRoute]),
+    routeTree: rootRoute.addChildren([inboxRoute, composeRoute, loginRoute, adminRoute]),
     history: createMemoryHistory({ initialEntries: [`/mailbox/${MAILBOX_ID}`] }),
   });
   render(
@@ -118,13 +185,13 @@ function renderInbox(options: RenderInboxOptions): {
   fetchCalls: Array<{ url: string; method: string }>;
 } {
   // The auth session query has `staleTime: 0` in production, so it
-  // refetches on every mount. The spyFetch intercepts that refetch
-  // and would otherwise consume a resolver slot meant for the
-  // messages endpoint. Prepend a Better Auth–shaped response to the
-  // resolver list so the auth fetch resolves with the same descriptor
-  // we cached. parseSessionResponse accepts the production wire shape:
+  // refetches on every mount — including the AppNav probe's LATE session
+  // observer (see withAdminProbeDenied). get-session is therefore
+  // URL-dispatched with this response instead of consuming a sequential
+  // resolver slot meant for the messages endpoint.
+  // parseSessionResponse accepts the production wire shape:
   //   { data: { user: { id, email, name }, session: { userId, expiresAt } } }
-  const authSessionResolver = (): Response => {
+  const sessionResponse = (): Response => {
     if (options.session === null || options.session === undefined) {
       // No session: parseSessionResponse will return null. We return
       // the same shape Better Auth sends for an un-authenticated
@@ -146,11 +213,19 @@ function renderInbox(options: RenderInboxOptions): {
       },
     });
   };
-  const { fetchImpl, calls } = spyFetch([authSessionResolver, ...options.resolvers]);
+  const { fetchImpl, calls } = spyFetch(options.resolvers);
+  // Fix (f): the probe's answer is parametric — member 403 (default, no
+  // Admin link) or admin 200 (the in-situ admin case).
+  const probeResponse =
+    options.adminProbe === true
+      ? () => jsonResponse({ data: { items: [], nextCursor: null } })
+      : () => errorResponse('PERMISSION_DENIED', 'Forbidden', 403);
   const apiClient = createApiClient({
     baseUrl: '',
     getSessionToken: () => null,
-    fetchImpl,
+    // CAP-044 Slice 3: the AppNav probe and every get-session refetch are
+    // URL-dispatched before they can consume a sequential resolver slot.
+    fetchImpl: withAdminProbe(fetchImpl, sessionResponse, probeResponse),
   });
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -190,7 +265,17 @@ describe('InboxListPage', () => {
     const apiClient = createApiClient({
       baseUrl: '',
       getSessionToken: () => null,
-      fetchImpl,
+      // CAP-044 Slice 3: keep the member surface here too — get-session
+      // answers with the session shape and the probe 403s, so neither
+      // can fall through to the pending-messages branch.
+      fetchImpl: withAdminProbeDenied(fetchImpl, () =>
+        jsonResponse({
+          data: {
+            user: { id: SESSION.userId, email: SESSION.email, name: SESSION.displayName },
+            session: { userId: SESSION.userId, expiresAt: SESSION.expiresAt },
+          },
+        }),
+      ),
     });
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -253,6 +338,188 @@ describe('InboxListPage', () => {
     ).toBe(true);
   });
 
+  it('fix (g): a no-data INVALID_CURSOR offers Start over (resetQueries), which recovers the list', async () => {
+    const { fetchCalls } = renderInbox({
+      resolvers: [
+        () => errorResponse('INVALID_CURSOR', 'The supplied cursor is invalid', 400),
+        () =>
+          jsonResponse({
+            data: {
+              items: [
+                {
+                  id: '00000000-0000-4000-8000-000000000001',
+                  fromAddress: 'a@x.test',
+                  fromName: 'A',
+                  subject: 'Recovered',
+                  isRead: 0,
+                  isStarred: 0,
+                  folder: 'inbox',
+                  createdAt: '2026-01-01T00:00:00Z',
+                  recipients: { to: [], cc: [] },
+                },
+              ],
+              nextCursor: null,
+            },
+          }),
+      ],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-error')).toBeInTheDocument();
+    });
+    // D-CAP-044-L: for INVALID_CURSOR the recovery button is "Start
+    // over" (resetQueries drops the broken pageParam chain), NOT Retry
+    // (refetch() would replay every stored pageParam and fail forever).
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Start over' }));
+    await waitFor(() => {
+      expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(1);
+    });
+    expect(
+      fetchCalls.filter(
+        (call) =>
+          call.method === 'GET' &&
+          call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`),
+      ).length,
+    ).toBe(2);
+  });
+
+  it('fix (g): an INVALID_CURSOR load-more keeps the rows and offers Start over in the banner, which resets the chain', async () => {
+    const page1 = () =>
+      jsonResponse({
+        data: {
+          items: [
+            {
+              id: '00000000-0000-4000-8000-000000000001',
+              fromAddress: 'a@x.test',
+              fromName: 'A',
+              subject: 'One',
+              isRead: 0,
+              isStarred: 0,
+              folder: 'inbox',
+              createdAt: '2026-01-01T00:00:00Z',
+              recipients: { to: [], cc: [] },
+            },
+            {
+              id: '00000000-0000-4000-8000-000000000002',
+              fromAddress: 'b@x.test',
+              fromName: 'B',
+              subject: 'Two',
+              isRead: 1,
+              isStarred: 0,
+              folder: 'inbox',
+              createdAt: '2026-01-02T00:00:00Z',
+              recipients: { to: [], cc: [] },
+            },
+          ],
+          nextCursor: 'cursor-page-1',
+        },
+      });
+    renderInbox({
+      resolvers: [
+        page1,
+        () => errorResponse('INVALID_CURSOR', 'The supplied cursor is invalid', 400),
+        page1,
+      ],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(2);
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('inbox-load-more'));
+    // The load-more fails with INVALID_CURSOR: the two loaded rows STAY
+    // (data-first) and the error renders as a banner offering Start
+    // over — never a wipe back to the full-page error panel.
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-error-banner')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(2);
+    expect(screen.getByTestId('inbox-start-over')).toBeInTheDocument();
+    expect(screen.queryByTestId('inbox-banner-retry')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('inbox-error')).not.toBeInTheDocument();
+
+    // resetQueries drops the broken chain and refetches page 1: banner
+    // gone, the fresh page-1 rows on screen.
+    await user.click(screen.getByTestId('inbox-start-over'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('inbox-error-banner')).not.toBeInTheDocument();
+    });
+    expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(2);
+  });
+
+  it('QA L5 / fix (g): an inbox load costs exactly TWO get-session requests and ONE probe', async () => {
+    // Pin the request footprint (the code L2 acceptance): the page's
+    // own session observers (InboxListPage + InboxListContent) share one
+    // key and dedupe to ONE mount refetch; AppNav's session observer
+    // mounts LATE (after the first page resolves) and adds exactly one
+    // more; LogoutButton adds none (it only reads the query client).
+    // The probe fires once for the member.
+    const sessionGets: string[] = [];
+    const probeGets: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/v1/auth/better/get-session')) {
+        sessionGets.push(url);
+        return jsonResponse({
+          data: {
+            user: { id: SESSION.userId, email: SESSION.email, name: SESSION.displayName },
+            session: { userId: SESSION.userId, expiresAt: SESSION.expiresAt },
+          },
+        });
+      }
+      if (url.startsWith('/api/v1/admin/audit-events')) {
+        probeGets.push(url);
+        return errorResponse('PERMISSION_DENIED', 'Forbidden', 403);
+      }
+      return jsonResponse({ data: { items: [], nextCursor: null } });
+    }) as unknown as typeof fetch;
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: 0 },
+        mutations: { retry: false },
+      },
+    });
+    queryClient.setQueryData(authQueryKeys.session(), SESSION);
+    mountInboxRouter(apiClient, queryClient);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
+    });
+    // The probe fires only after AppNav mounts (first page resolved) —
+    // wait for it before pinning both counts.
+    await waitFor(() => {
+      expect(probeGets).toHaveLength(1);
+    });
+    expect(sessionGets).toHaveLength(2);
+  });
+
+  it('fix (f): an ADMIN probe renders the header Admin link pointing at /admin, in situ', async () => {
+    // The member case (no link) is asserted by every other test's
+    // render; this is the granted counterpart, on the REAL inbox page —
+    // the probe's success must surface the /admin entry point.
+    renderInbox({
+      resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
+      session: SESSION,
+      adminProbe: true,
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('app-nav-admin-link')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('app-nav-admin-link').getAttribute('href')).toBe('/admin');
+    expect(screen.getByTestId('app-nav-admin-link').textContent).toBe('Admin');
+  });
+
   it('renders a row per message and a Load more button when nextCursor is present', async () => {
     // Two pages: first has 2 items + a cursor, second has 1 item + null cursor.
     const cursor = 'opaque-hmac-cursor';
@@ -313,6 +580,9 @@ describe('InboxListPage', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(2);
     });
+    // CAP-044 Slice 3 (D-CAP-044-K): a member's probe 403 renders NO
+    // admin link in the header.
+    expect(screen.queryByTestId('app-nav')).not.toBeInTheDocument();
     const user = userEvent.setup();
     await user.click(screen.getByTestId('inbox-load-more'));
     await waitFor(() => {

@@ -23,6 +23,10 @@
 //   - INVALID_CURSOR on a load-more offers Start over (resetQueries),
 //     which drops the broken chain and refetches page 1.
 //
+// Slice 3 fix pass (b) additions:
+//   - A never-resolving first fetch stays on the loading placeholder —
+//     no false empty or error surface (isPending-vs-isLoading).
+//
 // The router integration of the PRODUCTION route tree (session guard)
 // is owned by router.test.tsx; this file stays scoped to the page.
 import { afterEach, describe, expect, it } from 'vitest';
@@ -112,6 +116,13 @@ function mountAdminRouter(
 
 interface RenderOptions {
   readonly resolvers: Array<(call: { url: string; method: string }) => Response>;
+  /**
+   * Fix (b): when true, audit-events calls NEVER resolve (spyFetch
+   * resolvers answer synchronously; a never-resolving fetch needs this
+   * bespoke pending-promise branch). Pins the first fetch in flight
+   * forever to exercise the loading gate.
+   */
+  readonly pendingAuditFetch?: boolean;
 }
 
 /**
@@ -131,6 +142,10 @@ function renderAuditEvents(options: RenderOptions): {
     if (url.includes('/api/v1/auth/better/get-session')) {
       calls.push({ url, method: 'GET' });
       return authSessionResolver();
+    }
+    if (options.pendingAuditFetch === true) {
+      calls.push({ url, method: 'GET' });
+      return new Promise<Response>(() => {});
     }
     return sequentialFetch(input, init);
   };
@@ -377,6 +392,23 @@ describe('AuditEventsPage (CAP-044 Slice 2 / AC 14)', () => {
     expect(screen.queryByTestId('admin-error')).not.toBeInTheDocument();
     // The banner offers a plain Retry for a transient failure.
     expect(screen.getByTestId('audit-banner-retry')).toBeInTheDocument();
+  });
+
+  it('fix (b): a never-resolving first fetch stays on admin-loading — no false empty, no error panel', async () => {
+    renderAuditEvents({
+      resolvers: [],
+      pendingAuditFetch: true,
+    });
+    // isPending holds until data or an error exists, so a first fetch
+    // that never settles (e.g. paused offline) must not fall through to
+    // the empty or error surfaces while NOTHING has loaded.
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-loading')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('audit-events-empty')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-error')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-not-authorized')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('audit-events-page')).not.toBeInTheDocument();
   });
 
   it('fix (e): an INVALID_CURSOR load-more offers Start over, which resets the page chain', async () => {
