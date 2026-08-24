@@ -10,6 +10,33 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-24 — CAP-044 Slice 1 landed: compose + reply (review round + 9-item fix pass)
+
+Commit `2fded28`. ACs 1–7 verified with evidence by the five-way round (verdicts + positive
+evidence in `work/reviews/CAP-044-slice1-review.md`): composer at `/mailbox/:mailboxId/compose`
+(plain-text, send-only), reply prefill via `buildReplyContext`, `composeResponseSchema` promoted
+to contracts, unit 758/758, worker 698/702 (only the 4 documented pre-existing D1-parallelism
+failures), zero worker files touched.
+
+The round produced one REJECT-grade defect the implementer round missed: the reply base was
+selected with JS truthiness where `THREAD_ROOT_SQL` requires a `<…>` pair, so a malformed stored
+References value silently unthreaded the reply. Fix pass (a) mirrors the SQL tier conditions
+exactly (references base only with a pair; in-reply-to base when non-null + non-empty — the SQL
+tier carries NO pair condition there); the test mirror `resolvedThreadRoot` was aligned to the
+SQL's first-`>`-overall instr semantics at the same time. Also landed: data-first parent branch
+ordering (a failed background refetch no longer destroys a typed draft or the send
+confirmation), stale-threading-context clear on success, double-submit bail, INVALID_RESPONSE
+mapping, path-id encoding, trimmed `?replyTo`, +17 tests.
+
+Rulings recorded in the contract: `compose.ts:145` provider resolution is carried as the
+R-OUTBOUND-001 deferred row (security-ruled acceptable: single-active-connection topology is
+behaviorally identical; CAP-045 must assert that topology); the threading e2e worker proof is
+deferred (D-CAP-044-J — notably zero of the 16 compose worker tests send threading headers);
+unbounded `inReplyTo`/`references` deferred (D-CAP-044-I — durable fix is server-side threading-
+header normalization at send + ingest, which also carries the size caps and the non-bracket
+in-reply-to corner). Closure duty stands: log the client-mirror ↔ `THREAD_ROOT_SQL` drift
+surface + the promotion trigger (second consumer → promote the helper into contracts).
+
 ## 2026-08-24 — CAP-044 dispatch: compose/reply + admin surfaces (contract written, Slice 1 out)
 
 Pre-contract investigation (read-only, `inv-cap044-state`) mapped the ground truth: the send API **already exists** — `POST /api/v1/mailboxes/:mailboxId/messages/send` (CAP-023) with the full one-batch write (message + recipients + mailbox_messages + outbound_jobs + idempotency record), queue handoff, and `message.send` audit — and `composeRequestSchema` already carries `inReplyTo`/`references`. The real gaps: no web composer/reply anywhere, audit events are **writer-only** (no query repo/route/UI — CAP-033 never started), no users-list API (identity owns `users`, exports nothing list-shaped), no admin UI at all, and Tiptap is not installed.
