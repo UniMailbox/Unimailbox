@@ -106,6 +106,11 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
         },
       });
 
+      // CAP-046 / D-CAP-046-A: pull the request correlation UUID the
+      // request-id middleware stamped on this request so the audit row
+      // carries it through.
+      const requestId = c.get('requestId') ?? null;
+
       // R-AUDIT-001: every state transition writes an audit row. The
       // business write, the idempotency record, and the audit row all land
       // in one D1 batch so a crash between them cannot produce a state
@@ -124,6 +129,7 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
           action: 'blocklist.create',
           resourceType: 'blocklist_entry',
           resourceId: id,
+          requestId,
           createdAt: now,
         }),
         prepareCreateIdempotencyRecord(c.env.DB, {
@@ -223,6 +229,11 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
 
       const responseJson = JSON.stringify({ data: { id, deleted: true } });
 
+      // CAP-046 / D-CAP-046-A: pull the request correlation UUID the
+      // request-id middleware stamped on this request so the audit row
+      // carries it through.
+      const requestId = c.get('requestId') ?? null;
+
       // R-AUDIT-001: every state transition writes an audit row. The
       // business DELETE, the audit row, and the idempotency record all
       // land in one D1 batch so a crash between them cannot produce a
@@ -235,6 +246,7 @@ export function adminBlocklistRoutes(): Hono<AppEnv> {
           action: 'blocklist.delete',
           resourceType: 'blocklist_entry',
           resourceId: id,
+          requestId,
           createdAt: now,
         }),
         prepareCreateIdempotencyRecord(c.env.DB, {

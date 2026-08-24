@@ -51,14 +51,29 @@ export async function seedInstallationState(
   currentStep: InstallationStep,
   timestamp: string,
 ): Promise<void> {
-  await db
+  // CAP-046 / D-CAP-046-B: delegate to the prepare variant so the seed
+  // statement can be folded into a db.batch with the audit row.
+  await prepareSeedInstallationState(db, currentStep, timestamp).run();
+}
+
+/**
+ * Returns a prepared INSERT statement for the installation_state row.
+ * Use this when the seed must be atomic with other writes (e.g., the audit
+ * row emitted by claim-setup). Mirrors `prepareUpdateInstallationStep`
+ * below (same shape for batched vs. standalone callers).
+ */
+export function prepareSeedInstallationState(
+  db: Database,
+  currentStep: InstallationStep,
+  timestamp: string,
+): D1PreparedStatement {
+  return db
     .prepare(
       `INSERT INTO installation_state (id, status, current_step, schema_version, updated_at, created_at)
        VALUES (1, 'setup', ?, 1, ?, ?)
        ON CONFLICT(id) DO NOTHING`,
     )
-    .bind(currentStep, timestamp, timestamp)
-    .run();
+    .bind(currentStep, timestamp, timestamp);
 }
 
 /**

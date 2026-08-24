@@ -44,3 +44,9 @@ export type {
   RegisterWithInviteDeps,
   RegisterWithInviteResult,
 } from './register-with-invite';
+export type { ClaimSetupInput, ClaimSetupResult } from './claim-setup';
+
+// CAP-046 / D-CAP-046-B: re-export the prepare variant so claim-setup can
+// fold the seed + audit row into one D1 batch while non-batch callers
+// (none today) continue to use `seedInstallationState` directly.
+export { prepareSeedInstallationState } from './installation-state-repository';

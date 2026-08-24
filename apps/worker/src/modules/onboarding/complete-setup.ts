@@ -9,11 +9,15 @@
 import type { Database } from '../../platform/database';
 import type { Clock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
-import { seedRolesAndPermissions, createAuditEvent } from '../admin';
+import { seedRolesAndPermissions, prepareCreateAuditEvent } from '../admin';
 import { getFirstUser } from '../identity';
 
 export interface CompleteSetupInput {
   readonly db: Database;
+  // CAP-046 / D-CAP-046-A: the request-id middleware-stamped UUID for
+  // this /complete request. Threaded to the audit row so R-AUDIT-001's
+  // correlation invariant holds for setup writes.
+  readonly requestId: string | null;
 }
 
 export interface CompleteSetupResult {
@@ -64,19 +68,30 @@ export async function completeSetup(
       .bind('complete', 'complete', now),
   );
 
-  if (stmts.length > 0) {
-    await input.db.batch(stmts);
-  }
+  // R-AUDIT-001 + CAP-046 / D-CAP-046-A + D-CAP-046-B: append the audit
+  // row prepared statement to the same batch so the state flip and its
+  // audit row land atomically. The audit row carries the request-id the
+  // middleware stamped on the /complete request.
+  stmts.push(
+    prepareCreateAuditEvent(input.db, {
+      id: systemIds.uuid(),
+      actorUserId: admin?.id ?? null,
+      action: 'setup.complete',
+      resourceType: 'system',
+      resourceId: null,
+      requestId: input.requestId,
+      createdAt: now,
+    }),
+  );
 
-  // R-AUDIT-001: record the state transition.
-  await createAuditEvent(input.db, {
-    id: systemIds.uuid(),
-    actorUserId: admin?.id ?? null,
-    action: 'setup.complete',
-    resourceType: 'system',
-    resourceId: null,
-    createdAt: now,
-  });
+  // The batch is ALWAYS non-empty: the audit statement is unconditionally
+  // pushed above, and the installation_state UPDATE is also unconditional.
+  // The optional `user_roles` INSERT may or may not be present depending
+  // on whether `getFirstUser` returned a row — but the two guaranteed
+  // statements guarantee the batch carries at least the audit + UPDATE.
+  // A future refactor that conditionally removes the UPDATE will not
+  // silently load-bear this guard-less batch.
+  await input.db.batch(stmts);
 
   return { status: 'complete' };
 }

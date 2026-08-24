@@ -16,6 +16,7 @@
 import { Hono } from 'hono';
 import { createMailboxRequestSchema } from '@unimailbox/contracts';
 import { listMailboxesByOwner } from '../../modules/tenancy';
+import { prepareCreateAuditEvent } from '../../modules/admin';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
@@ -132,6 +133,11 @@ export function mailboxRoutes(): Hono<AppEnv> {
       const now = sqliteTimestamp(systemClock.now());
       const address = `${body.localPart}@${domain.name}`;
 
+      // CAP-046 / D-CAP-046-A: pull the request correlation UUID the
+      // request-id middleware stamped on this request so the audit row
+      // carries it through.
+      const requestId = c.get('requestId') ?? null;
+
       // Fix 4 (strict batch mode): Build the success body up front so we can
       // store the exact same JSON the client will receive on a replay.
       const successBody = JSON.stringify({
@@ -148,6 +154,9 @@ export function mailboxRoutes(): Hono<AppEnv> {
 
       // Fix 4 (R-API-004, R-OUTBOUND-006): mailbox + audit_event + idempotency
       // record are written in one D1 batch so they land atomically.
+      // CAP-046 fix slice (AC 19): the audit_events INSERT goes through
+      // `prepareCreateAuditEvent` (single source of truth for the
+      // audit_events schema at modules/admin/audit-event-repository.ts).
       const statements: D1PreparedStatement[] = [
         // 1. Mailbox row.
         c.env.DB.prepare(
@@ -164,11 +173,17 @@ export function mailboxRoutes(): Hono<AppEnv> {
           now,
           now,
         ),
-        // 2. Audit event (R-AUDIT-001).
-        c.env.DB.prepare(
-          `INSERT INTO audit_events (id, actor_user_id, action, resource_type, resource_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        ).bind(auditEventId, userId, 'mailbox.create', 'mailbox', mailboxId, now),
+        // 2. Audit event (R-AUDIT-001 + CAP-046 / D-CAP-046-A: carries
+      // the request-id the middleware stamped on this /mailboxes POST).
+        prepareCreateAuditEvent(c.env.DB, {
+          id: auditEventId,
+          actorUserId: userId,
+          action: 'mailbox.create',
+          resourceType: 'mailbox',
+          resourceId: mailboxId,
+          requestId,
+          createdAt: now,
+        }),
         // 3. Idempotency record (R-API-004, R-OUTBOUND-006).
         prepareCreateIdempotencyRecord(c.env.DB, {
           id: idempotencyRecordId,

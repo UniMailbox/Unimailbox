@@ -10,7 +10,210 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
-## 2026-08-24 — CAP-045 PARTIAL closure: preview-verification gate infrastructure shipped
+## 2026-08-24 — CAP-046 closed: Implemented (audit `request_id` correlation + standalone-write folds)
+
+D-CAP-046-A (audit `request_id` correlation at 6 + 1 sites) and D-CAP-046-B (4 standalone audit writes folded into the same D1 batch as the business write) both **Resolved**. 13 files / +919 / −138 across 11 source + 2 doc files. Contract archived at `work/archive/2026-08/CAP-046/task.md`; reviewer reports at `work/reviews/CAP-046-{architecture,code,security,qa}-review.md`.
+
+**Site-by-site (orchestrator-confirmed against the diff):**
+
+- `apps/worker/src/http/routes/compose.ts` (`message.send`, AC 1): `createAuditEvent` replaced with `prepareCreateAuditEvent(c.env.DB, { ... requestId ... })`; the prepared statement is pushed onto the existing `statements` array before `createMessageWithRelations`. Queue send ordering unchanged.
+- `apps/worker/src/http/routes/mailboxes.ts` (`mailbox.create`, AC 2 + AC 19): inline `INSERT INTO audit_events` SQL at lines 174-177 swapped for `prepareCreateAuditEvent` (single source of truth for the `audit_events` schema). The new `request_id` column binds to `requestId`. `db.batch([mailbox, audit, idempotency])` shape unchanged.
+- `apps/worker/src/http/routes/admin-blocklist.ts` (`blocklist.create`, `blocklist.delete`, AC 3-4): `requestId: c.get('requestId') ?? null` field added to the existing `prepareCreateAuditEvent` calls.
+- `apps/worker/src/http/routes/admin-role-policies.ts` (`role_policy.set`, AC 5): same.
+- `apps/worker/src/modules/onboarding/complete-setup.ts` (`setup.complete`, AC 6 + AC 21): `CompleteSetupInput` gains `readonly requestId: string \| null`. The audit statement is now prepared via `prepareCreateAuditEvent` and pushed onto `stmts` before `input.db.batch(stmts)`. 6-line comment above the unconditional batch documents that the audit + UPDATE always present (the optional `user_roles` INSERT may or may not be there) — a future refactor that conditionally removes the UPDATE will not silently load-bear a guard-less batch.
+- `apps/worker/src/modules/onboarding/claim-setup.ts` (`setup.claim`, AC 7): `ClaimSetupInput` gains `readonly requestId: string \| null`. The use case now writes `db.batch([prepareSeedInstallationState(...), prepareCreateAuditEvent(...)])`. `seedInstallationState` (`.run()`-only) is retained for symmetry and delegates to the new prepare.
+- `apps/worker/src/modules/onboarding/installation-state-repository.ts` (AC 8): `prepareSeedInstallationState(db, step, timestamp): D1PreparedStatement` added, parallel to `prepareUpdateInstallationStep`. Re-exported through `modules/onboarding/index.ts`.
+- `apps/worker/src/entrypoints/inbound-email.ts` (`message.receive`): the existing standalone audit `createAuditEvent` (which already carried `requestId`) is replaced with `prepareCreateAuditEvent` and prepended to `allStatements` before `createMessageWithRelations`.
+- `apps/worker/src/http/routes/setup.ts` (caller plumbing, AC 6 + AC 7): `setup.ts:128-135` (claim handler) + `setup.ts:792` (complete handler) extract `c.get('requestId')` and pass it to the use cases.
+
+**Preview-gate suite (`apps/worker/test/preview-gate.worker.test.ts`, ~280 lines added):**
+
+- `DEFERRED_REQUEST_ID_ACTIONS` flips from the 5-action array to `[]` (AC 9).
+- `EXPECTED_AUDIT_ACTIONS` constant added at module top — hand-declared set of 13 production values (independent of `auditActionSchema`) so the closed-vocab check is meaningful when DEFERRED_REQUEST_ID_ACTIONS is empty and would catch a future phantom action.
+- `UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i` constant at module top.
+- Synthetic `writeResolved` helper (formerly lines 970-991) **removed** — replaced by route-level readback block.
+- 8 new tests (AC 22–AC 29) under `describe('CAP-046 route-level audit correlation', ...)`: `message.send`, `mailbox.create`, `blocklist.create`, `blocklist.delete`, `role_policy.set`, `setup.claim`, `setup.complete`, `message.receive`. Each test drives the production path via `SELF.fetch`, queries the audit-events API with `actorUserId` + `action` filters, fetches the newest row, and asserts `requestId matches UUID_V4_REGEX` AND `resourceId matches the response's created entity`. The block's `beforeAll` seeds installation_state + roles/perms + admin user + managed domain; `beforeEach` re-seeds + re-logins after `resetAndMigrate` CACHE-reset side effect.
+- `expect(DEFERRED_REQUEST_ID_ACTIONS).toHaveLength(0)` explicit length assertion (AC 20).
+
+**Process — 4-way parallel review (frontend N/A per contract; no `apps/web/` changes):**
+
+The initial-slice review surfaced **1 BLOCKER + 2 HIGH + 2 MEDIUM + 2 LOW**. Cross-reviewer agreement on the BLOCKER: the preview-gate suite's earlier `writeResolved` helper wrote synthetic rows directly via `createAuditEvent` instead of driving the modified production paths; a regression that dropped `requestId` from any of the 6 modified calls would have failed no test. The orchestrator expanded the contract with **AC 22–AC 29** (8 route-level readback tests) and dispatched a fix-slice implementer who rebuilt the test surface in-place. Code reviewer died mid-investigation on the initial round (API connection loss); re-dispatched code reviewer on the fix slice returned clean. One fix-slice implementer + one closure-pass implementer (folded two LOWs from the re-review round — AC 26 path correction + AC 29 inline regex → `UUID_V4_REGEX` constant reference).
+
+**Review verdicts (re-review round on the fix slice, all 4 fresh):**
+
+- **Architecture** (0/0/0/0): ACCEPT. "Next: Close CAP-046."
+- **Security** (0/0/0/2 LOW): ACCEPT. LOWs were (a) contract line-number drift (doc-only, acceptable), (b) closed-vocab check string-typing. "Closure ledger entry may proceed."
+- **Code** (0/0/0/3 LOW): ACCEPT. LOWs were (a) AC 26 path correction, (b) AC 29 inline regex → constant, (c) trailing newline (no addition needed).
+- **QA** (0/0/0/2 LOW): ACCEPT-WITH-FIXES. LOWs converged with code's. "Accept CAP-046 closure. The orchestrator can stage the named files and commit `feat(CAP-046): audit request_id correlation + standalone-write folds` per the contract's ## File ownership table."
+
+**Gates** (orchestrator-run, post-fix-slice + post-closure-pass):
+
+- `pnpm scaffold doctor` 14/14 (unchanged from CAP-045 PARTIAL)
+- `pnpm typecheck` clean (`tsc --build` exits 0)
+- `pnpm lint` clean (zero findings)
+- `pnpm test:unit` 883/883 (unchanged baseline; +0 from CAP-046 — the new audit tests live in `test/`, which runs under `test:worker`, not `test:unit`)
+- `pnpm test:worker` 758/763 — exactly the 4 documented `D-CAP-042-pre-existing-parallelism` failures + 1 unrelated `tests-cover-contracts` reorg flake, no regressions. The CAP-046 closure-pass targeted `preview-gate.worker.test.ts` exclusively: **26/27** with 1 skipped (the live-mode-only sub-assertion gated on `BREVO_API_KEY?.trim()`; the operator's run with the key set exercises it).
+- `pnpm build` EXIT=0
+
+**Follow-ups recorded in `## CAP-046 follow-ups`:**
+
+- **D-CAP-046-J** — `webhook_secret.reveal` audit reconciliation (out-of-scope decision: read-only reveal has no D1 mutation to fold with; the audit IS the write for a read-only reveal).
+- **D-CAP-046-K** — `claim-setup.ts:87-98` audit row may double-fire under burst concurrent `/setup/claim` requests (pre-existing race CAP-046 preserved; `INSERT INTO audit_events ... SELECT ... WHERE NOT EXISTS (...)` is the fix shape).
+- **D-CAP-046-L** — preview-gate suite's hard-coded TS literal union of 5 actions (architect's LOW-1); the in-scope 8 actions are covered end-to-end by the route-level readback block, but no single test loops over `auditActionSchema.options`.
+- **D-CAP-046-M** — Hono 4.13.3's `c.header('X-Request-Id', id)` does not propagate to `new Response(...)` returns. The audit row's `requestId` is threaded correctly (R-AUDIT-001 holds; server-side log correlation works via the JSON log line at `request-id.ts:17`), but the HTTP response header is not observable to the client. Fix: switch the 7 in-scope + ~10 other `new Response()` success paths to `c.json()` (option a, cleaner long-term) or include `'X-Request-Id': c.get('requestId') ?? ''` manually (option b, surgical). Documented as a follow-up because the slice scope expanded already (route-level readback block was an unanticipated add) and the runtime invariant holds via the row's `requestId`.
+
+The carry-forward rows **D-CAP-046-C / G / H** (queue ack/retry direct coverage, scheduled cron direct coverage, blocklist-rejection inbound path) are unchanged from CAP-045 PARTIAL.
+
+**Closure status:** Implemented at code level (`Verified` requires the CAP-045 FULL preview run). Contract archived; reviewer reports preserved; no commit/push/deploy performed (security constraint preserved). Next: CAP-045 FULL closure — operator runs `pnpm scaffold deploy --environment=preview`, executes runbook Steps 1–7, drops evidence into `work/reviews/CAP-045-evidence-<OPERATOR>-<YYYY-MM-DD>/`, and pastes `pnpm test:worker` output back. Until that lands, Phase 0 and Phase 1 stay `Reopened`.
+
+---
+
+## 2026-08-24 — CAP-046 contract drafted: audit `request_id` correlation + standalone-write folds
+
+Decomposed D-CAP-046-A (audit `request_id` correlation at 6 call sites) + D-CAP-046-B (4
+standalone audit writes folded into the same D1 batch as the business write) from the
+CAP-045 PARTIAL closure deferred rows into a new capability, per the user's chosen path.
+
+**Inventory (orchestrator-confirmed against the source):**
+
+- **D-CAP-046-A** (6 sites missing `request_id`):
+  - `apps/worker/src/http/routes/compose.ts:262` — `message.send`
+  - `apps/worker/src/http/routes/mailboxes.ts:171` — `mailbox.create` (raw SQL)
+  - `apps/worker/src/http/routes/admin-blocklist.ts:121` — `blocklist.create`
+  - `apps/worker/src/http/routes/admin-blocklist.ts:232` — `blocklist.delete`
+  - `apps/worker/src/http/routes/admin-role-policies.ts:144` — `role_policy.set`
+  - `apps/worker/src/modules/onboarding/complete-setup.ts:72` — `setup.complete`
+- **D-CAP-046-A** (7th site, was not in the CAP-045 deferred-rows export — the preview-
+  gate suite's AC 7 deferred-rows accumulator never drove `/setup/claim`, only
+  `/setup/complete`):
+  - `apps/worker/src/modules/onboarding/claim-setup.ts:80` — `setup.claim`
+- **D-CAP-046-B** (4 standalone writes to fold):
+  - `compose.ts:262` — fold into existing `statements` array before `createMessageWithRelations`
+  - `inbound-email.ts:177` — fold into `allStatements` before `createMessageWithRelations`
+  - `complete-setup.ts:72` — fold into existing `stmts` array before `input.db.batch(stmts)`
+  - `claim-setup.ts:80` — `db.batch([prepareSeedInstallationState(...), prepareCreateAuditEvent(...)])`
+
+**Reference pattern (locked):** `apps/worker/src/http/routes/webhooks.ts:60-93` —
+`const requestId = c.get('requestId') ?? null;` then `prepareCreateAuditEvent(...)` (or
+`ctx.auditEventWriter.prepare({ ... requestId, ... }).statement`) folded into the existing
+`db.batch([...])`. In-module routes use `prepareCreateAuditEvent` directly; cross-module
+use is the audit-event-writer seam (CAP-040).
+
+**Out of scope with reason:**
+
+- `apps/worker/src/http/routes/admin-webhooks.ts:117` (`webhook_secret.reveal`) — read-only
+  reveal has no D1 mutation to fold with; the audit row IS the write. R-AUDIT-001's strict
+  reading treats reads as non-transitions. Recorded as **D-CAP-046-J** for a future CAP
+  that reconciles orphan reads via `wrangler tail` log-line ingestion.
+- D-CAP-046-C/G/H (queue ack/retry direct coverage; `scheduled.ts` direct coverage;
+  blocklist-rejection inbound path) unchanged from CAP-045.
+
+**Plumbing for use cases:** `CompleteSetupInput` and `ClaimSetupInput` each gain
+`readonly requestId: string \| null`. Routes `setup.ts:128-135` (claim) and `setup.ts:792`
+(complete) extract `c.get('requestId')` and pass it. `installation-state-repository.ts`
+gains `prepareSeedInstallationState(db, step, timestamp): D1PreparedStatement` parallel
+to the existing `prepareUpdateInstallationStep`. The existing `seedInstallationState`
+(`.run()` variant) is retained for symmetry and delegates to the new prepare.
+
+**Validation harness:** the preview-gate suite's `DEFERRED_REQUEST_ID_ACTIONS` export
+flips from the current 5-action array to `[]`. AC 7's deferred-rows accumulator now
+discovers zero rows. Worker tests at each in-scope route read back `audit_events.request_id`
+and compare to the request's `x-request-id` response header (request-id middleware echoes
+the value it stamped).
+
+**Files (orchestrator-authorable this slice):**
+
+- `work/active/CAP-046-audit-correlation/task.md` (NEW, drafted) — the contract
+- `docs/rebuild/capability-ledger.md` (CAP-046 row added, Active/Next/Repository state cells flipped)
+
+**Closure status:** In Progress. Implementation + 4-way parallel review + fix pass + slice
+commit (`fix(CAP-046): audit request_id correlation + standalone-write folds`) land next.
+
+---
+
+## 2026-08-24 — CAP-046 contract expanded: route-level readback tests + review polish
+
+CAP-046 review surfaced one BLOCKER + 2 HIGH (qa reviewer) and 2 MEDIUM + 2 LOW (architecture
+reviewer). Code reviewer died mid-investigation (API connection lost) but partial evidence
+aligned with the QA's gap finding. Security reviewer: ACCEPT (0/0/0/2 LOW; LOWs were
+doc-drift and a pre-existing design note on `inbound-email.ts:114`).
+
+**BLOCKER fix — route-level readback tests (AC 22–AC 29, new):**
+
+The original CAP-046 contract claimed "AC 4 / AC 5 worker tests read `request_id` from
+the `audit_events` row and compare to the request's `x-request-id` response header" but
+those tests did not exist. The preview-gate suite's `writeResolved` helper
+(`preview-gate.worker.test.ts:970-991`) wrote synthetic audit rows directly via
+`createAuditEvent` with a fabricated `requestId`, then queried the audit-events API.
+A regression that dropped `requestId` from any of the 6 modified production calls would
+not have failed any test. CAP-046 expands to add 8 route-level readback tests:
+
+- `message.send` (`POST /api/v1/mailboxes/:mailboxId/messages/send`)
+- `mailbox.create` (`POST /api/v1/mailboxes`)
+- `blocklist.create` (`POST /api/v1/admin/blocklist`)
+- `blocklist.delete` (`DELETE /api/v1/admin/blocklist/:id`)
+- `role_policy.set` (`PATCH /api/v1/admin/role-policies/:id`)
+- `setup.claim` (`POST /api/v1/setup/claim`)
+- `setup.complete` (`POST /api/v1/setup/complete`)
+- `message.receive` (entrypoint: `entrypoints/inbound-email.ts`'s default export)
+
+Each test drives a real request via `SELF.fetch`, captures `X-Request-Id` from the
+response, queries `GET /api/v1/admin/audit-events` with `actorUserId` + `action`
+filters, and asserts the newest row's `requestId` equals the captured header. The
+inbound-email case asserts the row's `requestId` is a valid UUID (the entrypoint
+synthesizes one — no Hono context in Email Routing; pre-existing design cited as
+architecture LOW-2).
+
+The synthetic `writeResolved` helper is removed in favor of the route-level block.
+
+**HIGH fix — explicit `DEFERRED_REQUEST_ID_ACTIONS` length assertion (AC 20, new):**
+
+The pre-CAP-046-final test copies `DEFERRED_REQUEST_ID_ACTIONS` into a local `expected`
+array at line 1035 and checks membership in `auditActionSet` at lines 1054–1061. No
+explicit `expect(DEFERRED_REQUEST_ID_ACTIONS).toHaveLength(0)` exists. The closed-vocab
+check is self-referential (derives `auditActionSet` from `auditActionSchema.options`).
+CAP-046 adds an explicit length assertion AND uses a hand-declared expected action set
+(NOT derived from production schema) for the closed-vocab check, so the assertion is
+meaningful when the export is empty today and would catch a phantom action if a future
+export non-empty.
+
+**MEDIUM fix — `mailboxes.ts:174-177` single source of truth (AC 19, new):**
+
+`mailboxes.ts:174-177` had inline `INSERT INTO audit_events` SQL duplicating the schema
+in `apps/worker/src/modules/admin/audit-event-repository.ts:54-68`. A future column
+addition (e.g., `audit_events.ip_address` for Phase 2) would silently drop NULL for
+mailbox-create rows. CAP-046 swaps the inline SQL for `prepareCreateAuditEvent` —
+one-function swap, no behavioral change.
+
+**LOW fix — `complete-setup.ts` guard comment (AC 21, new):**
+
+The pre-CAP-046 `if (stmts.length > 0) { await input.db.batch(stmts); }` guard was
+removed because the audit row always pushes onto `stmts` (so the batch is never empty).
+Add a one-line comment above the unconditional `db.batch(stmts)` noting this is
+intentional — a future refactor that conditionally removes the UPDATE will not silently
+load-bear the guard-less batch.
+
+**Follow-ups recorded (NOT blocking CAP-046 closure):**
+
+- **D-CAP-046-K** — `claim-setup.ts:87-98` audit row may double-fire under burst
+  concurrent `/setup/claim` requests. Pre-existing race: `prepareSeedInstallationState`
+  uses `ON CONFLICT(id) DO NOTHING`; two concurrent claims both pass the not-complete
+  check, both write the seed (one swallows), both write the audit row. R-AUDIT-001
+  holds strictly (≥1 audit row per transition) but the audit log no longer reflects
+  the actual count of transitions. Fix: `INSERT INTO audit_events ... SELECT ...
+  WHERE NOT EXISTS (...)` or row-count gating.
+- **D-CAP-046-J** — `webhook_secret.reveal` audit reconciliation. Out of scope for
+  CAP-046 (read-only reveal has no D1 mutation to fold with). Already recorded.
+- **D-CAP-046-L** (new) — Preview-gate suite's hard-coded TS literal union of 5
+  actions in `writeResolved`'s successor block. Architect's LOW-1: the test should
+  loop over `auditActionSchema.options` to exercise every enum value, not just the
+  closed set of 5. The route-level tests cover the in-scope 8 actions end-to-end;
+  Phase 2 emission points will need their own coverage.
+
+**Closure status:** Implementation in progress. Single-implementer fix slice dispatched
+next; gates re-run; 4-way parallel review re-run on the fix diff; then closure.
+
+---
 
 Closed `Implemented (PARTIAL)` on the orchestrator-authorable subset: Worker-pool integration
 suite + helper + runbook + doctor check #14. Closes FULL when the operator pastes `pnpm test:worker`

@@ -12,14 +12,21 @@ import type { Clock } from '../../platform/clock';
 import type { IdGenerator } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
 import { constantTimeCompare } from '../../platform/crypto';
-import { createAuditEvent } from '../admin';
-import { getInstallationState, seedInstallationState } from './installation-state-repository';
+import { prepareCreateAuditEvent } from '../admin';
+import {
+  getInstallationState,
+  prepareSeedInstallationState,
+} from './installation-state-repository';
 
 export interface ClaimSetupInput {
   readonly db: Database;
   readonly setupSessionStore: SetupSessionStore;
   readonly expectedToken: string;
   readonly providedToken: string;
+  // CAP-046 / D-CAP-046-A: the request-id middleware-stamped UUID for
+  // this claim request. Threaded to the audit row so R-AUDIT-001's
+  // correlation invariant holds for setup writes.
+  readonly requestId: string | null;
 }
 
 export interface ClaimSetupResult {
@@ -73,18 +80,22 @@ export async function claimSetup(
     expirationTtl: SESSION_TTL_SECONDS,
   });
 
-  // Seed installation_state if absent (fresh DB). Does not overwrite existing rows.
-  await seedInstallationState(input.db, 'preflight', now);
-
-  // R-AUDIT-001: record the state transition.
-  await createAuditEvent(input.db, {
-    id: deps.ids.uuid(),
-    actorUserId: null,
-    action: 'setup.claim',
-    resourceType: 'system',
-    resourceId: null,
-    createdAt: now,
-  });
+  // Seed installation_state if absent (fresh DB) and emit the audit row
+  // in the same D1 batch (CAP-046 / D-CAP-046-B). A crash between the
+  // seed and the audit row would violate R-AUDIT-001 (state transition
+  // without the matching audit entry) — folding closes the window.
+  await input.db.batch([
+    prepareSeedInstallationState(input.db, 'preflight', now),
+    prepareCreateAuditEvent(input.db, {
+      id: deps.ids.uuid(),
+      actorUserId: null,
+      action: 'setup.claim',
+      resourceType: 'system',
+      resourceId: null,
+      requestId: input.requestId,
+      createdAt: now,
+    }),
+  ]);
 
   return { sessionToken, expiresIn: SESSION_TTL_SECONDS };
 }

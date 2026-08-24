@@ -129,6 +129,11 @@ export function adminRolePolicyRoutes(): Hono<AppEnv> {
 
       const responseJson = JSON.stringify({ data: policy });
 
+      // CAP-046 / D-CAP-046-A: pull the request correlation UUID the
+      // request-id middleware stamped on this request so the audit row
+      // carries it through.
+      const requestId = c.get('requestId') ?? null;
+
       // R-AUDIT-001: every state transition writes an audit row. The
       // business write, the audit row, and the idempotency record all
       // land in one D1 batch so a crash between them cannot produce a
@@ -147,6 +152,7 @@ export function adminRolePolicyRoutes(): Hono<AppEnv> {
           action: 'role_policy.set',
           resourceType: 'role_policy',
           resourceId: roleId,
+          requestId,
           createdAt: now,
         }),
         prepareCreateIdempotencyRecord(c.env.DB, {

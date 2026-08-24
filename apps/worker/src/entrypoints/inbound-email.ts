@@ -35,7 +35,7 @@ import {
   type CreateRecipientInput,
   type CreateMailboxMessageInput,
 } from '../modules/messages';
-import { createAuditEvent, getUserRoleIds } from '../modules/admin';
+import { getUserRoleIds, prepareCreateAuditEvent } from '../modules/admin';
 import { buildAppContext } from '../app-context';
 import { evaluateInboundPolicy } from '../modules/inbound-mail';
 import { systemIds } from '../platform/ids';
@@ -167,14 +167,13 @@ export default {
       mailboxMessageStatements.push(prepareCreateMailboxMessage(env.DB, mailboxMessageInput));
     }
 
-    // Execute all statements in one atomic batch (R-INBOUND-008)
+    // Execute all statements in one atomic batch (R-INBOUND-008 +
+    // CAP-046 / D-CAP-046-B: the audit_events INSERT is folded into the
+    // same batch so the message INSERT + recipients + mailbox_messages +
+    // audit row land atomically. A crash between the business writes
+    // and the audit row would violate R-AUDIT-001.)
     const messageStatement = prepareCreateMessage(env.DB, messageInput);
-    const allStatements = [messageStatement, ...recipientStatements, ...mailboxMessageStatements];
-
-    await createMessageWithRelations(env.DB, allStatements);
-
-    // R-AUDIT-001: record the state transition.
-    await createAuditEvent(env.DB, {
+    const auditStatement = prepareCreateAuditEvent(env.DB, {
       id: systemIds.uuid(),
       actorUserId: null,
       action: 'message.receive',
@@ -183,5 +182,13 @@ export default {
       requestId,
       createdAt: now,
     });
+    const allStatements = [
+      messageStatement,
+      ...recipientStatements,
+      ...mailboxMessageStatements,
+      auditStatement,
+    ];
+
+    await createMessageWithRelations(env.DB, allStatements);
   },
 };

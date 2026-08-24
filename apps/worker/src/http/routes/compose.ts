@@ -26,7 +26,7 @@ import { composeRequestSchema } from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan, findMailboxById } from '../../modules/tenancy';
-import { checkPermission, createAuditEvent } from '../../modules/admin';
+import { checkPermission, prepareCreateAuditEvent } from '../../modules/admin';
 import { prepareCreateOutboundJob } from '../../modules/outbound-mail';
 import { createMessageWithRelations } from '../../modules/messages';
 import { systemIds } from '../../platform/ids';
@@ -158,6 +158,11 @@ export function composeRoutes(): Hono<AppEnv> {
       const jobId = systemIds.uuid();
       const idempotencyRecordId = systemIds.uuid();
       const idempotencyNow = sqliteTimestamp(systemClock.now());
+      const auditEventId = systemIds.uuid();
+      // CAP-046 / D-CAP-046-A: pull the request correlation UUID the
+      // request-id middleware stamped on this request so the audit row
+      // carries it through.
+      const requestId = c.get('requestId') ?? null;
 
       // Build the success body up front so we can store the exact same JSON
       // the client will receive on a replay.
@@ -169,6 +174,9 @@ export function composeRoutes(): Hono<AppEnv> {
       // send the message is written in one D1 batch. If any statement fails,
       // D1 rolls the whole batch back — no orphaned 'queued' message. The
       // idempotency record is appended to the same batch (R-API-004).
+      // CAP-046 / D-CAP-046-B: the audit row is folded into the same D1
+      // batch so a crash between the message INSERT and the audit row
+      // cannot leave the message without its audit entry (R-AUDIT-001).
       const statements: D1PreparedStatement[] = [
         // 1. Message row, status 'queued', from the mailbox address.
         // CAP-030 D-CAP-030-D: this INSERT path intentionally bypasses the
@@ -228,7 +236,18 @@ export function composeRoutes(): Hono<AppEnv> {
           createdAt: now,
           updatedAt: now,
         }),
-        // 6. Idempotency record (R-API-004, R-OUTBOUND-006).
+        // 6. Audit row (R-AUDIT-001) — folded into the same batch so
+        // the message INSERT and the audit entry land atomically.
+        prepareCreateAuditEvent(c.env.DB, {
+          id: auditEventId,
+          actorUserId: userId,
+          action: 'message.send',
+          resourceType: 'message',
+          resourceId: messageId,
+          requestId,
+          createdAt: now,
+        }),
+        // 7. Idempotency record (R-API-004, R-OUTBOUND-006).
         prepareCreateIdempotencyRecord(c.env.DB, {
           id: idempotencyRecordId,
           actorId: userId,
@@ -257,16 +276,6 @@ export function composeRoutes(): Hono<AppEnv> {
       // the job, decrypts the credential, calls the adapter, and updates
       // message + job status.
       await c.env.OUTBOUND.send(JSON.stringify({ jobId }));
-
-      // R-AUDIT-001: record the state transition.
-      await createAuditEvent(c.env.DB, {
-        id: systemIds.uuid(),
-        actorUserId: userId,
-        action: 'message.send',
-        resourceType: 'message',
-        resourceId: messageId,
-        createdAt: now,
-      });
 
       return new Response(successBody, {
         status: 202,

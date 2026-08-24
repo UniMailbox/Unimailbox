@@ -131,6 +131,9 @@ export function setupRoutes(): Hono<AppEnv> {
         setupSessionStore: c.env.SETUP_SESSION,
         expectedToken,
         providedToken: body.token,
+        // CAP-046 / D-CAP-046-A: thread the request-id the middleware
+        // stamped onto this /claim request so the audit row carries it.
+        requestId: c.get('requestId') ?? null,
       },
       { clock: systemClock, ids: systemIds },
     );
@@ -789,7 +792,15 @@ export function setupRoutes(): Hono<AppEnv> {
     );
     if (replay) return replay;
 
-    const result = await completeSetup({ db: c.env.DB }, { clock: systemClock });
+    const result = await completeSetup(
+      {
+        db: c.env.DB,
+        // CAP-046 / D-CAP-046-A: thread the request-id the middleware
+        // stamped onto this /complete request so the audit row carries it.
+        requestId: c.get('requestId') ?? null,
+      },
+      { clock: systemClock },
+    );
 
     const successBody = JSON.stringify({ data: result });
     await writeIdempotencyRecord(c.env.DB, {
