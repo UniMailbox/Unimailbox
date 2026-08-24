@@ -110,7 +110,7 @@ A business rule is a **constraint** that the system enforces, expressed without 
 |---|---|
 | R-SECRET-001 | Provider API keys live in `encrypted_credentials`, encrypted with AES-GCM |
 | R-SECRET-002 | Encryption keys are stored in Cloudflare Secrets Store, never in `wrangler.toml` |
-| R-SECRET-003 | Secrets are never logged, never returned in API responses, never exposed to the client |
+| R-SECRET-003 | Secrets are never logged, never returned in API responses, never exposed to the client. Narrow exception (defined 2026-08-24, resolving D-CAP-040-B): a one-value, admin-initiated reveal of a provider **webhook signing secret** via `POST /api/v1/admin/connections/:id/webhook-secret/reveal` is permitted, because the operator must paste the secret into the provider's own dashboard to configure the webhook. Controls are mandatory: gated on `provider.sync` permission, response is one-time display semantics, a `webhook_secret.reveal` audit row records actor + connection (never the value), and the secret is never logged. Rotation-only disclosure remains the norm for every other secret; no list endpoint may include a secret value. |
 | R-SECRET-004 | Webhook signing secrets may be rotated; old + new are accepted during a 7-day window |
 
 ## R-AUDIT — Audit
