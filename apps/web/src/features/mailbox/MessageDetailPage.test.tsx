@@ -286,6 +286,13 @@ async function renderDetailPage(options: RenderDetailOptions): Promise<{
     path: '/mailbox/$mailboxId',
     component: () => <div data-testid="arrived-inbox">inbox</div>,
   });
+  // CAP-044 Slice 1: the page's Reply action links to the composer with
+  // ?replyTo=<messageId>; a sentinel keeps that destination resolvable.
+  const composeRouteEntry = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/mailbox/$mailboxId/compose',
+    component: () => <div data-testid="arrived-compose">compose</div>,
+  });
   const loginRouteEntry = createRoute({
     getParentRoute: () => rootRoute,
     path: '/login',
@@ -300,6 +307,7 @@ async function renderDetailPage(options: RenderDetailOptions): Promise<{
     routeTree: rootRoute.addChildren([
       detailRouteEntry,
       inboxRouteEntry,
+      composeRouteEntry,
       loginRouteEntry,
     ]),
     history,
@@ -381,6 +389,28 @@ describe('MessageDetailPage', () => {
     // items append ` · <date>` so they never exact-match.)
     expect(screen.getAllByText(formatted)).toHaveLength(1);
     expect(screen.getByTestId('message-from')).toHaveTextContent(formatted);
+  });
+
+  // CAP-044 Slice 1 / AC 5: the Reply action opens the composer carrying
+  // this message's id in ?replyTo — the composer prefills from it via
+  // D-CAP-044-C (the prefill itself is covered in ComposeEmail.test.tsx).
+  it('CAP-044: links to the composer with ?replyTo=<messageId>', async () => {
+    await renderDetailPage({
+      routes: [
+        sessionRoute({ session: SESSION }),
+        detailRoute(() => jsonResponse({ data: detailBody() })),
+        threadRoute(),
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-detail-page')).toBeInTheDocument();
+    });
+    const replyLink = screen.getByTestId('message-reply-link');
+    expect(replyLink.getAttribute('href')).toBe(
+      `/mailbox/${MAILBOX_ID}/compose?replyTo=${MESSAGE_ID}`,
+    );
+    expect(replyLink.textContent).toBe('Reply');
   });
 
   it('lists the thread oldest-first with the active message highlighted, and navigates to a sibling on click', async () => {

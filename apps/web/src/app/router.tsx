@@ -79,6 +79,7 @@ import {
 import { MailboxListPage } from '../features/mailbox/MailboxListPage';
 import { InboxListPage } from '../features/mailbox/InboxListPage';
 import { MessageDetailPage } from '../features/mailbox/MessageDetailPage';
+import { ComposeEmail } from '../features/mailbox/ComposeEmail';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -251,6 +252,57 @@ const messageDetailRoute = createRoute({
   },
 });
 
+// CAP-044 Slice 1 (AC 1 + AC 5): the compose route's optional
+// `replyTo` search param, VALIDATED at the route boundary. Only a
+// non-empty string survives; arrays, numbers, and empty strings are
+// dropped so the composer never receives a bogus parent id. Fix pass
+// (g): the emptiness check runs on the TRIMMED value — whitespace-only
+// `replyTo` drops the param (blank composer) instead of a guaranteed
+// parent 404, and a padded id survives trimmed. Exported for unit
+// tests (router.test.tsx) — the route is the only consumer.
+export function validateComposeSearch(
+  search: Record<string, unknown>,
+): { replyTo?: string } {
+  const replyTo = search['replyTo'];
+  if (typeof replyTo !== 'string') {
+    return {};
+  }
+  const trimmed = replyTo.trim();
+  return trimmed !== '' ? { replyTo: trimmed } : {};
+}
+
+// CAP-044 Slice 1 (AC 1 + AC 5): the composer at
+// /mailbox/$mailboxId/compose, with an optional ?replyTo=<messageId>
+// (validated above — a reply pre-fills the form from the parent's
+// detail, D-CAP-044-C). Same D-CAP-041-1 session-cache hydration +
+// D-CAP-041-9 guard as the sibling mailbox routes. A Link without a
+// `search` prop navigates with an EMPTY search (TanStack default), so
+// the inbox's Compose action opens a blank composer even from a URL
+// that carries a replyTo.
+const composeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mailbox/$mailboxId/compose',
+  validateSearch: validateComposeSearch,
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: function ComposeRoute(): ReactElement {
+    const params = useParams({ strict: false });
+    // Route-bound hook: the search type comes from THIS route's
+    // validateSearch output, not from a globally registered router.
+    const search = composeRoute.useSearch();
+    return (
+      <ComposeEmail mailboxId={params.mailboxId} replyToMessageId={search.replyTo} />
+    );
+  },
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -394,6 +446,7 @@ const routeTree = rootRoute.addChildren([
   mailboxRoute,
   inboxRoute,
   messageDetailRoute,
+  composeRoute,
   setupIndexRoute,
   setupChildren,
 ]);

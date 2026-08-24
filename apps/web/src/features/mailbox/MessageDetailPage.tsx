@@ -174,6 +174,21 @@ function MessageDetailContent({
           </dl>
         </details>
 
+        {/* CAP-044 Slice 1 / AC 5: Reply opens the composer pre-filled
+            from THIS message (D-CAP-044-C computes the threading
+            headers client-side from the detail data). */}
+        <div className="message-detail-actions">
+          <Link
+            to="/mailbox/$mailboxId/compose"
+            params={{ mailboxId }}
+            search={{ replyTo: messageId }}
+            className="btn btn-secondary btn-md"
+            data-testid="message-reply-link"
+          >
+            Reply
+          </Link>
+        </div>
+
         {threadQuery.data !== undefined ? (
           <MessageThreadPanel
             mailboxId={mailboxId}

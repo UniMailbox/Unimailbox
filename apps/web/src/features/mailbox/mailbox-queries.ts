@@ -26,6 +26,12 @@
 //     (AC 15/16, D-CAP-043-B/E); the 204 response removes the row from
 //     the inbox cache via structural `setQueryData`.
 //
+// CAP-044 Slice 1 adds the compose path:
+//   - `useComposeMessageMutation` — `POST .../messages/send` (CAP-023
+//     route) parsed with the contracts `composeResponseSchema`; success
+//     invalidates the mailbox's messages family, failure surfaces to the
+//     caller (the form keeps its values, AC 4).
+//
 // The hooks are keyed on `['mailbox', 'messages', mailboxId]` so a
 // navigation to a different mailbox invalidates by query key (D-CAP-041-1
 // cache pattern). The cursor is opaque to the client; we never inspect it.
@@ -38,6 +44,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import {
+  composeResponseSchema,
   mailboxListResponseSchema,
   messageDetailSchema,
   messageListResponseSchema,
@@ -109,8 +116,8 @@ export async function fetchMailboxMessagesPage(
 ): Promise<MessageListResponse> {
   const path =
     cursor === undefined
-      ? `/api/v1/mailboxes/${mailboxId}/messages`
-      : `/api/v1/mailboxes/${mailboxId}/messages?cursor=${encodeURIComponent(cursor)}`;
+      ? `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/messages`
+      : `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/messages?cursor=${encodeURIComponent(cursor)}`;
   const response = await apiClient.fetch<{
     readonly data: MessageListResponse;
   }>(path);
@@ -160,7 +167,11 @@ export async function fetchMessageDetail(
 ): Promise<MessageDetail> {
   const response = await apiClient.fetch<{
     readonly data: MessageDetail;
-  }>(`/api/v1/mailboxes/${mailboxId}/messages/${messageId}`);
+  }>(
+    // Fix pass (f): path ids are encoded — an id carrying reserved URL
+    // characters must never alter the request path.
+    `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/messages/${encodeURIComponent(messageId)}`,
+  );
   return messageDetailSchema.parse(response.data);
 }
 
@@ -192,7 +203,9 @@ export async function fetchMessageThread(
 ): Promise<MessageThreadResponse> {
   const response = await apiClient.fetch<{
     readonly data: MessageThreadResponse;
-  }>(`/api/v1/mailboxes/${mailboxId}/messages/${messageId}/thread`);
+  }>(
+    `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/messages/${encodeURIComponent(messageId)}/thread`,
+  );
   return messageThreadResponseSchema.parse(response.data);
 }
 
@@ -246,7 +259,7 @@ export function useMarkMessageReadMutation() {
   return useMutation({
     mutationFn: async (input: MarkMessageReadInput): Promise<void> => {
       await apiClient.fetch(
-        `/api/v1/mailboxes/${input.mailboxId}/messages/${input.messageId}/read`,
+        `/api/v1/mailboxes/${encodeURIComponent(input.mailboxId)}/messages/${encodeURIComponent(input.messageId)}/read`,
         { method: 'PATCH' },
       );
     },
@@ -328,7 +341,7 @@ export function useToggleMessageStarMutation() {
   return useMutation({
     mutationFn: async (input: ToggleMessageStarInput): Promise<number> => {
       const response = await apiClient.fetch<unknown>(
-        `/api/v1/mailboxes/${input.mailboxId}/messages/${input.messageId}/star`,
+        `/api/v1/mailboxes/${encodeURIComponent(input.mailboxId)}/messages/${encodeURIComponent(input.messageId)}/star`,
         { method: 'PATCH' },
       );
       // Envelope-wrapped contract: { data: { id, isStarred } } — the
@@ -442,7 +455,7 @@ export function useDeleteMessageMutation() {
   return useMutation({
     mutationFn: async (input: DeleteMessageInput): Promise<void> => {
       await apiClient.fetch(
-        `/api/v1/mailboxes/${input.mailboxId}/messages/${input.messageId}`,
+        `/api/v1/mailboxes/${encodeURIComponent(input.mailboxId)}/messages/${encodeURIComponent(input.messageId)}`,
         { method: 'DELETE' },
       );
     },
@@ -485,6 +498,89 @@ export function useDeleteMessageMutation() {
         messageId: input.messageId,
         code,
         message: error.message,
+      });
+    },
+  });
+}
+
+export interface ComposeMessageInput {
+  readonly mailboxId: string;
+  /** Already-normalised (trimmed, lower-cased) recipient addresses. */
+  readonly to: ReadonlyArray<string>;
+  readonly cc: ReadonlyArray<string>;
+  readonly subject: string;
+  readonly textBody: string;
+  /** Always '' in Phase 2 — the composer is plain-text only (D-CAP-044-B). */
+  readonly htmlBody: string;
+  /** RFC 5322 threading headers; present only on a reply (D-CAP-044-C). */
+  readonly inReplyTo?: string;
+  readonly references?: string;
+}
+
+/**
+ * Compose/send mutation (CAP-044 Slice 1 / AC 3 + AC 4).
+ *
+ * POST /api/v1/mailboxes/:mailboxId/messages/send. The 202 body is
+ * parsed with the contracts `composeResponseSchema`; the returned
+ * messageId is the caller's success-confirmation surface (the message
+ * itself is still `queued` — the durable outbox delivers it,
+ * R-OUTBOUND-006).
+ *
+ * R-OUTBOUND-005 / D-CAP-041-2: ApiClient mints a fresh Idempotency-Key
+ * for every fetch call, so one user click → one `mutate` call → one key.
+ * A manual retry after failure is a NEW `mutate` call with a NEW key —
+ * mutations do not auto-retry (App.tsx sets `mutations.retry: false`;
+ * the ApiClient's 5xx backoff happens within a single call only).
+ *
+ * On success the `['mailbox','messages',mailboxId]` family is
+ * invalidated: the sent copy appears in the mailbox's 'sent' folder and
+ * the next inbox render refetches. On failure nothing is cached or
+ * reset — the caller keeps the form's values and surfaces the error
+ * inline (AC 4); the error is user-visible, so unlike the row actions
+ * above there is no `console.warn` (nothing is swallowed).
+ */
+export function useComposeMessageMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ComposeMessageInput): Promise<string> => {
+      const response = await apiClient.fetch<unknown>(
+        `/api/v1/mailboxes/${encodeURIComponent(input.mailboxId)}/messages/send`,
+        {
+          method: 'POST',
+          // Threading headers are sent only when a reply carries them;
+          // a fresh compose omits both keys entirely.
+          body: {
+            to: input.to.map((address) => ({ address })),
+            cc: input.cc.map((address) => ({ address })),
+            subject: input.subject,
+            htmlBody: input.htmlBody,
+            textBody: input.textBody,
+            ...(input.inReplyTo !== undefined ? { inReplyTo: input.inReplyTo } : {}),
+            ...(input.references !== undefined ? { references: input.references } : {}),
+          },
+        },
+      );
+      // Fix pass (f): a 2xx body that does not match
+      // composeResponseSchema surfaces as the same INVALID_RESPONSE code
+      // the ApiClient uses for malformed bodies (status 0 — there is no
+      // HTTP status to attribute to a client-side shape mismatch), never
+      // as a raw ZodError.
+      let messageId: string;
+      try {
+        messageId = composeResponseSchema.parse(response).data.messageId;
+      } catch {
+        throw new ApiError(
+          'INVALID_RESPONSE',
+          'Unexpected response from the server.',
+          0,
+        );
+      }
+      return messageId;
+    },
+    onSuccess: (_messageId, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: mailboxQueryKeys.messages(input.mailboxId),
       });
     },
   });

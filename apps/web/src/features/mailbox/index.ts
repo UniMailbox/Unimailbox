@@ -17,3 +17,8 @@ export { InboxEmpty } from './InboxEmpty';
 export { InboxError } from './InboxError';
 export type { InboxErrorProps } from './InboxError';
 export type { InboxListPageProps } from './InboxListPage';
+// CAP-044 Slice 1: the composer. (Fix pass i: buildReplyContext /
+// ReplyContext left the barrel — every consumer deep-imports
+// ./reply-context, so the barrel exports were dead surface.)
+export { ComposeEmail } from './ComposeEmail';
+export type { ComposeEmailProps } from './ComposeEmail';

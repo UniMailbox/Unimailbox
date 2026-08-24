@@ -21,6 +21,7 @@
 // returns 400 INVALID_CURSOR; the client resets its cursor chain by
 // calling `refetch()` which restarts from page 1 (the only valid page).
 import type { ReactElement } from 'react';
+import { Link } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MessageListItem } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
@@ -131,6 +132,19 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
           <LogoutButton />
         </div>
       </header>
+      {/* CAP-044 Slice 1 / AC 1: the compose entry point for the active
+          mailbox. No `search` prop — TanStack navigates with an empty
+          search, so this always opens a BLANK composer. */}
+      <p className="inbox-compose-entry">
+        <Link
+          to="/mailbox/$mailboxId/compose"
+          params={{ mailboxId }}
+          className="btn btn-secondary btn-md"
+          data-testid="inbox-compose-link"
+        >
+          Compose
+        </Link>
+      </p>
       <Card
         title={mailboxAddress}
         description="Messages in this mailbox, newest first."

@@ -26,6 +26,7 @@ import {
   spyFetch,
 } from '../test-utils';
 import type { RouterContext } from './router';
+import { validateComposeSearch } from './router';
 import {
   authQueryKeys,
   fetchAuthSession,
@@ -119,5 +120,43 @@ describe('router (D-CAP-041-9 closure)', () => {
     expect(lastPathname(history)).toBe('/mailbox');
     // No additional fetch — the cache was already warm.
     expect(calls.length).toBe(0);
+  });
+});
+
+// CAP-044 Slice 1 (AC 1): the compose route's optional `?replyTo=`
+// search param is validated at the route boundary — only a non-empty
+// string survives, so the composer never receives a bogus parent id
+// (an array from ?replyTo=a&replyTo=b, a number, or an empty string).
+describe('validateComposeSearch (CAP-044 Slice 1)', () => {
+  it('keeps a non-empty string replyTo and drops every other key', () => {
+    expect(validateComposeSearch({ replyTo: 'm-1', other: 'junk' })).toEqual({
+      replyTo: 'm-1',
+    });
+  });
+
+  it('returns an empty object when replyTo is absent', () => {
+    expect(validateComposeSearch({})).toEqual({});
+  });
+
+  it('drops an empty-string replyTo', () => {
+    expect(validateComposeSearch({ replyTo: '' })).toEqual({});
+  });
+
+  // Fix pass (g): trim before the emptiness check.
+  it('drops a whitespace-only replyTo — the blank composer opens, not a parent 404', () => {
+    expect(validateComposeSearch({ replyTo: '   ' })).toEqual({});
+    expect(validateComposeSearch({ replyTo: ' \t\n ' })).toEqual({});
+  });
+
+  it('keeps a padded replyTo trimmed', () => {
+    expect(validateComposeSearch({ replyTo: ' m-1 ' })).toEqual({ replyTo: 'm-1' });
+  });
+
+  it('drops non-string replyTo values (number, array, object)', () => {
+    expect(validateComposeSearch({ replyTo: 42 })).toEqual({});
+    expect(validateComposeSearch({ replyTo: ['m-1', 'm-2'] })).toEqual({});
+    expect(validateComposeSearch({ replyTo: { id: 'm-1' } })).toEqual({});
+    expect(validateComposeSearch({ replyTo: null })).toEqual({});
+    expect(validateComposeSearch({ replyTo: true })).toEqual({});
   });
 });

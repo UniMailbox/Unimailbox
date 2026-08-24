@@ -30,6 +30,7 @@ import {
   auditActionSchema,
   composeRecipientSchema,
   composeRequestSchema,
+  composeResponseSchema,
   messageStatusSchema,
   outboundJobStatusSchema,
   type MessageStatus,
@@ -1366,6 +1367,42 @@ describe('composeRequestSchema', () => {
     const result = composeRequestSchema.safeParse({
       to: [{ address: 'recipient@example.com' }],
       htmlBody: 'a'.repeat(1_000_001),
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// CAP-044 Slice 1 / AC 3: the send route's 202 body, promoted verbatim
+// from the handler (compose.ts stores and replays this exact JSON).
+describe('composeResponseSchema', () => {
+  it('accepts the 202 body the route produces', () => {
+    const result = composeResponseSchema.parse({
+      data: { messageId: '00000000-0000-4000-8000-000000000001', status: 'queued' },
+    });
+    expect(result.data.messageId).toBe('00000000-0000-4000-8000-000000000001');
+    expect(result.data.status).toBe('queued');
+  });
+
+  it('rejects a missing data object via safeParse', () => {
+    const result = composeResponseSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing messageId via safeParse', () => {
+    const result = composeResponseSchema.safeParse({ data: { status: 'queued' } });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a status other than the queued literal via safeParse', () => {
+    const result = composeResponseSchema.safeParse({
+      data: { messageId: '00000000-0000-4000-8000-000000000001', status: 'sent' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-uuid messageId via safeParse', () => {
+    const result = composeResponseSchema.safeParse({
+      data: { messageId: 'not-a-uuid', status: 'queued' },
     });
     expect(result.success).toBe(false);
   });

@@ -18,11 +18,13 @@
 //   - IDOR-safe — the inbox renders only the requested mailbox's
 //     messages, not a global view.
 //
-// Tests render the component directly inside `QueryClientProvider` and
-// `ApiClientProvider`, mirroring `MailboxShell.test.tsx`. The router
-// integration (route matching, beforeLoad, navigation) is owned by the
-// production `router.tsx` and `MailboxListPage.test.tsx` — this file is
-// scoped to the inbox's four-state surface.
+// Tests render the page inside `QueryClientProvider` +
+// `ApiClientProvider` + a minimal memory-history router (CAP-044 Slice 1
+// added the Compose `<Link>`, which needs router context; the
+// unauthorized test already needed it for the Sign-in CTA). The router
+// integration of the PRODUCTION route tree is owned by `router.tsx` /
+// `router.test.tsx` — this file stays scoped to the inbox's four-state
+// surface.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -70,6 +72,46 @@ interface RenderInboxOptions {
    * test the empty-cache fallback.
    */
   readonly mailboxList?: ReadonlyArray<MailboxListItem>;
+}
+
+/**
+ * Mounts the inbox inside a minimal memory-history router. CAP-044
+ * Slice 1: the page's Compose entry is a router `<Link>`, so the bare
+ * `render(<InboxListPage />)` used through CAP-043 no longer resolves.
+ * The compose and login routes are sentinels — this file tests the
+ * inbox's own surface, not the composer.
+ */
+function mountInboxRouter(
+  apiClient: ReturnType<typeof createApiClient>,
+  queryClient: QueryClient,
+): void {
+  const rootRoute = createRootRoute({ component: () => <Outlet /> });
+  const inboxRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/mailbox/$mailboxId',
+    component: () => <InboxListPage mailboxId={MAILBOX_ID} />,
+  });
+  const composeRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/mailbox/$mailboxId/compose',
+    component: () => <div data-testid="arrived-compose">compose</div>,
+  });
+  const loginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/login',
+    component: () => <div data-testid="arrived-login">login</div>,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([inboxRoute, composeRoute, loginRoute]),
+    history: createMemoryHistory({ initialEntries: [`/mailbox/${MAILBOX_ID}`] }),
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ApiClientProvider client={apiClient}>
+        <RouterProvider router={router} />
+      </ApiClientProvider>
+    </QueryClientProvider>,
+  );
 }
 
 function renderInbox(options: RenderInboxOptions): {
@@ -120,13 +162,7 @@ function renderInbox(options: RenderInboxOptions): {
   if (options.mailboxList !== undefined) {
     queryClient.setQueryData(mailboxQueryKeys.list(), [...options.mailboxList]);
   }
-  render(
-    <QueryClientProvider client={queryClient}>
-      <ApiClientProvider client={apiClient}>
-        <InboxListPage mailboxId={MAILBOX_ID} />
-      </ApiClientProvider>
-    </QueryClientProvider>,
-  );
+  mountInboxRouter(apiClient, queryClient);
   return { fetchCalls: calls };
 }
 
@@ -163,13 +199,7 @@ describe('InboxListPage', () => {
       },
     });
     queryClient.setQueryData(authQueryKeys.session(), SESSION);
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ApiClientProvider client={apiClient}>
-          <InboxListPage mailboxId={MAILBOX_ID} />
-        </ApiClientProvider>
-      </QueryClientProvider>,
-    );
+    mountInboxRouter(apiClient, queryClient);
     await waitFor(() => {
       expect(screen.getByTestId('inbox-list-skeleton')).toBeInTheDocument();
     });
@@ -294,8 +324,9 @@ describe('InboxListPage', () => {
     // D-CAP-041-9 fallback (fix pass F6): cache holds null after the
     // router guard. The component renders <Unauthorized variant="expired" />
     // — its only null handling; the Sign-in CTA inside it is the recovery
-    // path (the page no longer imperatively navigates to /login). A
-    // RouterProvider is mounted so the CTA's useNavigate resolves.
+    // path (the page no longer imperatively navigates to /login). The
+    // router mount (mountInboxRouter) keeps the CTA's useNavigate and the
+    // CAP-044 Compose link resolvable.
     const authSessionResolver = (): Response =>
       jsonResponse({ data: { user: null, session: null } });
     const { fetchImpl } = spyFetch([authSessionResolver]);
@@ -311,30 +342,7 @@ describe('InboxListPage', () => {
       },
     });
     queryClient.setQueryData(authQueryKeys.session(), null);
-    const rootRoute = createRootRoute({ component: () => <Outlet /> });
-    const indexRoute = createRoute({
-      getParentRoute: () => rootRoute,
-      path: '/mailbox/$mailboxId',
-      component: () => <InboxListPage mailboxId={MAILBOX_ID} />,
-    });
-    const loginRoute = createRoute({
-      getParentRoute: () => rootRoute,
-      path: '/login',
-      component: () => <div data-testid="arrived-login">login</div>,
-    });
-    const routeTree = rootRoute.addChildren([indexRoute, loginRoute]);
-    const router = createRouter({
-      routeTree,
-      history: createMemoryHistory({ initialEntries: [`/mailbox/${MAILBOX_ID}`] }),
-    });
-    await router.load();
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ApiClientProvider client={apiClient}>
-          <RouterProvider router={router} />
-        </ApiClientProvider>
-      </QueryClientProvider>,
-    );
+    mountInboxRouter(apiClient, queryClient);
     await waitFor(() => {
       expect(screen.getByTestId('expired-session')).toBeInTheDocument();
     });
@@ -427,6 +435,23 @@ describe('InboxListPage', () => {
     expect(
       fetchCalls.some((call) => call.method === 'GET' && call.url.endsWith('/api/v1/mailboxes')),
     ).toBe(false);
+  });
+
+  // CAP-044 Slice 1 / AC 1: the inbox carries the Compose entry point.
+  // No `search` on the Link → TanStack navigates with an EMPTY search, so
+  // the composer opens BLANK (verified by the absent ?replyTo).
+  it('CAP-044: links to the blank composer for this mailbox', async () => {
+    renderInbox({
+      resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
+    });
+    const composeLink = screen.getByTestId('inbox-compose-link');
+    expect(composeLink.getAttribute('href')).toBe(`/mailbox/${MAILBOX_ID}/compose`);
+    expect(composeLink.getAttribute('href')).not.toContain('replyTo');
+    expect(composeLink.textContent).toBe('Compose');
   });
 });
 

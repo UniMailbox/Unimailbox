@@ -1021,6 +1021,30 @@ export const composeRequestSchema = z.object({
 
 export type ComposeRequest = z.infer<typeof composeRequestSchema>;
 
+/**
+ * Full response body of POST /api/v1/mailboxes/:mailboxId/messages/send
+ * (CAP-023; promoted into contracts by CAP-044 Slice 1 / AC 3).
+ *
+ * The route answers 202 — the message is persisted `queued` (message +
+ * recipients + mailbox_messages + outbound_jobs + idempotency record in
+ * one D1 batch, R-OUTBOUND-006) and handed to the OUTBOUND queue, but it
+ * has not yet reached the provider. Like `toggleStarResponseSchema`, this
+ * schema models the WHOLE wire body (envelope included) so the compose
+ * mutation parses the 202 in one step.
+ *
+ * R-API-004: replays with the same Idempotency-Key return the
+ * byte-identical stored response, so the schema also describes every
+ * replay.
+ */
+export const composeResponseSchema = z.object({
+  data: z.object({
+    messageId: uuidSchema,
+    status: z.literal('queued'),
+  }),
+});
+
+export type ComposeResponse = z.infer<typeof composeResponseSchema>;
+
 // ---------------------------------------------------------------------------
 // Admin: Inbound blocklist + per-role policies — D-CAP-021 / CAP-035.
 // ---------------------------------------------------------------------------

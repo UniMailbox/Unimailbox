@@ -34,6 +34,10 @@ trail from the web client — without any secret being exposed.
   deferred with the drafts capability. `composeRequestSchema` still has no `bcc` field; do not add
   one here.
 - **Forward** — reply only. Forward needs quoting/attachment semantics that do not exist yet.
+- **Reply from the thread panel** — a per-row Reply link requires restructuring each thread row
+  from a full-width `<button>` (interactive-inside-interactive); deferred with the UX pass.
+  Reply remains on every message's detail page, one click from the thread panel. (Recorded from
+  the Slice 1 architecture review — was a conversation-only decision.)
 - **User management mutations** (ban, role assignment UI, invite-code UI) — only the users *list*
   ships here. `user.manage` endpoints already exist (invite-codes).
 - **Provider-selection rework** — the send route's provider resolution stays as-is this
@@ -68,28 +72,30 @@ review rounds reference these IDs.
 
 ### Slice 1 — compose + reply
 
-- [ ] 1. A Compose entry point exists in the mailbox UI and opens the composer for the active
+- [x] 1. A Compose entry point exists in the mailbox UI and opens the composer for the active
   mailbox.
-- [ ] 2. The composer form (React Hook Form + zod) validates: To ≥ 1 valid email, Cc 0+ valid
+- [x] 2. The composer form (React Hook Form + zod) validates: To ≥ 1 valid email, Cc 0+ valid
   emails, subject required non-empty ≤ 998 chars, body ≤ 1,000,000 chars (may be empty); every
   field has a programmatic label; validation errors are announced (aria-describedby or
   equivalent) and submitted-but-invalid focuses the first error.
-- [ ] 3. `composeResponseSchema` (`{ data: { messageId: uuid, status: 'queued' } }`) is exported
+- [x] 3. `composeResponseSchema` (`{ data: { messageId: uuid, status: 'queued' } }`) is exported
   from `packages/contracts` with schema tests; the web mutation parses the 202 response with it.
-- [ ] 4. Sending: submit disabled while pending; on 202 the form resets, a success confirmation
+- [x] 4. Sending: submit disabled while pending; on 202 the form resets, a success confirmation
   shows the returned `messageId`, and mailbox list queries are invalidated (next render refetches);
   on error the form STAYS filled, the stable error `code` and message are shown inline, and the
   user can retry (a retry is a new mutation call → new Idempotency-Key, never a silent auto-replay).
-- [ ] 5. Reply: `MessageDetailPage` offers Reply; it opens the composer pre-filled per
+- [x] 5. Reply: `MessageDetailPage` offers Reply; it opens the composer pre-filled per
   D-CAP-044-C: `to` = the parent's `fromAddress`; `subject` = `Re: <parent.subject>` (no double
   prefix when already `Re:`/`RE:`); `inReplyTo` = parent `messageIdHeader`; `references` =
-  space-join of (parent `referencesHeader` ?? parent `inReplyToHeader` ?? '') and parent
-  `messageIdHeader`, trimmed.
-- [ ] 6. Threading invariant (dedicated unit test): across the four parent shapes — (a) has
+  space-join of the threading base and parent `messageIdHeader`, trimmed. (Fix pass (a) refined
+  the base selection from the `??`/truthiness formulation to the exact `THREAD_ROOT_SQL` tier
+  conditions — references base only with a `<…>` pair, in-reply-to base when non-null and
+  non-empty, mirroring the SQL tier-for-tier.)
+- [x] 6. Threading invariant (dedicated unit test): across the four parent shapes — (a) has
   references, (b) references empty + has in-reply-to, (c) neither (root), (d) `messageIdHeader`
   null — the constructed reply's `references` FIRST token equals the parent's resolved root under
   CAP-043 `THREAD_ROOT_SQL` tier 1, or the reply carries no threading headers at all (case d).
-- [ ] 7. The reply composer sends with `inReplyTo`/`references` in the body and they reach the API
+- [x] 7. The reply composer sends with `inReplyTo`/`references` in the body and they reach the API
   request payload (web test asserts the POSTed JSON); no worker-side change to the send route is
   made (the 16 existing compose worker tests must remain green, unmodified in behavior).
 
@@ -277,3 +283,120 @@ Give each subagent exactly this:
 - Whether `users` rows carry an account-status column post-CAP-042 (Better Auth) — the Slice 3
   implementer inspects the actual `users` schema and reports; AC 16's status field is conditional
   on it existing.
+
+## Slice 1 review outcome → fix pass (2026-08-24)
+
+Five-way parallel review (architecture, code, security, frontend, QA; none wrote the code;
+unit suite independently re-run 741/741 by two reviewers):
+
+| Reviewer | Verdict | BLOCKER | HIGH | MEDIUM | LOW |
+|---|---|---|---|---|---|
+| architecture | ACCEPT-WITH-FOLLOWUPS | 0 | 0 | 3 | 3 |
+| code | **REJECT** | 0 | 1 | 1 | 6 |
+| security | ACCEPT-WITH-FOLLOWUPS | 0 | 0 | 3 | 4 |
+| frontend | ACCEPT-WITH-FOLLOWUPS | 0 | 1 | 2 | 4 |
+| QA | ACCEPT-WITH-FOLLOWUPS | 0 | 0 | 2 | 5 |
+
+Orchestrator ruling: **fix pass mandatory** — one HIGH (code) is a genuine AC 6 invariant break,
+and one HIGH (frontend) can destroy user input. The stale-`replyContext` second-send hazard was
+flagged independently by three reviewers (frontend M1, architecture M1, code M1) and is included.
+
+### Fix criteria (single implementer, slice-1 file ownership unchanged)
+
+- **(a) AC 6 fidelity — malformed References class** (code H1): `reply-context.ts` selects the
+  references base with `||` truthiness; `THREAD_ROOT_SQL` accepts `references_header` only when
+  it contains a token pair (`instr('<') > 0 AND instr('>') > instr('<')`). Mirror the SQL tier:
+  use `referencesHeader` as base ONLY when it contains a `<…>` pair (JS: first `<` at i, then a
+  `>` at index > i); otherwise fall through to `inReplyToHeader`. Tests: the malformed class —
+  `'no brackets here'` + resolvable `inReplyToHeader`, whitespace-only references, `'<'` alone,
+  `'><'` — each asserting the reply's first references token equals the parent's resolved root
+  (the existing `resolvedThreadRoot` mirror computes the expectation). These must fail against
+  the pre-fix implementation. Also add the one-line mirror comment on the malformed-input
+  subtlety (first-`>`-after-first-`<` vs first-`>`-overall) per QA L5.
+- **(b)** `reply-context.ts`: treat `messageIdHeader === ''` exactly like `null` (case d — no
+  threading headers). Test included.
+- **(c) Draft preservation** (frontend H1): `ReplyComposer` branches on `error` before cached
+  `data`; `staleTime: 0` means a failed background refetch swaps the mounted form (typed draft
+  destroyed) and can tear down the send confirmation after success (invalidation refetch).
+  Fix: data-first ordering — render the prefilled form whenever `parentQuery.data` is defined;
+  the parent-error panel renders only when there is NO data. Tests: cached data + background
+  refetch failure → form stays mounted with user input; successful send + failing parent
+  refetch → confirmation persists.
+- **(d) Stale threading context** (3× flag): after a successful send in reply mode, the follow-up
+  form must NOT carry the old `inReplyTo`/`references`. Lift `replyContext` into `ComposeForm`
+  state; on success clear it (title/card degrade to Compose wording) alongside the form reset.
+  Test: send reply → success → type a different recipient/subject → send → second POST body has
+  NO `inReplyTo`/`references` keys.
+- **(e) Double-submit guard**: bail out of `onSubmit` while `composeMutation.isPending` (the
+  click→re-render race and RHF's async resolver window can admit two submits → two fresh keys →
+  duplicate send).
+- **(f) `mailbox-queries.ts`**: (1) wrap `composeResponseSchema.parse` in try/catch and throw
+  `ApiError('INVALID_RESPONSE', <readable message>, 0)` instead of surfacing a raw ZodError
+  (reuse the client's existing code constant); (2) `encodeURIComponent` the interpolated id/path
+  segments in this file's fetch paths (list, detail, thread — the `?replyTo=` value now flows
+  into the detail path).
+- **(g)** `router.tsx` `validateComposeSearch`: trim `replyTo` before the emptiness check —
+  whitespace-only opens the blank composer instead of a guaranteed parent 404. Update its test.
+- **(h) `ComposeEmail.tsx` tests + autofill**: remove `autoComplete="email"` from To/Cc (wrong
+  semantics — it offers the *user's own* address for recipient fields). Add the missing tests:
+  403 surfacing (mock 403 `MAILBOX_ACCESS_DENIED` → code rendered inline, values kept —
+  R-MESSAGE-011), empty-body successful send, body 1,000,001 rejection, whitespace-only subject
+  rejection, trailing-comma To parsing (`a@b.c,,`), reply-send failure keeps threading headers.
+- **(i)** `mailbox/index.ts`: remove the unused `buildReplyContext`/`ReplyContext` barrel
+  exports (no barrel consumer; deep imports only — verify by grep first).
+
+### Rulings recorded
+
+- **`compose.ts:145` provider resolution (Open question 1) — RULED: carry as deferred row**
+  (security M1). Zero worker files changed; single-tenant per deployment; with exactly one
+  active connection the behavior is identical to R-OUTBOUND-001's tail tier; failure mode is
+  mis-dispatch within one deployment, not authz bypass. Conditions: deferred row keyed to
+  R-OUTBOUND-001's missing domain-override tier at closure; CAP-045 asserts the
+  single-active-connection topology; any future multi-connection capability implements
+  domain-override selection first.
+- **Threading e2e proof (QA M1) — RULED: recorded follow-up, does not block Slice 1**
+  (web-only ownership; AC 6's scoped unit proof exists). Deferred row at closure: worker test
+  seeding a parent via the real send route, sending a reply with client-shaped headers, and
+  asserting thread-endpoint grouping — home `compose.worker.test.ts` (persistence-on-send has
+  zero coverage today) and/or `messages.worker.test.ts`.
+
+### Deferred rows to record at closure
+
+- **D-CAP-044-I** — unbounded `inReplyTo`/`references` (security M2): per-field max in
+  `composeRequestSchema` + client cap in `buildReplyContext` that preserves the root (first)
+  token. Needs a deliberate cap-value/truncation decision; scenario requires a degenerate
+  ~1 MB inbound References header (reply from the UI would be 413-blocked forever).
+- **D-CAP-044-J** — threading e2e worker proof (QA M1, ruling above).
+
+### Accepted as-is / routed elsewhere
+
+- Char-vs-byte body-cap mismatch (ApiClient measures UTF-16 units) — pre-existing
+  `client.ts` (owned by no slice); the error still surfaces inline; no action this capability.
+- New CSS classes (`inbox-compose-entry`, `message-detail-actions`, `compose-confirmation`,
+  `compose-body`) — Slice 3 `tokens.css` pass; AC 22's checklist must include them.
+- Skeleton shape divergence and reply-mode back-link target — Slice 3 styling-pass judgment.
+- `Re:` for an empty parent subject — accepted (honest `Re:` beats a fabricated subject).
+- Route `beforeLoad`/`useSearch` wiring proven by construction + `validateComposeSearch` unit
+  tests — consistent with the repo's mirror-test convention.
+- Closure documentation duty (architecture M2): implementation log must record the
+  client-mirror ↔ `THREAD_ROOT_SQL` drift surface (including the dormant `thread_id` tier) and
+  the promotion trigger (second consumer → move the helper into contracts).
+
+### Fix-pass outcome (validated 2026-08-24)
+
+Single implementer, criteria (a)–(i) all landed; orchestrator validated the diff file-by-file
+and re-ran all gates. Pre-fix failure evidence recorded by the implementer: 6 tests fail against
+the old (a)/(b) code, 2 against the old branch order, 1 without the context clear.
+
+Gates after the fix pass: doctor 13/13 · typecheck EXIT=0 · lint EXIT=0 · unit **758/758**
+(50 files; 741 baseline + 17 new) · worker **698/702** with exactly the 4 documented
+`D-CAP-042-pre-existing-parallelism` failures (verified by name on a second run) · build EXIT=0.
+
+Orchestrator correction to the implementer's residual-gap finding: a references value with a
+valid pair but leading garbage (e.g. `garbage <a@b.c>`) still THREADS correctly — the SQL root
+is the first bracket token (`substr` from the first `<`), extracted identically from the
+reply's verbatim-carried base; only the invariant's whitespace-first-token *letter* diverges
+there. The genuinely un-matchable corner is a parent whose tier-3 root is a NON-bracket
+in-reply-to value (direct-API compose shape only, pre-existing, worker-structural). Both fold
+into **D-CAP-044-I** at closure: the durable fix is server-side normalization of threading
+headers at send + ingest (extract/validate bracket tokens), which also carries the size caps.
