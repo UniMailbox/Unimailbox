@@ -10,6 +10,104 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-24 — CAP-045 PARTIAL closure: preview-verification gate infrastructure shipped
+
+Closed `Implemented (PARTIAL)` on the orchestrator-authorable subset: Worker-pool integration
+suite + helper + runbook + doctor check #14. Closes FULL when the operator pastes `pnpm test:worker`
+output + runbook evidence back; that is a ledger-only update, no further code changes.
+
+**Form (locked by user):** executable suite + operator close-out runbook. Worker HTTP +
+entrypoint round-trip via vitest workers pool. Provider HTTP live when `BREVO_API_KEY?.trim()`
+is set (operator-runs-the-gate); skipped with `console.warn` when unset (orchestrator-runs-
+the-gate). Strict `request_id` matching captured into a deferred-rows accumulator that asserts
+the EXACT production-named six actions missing `request_id` today (driven through the
+audit-events API, not seeded — discovered after the 4-way parallel review caught the prior
+tautology). `scripts/send-test-brevo.ts` ships at 45 lines. `testing.md` §Mocking is NOT
+amended; live-HTTP is conditional on env-var presence only.
+
+**Files (this slice):**
+`apps/worker/test/preview-gate.worker.test.ts` (NEW, 1253 lines, 18 sub-assertions + 1
+live-mode skip),
+`apps/worker/vitest.workers.config.ts` (include-glob expansion to `test/**/*.worker.test.ts`),
+`scripts/doctor.ts` (check #14 `preview-gate-suite-present` wired into `CHECKS`; pure
+evaluator `evaluatePreviewGateSuitePresent({ fsRead })` per CAP-039 precedent),
+`scripts/doctor.test.ts` (NEW, 8 unit tests),
+`scripts/redaction-patterns.ts` (NEW, anchored regexes extracted from inline — single source
+of truth for the suite's redaction scan + the doctor's helper check),
+`scripts/send-test-brevo.ts` (NEW, 45 lines, ≤50 budget — Brevo `/v3/smtp/email` POST with
+`BREVO_API_KEY` from env, no credential in script, try/catch + key-shape validation),
+`work/reviews/CAP-045-preview-runbook.md` (NEW, 281 lines, 7 steps with `<DEPLOYED_WORKER_URL>`
+placeholder + `wrangler tail` second-terminal instruction + `ENVIRONMENT=preview pnpm
+scaffold deploy` corrected in Steps 1+7 after QA H3),
+`work/active/CAP-045-preview-verification/task.md` (contract with V1/V2/V3 spike verdicts —
+V1 verified independently by Read of `@cloudflare/workers-types:2445-2451`; V2/V3 proven by
+the suite's first `pnpm test:worker` run; D-CAP-046-G + D-CAP-046-H added to §"Out of scope").
+
+**Pre-implementation verifications (BLOCKERs to clear before authoring):**
+- **V1** (MessageBatch stubbability): GREEN — `MessageBatch` + `Message` interfaces in
+  `@cloudflare/workers-types:2445-2451` structurally constructible; metadata cast uses
+  `as unknown as` + actual `metrics` after the architecture review.
+- **V2** (fetch-spy intercepts worker-pool outbound): GREEN — proven by the suite's first
+  `pnpm test:worker` run; live-mode keeps the spy and skips the adapter stub.
+- **V3** (console-restore pattern): GREEN — `vi.spyOn(console, X).mockImplementation(...)`
+  toggle in `beforeEach`/`afterEach`; `restoreAllMocks` never called; captured arrays cleared
+  per-test.
+
+**4-way parallel review (frontend N/A per contract; no `apps/web/` changes this slice):**
+architecture / code / security / qa. 4 BLOCKERs + ~12 HIGHs + ~12 MEDIUMs + ~15 LOWs
+consolidated; one fix slice closed every BLOCKER and HIGH. Cross-reviewer agreement on
+the four BLOCKERs: (a) AC 7 deferred-rows accumulator was a tautology seeded with names
+that don't exist in the production `AuditAction` enum → replaced with API-driven discovery
+via `GET /api/v1/admin/audit-events?actorUserId=...` through `SELF.fetch`; (b) AC 6c was
+structurally empty → now drives the webhook route with a valid HMAC and asserts
+`webhook_deliveries.status='pending'`; (c) AC 5 live-mode contradicted itself (stub adapter
+never called fetch) → live-mode now runs the real Brevo adapter against the mocked fetch;
+(d) AC 7 redaction test never reached the service layer (setup/complete without auth got
+401) → now drives the full setup flow and scans captured `console.warn('[onboarding]
+administrator created', { email })` lines. Runbook deploy command corrected
+(`ENVIRONMENT=preview pnpm scaffold deploy`, not `--environment=preview` which is silently
+ignored). `wrangler tail --env preview` corrected to `cd apps/worker && wrangler tail`
+(no env.preview section exists).
+
+**Gates (orchestrator-run, post-fix-slice, verified independently):**
+doctor 14/14 (was 13/13), typecheck/lint clean, unit 883/883 (was 863/863), worker
+750/755 — exactly the 4 documented `D-CAP-042-pre-existing-parallelism` failures
+(`0015_credential_backfill` + `admin.seedRolesAndPermissions` ×2 + one more), verified by
+name, no regressions, build EXIT=0. The 18 preview-gate sub-assertions all pass (1 skipped
+is the live-mode sub-assertion gated on `BREVO_API_KEY`; with `BREVO_API_KEY` set, the
+operator's run exercises all 19).
+
+**Deferred rows recorded at PARTIAL closure:**
+- **D-CAP-046-A** — audit `request_id` correlation at six named call sites (compose.ts,
+  mailboxes.ts, admin-blocklist.ts, admin-role-policies.ts, complete-setup.ts).
+  Machine-readable from the suite's `DEFERRED_REQUEST_ID_ACTIONS` export, now anchored to
+  production names (`message.send`, `mailbox.create`, `blocklist.create`,
+  `blocklist.delete`, `role_policy.set`).
+- **D-CAP-046-B** — six standalone audit writes (crash-window gaps where audit row runs
+  AFTER the business write).
+- **D-CAP-046-C** — `entrypoints/queue.ts` `msg.ack()` / `msg.retry()` direct coverage;
+  V1 seam-extract fallback path.
+- **D-CAP-046-D** — Browser hydration evidence — operator-runbook only.
+- **D-CAP-046-E** — Real Cloudflare deploy execution — operator-only.
+- **D-CAP-046-F** — Real email provider sign-up + domain verification + SPF/DKIM/DMARC
+  publication — operator-only.
+- **D-CAP-046-G** (new this slice) — `entrypoints/scheduled.ts` direct coverage; the
+  maintenance cron is not invoked from the worker-pool suite. Operator can drive it via
+  the runbook's `wrangler tail` + cron trigger.
+- **D-CAP-046-H** (new this slice) — blocklist-rejection inbound path per R-INBOUND-005;
+  the gate proves the audit chain when a blocklist decision is recorded but does not drive
+  the inbound entrypoint with a matching from/subject/content that returns 4xx.
+
+**Resolves:** Phase 0 + Phase 1 "Reopened" status when CAP-045 closes FULL (operator pastes
+preview evidence back).
+
+**Closure status:** Implemented (PARTIAL). Closes FULL when the operator runs
+`pnpm scaffold deploy --environment=preview`, runs runbook Steps 1–7, drops evidence into
+`work/reviews/CAP-045-evidence-<OPERATOR>-<YYYY-MM-DD>/`, and pastes the `pnpm test:worker`
+output back into the ledger row's evidence section.
+
+---
+
 ## 2026-08-24 — CAP-044 closed: Implemented (CAP-033 flips with it, D-CAP-044-E)
 
 All 23 ACs met across three slices, each through the full loop (implementer → 5-way parallel

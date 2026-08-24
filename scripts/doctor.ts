@@ -676,6 +676,106 @@ async function checkMigrationStrategyPendingOnly(): Promise<R> {
   return evaluateMigrationStrategyPendingOnly(w);
 }
 
+// CAP-045 — preview verification gate (executable suite + operator runbook).
+// Pure evaluator over three on-disk files: the suite, the operator helper,
+// and the runbook. Also asserts the suite + helper do NOT contain patterns
+// that would defeat the worker-pool binding discipline (e.g. mocking the
+// test runner itself, stubbing D1's `db.prepare`) or leak the production
+// API key into committed source.
+//
+// `fsRead` is the filesystem accessor for testability — the caller passes
+// `readFileSync` in production and a fixture reader in tests, mirroring the
+// pattern established by `evaluateMigrationsPresent` (CAP-039).
+const PREVIEW_GATE_PATHS = {
+  suite: 'apps/worker/test/preview-gate.worker.test.ts',
+  helper: 'scripts/send-test-brevo.ts',
+  runbook: 'work/reviews/CAP-045-preview-runbook.md',
+} as const;
+
+// HIGH 7 fix: extend the disqualifying-pattern set so the helper is also
+// scanned for credential-leak shapes. The two known-safe string literals
+// (`BREVO_API_KEY` and `api-key`) inside the helper are exceptions — every
+// other assignment shape is an immediate fail. The matched `unescaped`
+// patterns are value-bearing (`key = "..."`, `key: "..."`).
+const HELPER_KEY_LEAK_PATTERN =
+  /(BREVO_API_KEY\s*[:=]\s*["'`]|api[_-]?key\s*[:=]\s*["'`][^\s"']{8,})/;
+
+export function evaluatePreviewGateSuitePresent({
+  fsRead,
+}: {
+  fsRead: (path: string) => string | null;
+}): R {
+  const missing: string[] = [];
+  for (const [name, path] of Object.entries(PREVIEW_GATE_PATHS)) {
+    const content = fsRead(path);
+    if (content === null) {
+      missing.push(`${name}: ${path}`);
+      continue;
+    }
+    // Disqualifying patterns — would defeat the worker-pool binding
+    // discipline OR leak credential material. Catching them here keeps a
+    // sloppy future edit from bypassing the real D1/KV/Queue/Console
+    // surface and hiding bugs, or from committing the operator API key.
+    if (
+      path === PREVIEW_GATE_PATHS.suite &&
+      /vi\.mock\(\s*['"]cloudflare:test['"]/.test(content)
+    ) {
+      return {
+        name: 'preview-gate-suite-present',
+        ok: false,
+        detail: `suite file mocks 'cloudflare:test' — defeats worker-pool binding discipline; remove the mock and drive the real binding`,
+      };
+    }
+    if (
+      path === PREVIEW_GATE_PATHS.suite &&
+      // Catches three forms on a SINGLE LINE (no cross-line false
+      // positives from `mockResolvedValue(...)` on globalThis.fetch plus
+      // a later `db.prepare(...)` real call elsewhere in the file):
+      //   1. Chain: db.prepare.mockResolvedValue(...)
+      //   2. Wrapping: vi.spyOn(db.prepare, ...)
+      //   3. Reference: mockResolvedValue(db.prepare, ...)
+      // Any of them means the suite mocks the D1 binding — defeats the
+      // worker-pool binding discipline. Real D1 only.
+      /db\.prepare[^\n]*\.mockResolvedValue|vi\.spyOn[^\n]*db\.prepare|mockResolvedValue\s*\([^\n]*db\.prepare/.test(
+        content,
+      )
+    ) {
+      return {
+        name: 'preview-gate-suite-present',
+        ok: false,
+        detail: `suite file mocks db.prepare — defeats worker-pool binding discipline; drive the real D1 binding instead`,
+      };
+    }
+    if (path === PREVIEW_GATE_PATHS.helper && HELPER_KEY_LEAK_PATTERN.test(content)) {
+      return {
+        name: 'preview-gate-suite-present',
+        ok: false,
+        detail: `helper file contains a credential assignment — never commit BREVO_API_KEY; the helper reads it from env only`,
+      };
+    }
+  }
+  if (missing.length) {
+    return {
+      name: 'preview-gate-suite-present',
+      ok: false,
+      detail: `missing files: ${missing.join('; ')}`,
+    };
+  }
+  return { name: 'preview-gate-suite-present', ok: true };
+}
+
+async function checkPreviewGateSuitePresent(): Promise<R> {
+  return evaluatePreviewGateSuitePresent({
+    fsRead: (path) => {
+      try {
+        return readFileSync(join(REPO, path), 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
 const CHECKS: ReadonlyArray<Ck> = [
   checkWranglerBindings,
   checkWranglerCompat,
@@ -690,6 +790,7 @@ const CHECKS: ReadonlyArray<Ck> = [
   checkWebAssetsBinding,
   checkQueueConsumerTopology,
   checkMigrationStrategyPendingOnly,
+  checkPreviewGateSuitePresent,
 ];
 async function main(): Promise<void> {
   const results: R[] = [];

@@ -23,7 +23,10 @@ export default defineConfig({
   ],
   test: {
     name: 'workers',
-    include: ['src/**/*.worker.test.ts'],
+    // CAP-045: include `test/**/*.worker.test.ts` so the preview-gate suite
+    // (which needs the adjacent setup.ts spies) is discovered alongside the
+    // `src/**` suite. Both globs share the worker-pool binding discipline.
+    include: ['src/**/*.worker.test.ts', 'test/**/*.worker.test.ts'],
     exclude: ['**/node_modules/**', 'dist/**'],
     setupFiles: ['./test/setup.ts'],
   },
