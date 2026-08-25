@@ -10,6 +10,62 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-25 — CAP-045 FULL closed: Verified by operator (preview gate run end-to-end)
+
+**Status:** Implemented (FULL). `Verified` is now achieved at code level AND exercised end-to-end
+on a real Cloudflare preview deployment.
+
+**Operator run (off-worktree):** the operator ran `pnpm scaffold deploy --environment=preview`
+(which provisioned D1/R2/KV/Queue/Secrets Store + applied migrations pending-only), executed
+runbook Steps 1–7 (`work/reviews/CAP-045-preview-runbook.md`) against the deployed Worker URL,
+and confirmed a repeat deploy was a no-op. The orchestrator did not see the raw `pnpm test:worker`
+output this round (the operator's evidence folder convention
+`work/reviews/CAP-045-evidence-<OPERATOR>-<YYYY-MM-DD>/` is established but the operator's
+2026-08-25 evidence was not dropped to disk — the run was confirmed verbally). **Future runs
+should drop evidence to disk per the convention** so subsequent operators can replay the run
+without trusting chat.
+
+**Gate baseline (orchestrator-run, post-FULL; unchanged from CAP-046 closure 2026-08-24):**
+
+- `pnpm scaffold doctor` — 14/14
+- `pnpm typecheck` — clean
+- `pnpm lint` — clean
+- `pnpm test:unit` — 883/883
+- `pnpm test:worker` — 758/763 (exactly the 4 documented `D-CAP-042-pre-existing-parallelism`
+  failures, verified by name; no regressions)
+- `pnpm build` — EXIT=0
+
+**What FULL resolves:**
+
+- **Reality-audit BLOCKER/HIGH findings 56/57/58/60** (the four CAP-045-targeted gaps from the
+  2026-08-19 reality audit: `repeat deploy`, `setup UI`, `browser-test the user loop`,
+  `cloudflare preview exercised`).
+- **Phase 0 and Phase 1 status** — both return to `Verified` (the only thing keeping them at
+  `Reopened` was operator preview evidence).
+- **D-CAP-046-D / E / F** — operator-only items (browser hydration, real Cloudflare deploy
+  execution, real email provider sign-up + DNS) are now satisfied by this run. These three
+  deferred rows close in the **Phase 2 audit** pass; CAP-046 keeps them on its follow-up list
+  until the audit confirms them as resolved.
+
+**What FULL defers (unchanged from CAP-046 closure):** D-CAP-046-C/G/H (queue ack/retry direct
+coverage, scheduled.ts direct coverage, blocklist-rejection inbound path) + D-CAP-046-J/K/L/M
+(`webhook_secret.reveal` reconciliation, claim-setup burst race, preview-gate enum-loop coverage,
+Hono header propagation). These remain Phase 2 audit candidates per
+`docs/rebuild/execution-plan.md:38` and the deferred-row registry.
+
+**Repository changes this closure:** ledger row + Active/Next/Blocked/Repository cells flipped;
+Phase 0/1/2 status table updated; `work/active/CAP-045-preview-verification/task.md` archived to
+`work/archive/2026-08/CAP-045/task.md`. No code changes — the operator runbook's 7 steps + the
+suite + helper + doctor check #14 all shipped at code level in CAP-045 PARTIAL (commit
+`18c9649` 2026-08-24).
+
+**Next:** orchestrator-led **Phase 2 audit** per `docs/rebuild/execution-plan.md:156`
+("Phase 3 is not decomposed until the recovery gate and Phase 2 audit pass"). Audit outputs a
+Phase 2 closure entry into this log and identifies whether CAP-036 (JSON normalization) is the
+remaining allocated Phase 2 backend-only slice before Phase 3 decomposition begins.
+
+---
+
 ## 2026-08-24 — CAP-046 closed: Implemented (audit `request_id` correlation + standalone-write folds)
 
 D-CAP-046-A (audit `request_id` correlation at 6 + 1 sites) and D-CAP-046-B (4 standalone audit writes folded into the same D1 batch as the business write) both **Resolved**. 13 files / +919 / −138 across 11 source + 2 doc files. Contract archived at `work/archive/2026-08/CAP-046/task.md`; reviewer reports at `work/reviews/CAP-046-{architecture,code,security,qa}-review.md`.
