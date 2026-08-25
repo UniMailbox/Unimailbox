@@ -10,6 +10,64 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-25 — Phase 2 closed: Verified (INV-001 Phase 2 audit)
+
+**Verdict:** Phase 2 returns to **Verified** (the audit was the gate per
+`docs/rebuild/execution-plan.md:156`). All 7 acceptance criteria from
+`docs/rebuild/08-roadmap/phase-2-core-loop.md` have implemented owners and worker/UI/
+preview-gate evidence.
+
+| AC | Owner | Evidence |
+|---|---|---|
+| Replay `/messages/send` with same `Idempotency-Key` returns same message id | CAP-027 | `tryReplayIdempotency` + 11 route-level replay tests |
+| Same key + different body returns 409 | CAP-027 | `assertSameRequestHash` + per-route `IDEMPOTENCY_KEY_REUSED` tests |
+| Outbound job survives consumer crash mid-send (attempts++, lock expires, re-queued) | CAP-029 + CAP-045 FULL | `reclaimStaleOutboundJobs`; preview-gate step (d) drives queue with throwing adapter; operator FULL run 2026-08-25 |
+| Webhook arriving before send-complete is queued, not lost | CAP-040 + CAP-045 FULL | `webhook_deliveries` row `status='pending'`; preview-gate step (d) drives the route with a valid signature pre-send; operator FULL run |
+| No `/api/v1/*` endpoint accepts a request > 1 MB | CAP-031 | `enforceBodySize` middleware in `router.ts` |
+| All audit events are queryable by actor and resource | CAP-044 Slice 2 (CAP-033 absorbed) | `GET /api/v1/admin/audit-events` query API + `/admin/audit-events` UI page |
+| All endpoints return JSON error body with stable code | CAP-032 | `DomainError.code: ErrorCode` + canonical `{ error: { code, message, requestId } }` envelope |
+
+**Deferred-row classification (91 rows walked):**
+
+- **0 Phase 2-closing BLOCKER.** The closest candidates (D-CAP-029-A webhook delivery +
+  messages UPDATE atomicity; D-CAP-044-N upgrade-path re-seed; D-CAP-046-H blocklist-rejection
+  inbound path) are accepted as residual per `INV-001-phase-2-audit.md` §"Phase 2-closing
+  candidates" — none invalidates a Phase 2 AC.
+- **15 rows classified as accepted-residual** (D-CAP-027-A, D-CAP-029-A/B, D-CAP-030-B/C/D,
+  D-CAP-031-A, D-CAP-040-A, D-CAP-044-N/O/P/Q/R/S/T, D-CAP-046-C/G/H/J/K/L/M).
+  Severity/status fields are unchanged; the audit names the owning phase for each (Phase 2
+  follow-up, Phase 4 operations, or rides-with-next-touch).
+- **3 rows marked RESOLVED** (D-CAP-040-B, D-CAP-044-K, D-CAP-044-L — already RESOLVED
+  before this audit) and **3 new RESOLVED additions** in `## CAP-046 follow-ups`:
+  - **D-CAP-046-D** (browser hydration evidence — operator-only) — RESOLVED by the 2026-08-25
+    CAP-045 FULL run.
+  - **D-CAP-046-E** (real Cloudflare deploy execution — operator-only) — RESOLVED by the
+    2026-08-25 CAP-045 FULL run.
+  - **D-CAP-046-F** (real email provider sign-up + DNS — operator-only) — RESOLVED by the
+    2026-08-25 CAP-045 FULL run.
+
+**CAP-036 verdict (R-DATA-005 strictness for v1):** the migration `0010_blocklist_and_role_policies.sql`
+ships JSON-in-TEXT columns in v1. Strict `R-DATA-005` would require a join table for each
+list-of-objects column. The audit's call: v1 is acceptable as-is because every reads-by-PK
+path (`(scope, target_value)`) has worker tests proving shape conformance and no current
+query path needs inside-the-JSON indexing. CAP-036 is correctly allocated but not required
+for Phase 2 closure. If the user wants strict `R-DATA-005` compliance in v1, CAP-036 ships;
+otherwise it rolls into the v2 blocklist/policies capability. The audit records both options.
+
+**Repository changes this entry:** ledger Phase 2 row flipped to **Verified**; Active/Next/
+Blocked/Repository cells updated to reflect "user's choice between Phase 3 decomposition or
+CAP-036"; Phase 0/1/2 status table reconciled. Audit document at
+`work/investigations/INV-001-phase-2-audit.md` (read-only; no code changed per the audit
+disposition). The 3 operator-only CAP-046 follow-ups (D-CAP-046-D/E/F) marked RESOLVED in
+`## CAP-046 follow-ups`.
+
+**Next:** user decision — (a) **Phase 3 decomposition** (drafts + attachments + mailbox
+sharing + stars + folders per `docs/rebuild/08-roadmap/phase-3-business-completeness.md`), or
+(b) **CAP-036 JSON normalization** (R-DATA-005 strictness in v1). Either unblocks the next
+vertical slice.
+
+---
+
 ## 2026-08-25 — CAP-045 FULL closed: Verified by operator (preview gate run end-to-end)
 
 **Status:** Implemented (FULL). `Verified` is now achieved at code level AND exercised end-to-end
