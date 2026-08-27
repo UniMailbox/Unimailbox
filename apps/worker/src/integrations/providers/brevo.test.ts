@@ -239,3 +239,167 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
     expect((caught as RetryableProviderError).cause).toBe(networkError);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CAP-054 R-OUTBOUND-004 — payload wire shape on the success path.
+//
+// Brevo's sendTransacEmail contract puts `headers` inside the JSON body, NOT in fetch
+// RequestInit.headers. These tests parse the JSON body the adapter produces and assert
+// that headers["Idempotency-Key"] === msg.idempotencyKey on every success path.
+// Reference: https://developers.brevo.com/reference/sendtransacemail
+// ---------------------------------------------------------------------------
+
+interface BrevoSendPayload {
+  readonly sender?: { email?: string; name?: string };
+  readonly to?: ReadonlyArray<{ email?: string; name?: string }>;
+  readonly cc?: ReadonlyArray<{ email?: string; name?: string }>;
+  readonly bcc?: ReadonlyArray<{ email?: string; name?: string }>;
+  readonly subject?: string;
+  readonly htmlContent?: string;
+  readonly textContent?: string;
+  readonly headers?: Record<string, string | undefined>;
+}
+
+function parseBrevoSendBody(init: RequestInit | undefined): BrevoSendPayload {
+  if (typeof init?.body !== 'string') {
+    throw new Error('Expected fetch init body to be a JSON string');
+  }
+  return JSON.parse(init.body) as BrevoSendPayload;
+}
+
+function makeOkResponse(messageId: string): Response {
+  return new Response(JSON.stringify({ messageId }), {
+    status: 201,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', () => {
+  it('headers["Idempotency-Key"] equals the supplied canonical message ID', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeOkResponse('brevo-1'));
+
+    const result = await brevoAdapter.send(
+      { env: { BREVO_API_KEY: 'test-key' } },
+      {
+        idempotencyKey: 'canonical-msg-id-uuid-1',
+        from: { address: 'sender@example.com', displayName: 'Sender' },
+        to: [{ address: 'recipient@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'hello',
+        html: '<p>html body</p>',
+        text: 'text body',
+        references: '',
+        attachments: [],
+      },
+    );
+
+    expect(result.providerMessageId).toBe('brevo-1');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = parseBrevoSendBody(init);
+    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-uuid-1');
+
+    // R-OUTBOUND-004: Idempotency-Key is in the JSON body, NOT in fetch HTTP headers.
+    const requestHeaders = (init?.headers ?? {}) as Record<string, string>;
+    expect(requestHeaders['Idempotency-Key']).toBeUndefined();
+    expect(requestHeaders['idempotency-key']).toBeUndefined();
+    expect(requestHeaders['X-Idempotency-Key']).toBeUndefined();
+
+    // Standard Brevo auth + content-negotiation HTTP headers still present.
+    expect(requestHeaders['api-key']).toBe('test-key');
+    expect(requestHeaders['Content-Type']).toBe('application/json');
+    expect(requestHeaders['Accept']).toBe('application/json');
+
+    // JSON payload still carries sender, recipients, subject, content.
+    expect(body.sender?.email).toBe('sender@example.com');
+    expect(body.sender?.name).toBe('Sender');
+    expect(body.to?.[0]?.email).toBe('recipient@example.com');
+    expect(body.subject).toBe('hello');
+    expect(body.htmlContent).toBe('<p>html body</p>');
+    expect(body.textContent).toBe('text body');
+  });
+
+  it('Idempotency-Key remains present when msg.messageId is undefined', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeOkResponse('brevo-2'));
+
+    await brevoAdapter.send(
+      { env: { BREVO_API_KEY: 'test-key' } },
+      {
+        idempotencyKey: 'canonical-msg-id-no-message-id',
+        from: { address: 'sender@example.com' },
+        to: [{ address: 'r@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 's',
+        html: '',
+        text: '',
+        references: '',
+        attachments: [],
+        // messageId intentionally omitted.
+      },
+    );
+
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = parseBrevoSendBody(init);
+    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-no-message-id');
+    // No Message-ID header in the JSON body when messageId is absent.
+    expect(body.headers?.['Message-ID']).toBeUndefined();
+  });
+
+  it('Message-ID, In-Reply-To, References coexist with Idempotency-Key when supplied', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeOkResponse('brevo-3'));
+
+    await brevoAdapter.send(
+      { env: { BREVO_API_KEY: 'test-key' } },
+      {
+        idempotencyKey: 'canonical-msg-id-with-headers',
+        from: { address: 'sender@example.com' },
+        to: [{ address: 'r@example.com' }],
+        cc: [],
+        bcc: [],
+        subject: 'reply',
+        html: '',
+        text: '',
+        messageId: '<m1@example.com>',
+        inReplyTo: '<m0@example.com>',
+        references: '<m0@example.com>',
+        attachments: [],
+      },
+    );
+
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = parseBrevoSendBody(init);
+    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-with-headers');
+    expect(body.headers?.['Message-ID']).toBe('<m1@example.com>');
+    expect(body.headers?.['In-Reply-To']).toBe('<m0@example.com>');
+    expect(body.headers?.['References']).toBe('<m0@example.com>');
+  });
+
+  it('cc recipients serialize into the payload when present', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeOkResponse('brevo-4'));
+
+    await brevoAdapter.send(
+      { env: { BREVO_API_KEY: 'test-key' } },
+      {
+        idempotencyKey: 'canonical-msg-id-cc',
+        from: { address: 'sender@example.com' },
+        to: [{ address: 'to@example.com' }],
+        cc: [{ address: 'cc@example.com' }],
+        bcc: [],
+        subject: 's',
+        html: '',
+        text: '',
+        references: '',
+        attachments: [],
+      },
+    );
+
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = parseBrevoSendBody(init);
+    expect(body.to?.[0]?.email).toBe('to@example.com');
+    expect(body.cc?.[0]?.email).toBe('cc@example.com');
+    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-cc');
+  });
+});

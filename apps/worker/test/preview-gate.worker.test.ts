@@ -161,9 +161,13 @@ function computePendingMigrations(
   return { ghost, pending };
 }
 
-// Live mode = BREVO_API_KEY present and non-empty (per M1: NOT bare
-// truthy check — empty-string falsy values must NOT enable live mode).
-const LIVE = !!process.env.BREVO_API_KEY?.trim();
+// CAP-054: the wire-shape AC 5 assertion runs unconditionally. The test mocks
+// globalThis.fetch with vi.spyOn before driving the queue, so it does NOT require
+// BREVO_API_KEY or any real provider HTTP. The earlier `liveOnly(...)` wrapper was
+// pointed at the wrong layer (fetch RequestInit.headers['X-Idempotency-Key']); the
+// fix sends Idempotency-Key inside the sendTransacEmail JSON body per
+// https://developers.brevo.com/reference/sendtransacemail — the test parses
+// sendInit.body and asserts body.headers['Idempotency-Key'] === messageId.
 
 // V3 pattern — toggle the module-scope console spies from silence to
 // recording. The spies installed by test/setup.ts:23-26 stay installed
@@ -208,24 +212,9 @@ afterEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-// Surface the mode ONCE per file. Vitest prints beforeAll output
-// before any test runs, so the operator/orchestrator sees it on the
-// first invocation and on every --watch re-run.
-beforeAll(() => {
-  if (!LIVE) {
-    console.warn(
-      '[CAP-045] BREVO_API_KEY unset — wire-shape assertions skipped; runbook Step 4 covers the live verification',
-    );
-  }
-});
-
-// AC 9 — every step is gated on LIVE. Live-HTTP-dependent sub-assertions
-// use `it.skip()` when !LIVE; everything else (code-path, audit
-// correlation, log redaction, repeat-deploy) RUNS regardless of mode.
-const liveOnly = (name: string, fn: () => Promise<void>): void => {
-  if (LIVE) it(name, fn);
-  else it.skip(name, fn);
-};
+// AC 5 wire-shape assertion is now unconditional — see the comment block above
+// the deleted `LIVE` / `liveOnly` machinery. No skip path remains: the fetch spy
+// intercepts the outbound HTTP, no real network call can escape.
 
 // Helper builders used across multiple AC blocks. Each returns the
 // minimal viable fixture for one shape of test.
@@ -563,124 +552,137 @@ Preview body`;
     expect(link?.mailbox_id).toBe(mailboxId);
   });
 
-  liveOnly(
-    'AC 5 — live mode: outbound queue handler drives Brevo with correct wire shape (sender/to/subject + idempotency-key)',
-    async () => {
-      const db = await migrationsDb();
-      const userId = await seedUser(db, 'sender@example.com');
-      const domainId = await seedDomain(db);
-      await seedMailbox(db, domainId, userId, 'inbox');
+  it('AC 5 — Brevo send carries Idempotency-Key inside the sendTransacEmail JSON body (R-OUTBOUND-004)', async () => {
+    const db = await migrationsDb();
+    const userId = await seedUser(db, 'sender@example.com');
+    const domainId = await seedDomain(db);
+    await seedMailbox(db, domainId, userId, 'inbox');
 
-      // Seed an outbound job pointing at a Brevo connection.
-      const messageId = systemIds.uuid();
-      const jobId = systemIds.uuid();
-      const connectionId = systemIds.uuid();
-      const credentialId = systemIds.uuid();
-      const ENCRYPTION_KEY = 'a'.repeat(64);
-      const key = await importEncryptionKey(ENCRYPTION_KEY);
-      const encrypted = await encrypt('live-brevo-api-key', key);
+    // Seed an outbound job pointing at a Brevo connection.
+    const messageId = systemIds.uuid();
+    const jobId = systemIds.uuid();
+    const connectionId = systemIds.uuid();
+    const credentialId = systemIds.uuid();
+    const ENCRYPTION_KEY = 'a'.repeat(64);
+    const key = await importEncryptionKey(ENCRYPTION_KEY);
+    const encrypted = await encrypt('live-brevo-api-key', key);
 
-      await db.batch([
-        db
-          .prepare(
-            `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body, message_id_header, in_reply_to_header, references_header, status, created_at, updated_at)
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body, message_id_header, in_reply_to_header, references_header, status, created_at, updated_at)
              VALUES (?, 'sender@example.com', 'Sender', 'Preview subject', '<p>body</p>', 'body', NULL, NULL, '', 'queued', ?, ?)`,
-          )
-          .bind(messageId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
-        db
-          .prepare(
-            `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
+        )
+        .bind(messageId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+      db
+        .prepare(
+          `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
              VALUES (?, ?, 'recipient@example.com', 'Recipient', 'to', ?)`,
-          )
-          .bind(systemIds.uuid(), messageId, FIXED_TIMESTAMP),
-        db
-          .prepare(
-            `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
+        )
+        .bind(systemIds.uuid(), messageId, FIXED_TIMESTAMP),
+      db
+        .prepare(
+          `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
              VALUES (?, 'brevo-api-key', 1, ?, ?, ?, ?, ?)`,
-          )
-          .bind(
-            credentialId,
-            encrypted.ciphertext,
-            encrypted.iv,
-            encrypted.authTag,
-            FIXED_TIMESTAMP,
-            FIXED_TIMESTAMP,
-          ),
-        db
-          .prepare(
-            `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
+        )
+        .bind(
+          credentialId,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.authTag,
+          FIXED_TIMESTAMP,
+          FIXED_TIMESTAMP,
+        ),
+      db
+        .prepare(
+          `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
              VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
-          )
-          .bind(connectionId, credentialId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
-        db
-          .prepare(
-            `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, created_at, updated_at)
+        )
+        .bind(connectionId, credentialId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+      db
+        .prepare(
+          `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, created_at, updated_at)
              VALUES (?, ?, ?, 'queued', 0, 3, ?, ?)`,
-          )
-          .bind(jobId, messageId, connectionId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
-      ]);
+        )
+        .bind(jobId, messageId, connectionId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+    ]);
 
-      // Spy fetch BEFORE driving the queue. The real Brevo adapter runs
-      // unmodified via the registered providerRegistry — the spy
-      // intercepts its outbound HTTP call so the test asserts on the
-      // wire shape the production adapter produces.
-      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-        new Response(JSON.stringify({ messageId: 'brevo-live-1' }), {
-          status: 201,
-          headers: { 'content-type': 'application/json' },
-        }),
+    // Spy fetch BEFORE driving the queue. The real Brevo adapter runs
+    // unmodified via the registered providerRegistry — the spy
+    // intercepts its outbound HTTP call so the test asserts on the
+    // wire shape the production adapter produces.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ messageId: 'brevo-live-1' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    try {
+      const stubMessage = makeStubMessage(JSON.stringify({ jobId }));
+      const batch = makeMessageBatch([stubMessage]);
+      await queueEntry.queue(batch, env);
+
+      // The fetch spy captured the outbound HTTP call (V2 verdict) —
+      // one outbound send and possibly the Brevo account validation
+      // (validateConnection is invoked inside processOutboundJob). The
+      // load-bearing assertion is that the `smtp/email` URL was hit
+      // and the message id payload was correct.
+      const calls = fetchSpy.mock.calls;
+      const sendCall = calls.find(
+        (c) => typeof c[0] === 'string' && (c[0] as string).includes('api.brevo.com/v3/smtp/email'),
       );
+      expect(sendCall).toBeDefined();
 
-      try {
-        const stubMessage = makeStubMessage(JSON.stringify({ jobId }));
-        const batch = makeMessageBatch([stubMessage]);
-        await queueEntry.queue(batch, env);
+      // The job row advanced to 'sent' with the provider message id.
+      const job = await db
+        .prepare('SELECT status, provider_message_id FROM outbound_jobs WHERE id = ?')
+        .bind(jobId)
+        .first<{ status: string; provider_message_id: string | null }>();
+      expect(job?.status).toBe('sent');
+      expect(job?.provider_message_id).toBeTruthy();
 
-        // The fetch spy captured the outbound HTTP call (V2 verdict) —
-        // one outbound send and possibly the Brevo account validation
-        // (validateConnection is invoked inside processOutboundJob). The
-        // load-bearing assertion is that the `smtp/email` URL was hit
-        // and the message id payload was correct.
-        const calls = fetchSpy.mock.calls;
-        const sendCall = calls.find(
-          (c) =>
-            typeof c[0] === 'string' && (c[0] as string).includes('api.brevo.com/v3/smtp/email'),
-        );
-        expect(sendCall).toBeDefined();
+      // The message was ack()ed, not retry()ed (success path).
+      expect(stubMessage.acked).toBe(true);
+      expect(stubMessage.retried).toBe(false);
 
-        // The job row advanced to 'sent' with the provider message id.
-        const job = await db
-          .prepare('SELECT status, provider_message_id FROM outbound_jobs WHERE id = ?')
-          .bind(jobId)
-          .first<{ status: string; provider_message_id: string | null }>();
-        expect(job?.status).toBe('sent');
-        expect(job?.provider_message_id).toBeTruthy();
+      // Wire-shape assertions on the body the real adapter sent:
+      // Idempotency-Key lives inside the sendTransacEmail JSON body's
+      // `headers` object (Brevo API contract:
+      // https://developers.brevo.com/reference/sendtransacemail), NOT in
+      // the fetch RequestInit HTTP headers. The previous assertion at
+      // sendInit.headers['X-Idempotency-Key'] pointed at the wrong layer
+      // and was removed in CAP-054.
+      const sendInit = sendCall?.[1] as RequestInit | undefined;
+      const sendBody = JSON.parse(String(sendInit?.body)) as {
+        sender?: { email?: string };
+        to?: ReadonlyArray<{ email?: string }>;
+        subject?: string;
+        headers?: Record<string, string | undefined>;
+      };
+      expect(sendBody.headers?.['Idempotency-Key']).toBe(messageId);
+      expect(sendBody.sender?.email).toBe('sender@example.com');
+      expect(sendBody.to?.[0]?.email).toBe('recipient@example.com');
+      expect(sendBody.subject).toBe('Preview subject');
 
-        // The message was ack()ed, not retry()ed (success path).
-        expect(stubMessage.acked).toBe(true);
-        expect(stubMessage.retried).toBe(false);
-
-        // Wire-shape assertions on the body the real adapter sent:
-        // first URL param is the Brevo send endpoint; second is the
-        // request init containing the idempotency-key header.
-        const sendInit = sendCall?.[1] as RequestInit | undefined;
-        const sendHeaders = (sendInit?.headers ?? {}) as Record<string, string>;
-        const idempotencyHeader =
-          sendHeaders['X-Idempotency-Key'] ?? sendHeaders['x-idempotency-key'];
-        expect(idempotencyHeader).toBe(messageId);
-        const sendBody = JSON.parse(String(sendInit?.body)) as {
-          sender?: { email?: string };
-          to?: ReadonlyArray<{ email?: string }>;
-          subject?: string;
-        };
-        expect(sendBody.sender?.email).toBe('sender@example.com');
-        expect(sendBody.to?.[0]?.email).toBe('recipient@example.com');
-        expect(sendBody.subject).toBe('Preview subject');
-      } finally {
-        fetchSpy.mockRestore();
-      }
-    },
-  );
+      // R-OUTBOUND-004: Idempotency-Key is NOT in the fetch RequestInit
+      // HTTP headers — the canonical message id is in the JSON body only.
+      const sendHeaders = (sendInit?.headers ?? {}) as Record<string, string>;
+      expect(sendHeaders['Idempotency-Key']).toBeUndefined();
+      expect(sendHeaders['idempotency-key']).toBeUndefined();
+      expect(sendHeaders['X-Idempotency-Key']).toBeUndefined();
+      // Standard Brevo auth + content-negotiation HTTP headers still present.
+      // `ENCRYPTION_KEY` is the Secrets Store key (64 hex chars); the
+      // `api-key` HTTP header value is the decrypted plaintext credential
+      // the adapter pulls from `encrypted_credentials` ('live-brevo-api-key'
+      // — a literal placeholder, not a real Brevo key).
+      expect(sendHeaders['api-key']).toBe('live-brevo-api-key');
+      expect(sendHeaders['Content-Type']).toBe('application/json');
+      expect(sendHeaders['Accept']).toBe('application/json');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 
 // =====================================================================

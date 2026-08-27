@@ -124,13 +124,18 @@ export const brevoAdapter: OutboundProviderAdapter = {
         content: Buffer.from(a.content).toString('base64'),
         contentType: a.contentType,
       })),
-      headers: msg.messageId
-        ? {
-            'Message-ID': msg.messageId,
-            ...(msg.inReplyTo ? { 'In-Reply-To': msg.inReplyTo } : {}),
-            ...(msg.references ? { References: msg.references } : {}),
-          }
-        : undefined,
+      // R-OUTBOUND-004: provider idempotency is sent as a JSON body header.
+      // Brevo's sendTransacEmail contract (developers.brevo.com/reference/sendtransacemail)
+      // accepts `headers` as part of the JSON body; Idempotency-Key belongs there, NOT in
+      // fetch RequestInit.headers. Preserves Message-ID / In-Reply-To / References when supplied.
+      // Idempotency-Key is always present (even when msg.messageId is absent) — the canonical
+      // message ID is the queue's idempotencyKey, not the optional RFC 5322 Message-ID.
+      headers: {
+        'Idempotency-Key': msg.idempotencyKey,
+        ...(msg.messageId ? { 'Message-ID': msg.messageId } : {}),
+        ...(msg.inReplyTo ? { 'In-Reply-To': msg.inReplyTo } : {}),
+        ...(msg.references ? { References: msg.references } : {}),
+      },
     };
 
     let response: Response;
