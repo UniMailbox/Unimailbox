@@ -10,6 +10,26 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-27 — Phase 2 verification reopened: provider idempotency is not on the wire
+
+Branch-consolidation verification ran the Worker suite from the root worktree, where an ignored
+local `BREVO_API_KEY` enabled preview-gate AC 5 instead of skipping it. The live-mode wire assertion
+failed: `processOutboundJob` creates `idempotencyKey: claimed.message_id`, but the Brevo adapter's
+actual `fetch` headers contain only the API key and content-negotiation headers. The standard
+secret-independent suite remains green because this assertion is the one intentional skip.
+
+This is a runtime correctness gap, not just a test-environment difference. A Worker crash after
+Brevo accepts a message but before D1 records success can cause the reclaimed job to resend without
+provider-side deduplication, contradicting R-OUTBOUND-004 and the durable-outbox Phase 2 evidence.
+Phase 2 is therefore reopened and CAP-047 is blocked until D-CAP-028-E is fixed and both standard
+and configured-live gates pass. No production code was changed in this verification pass.
+
+Evidence: configured-live Worker suite 1 failed / 783 passed (AC 5 missing header); standard Worker
+suite 783 passed + 1 intentional skip; unit 900/900; doctor 14/14; lint/typecheck/format clean;
+build and Wrangler dry-run clean.
+
+---
+
 ## 2026-08-27 — CAP-036 implemented locally; workspace archived
 
 Migration 0019 replaces both JSON-in-TEXT role-policy columns with relational child
