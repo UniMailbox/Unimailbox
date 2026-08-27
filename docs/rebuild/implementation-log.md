@@ -10,6 +10,49 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-27 — CAP-054 implemented; Phase 2 verification re-closed
+
+D-CAP-028-E is RESOLVED. The Brevo adapter now sends `Idempotency-Key: msg.idempotencyKey`
+**inside the `sendTransacEmail` JSON body's `headers` object**, per
+`https://developers.brevo.com/reference/sendtransacemail`. The previous
+`preview-gate.worker.test.ts` AC 5 wire-shape assertion probed
+`fetch RequestInit.headers['X-Idempotency-Key']` — the wrong layer; that
+assertion is replaced by `sendInit.body.headers['Idempotency-Key'] === messageId`.
+`Message-ID` / `In-Reply-To` / `References` continue to coexist when supplied;
+`Idempotency-Key` is always present (even when `msg.messageId` is absent — the
+canonical message id is the queue's `idempotencyKey`, not the optional RFC 5322
+`Message-ID`). Standard Brevo `api-key` / `Content-Type` / `Accept` HTTP headers
+preserved verbatim. Idempotency-Key is NOT in `RequestInit.headers`.
+
+The `LIVE` constant, `liveOnly(...)` helper, and the
+`beforeAll(() => { if (!LIVE) console.warn(...) })` machinery in
+`preview-gate.worker.test.ts` are removed — all unreferenced after the AC 5
+conversion. The `DEFERRED_REQUEST_ID_ACTIONS` constant + `EXPECTED_AUDIT_ACTIONS`
+set remain untouched. The fetch spy (`vi.spyOn(globalThis, 'fetch')`) intercepts
+the outbound HTTP request before it leaves the Worker — no `BREVO_API_KEY` env
+var, no `.env` file read, no real provider call can escape. Standard and
+configured-live Worker modes no longer differ for this assertion.
+
+Files: `apps/worker/src/integrations/providers/brevo.ts` (production),
+`apps/worker/src/integrations/providers/brevo.test.ts` (+4 wire-shape cases,
+10/10 passing), `apps/worker/test/preview-gate.worker.test.ts` (AC 5 + LIVE
+machinery, 27/27 passing). No new migration, no new env var, no new dependency,
+no secret in source/tests/logs/commits.
+
+Gates (orchestrator-run on `cap/CAP-054-provider-idempotency`): `pnpm scaffold
+doctor` 14/14; `pnpm lint` 0 errors; `pnpm typecheck` clean; `pnpm format:check`
+clean; `pnpm test:unit` 904/904 (+4); `pnpm test:worker` **784/784, zero
+skipped, zero failed** (was 783 + 1 intentional skip; the skip becomes a real
+run); `pnpm build` clean with Wrangler dry-run reporting all 12 bindings;
+`git diff --check` clean. Phase 2 returns to **Verified 2026-08-27**; Phase 3
+to **Ready**; CAP-047 (drafts + attachments) is the next dispatch candidate.
+Contract archived at `work/archive/2026-08/CAP-054/task.md`.
+
+Cleanup: 0 promoted, 1 archived (task.md → `work/archive/2026-08/CAP-054/`), 0
+deleted.
+
+---
+
 ## 2026-08-27 — Phase 2 verification reopened: provider idempotency is not on the wire
 
 Branch-consolidation verification ran the Worker suite from the root worktree, where an ignored
