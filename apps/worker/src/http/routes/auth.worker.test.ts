@@ -1433,8 +1433,9 @@ describe('CAP-042 AC 23 — POST /api/v1/auth/login mode gating', () => {
     // no `idempotency_records` row was written. If the gate had run
     // after requireIdempotencyKey, a previous-run record would have
     // been re-executed and the route would have minted fresh tokens.
-    const idempotencyCount = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM idempotency_records WHERE operation = ?`)
+    const idempotencyCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE operation = ?`,
+    )
       .bind('POST /api/v1/auth/login')
       .first<{ n: number }>();
     expect(idempotencyCount?.n ?? 0).toBe(0);

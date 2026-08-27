@@ -30,11 +30,7 @@ import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { hashPassword } from '../../platform/crypto';
 import { signCursor } from '../../platform/cursor';
-import {
-  createAuditEvent,
-  queryAuditEvents,
-  AuditFilterPairError,
-} from '../../modules/admin';
+import { createAuditEvent, queryAuditEvents, AuditFilterPairError } from '../../modules/admin';
 import { auditEventSchema, type AuditAction } from '@unimailbox/contracts';
 
 // ---------------------------------------------------------------------------
@@ -325,10 +321,9 @@ describe('GET /api/v1/admin/audit-events — filters', () => {
   });
 
   it('returns an empty page for a filter matching nothing', async () => {
-    const response = await SELF.fetch(
-      `${BASE}?resourceType=message&resourceId=no-such-message`,
-      { headers: { Authorization: `Bearer ${adminToken}` } },
-    );
+    const response = await SELF.fetch(`${BASE}?resourceType=message&resourceId=no-such-message`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.items).toEqual([]);
@@ -608,7 +603,11 @@ describe('queryAuditEvents — repository contract (fix (c))', () => {
     await completeSetup();
 
     await expect(
-      queryAuditEvents(env.DB, { resourceType: 'message' }, { cursorSigningKey: cursorSigningKey() }),
+      queryAuditEvents(
+        env.DB,
+        { resourceType: 'message' },
+        { cursorSigningKey: cursorSigningKey() },
+      ),
     ).rejects.toBeInstanceOf(AuditFilterPairError);
   });
 
@@ -617,7 +616,11 @@ describe('queryAuditEvents — repository contract (fix (c))', () => {
     await completeSetup();
 
     await expect(
-      queryAuditEvents(env.DB, { resourceId: 'message-1' }, { cursorSigningKey: cursorSigningKey() }),
+      queryAuditEvents(
+        env.DB,
+        { resourceId: 'message-1' },
+        { cursorSigningKey: cursorSigningKey() },
+      ),
     ).rejects.toBeInstanceOf(AuditFilterPairError);
   });
 });

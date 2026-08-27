@@ -37,9 +37,7 @@ afterEach(() => {
 
 describe('LogoutButton', () => {
   it('posts to sign-out, clears the store, and navigates to /login', async () => {
-    const { fetchImpl, calls } = spyFetch([
-      () => jsonResponse({ success: true }),
-    ]);
+    const { fetchImpl, calls } = spyFetch([() => jsonResponse({ success: true })]);
     setAuthSession(SESSION);
     const user = userEvent.setup();
     const { history, queryClient } = await renderAuthPage({
@@ -56,16 +54,12 @@ describe('LogoutButton', () => {
     await waitFor(() => {
       expect(lastPathname(history)).toBe('/login');
     });
-    const signOutCall = calls.find(
-      (c) => c.url === '/api/v1/auth/better/sign-out',
-    );
+    const signOutCall = calls.find((c) => c.url === '/api/v1/auth/better/sign-out');
     expect(signOutCall?.method).toBe('POST');
     expect(useAuthSession.getState().session).toBeNull();
     // The cache entry was removed so a subsequent /mailbox navigation
     // would re-fetch and find no session.
-    expect(
-      queryClient.getQueryData(authQueryKeys.session()),
-    ).toBeUndefined();
+    expect(queryClient.getQueryData(authQueryKeys.session())).toBeUndefined();
   });
 
   it('still clears the store and redirects when sign-out fails', async () => {

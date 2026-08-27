@@ -202,9 +202,7 @@ describe('CAP-042 AC 15 — 0015_credential_backfill', () => {
     expect(row?.id).toBe(`cap042-backfill-${LEGACY_ACTIVE}`);
     expect(row?.user_id).toBe(LEGACY_ACTIVE);
     // The envelope shape the Better Auth password adapter verifies.
-    expect(row?.password).toMatch(
-      /^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/,
-    );
+    expect(row?.password).toMatch(/^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
   });
 
   it('AC 15.2 — banned users did NOT produce an auth_accounts row (R-AUTH-002)', async () => {
@@ -288,7 +286,7 @@ describe('CAP-042 AC 15 — 0015_credential_backfill', () => {
     expect(row?.n).toBe(0);
   });
 
-  it('AC 15.8 — the envelope matches Better Auth\'s canonical regex', async () => {
+  it("AC 15.8 — the envelope matches Better Auth's canonical regex", async () => {
     const db = await migrationsDb({ through: '0014_better_auth_substrate' });
     await seedLegacyUsers(db);
     await migrationsDb({ through: '0015_credential_backfill' });
@@ -403,9 +401,7 @@ describe('CAP-042 AC 15 — 0015_credential_backfill', () => {
     await migrationsDb({ through: '0015_credential_backfill' });
 
     const row = await db
-      .prepare(
-        `SELECT created_at, updated_at FROM auth_accounts WHERE user_id = ?`,
-      )
+      .prepare(`SELECT created_at, updated_at FROM auth_accounts WHERE user_id = ?`)
       .bind(LEGACY_ACTIVE)
       .first<{ created_at: number; updated_at: number }>();
     expect(typeof row?.created_at).toBe('number');

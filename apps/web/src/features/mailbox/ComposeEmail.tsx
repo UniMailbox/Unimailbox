@@ -61,10 +61,7 @@ function splitEmailList(value: string): ReadonlyArray<string> {
 }
 
 /** Adds a validation issue for the first token that is not an email. */
-function rejectInvalidEmailToken(
-  value: string,
-  ctx: z.RefinementCtx,
-): void {
+function rejectInvalidEmailToken(value: string, ctx: z.RefinementCtx): void {
   for (const token of splitEmailList(value)) {
     const parsed = emailAddressSchema.safeParse(token);
     if (!parsed.success) {
@@ -196,10 +193,7 @@ function ReplyComposer({ mailboxId, parentMessageId }: ReplyComposerProps): Reac
   if (parentQuery.error !== null) {
     return (
       <main className="mailbox-shell" data-testid="compose-parent-error">
-        <Card
-          title="Could not load the message"
-          description="The reply cannot be pre-filled."
-        >
+        <Card title="Could not load the message" description="The reply cannot be pre-filled.">
           <ErrorPanel
             message={parentQuery.error.message}
             code={parentQuery.error.code}
@@ -222,9 +216,7 @@ interface ComposeFormProps {
   readonly mailboxId: string;
   readonly defaultValues: ComposeFormFields;
   /** Threading headers for a reply; absent for a fresh compose. */
-  readonly replyContext?:
-    | { readonly inReplyTo: string; readonly references: string }
-    | undefined;
+  readonly replyContext?: { readonly inReplyTo: string; readonly references: string } | undefined;
 }
 
 function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProps): ReactElement {
@@ -309,13 +301,9 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
       <header className="mailbox-header">
         {/* Fix pass (d): the title follows the CLEARED context after a
             reply send — the reset form is a fresh Compose, not a reply. */}
-        <h1 className="mailbox-title">
-          {activeReplyContext !== undefined ? 'Reply' : 'Compose'}
-        </h1>
+        <h1 className="mailbox-title">{activeReplyContext !== undefined ? 'Reply' : 'Compose'}</h1>
         <div className="mailbox-header-meta">
-          <span data-testid="mailbox-user-email">
-            {sessionQuery.data?.email ?? ''}
-          </span>
+          <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
           <LogoutButton />
         </div>
       </header>

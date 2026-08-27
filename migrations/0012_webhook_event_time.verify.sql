@@ -1,33 +1,27 @@
--- migrations/0012_webhook_event_time.verify.sql — Verification queries for 0012_webhook_event_time.sql.
--- Run after migration apply to confirm schema integrity.
---
--- Verification checks:
--- 1. event_time column was added to webhook_deliveries
--- 2. event_time is INTEGER (R-DATA-005: typed, indexable, comparable)
--- 3. event_time_source column was added with a CHECK constraint
--- 4. The new index exists on event_time
--- 5. Migration tracking row exists
+-- Verification for 0012_webhook_event_time.sql.
 
--- Verify event_time column was added to webhook_deliveries
-SELECT COUNT(*) = 1 FROM pragma_table_info('webhook_deliveries')
-WHERE name = 'event_time';
+SELECT '0012_event_time_shape' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM pragma_table_info('webhook_deliveries')
+WHERE name = 'event_time' AND type = 'INTEGER';
 
--- Verify event_time is INTEGER (R-DATA-005: not text, not json-as-text)
-SELECT
-  CASE
-    WHEN (SELECT type FROM pragma_table_info('webhook_deliveries')
-          WHERE name = 'event_time') = 'INTEGER'
-    THEN 1
-    ELSE 0
-  END = 1;
+SELECT '0012_event_time_source_shape' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM pragma_table_info('webhook_deliveries')
+WHERE name = 'event_time_source' AND type = 'TEXT';
 
--- Verify event_time_source column exists
-SELECT COUNT(*) = 1 FROM pragma_table_info('webhook_deliveries')
-WHERE name = 'event_time_source';
+SELECT '0012_event_time_source_check_exists' AS assertion,
+  EXISTS (
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'webhook_deliveries'
+      AND instr(sql, 'event_time_source') > 0
+      AND instr(sql, 'event_time_source IN (''provider'', ''server'')') > 0
+  ) AS pass;
 
--- Verify the new index exists
-SELECT COUNT(*) >= 1 FROM pragma_index_list('webhook_deliveries')
-WHERE name = 'webhook_deliveries_event_time_idx';
+SELECT '0012_event_time_index_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM sqlite_master WHERE type = 'index' AND name = 'webhook_deliveries_event_time_idx';
 
--- Verify migration tracking row exists
-SELECT COUNT(*) = 1 FROM d1_migrations WHERE name = '0012_webhook_event_time.sql';
+SELECT '0012_tracking_row_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM d1_migrations WHERE name = '0012_webhook_event_time.sql';

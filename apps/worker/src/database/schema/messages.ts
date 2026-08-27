@@ -5,7 +5,14 @@
 // used to regenerate the SQL.
 //
 // R-INBOUND-008: Message + recipients + mailbox_messages inserted in one D1 batch
-import { sqliteTable, text, index, uniqueIndex, integer, primaryKey } from 'drizzle-orm/sqlite-core';
+import {
+  sqliteTable,
+  text,
+  index,
+  uniqueIndex,
+  integer,
+  primaryKey,
+} from 'drizzle-orm/sqlite-core';
 import { users } from './identity';
 import { mailboxes } from './tenancy';
 

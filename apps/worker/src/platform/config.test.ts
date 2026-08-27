@@ -14,6 +14,7 @@ import {
   loadConfig,
   parseAuthProvider,
   parseBetterAuthUrl,
+  parseEnvironment,
 } from './config';
 import type { Env } from './env';
 
@@ -71,6 +72,25 @@ describe('parseAuthProvider', () => {
   });
 });
 
+describe('parseEnvironment', () => {
+  it('defaults only missing or empty values to local', () => {
+    expect(parseEnvironment(undefined)).toBe('local');
+    expect(parseEnvironment('')).toBe('local');
+  });
+
+  it('accepts every closed-enum value', () => {
+    expect(parseEnvironment('local')).toBe('local');
+    expect(parseEnvironment('preview')).toBe('preview');
+    expect(parseEnvironment('staging')).toBe('staging');
+    expect(parseEnvironment('production')).toBe('production');
+  });
+
+  it('rejects unknown and case-mutated values', () => {
+    expect(() => parseEnvironment('prod')).toThrow(ConfigError);
+    expect(() => parseEnvironment('Production')).toThrow(ConfigError);
+  });
+});
+
 describe('parseBetterAuthUrl', () => {
   it('rejects undefined and empty input', () => {
     expect(() => parseBetterAuthUrl(undefined, 'local')).toThrow(/required/);
@@ -82,33 +102,23 @@ describe('parseBetterAuthUrl', () => {
   });
 
   it('rejects non-http(s) protocols', () => {
-    expect(() => parseBetterAuthUrl('ftp://example.com', 'local')).toThrow(
-      /http or https/,
-    );
-    expect(() => parseBetterAuthUrl('javascript:alert(1)', 'local')).toThrow(
-      /http or https/,
-    );
-    expect(() => parseBetterAuthUrl('file:///etc/passwd', 'local')).toThrow(
-      /http or https/,
-    );
+    expect(() => parseBetterAuthUrl('ftp://example.com', 'local')).toThrow(/http or https/);
+    expect(() => parseBetterAuthUrl('javascript:alert(1)', 'local')).toThrow(/http or https/);
+    expect(() => parseBetterAuthUrl('file:///etc/passwd', 'local')).toThrow(/http or https/);
   });
 
   it('rejects URLs that carry credentials', () => {
-    expect(() => parseBetterAuthUrl('https://user@example.com', 'local')).toThrow(
+    expect(() => parseBetterAuthUrl('https://user@example.com', 'local')).toThrow(/credentials/);
+    expect(() => parseBetterAuthUrl('https://user:pass@example.com', 'local')).toThrow(
       /credentials/,
     );
-    expect(() =>
-      parseBetterAuthUrl('https://user:pass@example.com', 'local'),
-    ).toThrow(/credentials/);
   });
 
   it('rejects URLs that carry a query string or fragment', () => {
     expect(() => parseBetterAuthUrl('https://example.com/?token=x', 'local')).toThrow(
       /query string/,
     );
-    expect(() => parseBetterAuthUrl('https://example.com/#frag', 'local')).toThrow(
-      /fragment/,
-    );
+    expect(() => parseBetterAuthUrl('https://example.com/#frag', 'local')).toThrow(/fragment/);
   });
 
   it('requires https for non-local environments', () => {
@@ -122,9 +132,7 @@ describe('parseBetterAuthUrl', () => {
   });
 
   it('accepts http://localhost:3000 for local', () => {
-    expect(parseBetterAuthUrl('http://localhost:3000', 'local')).toBe(
-      'http://localhost:3000',
-    );
+    expect(parseBetterAuthUrl('http://localhost:3000', 'local')).toBe('http://localhost:3000');
   });
 
   it('accepts a bare https origin for non-local and returns the canonical origin', () => {
@@ -160,6 +168,16 @@ describe('loadConfig', () => {
 
   it('fails closed on an unknown provider', () => {
     expect(() => loadConfig(baseEnv({ AUTH_PROVIDER: 'openid' }))).toThrow(ConfigError);
+  });
+
+  it('fails closed on an unknown environment instead of applying local URL rules', () => {
+    let captured: ConfigError | null = null;
+    try {
+      loadConfig(baseEnv({ ENVIRONMENT: 'prod' as Env['ENVIRONMENT'] }));
+    } catch (err) {
+      captured = err as ConfigError;
+    }
+    expect(captured?.code).toBe('INVALID_ENVIRONMENT');
   });
 
   it('fails closed when a non-local environment ships http://localhost', () => {

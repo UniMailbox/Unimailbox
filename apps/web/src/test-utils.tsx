@@ -305,9 +305,7 @@ export interface RenderAuthPageOptions {
   readonly mailbox?: ReactElement;
 }
 
-export async function renderAuthPage(
-  options: RenderAuthPageOptions,
-): Promise<{
+export async function renderAuthPage(options: RenderAuthPageOptions): Promise<{
   readonly router: AnyRouter;
   readonly history: ReturnType<typeof createMemoryHistory>;
   readonly apiClient: ApiClient;

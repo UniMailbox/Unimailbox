@@ -23,7 +23,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 
 import { betterAuthPassword } from '../../integrations/better-auth/password';
-import { BETTER_AUTH_BASE_PATH, BETTER_AUTH_COOKIE_NAME } from '../../integrations/better-auth/path';
+import {
+  BETTER_AUTH_BASE_PATH,
+  BETTER_AUTH_COOKIE_NAME,
+} from '../../integrations/better-auth/path';
 
 /**
  * Force `AUTH_PROVIDER='dual'` for the legacy AC 13/14 tests.
@@ -81,69 +84,58 @@ async function seedTwoUsers(): Promise<void> {
   const bearerEnvelope = await hashTestPassword(BEARER_PASSWORD);
 
   await env.DB.batch([
-    env.DB
-      .prepare(
-        `INSERT INTO users (
+    env.DB.prepare(
+      `INSERT INTO users (
            id, email, display_name, email_verified, status,
            password_algorithm, password_iterations, password_salt, password_hash,
            created_at, updated_at
          ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
-      )
-      .bind(
-        COOKIE_USER_ID,
-        COOKIE_USER_EMAIL,
-        COOKIE_DISPLAY_NAME,
-        new Uint8Array(16),
-        new Uint8Array(32),
-        new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-        new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-      ),
-    env.DB
-      .prepare(
-        `INSERT INTO auth_accounts (
+    ).bind(
+      COOKIE_USER_ID,
+      COOKIE_USER_EMAIL,
+      COOKIE_DISPLAY_NAME,
+      new Uint8Array(16),
+      new Uint8Array(32),
+      new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+      new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+    ),
+    env.DB.prepare(
+      `INSERT INTO auth_accounts (
            id, issuer, account_id, provider_id, user_id, password,
            created_at, updated_at
          ) VALUES (?, 'local:credential', ?, 'credential', ?, ?, ?, ?)`,
-      )
-      .bind('ac13-account', COOKIE_USER_ID, COOKIE_USER_ID, cookieEnvelope, NOW_MS, NOW_MS),
-    env.DB
-      .prepare(
-        `INSERT INTO users (
+    ).bind('ac13-account', COOKIE_USER_ID, COOKIE_USER_ID, cookieEnvelope, NOW_MS, NOW_MS),
+    env.DB.prepare(
+      `INSERT INTO users (
            id, email, display_name, email_verified, status,
            password_algorithm, password_iterations, password_salt, password_hash,
            created_at, updated_at
          ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
-      )
-      .bind(
-        BEARER_USER_ID,
-        BEARER_USER_EMAIL,
-        BEARER_DISPLAY_NAME,
-        new Uint8Array(16),
-        new Uint8Array(32),
-        new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-        new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-      ),
-    env.DB
-      .prepare(
-        `INSERT INTO auth_accounts (
+    ).bind(
+      BEARER_USER_ID,
+      BEARER_USER_EMAIL,
+      BEARER_DISPLAY_NAME,
+      new Uint8Array(16),
+      new Uint8Array(32),
+      new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+      new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+    ),
+    env.DB.prepare(
+      `INSERT INTO auth_accounts (
            id, issuer, account_id, provider_id, user_id, password,
            created_at, updated_at
          ) VALUES (?, 'local:credential', ?, 'credential', ?, ?, ?, ?)`,
-      )
-      .bind('ac14-account', BEARER_USER_ID, BEARER_USER_ID, bearerEnvelope, NOW_MS, NOW_MS),
+    ).bind('ac14-account', BEARER_USER_ID, BEARER_USER_ID, bearerEnvelope, NOW_MS, NOW_MS),
   ]);
 }
 
 /** Sign in via Better Auth and return the raw cookie header (`name=value`). */
 async function signInAndGetCookie(email: string, password: string): Promise<string> {
-  const response = await SELF.fetch(
-    `http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    },
-  );
+  const response = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
   expect(response.status).toBe(200);
   const setCookie = response.headers.get('set-cookie');
   if (!setCookie) throw new Error('sign-in missing set-cookie');
@@ -443,8 +435,9 @@ describe('CAP-042 AC 23 — rollback proof: dual → legacy → dual without res
     expect(dualBody.data?.user?.id).toBe(COOKIE_USER_ID);
 
     // Snapshot the additive row state before the rollback.
-    const sessionCountBefore = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessionCountBefore = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(COOKIE_USER_ID)
       .first<{ n: number }>();
     expect(sessionCountBefore?.n ?? 0).toBeGreaterThan(0);
@@ -469,8 +462,9 @@ describe('CAP-042 AC 23 — rollback proof: dual → legacy → dual without res
 
     // The auth_sessions row is unchanged: rollback does not migrate,
     // delete, or otherwise mutate the additive schema.
-    const sessionCountMid = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessionCountMid = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(COOKIE_USER_ID)
       .first<{ n: number }>();
     expect(sessionCountMid?.n ?? 0).toBe(sessionCountBefore?.n ?? 0);
@@ -486,8 +480,9 @@ describe('CAP-042 AC 23 — rollback proof: dual → legacy → dual without res
 
     // Final snapshot: the additive row is still there, unchanged in
     // count. This is the load-bearing assertion: the rollback proof.
-    const sessionCountAfter = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessionCountAfter = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(COOKIE_USER_ID)
       .first<{ n: number }>();
     expect(sessionCountAfter?.n ?? 0).toBe(sessionCountBefore?.n ?? 0);

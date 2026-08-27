@@ -14,7 +14,12 @@
 // (D-CAP-041-1 promise: one HTTP GET per navigation, not two).
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
-import { parseSessionResponse, fetchAuthSession, authQueryKeys, useSignInMutation } from './auth-queries';
+import {
+  parseSessionResponse,
+  fetchAuthSession,
+  authQueryKeys,
+  useSignInMutation,
+} from './auth-queries';
 import { ApiError } from '../../infrastructure/api/errors';
 import type { ApiClient } from '../../infrastructure/api/client';
 import { renderHook, act } from '@testing-library/react';
@@ -124,9 +129,7 @@ describe('fetchAuthSession', () => {
   });
 
   it('returns null when the API responds with 401 (no cookie)', async () => {
-    const apiClient = makeClient(
-      errorResponse('UNAUTHORIZED', 'Authentication required', 401),
-    );
+    const apiClient = makeClient(errorResponse('UNAUTHORIZED', 'Authentication required', 401));
     const descriptor = await fetchAuthSession(apiClient);
     expect(descriptor).toBeNull();
   });
@@ -137,9 +140,7 @@ describe('fetchAuthSession', () => {
   });
 
   it('rethrows non-401 ApiErrors so the error boundary can surface them', async () => {
-    const apiClient = makeClient(
-      errorResponse('INTERNAL', 'Database unreachable', 500),
-    );
+    const apiClient = makeClient(errorResponse('INTERNAL', 'Database unreachable', 500));
     await expect(fetchAuthSession(apiClient)).rejects.toBeInstanceOf(ApiError);
   });
 });
@@ -161,9 +162,9 @@ function makeClient(response: Response): ApiClient {
         let code = 'HTTP_ERROR';
         let message = `Request failed with status ${String(response.status)}`;
         try {
-          const body = (await response.json()) as
-            | { error?: { code?: string; message?: string } }
-            | null;
+          const body = (await response.json()) as {
+            error?: { code?: string; message?: string };
+          } | null;
           if (
             body !== null &&
             typeof body === 'object' &&
@@ -191,10 +192,10 @@ function jsonResponse(data: unknown): Response {
 }
 
 function errorResponse(code: string, message: string, status: number): Response {
-  return new Response(
-    JSON.stringify({ error: { code, message, requestId: 'req-test' } }),
-    { status, headers: { 'content-type': 'application/json' } },
-  );
+  return new Response(JSON.stringify({ error: { code, message, requestId: 'req-test' } }), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 // CAP-042 Batch 8 (M-2 fix): verify the sign-in mutation writes the

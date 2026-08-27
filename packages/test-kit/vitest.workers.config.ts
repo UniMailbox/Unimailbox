@@ -24,6 +24,7 @@ export default defineConfig({
   ],
   test: {
     name: 'test-kit-workers',
+    fileParallelism: false,
     include: ['src/**/*.worker.test.ts'],
     exclude: ['**/node_modules/**', 'dist/**'],
   },

@@ -54,6 +54,18 @@ export class ConfigError extends Error {
 
 const AUTH_PROVIDERS: ReadonlyArray<AuthProviderName> = ['legacy', 'dual', 'better-auth'];
 
+/** Parse ENVIRONMENT as a closed enum. Unknown values must never inherit local relaxations. */
+export function parseEnvironment(raw: string | undefined): EnvironmentName {
+  if (raw === undefined || raw === '') return 'local';
+  if ((ALLOWED_ENVIRONMENTS as ReadonlyArray<string>).includes(raw)) {
+    return raw as EnvironmentName;
+  }
+  throw new ConfigError(
+    'INVALID_ENVIRONMENT',
+    `ENVIRONMENT must be one of ${ALLOWED_ENVIRONMENTS.join('|')}; got ${JSON.stringify(raw)}`,
+  );
+}
+
 /**
  * Parse the auth provider mode from the runtime env. Unknown values fail
  * closed with `INVALID_AUTH_PROVIDER` so a typo or stale var cannot
@@ -90,10 +102,7 @@ export function parseAuthProvider(raw: string | undefined): AuthProviderName {
  * Returns the canonicalised origin string (`${protocol}//${host}`) so
  * Better Auth's `baseURL` is the same shape every request hits.
  */
-export function parseBetterAuthUrl(
-  raw: string | undefined,
-  environment: EnvironmentName,
-): string {
+export function parseBetterAuthUrl(raw: string | undefined, environment: EnvironmentName): string {
   if (typeof raw !== 'string' || raw.length === 0) {
     throw new ConfigError('INVALID_BETTER_AUTH_URL', 'BETTER_AUTH_URL is required');
   }
@@ -125,10 +134,7 @@ export function parseBetterAuthUrl(
     );
   }
   if (parsed.hash !== '') {
-    throw new ConfigError(
-      'INVALID_BETTER_AUTH_URL',
-      'BETTER_AUTH_URL must not carry a fragment',
-    );
+    throw new ConfigError('INVALID_BETTER_AUTH_URL', 'BETTER_AUTH_URL must not carry a fragment');
   }
   if (environment !== 'local' && parsed.protocol !== 'https:') {
     throw new ConfigError(
@@ -140,12 +146,7 @@ export function parseBetterAuthUrl(
 }
 
 export function loadConfig(env: Env): PlatformConfig {
-  const rawEnv = env.ENVIRONMENT ?? 'local';
-  const environment: EnvironmentName = ALLOWED_ENVIRONMENTS.includes(
-    rawEnv as EnvironmentName,
-  )
-    ? (rawEnv as EnvironmentName)
-    : 'local';
+  const environment = parseEnvironment(env.ENVIRONMENT);
   const authProvider = parseAuthProvider(env.AUTH_PROVIDER);
   const betterAuthUrl = parseBetterAuthUrl(env.BETTER_AUTH_URL, environment);
   // CAP-043 Slice 1 fix pass (F8): there is no `cursorSigningKey` field on

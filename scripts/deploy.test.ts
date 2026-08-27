@@ -23,6 +23,7 @@ import {
   parseAppliedMigrationNames,
   NO_PENDING_LOG_FORMAT,
   evaluateDeployConfigForTarget,
+  parseMigrationVerificationOutput,
   type ResourceState,
 } from './deploy.js';
 
@@ -185,14 +186,20 @@ describe('scripts/deploy.ts — pure logic', () => {
       const result = checkEnvironmentGuard(undefined);
       expect(result.ok).toBe(false);
       expect(result.error).toContain('(unset)');
-      expect(result.error).toContain("must be non-'local'");
+      expect(result.error).toContain('preview|staging|production');
     });
 
     it('rejects local environment', () => {
       const result = checkEnvironmentGuard('local');
       expect(result.ok).toBe(false);
       expect(result.error).toContain('ENVIRONMENT=local');
-      expect(result.error).toContain("must be non-'local'");
+      expect(result.error).toContain('preview|staging|production');
+    });
+
+    it('rejects arbitrary non-local strings', () => {
+      const result = checkEnvironmentGuard('prod');
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('ENVIRONMENT=prod');
     });
   });
 
@@ -429,6 +436,26 @@ describe('scripts/deploy.ts — pure logic', () => {
       expect(r.ok).toBe(true);
     });
 
+    it('refuses a config environment that does not exactly match the target', () => {
+      const resolved = JSON.stringify({
+        ENVIRONMENT: 'staging',
+        BETTER_AUTH_URL: 'https://preview.example.com',
+      });
+      const r = evaluateDeployConfigForTarget(resolved, 'preview');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('must match exactly');
+    });
+
+    it('refuses an unknown target even when the config string matches it', () => {
+      const resolved = JSON.stringify({
+        ENVIRONMENT: 'prod',
+        BETTER_AUTH_URL: 'https://app.example.com',
+      });
+      const r = evaluateDeployConfigForTarget(resolved, 'prod');
+      expect(r.ok).toBe(false);
+      expect(r.error).toContain('Unknown deploy target');
+    });
+
     it('refuses when ENVIRONMENT is missing for a non-local target', () => {
       const resolved = JSON.stringify({ BETTER_AUTH_URL: 'https://app.example.com' });
       const r = evaluateDeployConfigForTarget(resolved, 'production');
@@ -441,6 +468,60 @@ describe('scripts/deploy.ts — pure logic', () => {
       const r = evaluateDeployConfigForTarget(resolved, 'production');
       expect(r.ok).toBe(false);
       expect(r.error).toContain('missing BETTER_AUTH_URL');
+    });
+  });
+
+  describe('parseMigrationVerificationOutput', () => {
+    it('accepts one or more named passing assertions', () => {
+      const raw = JSON.stringify([
+        { results: [{ assertion: 'table_exists', pass: 1 }], success: true },
+      ]);
+      expect(parseMigrationVerificationOutput(raw, 'test.verify.sql')).toEqual({
+        ok: true,
+        assertions: [{ assertion: 'table_exists', pass: 1 }],
+      });
+    });
+
+    it('rejects zero assertions instead of reporting a false green', () => {
+      const raw = JSON.stringify([{ results: [], success: true }]);
+      const result = parseMigrationVerificationOutput(raw, 'legacy.verify.sql');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('zero assertion rows');
+    });
+
+    it('rejects non-assertion rows even when another query returns a passing assertion', () => {
+      const raw = JSON.stringify([
+        { results: [{ assertion: 'table_exists', pass: 1 }], success: true },
+        { results: [{ status: 'legacy output' }], success: true },
+      ]);
+      const result = parseMigrationVerificationOutput(raw, 'mixed.verify.sql');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('unexpected non-assertion row');
+    });
+
+    it('rejects malformed assertion rows and failed assertions', () => {
+      const malformed = parseMigrationVerificationOutput(
+        JSON.stringify([{ results: [{ assertion: 'broken', pass: '1' }], success: true }]),
+        'bad.verify.sql',
+      );
+      expect(malformed.ok).toBe(false);
+
+      const failed = parseMigrationVerificationOutput(
+        JSON.stringify([{ results: [{ assertion: 'broken', pass: 0 }], success: true }]),
+        'failed.verify.sql',
+      );
+      expect(failed.ok).toBe(false);
+      if (!failed.ok) expect(failed.error).toContain('broken');
+    });
+
+    it('rejects failed Wrangler batches and invalid JSON', () => {
+      expect(
+        parseMigrationVerificationOutput(
+          JSON.stringify([{ results: [], success: false, error: 'D1 failed' }]),
+          'failed.verify.sql',
+        ).ok,
+      ).toBe(false);
+      expect(parseMigrationVerificationOutput('{', 'invalid.verify.sql').ok).toBe(false);
     });
   });
 });

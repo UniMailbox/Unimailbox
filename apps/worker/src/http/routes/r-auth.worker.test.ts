@@ -56,36 +56,31 @@ async function seedUserAndCredential(options: {
 }): Promise<{ userId: string; email: string }> {
   const userId = options.id ?? crypto.randomUUID();
   const status = options.status ?? 'active';
-  const envelope = options.passwordEnvelope === undefined
-    ? await sharedEnvelope()
-    : options.passwordEnvelope;
+  const envelope =
+    options.passwordEnvelope === undefined ? await sharedEnvelope() : options.passwordEnvelope;
 
   await env.DB.batch([
-    env.DB
-      .prepare(
-        `INSERT INTO users (
+    env.DB.prepare(
+      `INSERT INTO users (
            id, email, display_name, email_verified, status,
            password_algorithm, password_iterations, password_salt, password_hash,
            created_at, updated_at
          ) VALUES (?, ?, ?, 0, ?, 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
-      )
-      .bind(
-        userId,
-        options.email,
-        'R-AUTH User',
-        status,
-        PLACEHOLDER_SALT,
-        PLACEHOLDER_HASH,
-        NOW_TEXT,
-        NOW_TEXT,
-      ),
-    env.DB
-      .prepare(
-        `INSERT INTO auth_accounts (
+    ).bind(
+      userId,
+      options.email,
+      'R-AUTH User',
+      status,
+      PLACEHOLDER_SALT,
+      PLACEHOLDER_HASH,
+      NOW_TEXT,
+      NOW_TEXT,
+    ),
+    env.DB.prepare(
+      `INSERT INTO auth_accounts (
            id, issuer, account_id, provider_id, user_id, password, created_at, updated_at
          ) VALUES (?, 'local:credential', ?, 'credential', ?, ?, ?, ?)`,
-      )
-      .bind(`cap042-credential-${userId}`, userId, userId, envelope, NOW_MS, NOW_MS),
+    ).bind(`cap042-credential-${userId}`, userId, userId, envelope, NOW_MS, NOW_MS),
   ]);
 
   return { userId, email: options.email };
@@ -131,14 +126,13 @@ async function seedRegistrationKey(options: {
   // Minimal creator user — `registration_keys.created_by` is FK to `users.id`.
   const creatorId = crypto.randomUUID();
   const creatorEmail = options.creatorEmail ?? 'r-auth-creator@example.test';
-  await env.DB
-    .prepare(
-      `INSERT INTO users (
+  await env.DB.prepare(
+    `INSERT INTO users (
          id, email, display_name, email_verified, status,
          password_algorithm, password_iterations, password_salt, password_hash,
          created_at, updated_at
        ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
-    )
+  )
     .bind(
       creatorId,
       creatorEmail,
@@ -150,13 +144,12 @@ async function seedRegistrationKey(options: {
     )
     .run();
 
-  await env.DB
-    .prepare(
-      `INSERT INTO registration_keys (
+  await env.DB.prepare(
+    `INSERT INTO registration_keys (
          id, code_hash, role_id, max_uses, used_count,
          expires_at, revoked_at, created_by, created_at
        ) VALUES (?, ?, NULL, ?, 0, ?, NULL, ?, ?)`,
-    )
+  )
     .bind(
       crypto.randomUUID(),
       codeHash,
@@ -195,15 +188,15 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     // also wiring a sender surfaces here as a failing test.
     expect(BETTER_AUTH_BASE_PATH).toBe('/api/v1/auth/better');
 
-    const before = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_verifications`)
-      .first<{ n: number }>();
+    const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_verifications`).first<{
+      n: number;
+    }>();
 
     await seedUserAndCredential({ email: 'r-auth-001@example.test' });
 
-    const after = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_verifications`)
-      .first<{ n: number }>();
+    const after = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_verifications`).first<{
+      n: number;
+    }>();
     expect(after?.n ?? 0).toBe(before?.n ?? 0);
   });
 
@@ -219,10 +212,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
   // R-AUTH-002 invariant for the Better Auth sign-in path; the legacy
   // `/api/v1/auth/login` route enforces the same rule independently.
   // -------------------------------------------------------------------------
-  it.each([
-    ['banned'],
-    ['deleted'],
-  ])(
+  it.each([['banned'], ['deleted']])(
     'R-AUTH-002: %s user is denied at sign-in (no session row created, no factor leaked)',
     async (statusStr) => {
       const status = statusStr as 'banned' | 'deleted';
@@ -239,8 +229,9 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
 
       expect(response.status).toBe(401);
 
-      const sessions = await env.DB
-        .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+      const sessions = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+      )
         .bind(seeded.userId)
         .first<{ n: number }>();
       expect(sessions?.n ?? 0).toBe(0);
@@ -270,9 +261,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
 
       // Identical envelope keys — no factor can be distinguished by an
       // attacker probing the response shape.
-      expect(Object.keys(bannedDeletedBody).sort()).toEqual(
-        Object.keys(wrongPasswordBody).sort(),
-      );
+      expect(Object.keys(bannedDeletedBody).sort()).toEqual(Object.keys(wrongPasswordBody).sort());
       // And both responses carry `code` and `message` keys; the message
       // text is not asserted (Better Auth may localise) but the
       // `typeof` shape must match across the three responses.
@@ -321,19 +310,16 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
       const token = `r-auth-003-token-${i}-${crypto.randomUUID()}`;
       sessionRows.push({ id: sessionId });
       statements.push(
-        env.DB
-          .prepare(
-            `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
+        env.DB.prepare(
+          `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?)`,
-          )
-          .bind(sessionId, token, seeded.userId, now + 60_000, now + i, now + i),
+        ).bind(sessionId, token, seeded.userId, now + 60_000, now + i, now + i),
       );
     }
     await env.DB.batch(statements);
 
     // Total sessions = exactly 10.
-    const count = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const count = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
       .bind(seeded.userId)
       .first<{ n: number }>();
     expect(count?.n ?? 0).toBe(10);
@@ -341,8 +327,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     // The first-inserted (oldest session) must have been evicted.
     const evictedId = sessionRows[0]?.id;
     if (!evictedId) throw new Error('no first session recorded');
-    const evicted = await env.DB
-      .prepare(`SELECT id FROM auth_sessions WHERE id = ?`)
+    const evicted = await env.DB.prepare(`SELECT id FROM auth_sessions WHERE id = ?`)
       .bind(evictedId)
       .first();
     expect(evicted).toBeNull();
@@ -351,8 +336,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     for (let i = 1; i < 11; i++) {
       const id = sessionRows[i]?.id;
       if (!id) throw new Error(`no session id at index ${i}`);
-      const row = await env.DB
-        .prepare(`SELECT id FROM auth_sessions WHERE id = ?`)
+      const row = await env.DB.prepare(`SELECT id FROM auth_sessions WHERE id = ?`)
         .bind(id)
         .first();
       expect(row).not.toBeNull();
@@ -377,16 +361,14 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     const initialToken = 'r-auth-004-initial-' + crypto.randomUUID();
     const sessionId = crypto.randomUUID();
     const now = Date.now();
-    await env.DB
-      .prepare(
-        `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
+    await env.DB.prepare(
+      `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
-      )
+    )
       .bind(sessionId, initialToken, seeded.userId, now + 60_000, now, now)
       .run();
 
-    const before = await env.DB
-      .prepare(`SELECT id FROM auth_sessions WHERE token = ?`)
+    const before = await env.DB.prepare(`SELECT id FROM auth_sessions WHERE token = ?`)
       .bind(initialToken)
       .first<{ id: string }>();
     expect(before?.id).toBe(sessionId);
@@ -394,23 +376,18 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     // Simulate rotation by updating the D1 token (Better Auth's
     // session-update hook does the same UPDATE).
     const newToken = 'rotated-token-' + crypto.randomUUID();
-    await env.DB
-      .prepare(
-        `UPDATE auth_sessions SET token = ?, updated_at = ? WHERE id = ?`,
-      )
+    await env.DB.prepare(`UPDATE auth_sessions SET token = ?, updated_at = ? WHERE id = ?`)
       .bind(newToken, Date.now(), sessionId)
       .run();
 
     // The original token must no longer resolve a session.
-    const stillThere = await env.DB
-      .prepare(`SELECT id FROM auth_sessions WHERE token = ?`)
+    const stillThere = await env.DB.prepare(`SELECT id FROM auth_sessions WHERE token = ?`)
       .bind(initialToken)
       .first();
     expect(stillThere).toBeNull();
 
     // The new token resolves the same session id.
-    const after = await env.DB
-      .prepare(`SELECT id FROM auth_sessions WHERE token = ?`)
+    const after = await env.DB.prepare(`SELECT id FROM auth_sessions WHERE token = ?`)
       .bind(newToken)
       .first<{ id: string }>();
     expect(after?.id).toBe(sessionId);
@@ -439,22 +416,17 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     const token1 = 'r-auth-005-token-1';
     const token2 = 'r-auth-005-token-2';
     await env.DB.batch([
-      env.DB
-        .prepare(
-          `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
+      env.DB.prepare(
+        `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(session1Id, token1, seeded.userId, now + 60_000, now, now),
-      env.DB
-        .prepare(
-          `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
+      ).bind(session1Id, token1, seeded.userId, now + 60_000, now, now),
+      env.DB.prepare(
+        `INSERT INTO auth_sessions (id, token, user_id, expires_at, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(session2Id, token2, seeded.userId, now + 60_000, now, now),
+      ).bind(session2Id, token2, seeded.userId, now + 60_000, now, now),
     ]);
 
-    const before = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
       .bind(seeded.userId)
       .first<{ n: number }>();
     expect(before?.n ?? 0).toBe(2);
@@ -462,13 +434,11 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     // Trigger the password-change revoke by updating auth_accounts.password.
     // The trigger fires when OLD.password IS NOT NEW.password; a different
     // envelope is sufficient.
-    await env.DB
-      .prepare(`UPDATE auth_accounts SET password = ?, updated_at = ? WHERE user_id = ?`)
+    await env.DB.prepare(`UPDATE auth_accounts SET password = ?, updated_at = ? WHERE user_id = ?`)
       .bind('pbkdf2-sha256$600000$' + 'aa'.repeat(16) + '$' + 'bb'.repeat(64), now, seeded.userId)
       .run();
 
-    const after = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const after = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
       .bind(seeded.userId)
       .first<{ n: number }>();
     expect(after?.n ?? 0).toBe(0);
@@ -484,30 +454,18 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     const userId = crypto.randomUUID();
     const email = 'r-auth-006@example.test';
     await env.DB.batch([
-      env.DB
-        .prepare(
-          `INSERT INTO users (
+      env.DB.prepare(
+        `INSERT INTO users (
              id, email, display_name, email_verified, status,
              password_algorithm, password_iterations, password_salt, password_hash,
              created_at, updated_at
            ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
-        )
-        .bind(
-          userId,
-          email,
-          'R-AUTH-006',
-          PLACEHOLDER_SALT,
-          PLACEHOLDER_HASH,
-          NOW_TEXT,
-          NOW_TEXT,
-        ),
-      env.DB
-        .prepare(
-          `INSERT INTO auth_accounts (
+      ).bind(userId, email, 'R-AUTH-006', PLACEHOLDER_SALT, PLACEHOLDER_HASH, NOW_TEXT, NOW_TEXT),
+      env.DB.prepare(
+        `INSERT INTO auth_accounts (
              id, issuer, account_id, provider_id, user_id, password, created_at, updated_at
            ) VALUES (?, 'local:credential', ?, 'credential', ?, NULL, ?, ?)`,
-        )
-        .bind(`cap042-credential-${userId}`, userId, userId, NOW_MS, NOW_MS),
+      ).bind(`cap042-credential-${userId}`, userId, userId, NOW_MS, NOW_MS),
     ]);
 
     const response = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
@@ -519,8 +477,9 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     // Better Auth's verifier treats NULL password as a non-match.
     expect(response.status).toBe(401);
 
-    const sessions = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessions = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(userId)
       .first<{ n: number }>();
     expect(sessions?.n ?? 0).toBe(0);
@@ -549,7 +508,9 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     expect(await betterAuthPassword.verify({ password: six, hash: sixEnvelope })).toBe(true);
     expect(await betterAuthPassword.verify({ password: thirty, hash: thirtyEnvelope })).toBe(true);
     expect(await betterAuthPassword.verify({ password: five, hash: fiveEnvelope })).toBe(true);
-    expect(await betterAuthPassword.verify({ password: thirtyOne, hash: thirtyOneEnvelope })).toBe(true);
+    expect(await betterAuthPassword.verify({ password: thirtyOne, hash: thirtyOneEnvelope })).toBe(
+      true,
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -621,8 +582,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
 
     // No user row was created — the rejection happened at the route
     // boundary, not deep in the use case.
-    const userCount = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM users WHERE email = ?`)
+    const userCount = await env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE email = ?`)
       .bind('ab@example.test')
       .first<{ n: number }>();
     expect(userCount?.n ?? 0).toBe(0);
@@ -640,8 +600,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
       email: 'mixed.case@example.test',
     });
 
-    const stored = await env.DB
-      .prepare(`SELECT email FROM users WHERE id = ?`)
+    const stored = await env.DB.prepare(`SELECT email FROM users WHERE id = ?`)
       .bind(seeded.userId)
       .first<{ email: string }>();
     expect(stored?.email).toBe('mixed.case@example.test');
@@ -686,11 +645,10 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
 
     // auth_accounts row exists with the deterministic credential id and
     // matches the canonical ADR-006 envelope.
-    const credential = await env.DB
-      .prepare(
-        `SELECT id, issuer, account_id, provider_id, user_id, password
+    const credential = await env.DB.prepare(
+      `SELECT id, issuer, account_id, provider_id, user_id, password
          FROM auth_accounts WHERE user_id = ?`,
-      )
+    )
       .bind(userId)
       .first<{
         id: string;
@@ -706,9 +664,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     expect(credential?.account_id).toBe(userId);
     expect(credential?.provider_id).toBe('credential');
     expect(credential?.user_id).toBe(userId);
-    expect(credential?.password).toMatch(
-      /^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/,
-    );
+    expect(credential?.password).toMatch(/^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
   });
 
   // -------------------------------------------------------------------------
@@ -723,9 +679,9 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     await seedUserAndCredential({ email: 'ac17-duplicate@example.test' });
 
     // Snapshot the auth_accounts row count BEFORE the failing registration.
-    const before = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
-      .first<{ n: number }>();
+    const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_accounts`).first<{
+      n: number;
+    }>();
     const beforeN = before?.n ?? 0;
 
     const code = await seedRegistrationKey({ maxUses: 1 });
@@ -747,9 +703,9 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     // The auth_accounts count is unchanged — the duplicate-email failure
     // rolled back the entire batch, including the credential row that
     // would have been written for the second user.
-    const after = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
-      .first<{ n: number }>();
+    const after = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_accounts`).first<{
+      n: number;
+    }>();
     expect(after?.n ?? 0).toBe(beforeN);
   });
 
@@ -804,11 +760,10 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     const userId = body.data?.userId;
     expect(userId).toBeTruthy();
 
-    const credential = await env.DB
-      .prepare(
-        `SELECT id, issuer, account_id, provider_id, user_id, password
+    const credential = await env.DB.prepare(
+      `SELECT id, issuer, account_id, provider_id, user_id, password
          FROM auth_accounts WHERE user_id = ?`,
-      )
+    )
       .bind(userId)
       .first<{
         id: string;
@@ -824,9 +779,7 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     expect(credential?.account_id).toBe(userId);
     expect(credential?.provider_id).toBe('credential');
     expect(credential?.user_id).toBe(userId);
-    expect(credential?.password).toMatch(
-      /^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/,
-    );
+    expect(credential?.password).toMatch(/^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
   });
 
   // -------------------------------------------------------------------------
@@ -844,9 +797,9 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     await seedUserAndCredential({ email: 'ac18-duplicate@example.test' });
 
     // Snapshot the auth_accounts row count BEFORE the failing write.
-    const before = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
-      .first<{ n: number }>();
+    const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_accounts`).first<{
+      n: number;
+    }>();
     const beforeN = before?.n ?? 0;
 
     // AC 18 happy-path pattern: rewind installation_state to 'preflight'
@@ -888,17 +841,17 @@ describe('CAP-042 AC 19 — R-AUTH-001..009 named-test matrix', () => {
     // The auth_accounts count is unchanged — the duplicate-email failure
     // was caught before the batch ran, so the credential row that would
     // have been written for the second user is absent.
-    const after = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_accounts`)
-      .first<{ n: number }>();
+    const after = await env.DB.prepare(`SELECT COUNT(*) AS n FROM auth_accounts`).first<{
+      n: number;
+    }>();
     expect(after?.n ?? 0).toBe(beforeN);
 
     // The installation_state step is unchanged at 'preflight' — the
     // 3-statement batch (insertUser + insertCredential + advanceStep) did
     // not run, so the step advance did not occur.
-    const installState = await env.DB
-      .prepare(`SELECT status, current_step FROM installation_state WHERE id = 1`)
-      .first<{ status: string; current_step: string }>();
+    const installState = await env.DB.prepare(
+      `SELECT status, current_step FROM installation_state WHERE id = 1`,
+    ).first<{ status: string; current_step: string }>();
     expect(installState?.current_step).toBe('preflight');
   });
 });

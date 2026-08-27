@@ -1,51 +1,26 @@
--- 0004_registration_keys.verify.sql — Verify registration_keys table structure.
--- Assertions run after migration to confirm the schema is as intended.
--- These assertions are executed by the migration verify system.
+-- Verification for 0004_registration_keys.sql.
 
--- Verify the table exists
-SELECT 'registration_keys table exists' AS assertion
-FROM sqlite_master
-WHERE type = 'table' AND name = 'registration_keys';
+SELECT '0004_table_exists' AS assertion,
+  EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'registration_keys') AS pass;
 
--- Verify all required columns exist
-SELECT 'registration_keys has id column' AS assertion
+SELECT '0004_required_columns_exist' AS assertion,
+  COUNT(*) = 9 AS pass
 FROM pragma_table_info('registration_keys')
-WHERE name = 'id';
+WHERE name IN ('id', 'code_hash', 'role_id', 'max_uses', 'used_count', 'expires_at', 'revoked_at', 'created_by', 'created_at');
 
-SELECT 'registration_keys has code_hash column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'code_hash';
+SELECT '0004_max_uses_check_exists' AS assertion,
+  EXISTS (
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'registration_keys'
+      AND instr(sql, 'CHECK (max_uses >= 1)') > 0
+  ) AS pass;
 
-SELECT 'registration_keys has role_id column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'role_id';
+SELECT '0004_foreign_keys_exist' AS assertion,
+  COUNT(*) = 2 AS pass
+FROM pragma_foreign_key_list('registration_keys')
+WHERE ("from" = 'role_id' AND "table" = 'roles' AND on_delete = 'SET NULL')
+   OR ("from" = 'created_by' AND "table" = 'users' AND on_delete = 'SET NULL');
 
-SELECT 'registration_keys has max_uses column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'max_uses';
-
-SELECT 'registration_keys has used_count column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'used_count';
-
-SELECT 'registration_keys has expires_at column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'expires_at';
-
-SELECT 'registration_keys has revoked_at column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'revoked_at';
-
-SELECT 'registration_keys has created_by column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'created_by';
-
-SELECT 'registration_keys has created_at column' AS assertion
-FROM pragma_table_info('registration_keys')
-WHERE name = 'created_at';
-
--- Verify max_uses CHECK constraint exists
-SELECT 'registration_keys has max_uses check constraint' AS assertion
-FROM sqlite_master
-WHERE type = 'table' AND name = 'registration_keys'
-  AND sql LIKE '%CHECK (max_uses >= 1)%';
+SELECT '0004_tracking_row_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM d1_migrations WHERE name = '0004_registration_keys.sql';

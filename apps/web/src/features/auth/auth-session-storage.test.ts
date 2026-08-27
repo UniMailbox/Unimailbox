@@ -81,21 +81,16 @@ describe('auth-session-storage guard (AC 21)', () => {
     expect(authFiles.length).toBeGreaterThan(0);
     expect(mailboxFiles.length).toBeGreaterThan(0);
     for (const [filePath, content] of files) {
-      expect(content, `${filePath} should not use localStorage`).not.toMatch(
-        /\blocalStorage\./i,
-      );
+      expect(content, `${filePath} should not use localStorage`).not.toMatch(/\blocalStorage\./i);
       expect(content, `${filePath} should not use sessionStorage`).not.toMatch(
         /\bsessionStorage\./i,
       );
-      expect(content, `${filePath} should not reference indexedDB`).not.toMatch(
-        /\bindexedDB\b/i,
-      );
+      expect(content, `${filePath} should not reference indexedDB`).not.toMatch(/\bindexedDB\b/i);
       // Zustand's persist middleware is keyed by a `persist:` option
       // or a `persist(...)` call. Match both.
-      expect(
-        content,
-        `${filePath} should not use Zustand persist middleware`,
-      ).not.toMatch(/\bpersist\s*[:(]/);
+      expect(content, `${filePath} should not use Zustand persist middleware`).not.toMatch(
+        /\bpersist\s*[:(]/,
+      );
     }
   });
 });

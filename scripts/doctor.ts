@@ -209,21 +209,16 @@ export function evaluateWranglerBindings(
   const missingTest = BINDS.filter((n) => !testNames.has(n));
   const missingEnv = BINDS.filter((n) => !envKeys.has(n));
   const bad: string[] = [];
-  if (missingProd.length)
-    bad.push(`wrangler.jsonc missing: ${missingProd.join(', ')}`);
-  if (missingTest.length)
-    bad.push(`wrangler.test.jsonc missing: ${missingTest.join(', ')}`);
+  if (missingProd.length) bad.push(`wrangler.jsonc missing: ${missingProd.join(', ')}`);
+  if (missingTest.length) bad.push(`wrangler.test.jsonc missing: ${missingTest.join(', ')}`);
   if (missingEnv.length) bad.push(`env.ts missing: ${missingEnv.join(', ')}`);
-  if (bad.length)
-    return { name: 'wrangler-bindings', ok: false, detail: bad.join('; ') };
+  if (bad.length) return { name: 'wrangler-bindings', ok: false, detail: bad.join('; ') };
   return { name: 'wrangler-bindings', ok: true };
 }
 
 async function checkWranglerBindings(): Promise<R> {
   const prod = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
-  const test = readJsonc(
-    join(REPO, 'apps/worker/wrangler.test.jsonc'),
-  ) as Record<string, unknown>;
+  const test = readJsonc(join(REPO, 'apps/worker/wrangler.test.jsonc')) as Record<string, unknown>;
   const envBody =
     readFileSync(join(REPO, 'apps/worker/src/platform/env.ts'), 'utf-8').match(
       /type\s+Env\s*=\s*\{([\s\S]*?)\}/,
@@ -265,6 +260,20 @@ async function checkWranglerCompat(): Promise<R> {
 // Both checks below skip the verify companions so they neither demand their
 // own .verify.sql file nor double-count the sequence number.
 const MIGRATION_FILE = /^\d{4}_.+(?<!verify)\.sql$/;
+export function evaluateMigrationCompanionSources(sources: Readonly<Record<string, string>>): R {
+  const invalid = Object.entries(sources)
+    .filter(([, source]) => !/\bAS\s+assertion\b/i.test(source) || !/\bAS\s+pass\b/i.test(source))
+    .map(([name]) => name);
+  if (invalid.length > 0) {
+    return {
+      name: 'migrations-present',
+      ok: false,
+      detail: `verify files missing assertion/pass rows: ${invalid.join(', ')}`,
+    };
+  }
+  return { name: 'migrations-present', ok: true };
+}
+
 async function checkMigrationsPresent(): Promise<R> {
   const dir = join(REPO, 'migrations');
   if (!statSync(dir, { throwIfNoEntry: false }))
@@ -279,7 +288,13 @@ async function checkMigrationsPresent(): Promise<R> {
       ok: false,
       detail: `missing verify files: ${missing.join(', ')}`,
     };
-  return { name: 'migrations-present', ok: true };
+  const sources = Object.fromEntries(
+    sqls.map((sql) => {
+      const verify = sql.replace(/\.sql$/, '.verify.sql');
+      return [verify, readFileSync(join(dir, verify), 'utf-8')];
+    }),
+  );
+  return evaluateMigrationCompanionSources(sources);
 }
 
 async function checkMigrationsOrdered(): Promise<R> {
@@ -716,10 +731,7 @@ export function evaluatePreviewGateSuitePresent({
     // discipline OR leak credential material. Catching them here keeps a
     // sloppy future edit from bypassing the real D1/KV/Queue/Console
     // surface and hiding bugs, or from committing the operator API key.
-    if (
-      path === PREVIEW_GATE_PATHS.suite &&
-      /vi\.mock\(\s*['"]cloudflare:test['"]/.test(content)
-    ) {
+    if (path === PREVIEW_GATE_PATHS.suite && /vi\.mock\(\s*['"]cloudflare:test['"]/.test(content)) {
       return {
         name: 'preview-gate-suite-present',
         ok: false,

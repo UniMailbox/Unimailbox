@@ -58,10 +58,7 @@ import { ApiError } from '../infrastructure/api/errors';
 import type { ApiClient } from '../infrastructure/api/client';
 import { fetchSetupStatus } from '../features/setup/setup-queries';
 import { SetupLayout } from '../features/setup/setup-layout';
-import {
-  authQueryKeys,
-  fetchAuthSession,
-} from '../features/auth/auth-queries';
+import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 import { LoginPage } from '../features/auth/LoginPage';
 import { RegisterPage } from '../features/auth/RegisterPage';
 import { AuthErrorBoundary } from '../features/auth/AuthErrorBoundary';
@@ -248,12 +245,7 @@ const messageDetailRoute = createRoute({
   },
   component: function MessageDetailRoute(): ReactElement {
     const params = useParams({ strict: false });
-    return (
-      <MessageDetailPage
-        mailboxId={params.mailboxId}
-        messageId={params.messageId}
-      />
-    );
+    return <MessageDetailPage mailboxId={params.mailboxId} messageId={params.messageId} />;
   },
 });
 
@@ -265,9 +257,7 @@ const messageDetailRoute = createRoute({
 // `replyTo` drops the param (blank composer) instead of a guaranteed
 // parent 404, and a padded id survives trimmed. Exported for unit
 // tests (router.test.tsx) — the route is the only consumer.
-export function validateComposeSearch(
-  search: Record<string, unknown>,
-): { replyTo?: string } {
+export function validateComposeSearch(search: Record<string, unknown>): { replyTo?: string } {
   const replyTo = search['replyTo'];
   if (typeof replyTo !== 'string') {
     return {};
@@ -302,9 +292,7 @@ const composeRoute = createRoute({
     // Route-bound hook: the search type comes from THIS route's
     // validateSearch output, not from a globally registered router.
     const search = composeRoute.useSearch();
-    return (
-      <ComposeEmail mailboxId={params.mailboxId} replyToMessageId={search.replyTo} />
-    );
+    return <ComposeEmail mailboxId={params.mailboxId} replyToMessageId={search.replyTo} />;
   },
 });
 

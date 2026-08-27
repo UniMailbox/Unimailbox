@@ -40,11 +40,7 @@
 // fails verification. Accepted pre-launch; CAP-045 verifies fresh flows
 // end-to-end.
 
-import {
-  cursorPayloadSchema,
-  type CursorPayload,
-  type CursorSurface,
-} from '@unimailbox/contracts';
+import { cursorPayloadSchema, type CursorPayload, type CursorSurface } from '@unimailbox/contracts';
 
 // Re-export for existing consumers (message-read-repository.ts imports
 // the type from this module; the canonical home is now contracts).
@@ -97,13 +93,10 @@ function base64UrlToBytes(input: string): Uint8Array {
  */
 async function importSigningKey(key: string): Promise<CryptoKey> {
   const bytes = new TextEncoder().encode(key);
-  return crypto.subtle.importKey(
-    'raw',
-    bytes,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign', 'verify'],
-  );
+  return crypto.subtle.importKey('raw', bytes, { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ]);
 }
 
 /**
@@ -162,12 +155,7 @@ export async function verifyCursor(
   // 3. Verify the signature against the payload bytes. A mismatch
   // returns false; we map that to null.
   const signingKey = await importSigningKey(key);
-  const signatureOk = await crypto.subtle.verify(
-    'HMAC',
-    signingKey,
-    signatureBytes,
-    payloadBytes,
-  );
+  const signatureOk = await crypto.subtle.verify('HMAC', signingKey, signatureBytes, payloadBytes);
   if (!signatureOk) return null;
 
   // 4. Parse the JSON payload and validate it against the contracts

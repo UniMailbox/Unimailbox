@@ -41,10 +41,7 @@ export interface MessageDetailPageProps {
   readonly messageId: string;
 }
 
-export function MessageDetailPage({
-  mailboxId,
-  messageId,
-}: MessageDetailPageProps): ReactElement {
+export function MessageDetailPage({ mailboxId, messageId }: MessageDetailPageProps): ReactElement {
   const sessionQuery = authSessionQuery();
 
   if (sessionQuery.data === undefined) {
@@ -65,10 +62,7 @@ interface MessageDetailContentProps {
   readonly messageId: string;
 }
 
-function MessageDetailContent({
-  mailboxId,
-  messageId,
-}: MessageDetailContentProps): ReactElement {
+function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProps): ReactElement {
   const sessionQuery = authSessionQuery();
   const detailQuery = messageDetailQuery(mailboxId, messageId);
   const threadQuery = messageThreadQuery(mailboxId, messageId);
@@ -130,9 +124,7 @@ function MessageDetailContent({
       <header className="mailbox-header">
         <h1 className="mailbox-title">Message</h1>
         <div className="mailbox-header-meta">
-          <span data-testid="mailbox-user-email">
-            {sessionQuery.data?.email ?? ''}
-          </span>
+          <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
           <LogoutButton />
         </div>
       </header>
@@ -222,7 +214,5 @@ function formatFrom(address: string, name: string): string {
 }
 
 function formatRecipients(recipients: ReadonlyArray<MessageRecipientInfo>): string {
-  return recipients
-    .map((r) => formatFrom(r.address, r.displayName))
-    .join(', ');
+  return recipients.map((r) => formatFrom(r.address, r.displayName)).join(', ');
 }

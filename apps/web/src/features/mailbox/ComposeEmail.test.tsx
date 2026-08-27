@@ -93,8 +93,7 @@ const PARENT_DETAIL: MessageDetail = {
   },
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ---------------------------------------------------------------------------
 // Fetch harness: URL+method dispatch with header AND body capture.
@@ -117,10 +116,7 @@ function dispatchFetch(routes: ReadonlyArray<RouteHandler>): {
   calls: CapturedRequest[];
 } {
   const calls: CapturedRequest[] = [];
-  const fetchImpl = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
     const headers: Record<string, string> = {};
@@ -166,8 +162,7 @@ function sessionRoute(): RouteHandler {
 function parentDetailRoute(respond: () => Response): RouteHandler {
   return {
     match: (url, method) =>
-      method === 'GET' &&
-      url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${PARENT_ID}`,
+      method === 'GET' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${PARENT_ID}`,
     response: respond,
   };
 }
@@ -181,8 +176,7 @@ function sendRoute(options: SendRouteOptions): RouteHandler {
   let attempts = 0;
   return {
     match: (url, method) =>
-      method === 'POST' &&
-      url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/send`,
+      method === 'POST' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/send`,
     response: () => {
       const response = options.responses[Math.min(attempts, options.responses.length - 1)];
       if (response === undefined) {
@@ -236,10 +230,7 @@ async function renderCompose(options: RenderComposeOptions): Promise<{
     },
   });
   if (options.session !== false) {
-    queryClient.setQueryData(
-      authQueryKeys.session(),
-      options.session === null ? null : SESSION,
-    );
+    queryClient.setQueryData(authQueryKeys.session(), options.session === null ? null : SESSION);
   }
   if (options.seedParentDetail !== undefined) {
     queryClient.setQueryData(
@@ -257,10 +248,7 @@ async function renderCompose(options: RenderComposeOptions): Promise<{
     component: () => {
       const params = useParams({ strict: false });
       return (
-        <ComposeEmail
-          mailboxId={params.mailboxId}
-          replyToMessageId={options.replyToMessageId}
-        />
+        <ComposeEmail mailboxId={params.mailboxId} replyToMessageId={options.replyToMessageId} />
       );
     },
   });
@@ -325,7 +313,10 @@ async function fillAndSubmit(
 
 describe('ComposeEmail — validation (AC 2)', () => {
   it('blocks submit with no To, reports the error, and focuses the To field', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Subject'), 'Only a subject');
     await user.click(screen.getByRole('button', { name: 'Send' }));
@@ -339,7 +330,10 @@ describe('ComposeEmail — validation (AC 2)', () => {
   });
 
   it('blocks submit when a To token is not a valid email address', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     await fillAndSubmit(user, { to: 'a@b.test, not-an-email', subject: 'Hi' });
 
@@ -350,7 +344,10 @@ describe('ComposeEmail — validation (AC 2)', () => {
   });
 
   it('blocks submit when a Cc token is not a valid email address', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     // (Cc itself may be empty — the pending-state test below submits
     // with an untouched Cc and succeeds.)
@@ -363,7 +360,10 @@ describe('ComposeEmail — validation (AC 2)', () => {
   });
 
   it('blocks submit with an empty subject and focuses the Subject field (To valid)', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('To'), 'a@b.test');
     await user.click(screen.getByRole('button', { name: 'Send' }));
@@ -377,14 +377,15 @@ describe('ComposeEmail — validation (AC 2)', () => {
   });
 
   it('blocks submit with a subject longer than 998 characters', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     await fillAndSubmit(user, { to: 'a@b.test', subject: 's'.repeat(999) });
 
     await waitFor(() => {
-      expect(
-        screen.getByText('Subject must be at most 998 characters.'),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Subject must be at most 998 characters.')).toBeInTheDocument();
     });
     expect(postCalls(calls)).toHaveLength(0);
   });
@@ -392,7 +393,10 @@ describe('ComposeEmail — validation (AC 2)', () => {
   // Fix pass (h): a whitespace-only subject is EMPTY after the schema's
   // trim — required, not merely cosmetic.
   it('blocks submit with a whitespace-only subject (fix h)', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     await fillAndSubmit(user, { to: 'a@b.test', subject: '   ' });
 
@@ -406,7 +410,10 @@ describe('ComposeEmail — validation (AC 2)', () => {
   // a million synthesized keystrokes would dominate the suite's runtime
   // while exercising the same RHF registration path.
   it('blocks submit with a 1,000,001-character body and sends zero POSTs (fix h)', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     fireEvent.change(screen.getByLabelText('Body'), {
       target: { value: 'x'.repeat(1_000_001) },
     });
@@ -414,9 +421,7 @@ describe('ComposeEmail — validation (AC 2)', () => {
     await fillAndSubmit(user, { to: 'a@b.test', subject: 'Oversized' });
 
     await waitFor(() => {
-      expect(
-        screen.getByText('Body must be at most 1,000,000 characters.'),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Body must be at most 1,000,000 characters.')).toBeInTheDocument();
     });
     expect(postCalls(calls)).toHaveLength(0);
   });
@@ -459,7 +464,10 @@ describe('ComposeEmail — a11y (AC 2)', () => {
 
 describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
   it('a valid form submits exactly one POST with the exact payload (R-DATA-001 normalisation, no threading keys)', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     await fillAndSubmit(user, {
       to: ' User@Example.COM , second@Example.com ',
@@ -494,10 +502,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
     const held = new Promise<Response>((resolve) => {
       resolveSend = resolve;
     });
-    const { calls } = await renderBlankComposer([
-      sessionRoute(),
-      sendRoute({ responses: [held] }),
-    ]);
+    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [held] })]);
     const user = userEvent.setup();
     await fillAndSubmit(user, { to: 'a@b.test', subject: 'Hi', body: 'b' });
 
@@ -549,7 +554,9 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
     const { calls } = await renderBlankComposer([
       sessionRoute(),
       sendRoute({
-        responses: [errorResponse('PROVIDER_CONNECTION_NOT_FOUND', 'No active provider connection', 409)],
+        responses: [
+          errorResponse('PROVIDER_CONNECTION_NOT_FOUND', 'No active provider connection', 409),
+        ],
       }),
     ]);
     const user = userEvent.setup();
@@ -575,10 +582,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
     const { calls } = await renderBlankComposer([
       sessionRoute(),
       sendRoute({
-        responses: [
-          errorResponse('INTERNAL', 'boom', 400),
-          sendAccepted(),
-        ],
+        responses: [errorResponse('INTERNAL', 'boom', 400), sendAccepted()],
       }),
     ]);
     const user = userEvent.setup();
@@ -637,7 +641,10 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
   // Fix pass (h): the body may be empty (AC 2) — the POST carries
   // textBody '' and still succeeds.
   it('sends successfully with an empty body (fix h)', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     // body untouched — '' by default.
     await fillAndSubmit(user, { to: 'a@b.test', subject: 'No body' });
@@ -665,7 +672,10 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
   // zod's .email() needs a 2+ char TLD — so the test uses a
   // schema-valid address with the same trailing-comma shape.)
   it('a trailing-comma To input sends one clean recipient (fix h)', async () => {
-    const { calls } = await renderBlankComposer([sessionRoute(), sendRoute({ responses: [sendAccepted()] })]);
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
     const user = userEvent.setup();
     await fillAndSubmit(user, { to: 'a@b.test,,', subject: 'Trailing commas' });
 
@@ -687,7 +697,11 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
 describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
   it('pre-fills from the parent detail per D-CAP-044-C and sends inReplyTo/references in the POST body', async () => {
     const { calls } = await renderCompose({
-      routes: [sessionRoute(), parentDetailRoute(() => jsonResponse({ data: PARENT_DETAIL })), sendRoute({ responses: [sendAccepted()] })],
+      routes: [
+        sessionRoute(),
+        parentDetailRoute(() => jsonResponse({ data: PARENT_DETAIL })),
+        sendRoute({ responses: [sendAccepted()] }),
+      ],
       replyToMessageId: PARENT_ID,
     });
 
@@ -761,10 +775,7 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
       resolveRefetch = resolve;
     });
     const { queryClient } = await renderCompose({
-      routes: [
-        sessionRoute(),
-        parentDetailRoute(() => heldRefetch as unknown as Response),
-      ],
+      routes: [sessionRoute(), parentDetailRoute(() => heldRefetch as unknown as Response)],
       replyToMessageId: PARENT_ID,
       seedParentDetail: PARENT_DETAIL,
     });
@@ -783,8 +794,7 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
     resolveRefetch(errorResponse('INTERNAL', 'refetch boom', 400));
     await waitFor(() => {
       expect(
-        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID))
-          ?.error,
+        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID))?.error,
       ).not.toBeNull();
     });
 
@@ -797,7 +807,7 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
 
   // Fix pass (c), second half: the send-success invalidation refires the
   // parent query; its failure must not tear down the confirmation.
-  it('(fix c) a successful send\'s confirmation survives a failing parent refetch triggered by the invalidation', async () => {
+  it("(fix c) a successful send's confirmation survives a failing parent refetch triggered by the invalidation", async () => {
     let detailAttempts = 0;
     const { queryClient } = await renderCompose({
       routes: [
@@ -828,8 +838,7 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
     // and the refetch failed — the confirmation and blank form stay.
     await waitFor(() => {
       expect(
-        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID))
-          ?.error,
+        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID))?.error,
       ).not.toBeNull();
     });
     expect(screen.getByTestId('compose-confirmation')).toBeInTheDocument();

@@ -12,7 +12,10 @@ export function MessageDetailSkeleton(): ReactElement {
   return (
     <main className="mailbox-shell" data-testid="message-detail-skeleton">
       <Card title="Loading message" description="Fetching this message and its thread.">
-        <div className="message-detail-skeleton-header" data-testid="message-detail-skeleton-header" />
+        <div
+          className="message-detail-skeleton-header"
+          data-testid="message-detail-skeleton-header"
+        />
         <div className="message-detail-skeleton-body" data-testid="message-detail-skeleton-body" />
       </Card>
     </main>

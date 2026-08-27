@@ -112,8 +112,7 @@ const THREAD = {
   items: [ROOT_THREAD_ITEM, ACTIVE_THREAD_ITEM],
 };
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ---------------------------------------------------------------------------
 // Fetch harness: URL+method dispatch with header capture.
@@ -135,10 +134,7 @@ function dispatchFetch(routes: ReadonlyArray<RouteHandler>): {
   calls: CapturedRequest[];
 } {
   const calls: CapturedRequest[] = [];
-  const fetchImpl = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
     const headers: Record<string, string> = {};
@@ -191,8 +187,7 @@ function detailRoute(respond: () => Response): RouteHandler {
     // The detail URL is the exact message path WITHOUT a /thread
     // suffix and without the PATCH /read suffix.
     match: (url, method) =>
-      method === 'GET' &&
-      url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
+      method === 'GET' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
     response: respond,
   };
 }
@@ -200,8 +195,7 @@ function detailRoute(respond: () => Response): RouteHandler {
 function threadRoute(): RouteHandler {
   return {
     match: (url, method) =>
-      method === 'GET' &&
-      url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}/thread`,
+      method === 'GET' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}/thread`,
     response: () => jsonResponse({ data: THREAD }),
   };
 }
@@ -209,8 +203,7 @@ function threadRoute(): RouteHandler {
 function markReadRoute(): RouteHandler {
   return {
     match: (url, method) =>
-      method === 'PATCH' &&
-      url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}/read`,
+      method === 'PATCH' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}/read`,
     response: () => jsonResponse({ data: { ok: true } }),
   };
 }
@@ -218,8 +211,7 @@ function markReadRoute(): RouteHandler {
 function siblingDetailRoute(): RouteHandler {
   return {
     match: (url, method) =>
-      method === 'GET' &&
-      url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${ROOT_ID}`,
+      method === 'GET' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${ROOT_ID}`,
     response: () =>
       jsonResponse({
         data: { ...DETAIL, id: ROOT_ID, subject: 'Thread root', isRead: 1 },
@@ -273,12 +265,7 @@ async function renderDetailPage(options: RenderDetailOptions): Promise<{
     path: '/mailbox/$mailboxId/messages/$messageId',
     component: () => {
       const params = useParams({ strict: false });
-      return (
-        <MessageDetailPage
-          mailboxId={params.mailboxId}
-          messageId={params.messageId}
-        />
-      );
+      return <MessageDetailPage mailboxId={params.mailboxId} messageId={params.messageId} />;
     },
   });
   const inboxRouteEntry = createRoute({
@@ -299,9 +286,7 @@ async function renderDetailPage(options: RenderDetailOptions): Promise<{
     component: () => <div data-testid="arrived-login">login</div>,
   });
   const history = createMemoryHistory({
-    initialEntries: [
-      options.initialPath ?? `/mailbox/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
-    ],
+    initialEntries: [options.initialPath ?? `/mailbox/${MAILBOX_ID}/messages/${MESSAGE_ID}`],
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
@@ -348,17 +333,11 @@ describe('MessageDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('message-detail-page')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('message-body').textContent).toBe(
-      'The plain-text report body.',
-    );
-    expect(screen.getByTestId('message-from').textContent).toBe(
-      'Sender Name <sender@example.com>',
-    );
+    expect(screen.getByTestId('message-body').textContent).toBe('The plain-text report body.');
+    expect(screen.getByTestId('message-from').textContent).toBe('Sender Name <sender@example.com>');
     expect(screen.getByTestId('message-to').textContent).toContain('me@example.com');
     expect(screen.getByTestId('message-cc').textContent).toContain('cc@example.com');
-    expect(screen.getByTestId('message-date').textContent).toBe(
-      '2026-02-02T00:00:00Z',
-    );
+    expect(screen.getByTestId('message-date').textContent).toBe('2026-02-02T00:00:00Z');
 
     // Headers section exists and is collapsed by default (AC 11).
     const headers = screen.getByTestId('message-headers');
@@ -444,9 +423,7 @@ describe('MessageDetailPage', () => {
     const user = userEvent.setup();
     await user.click(siblingButton);
     await waitFor(() => {
-      expect(history.location.pathname).toBe(
-        `/mailbox/${MAILBOX_ID}/messages/${ROOT_ID}`,
-      );
+      expect(history.location.pathname).toBe(`/mailbox/${MAILBOX_ID}/messages/${ROOT_ID}`);
     });
   });
 
@@ -522,7 +499,11 @@ describe('MessageDetailPage', () => {
       expect(item?.isRead).toBe(1);
     });
     // No inbox refetch was issued alongside the cache write.
-    expect(calls.some((call) => call.method === 'GET' && call.url.endsWith(`/mailboxes/${MAILBOX_ID}/messages`))).toBe(false);
+    expect(
+      calls.some(
+        (call) => call.method === 'GET' && call.url.endsWith(`/mailboxes/${MAILBOX_ID}/messages`),
+      ),
+    ).toBe(false);
   });
 
   // G6 (fe M1 / code M1): the mark-read success must flip the DETAIL
@@ -591,8 +572,7 @@ describe('MessageDetailPage', () => {
     ]);
     const detailFor = (id: string): RouteHandler => ({
       match: (url, method) =>
-        method === 'GET' &&
-        url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${id}`,
+        method === 'GET' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${id}`,
       response: () =>
         jsonResponse({
           data: detailBody({
@@ -604,8 +584,7 @@ describe('MessageDetailPage', () => {
     });
     const markReadFor = (id: string): RouteHandler => ({
       match: (url, method) =>
-        method === 'PATCH' &&
-        url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${id}/read`,
+        method === 'PATCH' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${id}/read`,
       response: () => {
         readByMessage.set(id, true);
         return jsonResponse({ data: { ok: true } });

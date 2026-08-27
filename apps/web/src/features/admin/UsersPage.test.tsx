@@ -236,7 +236,9 @@ describe('UsersPage (CAP-044 Slice 3 / AC 19)', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('admin-user-row')).toHaveLength(3);
     });
-    const allRows = screen.getAllByTestId('admin-user-row').map((r) => r.getAttribute('data-user-id'));
+    const allRows = screen
+      .getAllByTestId('admin-user-row')
+      .map((r) => r.getAttribute('data-user-id'));
     expect(allRows).toContain('00000000-0000-4000-8000-000000000003');
     // The second fetch must carry the first page's cursor (R-API-005).
     const usersCalls = fetchCalls.filter(
@@ -282,7 +284,8 @@ describe('UsersPage (CAP-044 Slice 3 / AC 19)', () => {
   it('a failed load-more keeps accumulated rows and shows the error banner', async () => {
     renderUsersPage({
       resolvers: [
-        () => jsonResponse({ data: { items: [userRow(1), userRow(2)], nextCursor: 'cursor-page-1' } }),
+        () =>
+          jsonResponse({ data: { items: [userRow(1), userRow(2)], nextCursor: 'cursor-page-1' } }),
         () => jsonResponse({ data: { items: [userRow(3)], nextCursor: 'cursor-page-2' } }),
         // 409 is non-retryable for the ApiClient (only 5xx/429 back off),
         // so the failure surfaces immediately — no test may sleep through
@@ -314,9 +317,11 @@ describe('UsersPage (CAP-044 Slice 3 / AC 19)', () => {
   it('an INVALID_CURSOR load-more offers Start over, which resets the page chain', async () => {
     renderUsersPage({
       resolvers: [
-        () => jsonResponse({ data: { items: [userRow(1), userRow(2)], nextCursor: 'cursor-page-1' } }),
+        () =>
+          jsonResponse({ data: { items: [userRow(1), userRow(2)], nextCursor: 'cursor-page-1' } }),
         () => errorResponse('INVALID_CURSOR', 'The supplied cursor is invalid', 400),
-        () => jsonResponse({ data: { items: [userRow(1), userRow(2)], nextCursor: 'cursor-page-1' } }),
+        () =>
+          jsonResponse({ data: { items: [userRow(1), userRow(2)], nextCursor: 'cursor-page-1' } }),
       ],
     });
     await waitFor(() => {

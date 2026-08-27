@@ -27,8 +27,4 @@ export {
   useSignOutMutation,
   useRegisterMutation,
 } from './auth-queries';
-export type {
-  AuthSignInInput,
-  AuthRegisterInput,
-  AuthRegisterResult,
-} from './auth-queries';
+export type { AuthSignInInput, AuthRegisterInput, AuthRegisterResult } from './auth-queries';

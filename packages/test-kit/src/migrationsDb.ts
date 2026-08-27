@@ -44,6 +44,7 @@ import messageUserStateSoftDeleteSql from '../../../migrations/0016_message_user
 // the 0006 single-column PK and a second member's read/delete row cannot
 // be written.
 import messageUserStateCompositePkSql from '../../../migrations/0017_message_user_state_composite_pk.sql?raw';
+import auditReadPermissionBackfillSql from '../../../migrations/0018_audit_read_permission_backfill.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -138,6 +139,11 @@ const MIGRATIONS = [
     name: '0017_message_user_state_composite_pk',
     fileName: '0017_message_user_state_composite_pk.sql',
     sql: messageUserStateCompositePkSql,
+  },
+  {
+    name: '0018_audit_read_permission_backfill',
+    fileName: '0018_audit_read_permission_backfill.sql',
+    sql: auditReadPermissionBackfillSql,
   },
 ] as const;
 

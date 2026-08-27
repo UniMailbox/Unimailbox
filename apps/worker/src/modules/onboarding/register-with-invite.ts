@@ -26,11 +26,7 @@ import type { IdGenerator } from '../../platform/ids';
 import type { EmailAddress } from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 import { hashPassword } from '../../platform/crypto';
-import {
-  prepareCreateUser,
-  prepareCreateCredential,
-  encodeCredentialEnvelope,
-} from '../identity';
+import { prepareCreateUser, prepareCreateCredential, encodeCredentialEnvelope } from '../identity';
 import { prepareIncrementKeyUsage } from './registration-key-repository';
 
 export interface RegisterWithInviteInput {

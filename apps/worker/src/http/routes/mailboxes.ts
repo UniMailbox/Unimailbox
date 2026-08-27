@@ -174,7 +174,7 @@ export function mailboxRoutes(): Hono<AppEnv> {
           now,
         ),
         // 2. Audit event (R-AUDIT-001 + CAP-046 / D-CAP-046-A: carries
-      // the request-id the middleware stamped on this /mailboxes POST).
+        // the request-id the middleware stamped on this /mailboxes POST).
         prepareCreateAuditEvent(c.env.DB, {
           id: auditEventId,
           actorUserId: userId,

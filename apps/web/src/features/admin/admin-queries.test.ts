@@ -10,11 +10,7 @@
 // a 2xx JSON body that does not match auditEventListResponseSchema must
 // surface as ApiError INVALID_RESPONSE, never a raw ZodError.
 import { describe, expect, it } from 'vitest';
-import {
-  adminQueryKeys,
-  auditEventsPath,
-  fetchAuditEventsPage,
-} from './admin-queries';
+import { adminQueryKeys, auditEventsPath, fetchAuditEventsPage } from './admin-queries';
 import { createApiClient } from '../../infrastructure/api/client';
 import { ApiError } from '../../infrastructure/api/errors';
 
@@ -112,12 +108,8 @@ describe('adminQueryKeys userId scoping (Slice 3 fix (a) — cross-user cache di
       adminQueryKeys.auditEvents('u-2', {}),
     );
     expect(adminQueryKeys.users('u-1')).not.toEqual(adminQueryKeys.users('u-2'));
-    expect(adminQueryKeys.connections('u-1')).not.toEqual(
-      adminQueryKeys.connections('u-2'),
-    );
-    expect(adminQueryKeys.webhookEvents('u-1')).not.toEqual(
-      adminQueryKeys.webhookEvents('u-2'),
-    );
+    expect(adminQueryKeys.connections('u-1')).not.toEqual(adminQueryKeys.connections('u-2'));
+    expect(adminQueryKeys.webhookEvents('u-1')).not.toEqual(adminQueryKeys.webhookEvents('u-2'));
   });
 
   it('keys the same user stably — the scoping adds no instability within one session', () => {
@@ -135,7 +127,10 @@ describe('fetchAuditEventsPage (Slice 2 fix (f))', () => {
     // ZodError from the page hook.
     const body = JSON.stringify({ data: { items: [], nextCursor: 42 } });
     const fetchImpl = (async () =>
-      new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
     const apiClient = createApiClient({
       baseUrl: '',
       getSessionToken: () => null,

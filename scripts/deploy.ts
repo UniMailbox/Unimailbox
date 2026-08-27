@@ -33,6 +33,7 @@ const RESOLVED_CONFIG_PATH = resolve(WORKER_DIR, '.wrangler.resolved.jsonc');
 
 // F6: Shared migration filename regex (matches db-migrate.ts)
 const MIGRATION_FILE = /^\d{4}_[A-Za-z0-9_-]+\.sql$/;
+const VERIFY_FILE = /^\d{4}_[A-Za-z0-9_-]+\.verify\.sql$/;
 
 export interface ResourceState {
   d1DatabaseId?: string;
@@ -68,8 +69,12 @@ const skipMigrate = args.has('--skip-migrate');
 // ENVIRONMENT guard (matches db-migrate.ts pattern)
 // ---------------------------------------------------------------------
 export const checkEnvironmentGuard = (env: string | undefined): { ok: boolean; error?: string } => {
-  if (!env || env === 'local') {
-    return { ok: false, error: `ENVIRONMENT=${env ?? '(unset)'} (must be non-'local')` };
+  const deployEnvironments = ['preview', 'staging', 'production'] as const;
+  if (!env || !deployEnvironments.includes(env as (typeof deployEnvironments)[number])) {
+    return {
+      ok: false,
+      error: `ENVIRONMENT=${env ?? '(unset)'} (must be one of ${deployEnvironments.join('|')})`,
+    };
   }
   return { ok: true };
 };
@@ -266,6 +271,64 @@ function parseWranglerJson(
   }
   return { ok: true, data: parsed };
 }
+
+export interface MigrationVerificationAssertion {
+  assertion: string;
+  pass: number;
+}
+
+export type MigrationVerificationResult =
+  | { ok: true; assertions: MigrationVerificationAssertion[] }
+  | { ok: false; error: string };
+
+/** Parse and enforce the `{ assertion, pass }` migration companion contract. */
+export const parseMigrationVerificationOutput = (
+  raw: string,
+  source: string,
+): MigrationVerificationResult => {
+  const parsed = parseWranglerJson({ status: 0, stdout: raw }, source);
+  if (!parsed.ok) return parsed;
+
+  const assertions: MigrationVerificationAssertion[] = [];
+  for (const batch of parsed.data as Array<{ results: unknown }>) {
+    if (!Array.isArray(batch.results)) {
+      return { ok: false, error: `${source}: Wrangler batch results must be an array` };
+    }
+    for (const row of batch.results) {
+      if (!row || typeof row !== 'object') continue;
+      const hasAssertion = 'assertion' in row;
+      const hasPass = 'pass' in row;
+      if (!hasAssertion && !hasPass) {
+        return {
+          ok: false,
+          error: `${source}: unexpected non-assertion row ${JSON.stringify(row)}`,
+        };
+      }
+      const candidate = row as { assertion?: unknown; pass?: unknown };
+      if (typeof candidate.assertion !== 'string' || typeof candidate.pass !== 'number') {
+        return {
+          ok: false,
+          error: `${source}: malformed assertion row ${JSON.stringify(row)}`,
+        };
+      }
+      assertions.push({ assertion: candidate.assertion, pass: candidate.pass });
+    }
+  }
+
+  if (assertions.length === 0) {
+    return { ok: false, error: `${source}: zero assertion rows returned` };
+  }
+  const failed = assertions.filter((row) => row.pass !== 1);
+  if (failed.length > 0) {
+    return {
+      ok: false,
+      error: `${source}: failed assertion(s): ${failed
+        .map((row) => `${row.assertion} (pass=${row.pass})`)
+        .join(', ')}`,
+    };
+  }
+  return { ok: true, assertions };
+};
 
 function extractColumn(parsed: unknown, col: string): string[] {
   const out: string[] = [];
@@ -842,6 +905,16 @@ export const evaluateDeployConfigForTarget = (
   resolved: string,
   targetEnv: string,
 ): DeployConfigGuard => {
+  const deployEnvironments = ['preview', 'staging', 'production'] as const;
+  if (
+    targetEnv !== 'local' &&
+    !deployEnvironments.includes(targetEnv as (typeof deployEnvironments)[number])
+  ) {
+    return {
+      ok: false,
+      error: `Unknown deploy target "${targetEnv}"; expected local|${deployEnvironments.join('|')}`,
+    };
+  }
   // Refuse ENVIRONMENT=local in a non-local deploy.
   const envMatch = resolved.match(/"ENVIRONMENT"\s*:\s*"([^"]+)"/);
   const envValue = envMatch?.[1];
@@ -855,6 +928,12 @@ export const evaluateDeployConfigForTarget = (
     return {
       ok: false,
       error: `wrangler.jsonc is missing ENVIRONMENT; the deploy target is "${targetEnv}"`,
+    };
+  }
+  if (targetEnv !== 'local' && envValue !== targetEnv) {
+    return {
+      ok: false,
+      error: `wrangler.jsonc ENVIRONMENT is "${envValue}" but the deploy target is "${targetEnv}"; the values must match exactly`,
     };
   }
   // Refuse BETTER_AUTH_URL=http://localhost in a non-local deploy — Better
@@ -1040,9 +1119,9 @@ const runRemoteMigrations = (): void => {
 
   // List migration files (F6: use shared MIGRATION_FILE regex)
   const migrationsDir = resolve(REPO, 'migrations');
-  const files = readdirSync(migrationsDir)
-    .filter((f: string) => MIGRATION_FILE.test(f))
-    .sort();
+  const directoryEntries = readdirSync(migrationsDir);
+  const files = directoryEntries.filter((f: string) => MIGRATION_FILE.test(f)).sort();
+  const verifyFiles = new Set(directoryEntries.filter((f: string) => VERIFY_FILE.test(f)));
 
   // Read the remote applied set — exit 1 on parse failure (handled inside).
   const applied = readRemoteApplied();
@@ -1064,6 +1143,18 @@ const runRemoteMigrations = (): void => {
     // no-op log line.
     console.log(`No pending migrations (${files.length} already applied).`);
     return;
+  }
+
+  const invalidCompanions = pending
+    .map((file) => file.replace(/\.sql$/, '.verify.sql'))
+    .filter((verifyFile) => {
+      if (!verifyFiles.has(verifyFile)) return true;
+      const source = readFileSync(resolve(migrationsDir, verifyFile), 'utf-8');
+      return !/\bAS\s+assertion\b/i.test(source) || !/\bAS\s+pass\b/i.test(source);
+    });
+  if (invalidCompanions.length > 0) {
+    console.error(`Missing or invalid migration companion(s): ${invalidCompanions.join(', ')}`);
+    process.exit(1);
   }
 
   for (const file of pending) {
@@ -1088,6 +1179,30 @@ const runRemoteMigrations = (): void => {
       console.error(`Failed to apply migration ${file}`);
       process.exit(result.status ?? 1); // F12: propagate wrangler status
     }
+
+    const verifyFile = file.replace(/\.sql$/, '.verify.sql');
+    console.log(`  Verifying ${verifyFile}…`);
+    const verification = wrangler([
+      'd1',
+      'execute',
+      'DB',
+      '--config',
+      RESOLVED_CONFIG_PATH,
+      '--remote',
+      '--file',
+      resolve(migrationsDir, verifyFile),
+      '--json',
+    ]);
+    if (verification.status !== 0) {
+      console.error(`Failed to execute verification ${verifyFile}`);
+      process.exit(verification.status ?? 1);
+    }
+    const verificationResult = parseMigrationVerificationOutput(verification.stdout, verifyFile);
+    if (!verificationResult.ok) {
+      console.error(`Migration verification failed: ${verificationResult.error}`);
+      process.exit(1);
+    }
+    console.log(`  ${verifyFile}: ${verificationResult.assertions.length} assertion(s) passed.`);
   }
   console.log('  Migrations applied.');
 };
@@ -1183,7 +1298,7 @@ const main = async (env: string): Promise<void> => {
     console.error(
       '    400 INVALID_CURSOR and the inbox will refetch from start (CAP-043 acceptance).',
     );
-    console.error('\nType \'yes\' to continue: ');
+    console.error("\nType 'yes' to continue: ");
 
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {

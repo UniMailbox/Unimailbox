@@ -23,6 +23,9 @@ export default defineConfig({
   ],
   test: {
     name: 'workers',
+    // Binding-backed files call cloudflare:test reset() and apply migrations.
+    // They must not race each other against the same Workers-pool storage.
+    fileParallelism: false,
     // CAP-045: include `test/**/*.worker.test.ts` so the preview-gate suite
     // (which needs the adjacent setup.ts spies) is discovered alongside the
     // `src/**` suite. Both globs share the worker-pool binding discipline.

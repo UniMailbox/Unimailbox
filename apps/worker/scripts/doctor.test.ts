@@ -13,6 +13,7 @@ import {
   evaluateWebAssetsBinding,
   evaluateQueueConsumerTopology,
   evaluateMigrationStrategyPendingOnly,
+  evaluateMigrationCompanionSources,
   evaluateWranglerBindings,
   parseJsonc,
   type R,
@@ -348,5 +349,24 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       expect(r.detail).toContain('BETTER_AUTH_URL');
       expect(r.detail).toContain('AUTH_PROVIDER');
     });
+  });
+});
+
+describe('migration companion assertion contract', () => {
+  it('accepts named assertion/pass queries', () => {
+    expect(
+      evaluateMigrationCompanionSources({
+        '0001_ok.verify.sql': "SELECT 'table_exists' AS assertion, 1 AS pass;",
+      }),
+    ).toEqual<R>({ name: 'migrations-present', ok: true });
+  });
+
+  it('rejects legacy SELECT output that the runner would otherwise ignore', () => {
+    const result = evaluateMigrationCompanionSources({
+      '0001_bad.verify.sql': "SELECT 'looks fine' AS status;",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('0001_bad.verify.sql');
+    expect(result.detail).toContain('assertion/pass');
   });
 });

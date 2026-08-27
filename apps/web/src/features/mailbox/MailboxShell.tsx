@@ -55,13 +55,9 @@ export function MailboxShell(): ReactElement {
           <LogoutButton />
         </div>
       </header>
-      <Card
-        title="Authorized"
-        description="You are signed in. The full inbox lands with CAP-043."
-      >
+      <Card title="Authorized" description="You are signed in. The full inbox lands with CAP-043.">
         <p data-testid="mailbox-placeholder">
-          Authorized mailbox shell. Inbox, threads, and compose land with
-          CAP-043 and CAP-044.
+          Authorized mailbox shell. Inbox, threads, and compose land with CAP-043 and CAP-044.
         </p>
         {descriptor.displayName !== null ? (
           <p className="mailbox-subtitle" data-testid="mailbox-display-name">

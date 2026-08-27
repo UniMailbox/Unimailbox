@@ -122,11 +122,7 @@ export function LoginPage(): ReactElement {
             >
               {submitting ? <Spinner /> : 'Sign in'}
             </Button>
-            <Link
-              to="/register"
-              className="btn btn-ghost btn-md"
-              data-testid="login-register-link"
-            >
+            <Link to="/register" className="btn btn-ghost btn-md" data-testid="login-register-link">
               Create an account
             </Link>
           </div>

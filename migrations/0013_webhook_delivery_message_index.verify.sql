@@ -1,41 +1,30 @@
--- migrations/0013_webhook_delivery_message_index.verify.sql — Verification
--- queries for 0013_webhook_delivery_message_index.sql.
---
--- Verification checks:
--- 1. provider_message_id column was added to webhook_deliveries
--- 2. The composite index exists
--- 3. The generated column is populated when raw_payload contains messageId
--- 4. The find-unmatched query returns rows with message_id IS NULL
--- 5. Migration tracking row exists
+-- Verification for 0013_webhook_delivery_message_index.sql.
+-- The generated-column expression is verified structurally; the worker upgrade
+-- suite owns the load-bearing write/read behavior without mutating production
+-- data from an operator verification script.
 
--- Verify provider_message_id column was added
-SELECT COUNT(*) = 1 FROM pragma_table_info('webhook_deliveries')
-WHERE name = 'provider_message_id';
+SELECT '0013_generated_column_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM pragma_table_xinfo('webhook_deliveries')
+WHERE name = 'provider_message_id' AND type = 'TEXT' AND hidden IN (2, 3);
 
--- Verify the composite index exists
-SELECT COUNT(*) >= 1 FROM pragma_index_list('webhook_deliveries')
-WHERE name = 'webhook_deliveries_provider_message_id_idx';
+SELECT '0013_generated_expression_exists' AS assertion,
+  EXISTS (
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'webhook_deliveries'
+      AND instr(sql, 'provider_message_id TEXT') > 0
+      AND instr(sql, 'json_extract(raw_payload, ''$.messageId'')') > 0
+  ) AS pass;
 
--- Verify the generated column populates from raw_payload.messageId.
--- We insert a stub row whose raw_payload contains a known messageId, then
--- assert the generated column mirrors it. The stub row is cleaned up at
--- the end of this verify script.
-INSERT INTO webhook_deliveries (
-  id, connection_id, event_type, raw_payload, message_id, status, created_at
-) VALUES (
-  'verify-stub-0013', 'verify-conn-0013', 'verify', '{"messageId":"brevo-msg-verify"}', NULL, 'processed', '2026-01-01 00:00:00'
-);
+SELECT '0013_composite_index_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM sqlite_master
+WHERE type = 'index' AND name = 'webhook_deliveries_provider_message_id_idx';
 
-SELECT COUNT(*) = 1 FROM webhook_deliveries
-WHERE id = 'verify-stub-0013' AND provider_message_id = 'brevo-msg-verify';
+SELECT '0013_composite_index_columns' AS assertion,
+  GROUP_CONCAT(name, ',') = 'provider_message_id,message_id' AS pass
+FROM pragma_index_info('webhook_deliveries_provider_message_id_idx');
 
--- Verify the find-unmatched reconciliation query returns rows whose
--- message_id is NULL but provider_message_id matches.
-SELECT COUNT(*) = 1 FROM webhook_deliveries
-WHERE provider_message_id = 'brevo-msg-verify' AND message_id IS NULL;
-
--- Clean up the stub.
-DELETE FROM webhook_deliveries WHERE id = 'verify-stub-0013';
-
--- Migration tracking row exists.
-SELECT COUNT(*) = 1 FROM d1_migrations WHERE name = '0013_webhook_delivery_message_index.sql';
+SELECT '0013_tracking_row_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM d1_migrations WHERE name = '0013_webhook_delivery_message_index.sql';

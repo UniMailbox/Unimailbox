@@ -13,24 +13,11 @@
 // router's cache-backed `beforeLoad` path will be caught here.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import {
-  createRoute,
-  type RootRoute,
-  type AnyRoute,
-  redirect,
-} from '@tanstack/react-router';
-import {
-  jsonResponse,
-  lastPathname,
-  mountAppRouter,
-  spyFetch,
-} from '../test-utils';
+import { createRoute, type RootRoute, type AnyRoute, redirect } from '@tanstack/react-router';
+import { jsonResponse, lastPathname, mountAppRouter, spyFetch } from '../test-utils';
 import type { RouterContext } from './router';
 import { validateComposeSearch } from './router';
-import {
-  authQueryKeys,
-  fetchAuthSession,
-} from '../features/auth/auth-queries';
+import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 
 afterEach(() => {
   cleanup();
@@ -80,9 +67,7 @@ describe('router (D-CAP-041-9 closure)', () => {
     // Better Auth returns a `{ data: null }` body (or equivalent) when
     // no cookie is present. `fetchAuthSession` swallows 401s and the
     // unwrapped null body both.
-    const { fetchImpl } = spyFetch([
-      () => jsonResponse({ data: null }),
-    ]);
+    const { fetchImpl } = spyFetch([() => jsonResponse({ data: null })]);
     const { history } = await mountAppRouter({
       fetchImpl,
       initialEntries: ['/mailbox'],
@@ -93,9 +78,7 @@ describe('router (D-CAP-041-9 closure)', () => {
   });
 
   it('redirects /mailbox to /login when get-session returns a null user', async () => {
-    const { fetchImpl } = spyFetch([
-      () => jsonResponse({ user: null, session: null }),
-    ]);
+    const { fetchImpl } = spyFetch([() => jsonResponse({ user: null, session: null })]);
     const { history } = await mountAppRouter({
       fetchImpl,
       initialEntries: ['/mailbox'],

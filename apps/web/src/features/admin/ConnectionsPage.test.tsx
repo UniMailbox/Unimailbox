@@ -226,7 +226,8 @@ describe('ConnectionsPage (CAP-044 Slice 3 / AC 20)', () => {
     });
     expect(screen.getByRole('status')).toBeInTheDocument();
     const connectionsGets = () =>
-      fetchCalls.filter((call) => call.method === 'GET' && call.url.includes(CONNECTIONS_URL)).length;
+      fetchCalls.filter((call) => call.method === 'GET' && call.url.includes(CONNECTIONS_URL))
+        .length;
     await waitFor(() => {
       expect(connectionsGets()).toBe(1);
     });
@@ -241,7 +242,12 @@ describe('ConnectionsPage (CAP-044 Slice 3 / AC 20)', () => {
         () => jsonResponse({ data: { items: [row] } }),
         () =>
           jsonResponse({
-            data: { id: row.id, providerKey: row.providerKey, label: row.label, webhookSecret: SECRET },
+            data: {
+              id: row.id,
+              providerKey: row.providerKey,
+              label: row.label,
+              webhookSecret: SECRET,
+            },
           }),
       ],
     });
@@ -262,9 +268,7 @@ describe('ConnectionsPage (CAP-044 Slice 3 / AC 20)', () => {
     // with the connection id path-encoded (R-AUDIT-001 server-side).
     const revealCalls = fetchCalls.filter((call) => call.method === 'POST');
     expect(revealCalls).toHaveLength(1);
-    expect(revealCalls[0]?.url).toBe(
-      `/api/v1/admin/connections/${row.id}/webhook-secret/reveal`,
-    );
+    expect(revealCalls[0]?.url).toBe(`/api/v1/admin/connections/${row.id}/webhook-secret/reveal`);
 
     // The one-time display: value + the "shown once / audited" note,
     // and the dialog is closed.
@@ -363,7 +367,9 @@ describe('ConnectionsPage (CAP-044 Slice 3 / AC 20)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('alert-dialog-error')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('alert-dialog-error').textContent).toContain('provider.sync required');
+    expect(screen.getByTestId('alert-dialog-error').textContent).toContain(
+      'provider.sync required',
+    );
     expect(screen.getByTestId('alert-dialog')).toBeInTheDocument();
     expect(screen.queryByTestId(`admin-secret-revealed-${row.id}`)).not.toBeInTheDocument();
     // Rows stay mounted throughout.
@@ -405,7 +411,7 @@ describe('ConnectionsPage (CAP-044 Slice 3 / AC 20)', () => {
     expect(screen.queryByTestId(`admin-secret-revealed-${row.id}`)).not.toBeInTheDocument();
   });
 
-  it('fix (f): a reveal retry clears the previous attempt\'s error while the new attempt is pending', async () => {
+  it("fix (f): a reveal retry clears the previous attempt's error while the new attempt is pending", async () => {
     const row = connectionRow();
     renderConnectionsPage({
       resolvers: [

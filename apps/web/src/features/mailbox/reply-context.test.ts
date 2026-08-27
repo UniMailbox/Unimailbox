@@ -191,9 +191,7 @@ describe('buildReplyContext — empty-string messageIdHeader (fix b)', () => {
 
 describe('buildReplyContext — to / subject (AC 5, R-DATA-001)', () => {
   it('to is the single-element parent fromAddress, trimmed and lower-cased', () => {
-    const ctx = buildReplyContext(
-      parentFixture({ fromAddress: '  Sender@Example.COM ' }),
-    );
+    const ctx = buildReplyContext(parentFixture({ fromAddress: '  Sender@Example.COM ' }));
     expect(ctx.to).toEqual(['sender@example.com']);
   });
 
@@ -204,9 +202,15 @@ describe('buildReplyContext — to / subject (AC 5, R-DATA-001)', () => {
   });
 
   it('does not double-prefix a subject that already starts with "Re:" (case-insensitive)', () => {
-    expect(buildReplyContext(parentFixture({ subject: 'Re: already' })).subject).toBe('Re: already');
-    expect(buildReplyContext(parentFixture({ subject: 'RE: shouted' })).subject).toBe('RE: shouted');
-    expect(buildReplyContext(parentFixture({ subject: 're: lowercase' })).subject).toBe('re: lowercase');
+    expect(buildReplyContext(parentFixture({ subject: 'Re: already' })).subject).toBe(
+      'Re: already',
+    );
+    expect(buildReplyContext(parentFixture({ subject: 'RE: shouted' })).subject).toBe(
+      'RE: shouted',
+    );
+    expect(buildReplyContext(parentFixture({ subject: 're: lowercase' })).subject).toBe(
+      're: lowercase',
+    );
   });
 
   it('does not treat a subject merely containing "re:" as already prefixed', () => {

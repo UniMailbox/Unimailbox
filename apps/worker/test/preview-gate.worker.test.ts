@@ -21,7 +21,11 @@
 import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import type { ForwardableEmailMessage, MessageBatch } from '@cloudflare/workers-types';
-import { parseProviderKey, auditActionSchema, type OutboundProviderAdapter } from '@unimailbox/contracts';
+import {
+  parseProviderKey,
+  auditActionSchema,
+  type OutboundProviderAdapter,
+} from '@unimailbox/contracts';
 import inboundEmail from '../src/entrypoints/inbound-email';
 import queueEntry from '../src/entrypoints/queue';
 import {
@@ -278,16 +282,20 @@ async function seedMailbox(
       `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
     )
-    .bind(id, domainId, ownerUserId, localPart, `${localPart} Mailbox`, FIXED_TIMESTAMP, FIXED_TIMESTAMP)
+    .bind(
+      id,
+      domainId,
+      ownerUserId,
+      localPart,
+      `${localPart} Mailbox`,
+      FIXED_TIMESTAMP,
+      FIXED_TIMESTAMP,
+    )
     .run();
   return id;
 }
 
-function makeInboundMessage(
-  to: string,
-  from: string,
-  raw: string,
-): ForwardableEmailMessage {
+function makeInboundMessage(to: string, from: string, raw: string): ForwardableEmailMessage {
   let rejectReason: string | null = null;
   return {
     to,
@@ -342,10 +350,7 @@ interface StubMessage {
   retry(options?: { delaySeconds?: number }): Promise<void>;
 }
 
-function makeStubMessage(
-  body: string,
-  opts: { id?: string; attempts?: number } = {},
-): StubMessage {
+function makeStubMessage(body: string, opts: { id?: string; attempts?: number } = {}): StubMessage {
   const msg: StubMessage = {
     id: opts.id ?? systemIds.uuid(),
     timestamp: new Date(),
@@ -482,8 +487,9 @@ describe('AC 4 — Step (b): complete setup + authenticate', () => {
     });
     expect(res.status).toBe(200);
 
-    const row = await env.DB.prepare('SELECT status FROM installation_state WHERE id = 1')
-      .first<{ status: string }>();
+    const row = await env.DB.prepare('SELECT status FROM installation_state WHERE id = 1').first<{
+      status: string;
+    }>();
     expect(row?.status).toBe('complete');
   });
 
@@ -592,7 +598,14 @@ Preview body`;
             `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
              VALUES (?, 'brevo-api-key', 1, ?, ?, ?, ?, ?)`,
           )
-          .bind(credentialId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+          .bind(
+            credentialId,
+            encrypted.ciphertext,
+            encrypted.iv,
+            encrypted.authTag,
+            FIXED_TIMESTAMP,
+            FIXED_TIMESTAMP,
+          ),
         db
           .prepare(
             `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
@@ -611,14 +624,12 @@ Preview body`;
       // unmodified via the registered providerRegistry — the spy
       // intercepts its outbound HTTP call so the test asserts on the
       // wire shape the production adapter produces.
-      const fetchSpy = vi
-        .spyOn(globalThis, 'fetch')
-        .mockResolvedValue(
-          new Response(JSON.stringify({ messageId: 'brevo-live-1' }), {
-            status: 201,
-            headers: { 'content-type': 'application/json' },
-          }),
-        );
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ messageId: 'brevo-live-1' }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
 
       try {
         const stubMessage = makeStubMessage(JSON.stringify({ jobId }));
@@ -633,16 +644,13 @@ Preview body`;
         const calls = fetchSpy.mock.calls;
         const sendCall = calls.find(
           (c) =>
-            typeof c[0] === 'string' &&
-            (c[0] as string).includes('api.brevo.com/v3/smtp/email'),
+            typeof c[0] === 'string' && (c[0] as string).includes('api.brevo.com/v3/smtp/email'),
         );
         expect(sendCall).toBeDefined();
 
         // The job row advanced to 'sent' with the provider message id.
         const job = await db
-          .prepare(
-            'SELECT status, provider_message_id FROM outbound_jobs WHERE id = ?',
-          )
+          .prepare('SELECT status, provider_message_id FROM outbound_jobs WHERE id = ?')
           .bind(jobId)
           .first<{ status: string; provider_message_id: string | null }>();
         expect(job?.status).toBe('sent');
@@ -844,17 +852,14 @@ describe('AC 6 — Step (d): retry/replay + unauthorized + early webhook + queue
     });
     const signature = await hmacSha256Hex(webhookSecret, rawBody);
 
-    const res = await SELF.fetch(
-      `https://example.com/api/v1/webhooks/brevo/${connectionId}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
-        },
-        body: rawBody,
+    const res = await SELF.fetch(`https://example.com/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
       },
-    );
+      body: rawBody,
+    });
     expect(res.status).toBe(200);
 
     // D-CAP-040-A: a webhook_deliveries row was persisted with the
@@ -907,7 +912,14 @@ describe('AC 6 — Step (d): retry/replay + unauthorized + early webhook + queue
           `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
            VALUES (?, 'brevo-api-key', 1, ?, ?, ?, ?, ?)`,
         )
-        .bind(credentialId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+        .bind(
+          credentialId,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.authTag,
+          FIXED_TIMESTAMP,
+          FIXED_TIMESTAMP,
+        ),
       db
         .prepare(
           `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
@@ -926,9 +938,9 @@ describe('AC 6 — Step (d): retry/replay + unauthorized + early webhook + queue
     // is reassigned cleanly with no prototype shadow leak between tests.
     const adapter = makeThrowingAdapter('Brevo 503 — preview recovery');
     const { providerRegistry } = await import('../src/integrations/providers/provider-registry');
-    const getSpy = vi.spyOn(providerRegistry, 'get').mockImplementation((key) =>
-      key === adapter.key ? adapter : undefined,
-    );
+    const getSpy = vi
+      .spyOn(providerRegistry, 'get')
+      .mockImplementation((key) => (key === adapter.key ? adapter : undefined));
 
     try {
       const stubMessage = makeStubMessage(JSON.stringify({ jobId }));
@@ -948,9 +960,7 @@ describe('AC 6 — Step (d): retry/replay + unauthorized + early webhook + queue
       // error_message string contains the adapter's "Brevo 503" text,
       // which is the strongest signal the retry path saw the failure.
       const job = await db
-        .prepare(
-          'SELECT status, attempts, error_message FROM outbound_jobs WHERE id = ?',
-        )
+        .prepare('SELECT status, attempts, error_message FROM outbound_jobs WHERE id = ?')
         .bind(jobId)
         .first<{ status: string; attempts: number; error_message: string | null }>();
       expect(job?.attempts).toBe(1);
@@ -1023,7 +1033,10 @@ describe('AC 7 — Step (e): audit correlation + log redaction', () => {
     );
     expect(auditRes.status).toBe(200);
     const auditBody = (await auditRes.json()) as {
-      data: { items: Array<{ action: string; requestId: string | null }>; nextCursor: string | null };
+      data: {
+        items: Array<{ action: string; requestId: string | null }>;
+        nextCursor: string | null;
+      };
     };
     const items = auditBody.data.items;
 
@@ -1114,18 +1127,15 @@ describe('AC 7 — Step (e): audit correlation + log redaction', () => {
     // (1) Preflight — captures `[preflight] secret read failed` (the
     // HIGH 1 false-positive anchor). Also drives the diagnostic to
     // emission.
-    const preflightRes = await SELF.fetch(
-      'https://example.com/api/v1/setup/preflight',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': systemIds.uuid(),
-        },
-        body: '{}',
+    const preflightRes = await SELF.fetch('https://example.com/api/v1/setup/preflight', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionToken}`,
+        'Idempotency-Key': systemIds.uuid(),
       },
-    );
+      body: '{}',
+    });
     expect(preflightRes.status).toBe(200);
 
     // (2) Bad-password login — the structured logger emits a warn line
@@ -1173,7 +1183,14 @@ describe('AC 7 — Step (e): audit correlation + log redaction', () => {
           `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
            VALUES (?, 'brevo-api-key', 1, ?, ?, ?, ?, ?)`,
         )
-        .bind(credentialId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+        .bind(
+          credentialId,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.authTag,
+          FIXED_TIMESTAMP,
+          FIXED_TIMESTAMP,
+        ),
       db
         .prepare(
           `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
@@ -1189,9 +1206,9 @@ describe('AC 7 — Step (e): audit correlation + log redaction', () => {
     ]);
     const adapter = makeThrowingAdapter('Brevo 503 — redaction probe');
     const { providerRegistry } = await import('../src/integrations/providers/provider-registry');
-    const getSpy = vi.spyOn(providerRegistry, 'get').mockImplementation((key) =>
-      key === adapter.key ? adapter : undefined,
-    );
+    const getSpy = vi
+      .spyOn(providerRegistry, 'get')
+      .mockImplementation((key) => (key === adapter.key ? adapter : undefined));
     try {
       const stubMessage = makeStubMessage(JSON.stringify({ jobId }));
       const batch = makeMessageBatch([stubMessage]);
@@ -1224,9 +1241,7 @@ Body`;
     const message = makeInboundMessage('inbox@example.com', 'sender@example.com', rawEmail);
     await inboundEmail.email(message, env);
 
-    const persisted = await db
-      .prepare('SELECT id FROM messages LIMIT 1')
-      .first<{ id: string }>();
+    const persisted = await db.prepare('SELECT id FROM messages LIMIT 1').first<{ id: string }>();
     expect(persisted?.id).toBeTruthy();
 
     const auditRes = await SELF.fetch(
@@ -1374,11 +1389,10 @@ describe('CAP-046 route-level audit correlation', () => {
 
     await seedRolesAndPermissions(env.DB, FIXED_TIMESTAMP);
     const passwordHash = await hashPassword('TestPass123!');
-    await env.DB
-      .prepare(
-        `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
          VALUES (?, 'admin@example.com', 'Admin', 'active', ?, ?, ?, ?, ?, ?)`,
-      )
+    )
       .bind(
         adminId,
         passwordHash.algorithm,
@@ -1389,18 +1403,16 @@ describe('CAP-046 route-level audit correlation', () => {
         FIXED_TIMESTAMP,
       )
       .run();
-    await env.DB
-      .prepare(
-        `INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at)
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO user_roles (user_id, role_id, granted_at)
          VALUES (?, 'administrator', datetime('now'))`,
-      )
+    )
       .bind(adminId)
       .run();
-    await env.DB
-      .prepare(
-        `INSERT INTO managed_domains (id, name, status, created_at, updated_at)
+    await env.DB.prepare(
+      `INSERT INTO managed_domains (id, name, status, created_at, updated_at)
          VALUES (?, 'example.com', 'active', ?, ?)`,
-      )
+    )
       .bind(domainRouteId, FIXED_TIMESTAMP, FIXED_TIMESTAMP)
       .run();
 
@@ -1434,7 +1446,10 @@ describe('CAP-046 route-level audit correlation', () => {
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { items: Array<{ requestId: string | null; resourceId: string | null; createdAt: string }>; nextCursor: string | null };
+      data: {
+        items: Array<{ requestId: string | null; resourceId: string | null; createdAt: string }>;
+        nextCursor: string | null;
+      };
     };
     if (body.data.items.length === 0) return null;
     const sorted = [...body.data.items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -1462,7 +1477,14 @@ describe('CAP-046 route-level audit correlation', () => {
           `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
            VALUES (?, 'brevo-api-key', 1, ?, ?, ?, ?, ?)`,
         )
-        .bind(credentialId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+        .bind(
+          credentialId,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.authTag,
+          FIXED_TIMESTAMP,
+          FIXED_TIMESTAMP,
+        ),
       db
         .prepare(
           `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
@@ -1582,16 +1604,13 @@ describe('CAP-046 route-level audit correlation', () => {
       .bind(blocklistId, adminId, FIXED_TIMESTAMP)
       .run();
 
-    const res = await SELF.fetch(
-      `https://example.com/api/v1/admin/blocklist/${blocklistId}`,
-      {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Idempotency-Key': systemIds.uuid(),
-        },
+    const res = await SELF.fetch(`https://example.com/api/v1/admin/blocklist/${blocklistId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Idempotency-Key': systemIds.uuid(),
       },
-    );
+    });
     expect(res.status).toBe(200);
 
     const row = await fetchNewestAuditRow('blocklist.delete', adminId);
@@ -1604,18 +1623,15 @@ describe('CAP-046 route-level audit correlation', () => {
 
   // AC 26 — role_policy.set
   it('role_policy.set audit row carries the request X-Request-Id', async () => {
-    const res = await SELF.fetch(
-      'https://example.com/api/v1/admin/roles/administrator/policy',
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          'Idempotency-Key': systemIds.uuid(),
-        },
-        body: JSON.stringify({ banEmail: [], availDomain: [] }),
+    const res = await SELF.fetch('https://example.com/api/v1/admin/roles/administrator/policy', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'Idempotency-Key': systemIds.uuid(),
       },
-    );
+      body: JSON.stringify({ banEmail: [], availDomain: [] }),
+    });
     expect(res.status).toBe(200);
 
     const row = await fetchNewestAuditRow('role_policy.set', adminId);
@@ -1665,7 +1681,10 @@ describe('CAP-046 route-level audit correlation', () => {
     );
     expect(queryRes.status).toBe(200);
     const queryBody = (await queryRes.json()) as {
-      data: { items: Array<{ requestId: string | null; createdAt: string }>; nextCursor: string | null };
+      data: {
+        items: Array<{ requestId: string | null; createdAt: string }>;
+        nextCursor: string | null;
+      };
     };
     const items = queryBody.data.items;
     expect(items.length).toBeGreaterThanOrEqual(1);
@@ -1719,7 +1738,10 @@ describe('CAP-046 route-level audit correlation', () => {
     );
     expect(queryRes.status).toBe(200);
     const queryBody = (await queryRes.json()) as {
-      data: { items: Array<{ requestId: string | null; createdAt: string }>; nextCursor: string | null };
+      data: {
+        items: Array<{ requestId: string | null; createdAt: string }>;
+        nextCursor: string | null;
+      };
     };
     const items = queryBody.data.items;
     expect(items.length).toBeGreaterThanOrEqual(1);
@@ -1765,7 +1787,10 @@ Body`;
     );
     expect(queryRes.status).toBe(200);
     const queryBody = (await queryRes.json()) as {
-      data: { items: Array<{ requestId: string | null; createdAt: string }>; nextCursor: string | null };
+      data: {
+        items: Array<{ requestId: string | null; createdAt: string }>;
+        nextCursor: string | null;
+      };
     };
     const items = queryBody.data.items;
     expect(items.length).toBeGreaterThanOrEqual(1);

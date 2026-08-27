@@ -83,10 +83,7 @@ export function MailboxListPage(): ReactElement {
           <AppNav />
         </div>
       </header>
-      <Card
-        title="Your mailboxes"
-        description="Pick a mailbox to open its inbox."
-      >
+      <Card title="Your mailboxes" description="Pick a mailbox to open its inbox.">
         {items.length === 0 ? (
           <p data-testid="mailbox-list-empty">No mailboxes yet.</p>
         ) : (

@@ -37,10 +37,7 @@ import type { MessageListItem } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
-import {
-  mailboxMessagesInfiniteQuery,
-  mailboxQueryKeys,
-} from './mailbox-queries';
+import { mailboxMessagesInfiniteQuery, mailboxQueryKeys } from './mailbox-queries';
 import type { MailboxListItem } from './mailbox-queries';
 import { InboxListSkeleton } from './InboxListSkeleton';
 import { InboxEmpty } from './InboxEmpty';
@@ -91,12 +88,9 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
   // non-subscribing cache read is enough — a cache miss (direct URL
   // entry) falls back to the UUID rather than firing a fetch here.
   const queryClient = useQueryClient();
-  const cachedMailboxes = queryClient.getQueryData<MailboxListItem[]>(
-    mailboxQueryKeys.list(),
-  );
+  const cachedMailboxes = queryClient.getQueryData<MailboxListItem[]>(mailboxQueryKeys.list());
   const mailboxAddress =
-    cachedMailboxes?.find((mailbox) => mailbox.id === mailboxId)?.address ??
-    `Mailbox ${mailboxId}`;
+    cachedMailboxes?.find((mailbox) => mailbox.id === mailboxId)?.address ?? `Mailbox ${mailboxId}`;
 
   // Fix (g), data-first ordering: `query.data` survives a failed
   // background refetch and a failed load-more, so the accumulated rows
@@ -139,9 +133,13 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
-            onRetry={apiError.code === 'INVALID_CURSOR' ? startOver : () => {
-              void query.refetch();
-            }}
+            onRetry={
+              apiError.code === 'INVALID_CURSOR'
+                ? startOver
+                : () => {
+                    void query.refetch();
+                  }
+            }
             retryLabel={apiError.code === 'INVALID_CURSOR' ? 'Start over' : 'Retry'}
             testId="inbox-error-panel"
           />
@@ -150,17 +148,14 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
     );
   }
 
-  const items: MessageListItem[] =
-    query.data?.pages.flatMap((page) => page.items) ?? [];
+  const items: MessageListItem[] = query.data?.pages.flatMap((page) => page.items) ?? [];
 
   return (
     <main className="mailbox-shell" data-testid="inbox-list-page">
       <header className="mailbox-header">
         <h1 className="mailbox-title">Inbox</h1>
         <div className="mailbox-header-meta">
-          <span data-testid="mailbox-user-email">
-            {sessionQuery.data?.email ?? ''}
-          </span>
+          <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
           {/* CAP-044 Slice 3 (D-CAP-044-K): the admin link, rendered only
               when the nav probe succeeds (member → nothing). */}
           <AppNav />
@@ -180,10 +175,7 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
           Compose
         </Link>
       </p>
-      <Card
-        title={mailboxAddress}
-        description="Messages in this mailbox, newest first."
-      >
+      <Card title={mailboxAddress} description="Messages in this mailbox, newest first.">
         {apiError !== null ? (
           // Fix (g): errors with data on screen render as a banner ABOVE
           // the list; the loaded rows below are never wiped by a failed
@@ -260,11 +252,15 @@ function InboxListRow({ mailboxId, message }: InboxListRowProps): ReactElement {
       <div className="inbox-list-row-subject">{message.subject}</div>
       <div className="inbox-list-row-meta">
         <span className="inbox-list-row-from">
-          {message.fromName !== '' ? `${message.fromName} <${message.fromAddress}>` : message.fromAddress}
+          {message.fromName !== ''
+            ? `${message.fromName} <${message.fromAddress}>`
+            : message.fromAddress}
         </span>
         <span className="inbox-list-row-date">{message.createdAt}</span>
         {isUnread ? (
-          <span className="inbox-list-row-badge" data-testid="inbox-unread-badge">Unread</span>
+          <span className="inbox-list-row-badge" data-testid="inbox-unread-badge">
+            Unread
+          </span>
         ) : null}
         {/* Slice 3 fix H12: a DIV container, not a span — the inline
             AlertDialog panel renders a <div class="alert-dialog"> here

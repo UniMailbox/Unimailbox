@@ -55,9 +55,7 @@ describe('MailboxShell', () => {
       expiresAt: '2099-01-01T00:00:00Z',
     });
     expect(screen.getByTestId('mailbox-shell')).toBeInTheDocument();
-    expect(screen.getByTestId('mailbox-user-email').textContent).toBe(
-      'shell@b.test',
-    );
+    expect(screen.getByTestId('mailbox-user-email').textContent).toBe('shell@b.test');
   });
 
   // CAP-042 Batch 8 (L-4 fix): the deeper fallback when the session

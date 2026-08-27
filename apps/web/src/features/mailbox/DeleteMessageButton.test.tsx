@@ -64,10 +64,7 @@ function dispatchFetch(routes: ReadonlyArray<RouteHandler>): {
   calls: CapturedRequest[];
 } {
   const calls: CapturedRequest[] = [];
-  const fetchImpl = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
     const headers: Record<string, string> = {};
@@ -171,8 +168,7 @@ describe('DeleteMessageButton', () => {
       inboxRoute(),
       {
         match: (url, method) =>
-          method === 'DELETE' &&
-          url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
+          method === 'DELETE' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
         // D-CAP-043-E: 204 No Content, empty body.
         response: () => new Response(null, { status: 204 }),
       },
@@ -218,8 +214,7 @@ describe('DeleteMessageButton — Slice 3 fix pass (H8/H11/H12)', () => {
         inboxRoute(),
         {
           match: (url, method) =>
-            method === 'DELETE' &&
-            url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
+            method === 'DELETE' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
           response: () => {
             if (!failDelete) {
               return new Response(null, { status: 204 });
@@ -327,8 +322,7 @@ describe('DeleteMessageButton — Slice 3 fix pass (H8/H11/H12)', () => {
       inboxRoute(),
       {
         match: (url, method) =>
-          method === 'DELETE' &&
-          url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
+          method === 'DELETE' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}`,
         response: () => new Response(null, { status: 204 }),
       },
     ]);

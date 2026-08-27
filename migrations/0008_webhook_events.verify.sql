@@ -1,38 +1,33 @@
--- migrations/0008_webhook_events.verify.sql — Verification queries for 0008_webhook_events.sql.
--- Run after migration apply to confirm schema integrity.
---
--- Verification checks:
--- 1. webhook_deliveries table exists with correct columns
--- 2. webhook_secret column was added to provider_connections
--- 3. Indexes exist on webhook_deliveries
--- 4. Foreign keys to provider_connections and messages are valid
--- 5. Migration tracking row exists
+-- Verification for 0008_webhook_events.sql.
 
--- Verify webhook_deliveries table exists and has 7 columns
-SELECT COUNT(*) = 7 FROM pragma_table_info('webhook_deliveries')
-WHERE name IN (
-  'id', 'connection_id', 'event_type', 'raw_payload',
-  'message_id', 'status', 'created_at'
-);
+SELECT '0008_table_exists' AS assertion,
+  EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries') AS pass;
 
--- Verify webhook_secret column was added to provider_connections
-SELECT COUNT(*) = 1 FROM pragma_table_info('provider_connections')
-WHERE name = 'webhook_secret';
+SELECT '0008_required_columns_exist' AS assertion,
+  COUNT(*) = 7 AS pass
+FROM pragma_table_info('webhook_deliveries')
+WHERE name IN ('id', 'connection_id', 'event_type', 'raw_payload', 'message_id', 'status', 'created_at');
 
--- Verify indexes exist (connection + created + implicit primary key)
-SELECT COUNT(*) = 2 FROM pragma_index_list('webhook_deliveries');
+SELECT '0008_webhook_secret_column_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM pragma_table_info('provider_connections') WHERE name = 'webhook_secret';
 
--- Verify foreign keys are enabled (R-DATA-004)
-PRAGMA foreign_keys;
+SELECT '0008_named_indexes_exist' AS assertion,
+  COUNT(*) = 2 AS pass
+FROM sqlite_master
+WHERE type = 'index' AND name IN ('webhook_deliveries_connection_idx', 'webhook_deliveries_created_idx');
 
--- Verify migration tracking row exists
-SELECT COUNT(*) = 1 FROM d1_migrations WHERE name = '0008_webhook_events.sql';
+SELECT '0008_foreign_keys_exist' AS assertion,
+  COUNT(*) = 2 AS pass
+FROM pragma_foreign_key_list('webhook_deliveries');
 
--- Verify R-DATA-005 explicit exception: raw_payload has a 64 KB size CHECK.
--- The CHECK must reject payloads over 65536 bytes.
-SELECT
-  CASE
-    WHEN (SELECT COUNT(*) FROM webhook_deliveries WHERE length(raw_payload) > 65536) = 0
-    THEN 1
-    ELSE 0
-  END = 1;
+SELECT '0008_raw_payload_size_check_exists' AS assertion,
+  EXISTS (
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'webhook_deliveries'
+      AND instr(sql, 'length(raw_payload) <= 65536') > 0
+  ) AS pass;
+
+SELECT '0008_tracking_row_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM d1_migrations WHERE name = '0008_webhook_events.sql';

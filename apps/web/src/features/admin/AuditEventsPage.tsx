@@ -37,11 +37,7 @@
 // a file whose only consumer is this list.
 import { useState, type FormEvent, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  auditActionSchema,
-  type AuditAction,
-  type AuditEventItem,
-} from '@unimailbox/contracts';
+import { auditActionSchema, type AuditAction, type AuditEventItem } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
@@ -235,9 +231,13 @@ function AuditEventsContent(): ReactElement {
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
-            onRetry={apiError.code === 'INVALID_CURSOR' ? startOver : () => {
-              void query.refetch();
-            }}
+            onRetry={
+              apiError.code === 'INVALID_CURSOR'
+                ? startOver
+                : () => {
+                    void query.refetch();
+                  }
+            }
             retryLabel={apiError.code === 'INVALID_CURSOR' ? 'Start over' : 'Retry'}
             testId="admin-error-panel"
           />
@@ -260,9 +260,7 @@ function AuditEventsContent(): ReactElement {
           // the list; the loaded rows below are never wiped by a failed
           // background refetch or a failed load-more.
           <div className="admin-error-banner" role="alert" data-testid="audit-error-banner">
-            <p>
-              Could not load audit events: {apiError.message}
-            </p>
+            <p>Could not load audit events: {apiError.message}</p>
             {apiError.code === 'INVALID_CURSOR' ? (
               <Button
                 type="button"

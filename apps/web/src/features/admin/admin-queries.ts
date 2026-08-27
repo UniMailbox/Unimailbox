@@ -104,8 +104,7 @@ export const adminQueryKeys = {
     [...adminQueryKeys.all, 'audit-events', userId, auditEventsPath(filters)] as const,
   users: (userId: string) => [...adminQueryKeys.all, 'users', userId] as const,
   connections: (userId: string) => [...adminQueryKeys.all, 'connections', userId] as const,
-  webhookEvents: (userId: string) =>
-    [...adminQueryKeys.all, 'webhook-events', userId] as const,
+  webhookEvents: (userId: string) => [...adminQueryKeys.all, 'webhook-events', userId] as const,
   navProbe: (userId: string) => [...adminQueryKeys.all, 'nav-probe', userId] as const,
 };
 

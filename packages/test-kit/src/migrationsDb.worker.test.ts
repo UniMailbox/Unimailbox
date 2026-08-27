@@ -209,7 +209,46 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0017');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0018');
+  });
+
+  it('CAP-044: upgrading an existing administrator grants audit.read', async () => {
+    const db = await migrationsDb({ through: '0017_message_user_state_composite_pk' });
+    await db
+      .prepare(
+        `INSERT INTO roles (id, name, description, is_system, created_at)
+         VALUES ('administrator', 'Administrator', 'Legacy administrator role', 1, ?)`,
+      )
+      .bind(NOW)
+      .run();
+
+    const before = await db
+      .prepare(`SELECT COUNT(*) AS count FROM permissions WHERE key = 'audit.read'`)
+      .first<{ count: number }>();
+    expect(before?.count).toBe(0);
+
+    await migrationsDb({ through: '0018_audit_read_permission_backfill' });
+
+    const permission = await db
+      .prepare(`SELECT id, key FROM permissions WHERE key = 'audit.read'`)
+      .first<{ id: string; key: string }>();
+    expect(permission).toEqual({ id: 'audit.read', key: 'audit.read' });
+    const mapping = await db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM role_permissions
+         WHERE role_id = 'administrator' AND permission_id = 'audit.read'`,
+      )
+      .first<{ count: number }>();
+    expect(mapping?.count).toBe(1);
+
+    await migrationsDb();
+    const repeated = await db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM role_permissions
+         WHERE role_id = 'administrator' AND permission_id = 'audit.read'`,
+      )
+      .first<{ count: number }>();
+    expect(repeated?.count).toBe(1);
   });
 
   it('CAP-042: upgrading 0013 to 0014 preserves canonical IDs, passwords, and legacy sessions', async () => {

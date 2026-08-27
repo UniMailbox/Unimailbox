@@ -1209,7 +1209,9 @@ describe('toggleStarResponseSchema', () => {
   });
 
   it('rejects a missing data envelope via safeParse', () => {
-    const result = toggleStarResponseSchema.safeParse({ id: '00000000-0000-4000-8000-000000000001' });
+    const result = toggleStarResponseSchema.safeParse({
+      id: '00000000-0000-4000-8000-000000000001',
+    });
     expect(result.success).toBe(false);
   });
 
@@ -1462,9 +1464,7 @@ describe('cursorPayloadSchema — payload contract (CAP-044 Slice 3 amendment)',
   });
 
   it('rejects a payload missing any field', () => {
-    expect(
-      cursorPayloadSchema.safeParse({ id: 'x', surface: 'messages' }).success,
-    ).toBe(false);
+    expect(cursorPayloadSchema.safeParse({ id: 'x', surface: 'messages' }).success).toBe(false);
     expect(
       cursorPayloadSchema.safeParse({ createdAt: '2026-08-24 00:00:00', surface: 'messages' })
         .success,
@@ -1479,8 +1479,11 @@ describe('cursorPayloadSchema — payload contract (CAP-044 Slice 3 amendment)',
       cursorPayloadSchema.safeParse({ createdAt: '', id: 'x', surface: 'messages' }).success,
     ).toBe(false);
     expect(
-      cursorPayloadSchema.safeParse({ createdAt: '2026-08-24 00:00:00', id: '', surface: 'messages' })
-        .success,
+      cursorPayloadSchema.safeParse({
+        createdAt: '2026-08-24 00:00:00',
+        id: '',
+        surface: 'messages',
+      }).success,
     ).toBe(false);
   });
 

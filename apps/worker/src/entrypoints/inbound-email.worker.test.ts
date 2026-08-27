@@ -427,13 +427,33 @@ describe('inbound-email handler — D-CAP-021 / CAP-035', () => {
     const mailboxId = await createTestMailbox(db, domainId, userId, 'inbox');
 
     if (policyJson) {
-      await db
-        .prepare(
-          `INSERT INTO role_policies (role_id, ban_email_patterns_json, avail_domain_patterns_json, updated_by, updated_at)
-         VALUES ('test-owner', ?, ?, ?, datetime('now'))`,
-        )
-        .bind(policyJson.ban_email_patterns_json, policyJson.avail_domain_patterns_json, userId)
-        .run();
+      // CAP-036: role_policies is metadata-only; banEmail/availDomain
+      // patterns live in role_policy_ban_emails / role_policy_avail_domains.
+      // Insert the metadata row first (FK target), then the child rows.
+      await db.batch([
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO role_policies (role_id, updated_by, updated_at)
+           VALUES ('test-owner', ?, datetime('now'))`,
+          )
+          .bind(userId),
+        db
+          .prepare(
+            `INSERT INTO role_policy_ban_emails (role_id, pattern)
+           SELECT 'test-owner', je.value
+             FROM json_each(?) AS je
+             WHERE je.type = 'text'`,
+          )
+          .bind(policyJson.ban_email_patterns_json),
+        db
+          .prepare(
+            `INSERT INTO role_policy_avail_domains (role_id, pattern)
+           SELECT 'test-owner', je.value
+             FROM json_each(?) AS je
+             WHERE je.type = 'text'`,
+          )
+          .bind(policyJson.avail_domain_patterns_json),
+      ]);
     }
 
     return { userId, mailboxId };

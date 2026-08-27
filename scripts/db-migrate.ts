@@ -71,6 +71,13 @@ const wrangler = (subargs: string[]): { status: number | null; stdout: string } 
 const all = readdirSync(MIGRATIONS_DIR);
 const migrations = all.filter((f) => MIGRATION_FILE.test(f)).sort();
 const verifyFiles = new Set(all.filter((f) => VERIFY_FILE.test(f)));
+const missingCompanions = migrations
+  .map((file) => file.replace(/\.sql$/, '.verify.sql'))
+  .filter((file) => !verifyFiles.has(file));
+if (missingCompanions.length > 0) {
+  console.error(`Missing migration companion(s): ${missingCompanions.join(', ')}`);
+  process.exit(1);
+}
 
 // F11: every filename that reaches a wrangler --file / --command
 // argument must match the strict regex. Defense in depth — readdirSync
@@ -184,20 +191,12 @@ for (const file of migrations) {
     failed++;
     continue;
   }
-  const rows = extractRows(parsed.data);
-  let failedAssertions = 0;
-  for (const row of rows) {
-    if (row.pass !== 1) {
-      console.error(`  ✗ ${row.assertion} — pass=${row.pass}`);
-      failedAssertions++;
-    }
-  }
-  if (failedAssertions > 0) {
-    console.error(`${verify}: ${failedAssertions} failed assertion(s).`);
+  const assertions = validateAssertionRows(parsed.data, verify);
+  if (!assertions.ok) {
+    console.error(assertions.error);
     failed++;
   } else {
-    // F12: drop the meaningless 0/0 log.
-    console.log(`${verify}: ${rows.length} assertion(s) passed.`);
+    console.log(`${verify}: ${assertions.rows.length} assertion(s) passed.`);
   }
 }
 
@@ -254,25 +253,54 @@ function parseWranglerJson(
   return { ok: true, data: parsed };
 }
 
-function extractRows(parsed: unknown): AssertionRow[] {
-  const out: AssertionRow[] = [];
-  if (!Array.isArray(parsed)) return out;
+function validateAssertionRows(
+  parsed: unknown,
+  source: string,
+): { ok: true; rows: AssertionRow[] } | { ok: false; error: string } {
+  const rows: AssertionRow[] = [];
+  if (!Array.isArray(parsed)) {
+    return { ok: false, error: `${source}: expected Wrangler batch array` };
+  }
   for (const batch of parsed) {
     if (batch && typeof batch === 'object' && 'results' in batch) {
       const results = (batch as { results: unknown }).results;
-      if (Array.isArray(results)) {
-        for (const r of results) {
-          if (r && typeof r === 'object' && 'assertion' in r && 'pass' in r) {
-            const row = r as { assertion: unknown; pass: unknown };
-            if (typeof row.assertion === 'string' && typeof row.pass === 'number') {
-              out.push({ assertion: row.assertion, pass: row.pass });
-            }
-          }
+      if (!Array.isArray(results)) {
+        return { ok: false, error: `${source}: Wrangler batch results must be an array` };
+      }
+      for (const result of results) {
+        if (!result || typeof result !== 'object') continue;
+        const hasAssertion = 'assertion' in result;
+        const hasPass = 'pass' in result;
+        if (!hasAssertion && !hasPass) {
+          return {
+            ok: false,
+            error: `${source}: unexpected non-assertion row ${JSON.stringify(result)}`,
+          };
         }
+        const row = result as { assertion?: unknown; pass?: unknown };
+        if (typeof row.assertion !== 'string' || typeof row.pass !== 'number') {
+          return {
+            ok: false,
+            error: `${source}: malformed assertion row ${JSON.stringify(result)}`,
+          };
+        }
+        rows.push({ assertion: row.assertion, pass: row.pass });
       }
     }
   }
-  return out;
+  if (rows.length === 0) {
+    return { ok: false, error: `${source}: zero assertion rows returned` };
+  }
+  const failed = rows.filter((row) => row.pass !== 1);
+  if (failed.length > 0) {
+    return {
+      ok: false,
+      error: `${source}: failed assertion(s): ${failed
+        .map((row) => `${row.assertion} (pass=${row.pass})`)
+        .join(', ')}`,
+    };
+  }
+  return { ok: true, rows };
 }
 
 function extractColumn(parsed: unknown, col: string): string[] {

@@ -168,7 +168,9 @@ export function betterAuthRoutes(): Hono<AppEnv> {
     if (response.status >= 500) {
       const requestId = c.get('requestId');
       logger.warn(
-        requestId ? { event: 'better_auth.upstream_error', requestId } : { event: 'better_auth.upstream_error' },
+        requestId
+          ? { event: 'better_auth.upstream_error', requestId }
+          : { event: 'better_auth.upstream_error' },
         { status: response.status },
       );
     }

@@ -26,11 +26,7 @@ import {
 import type { ApiClient } from '../../infrastructure/api/client';
 import { ApiError } from '../../infrastructure/api/errors';
 import { useApiClient } from '../../infrastructure/api/client-provider';
-import {
-  type AuthSessionDescriptor,
-  setAuthSession,
-  clearAuthSession,
-} from './auth-session-store';
+import { type AuthSessionDescriptor, setAuthSession, clearAuthSession } from './auth-session-store';
 
 export const authQueryKeys = {
   all: ['auth'] as const,
@@ -50,9 +46,7 @@ export const authQueryKeys = {
  * and reject anything else to `null` so the router's `beforeLoad` can
  * treat `null` as "redirect to /login".
  */
-export function parseSessionResponse(
-  response: unknown,
-): AuthSessionDescriptor | null {
+export function parseSessionResponse(response: unknown): AuthSessionDescriptor | null {
   if (response === null || response === undefined) return null;
   const outer = response as { data?: unknown };
   const payload = outer && typeof outer === 'object' && 'data' in outer ? outer.data : response;
@@ -69,8 +63,7 @@ export function parseSessionResponse(
   if (typeof session.userId !== 'string' || session.userId.length === 0) return null;
   if (typeof session.expiresAt !== 'string' || session.expiresAt.length === 0) return null;
   const rawName = user.name;
-  const displayName =
-    typeof rawName === 'string' && rawName.length > 0 ? rawName : null;
+  const displayName = typeof rawName === 'string' && rawName.length > 0 ? rawName : null;
   return {
     userId: user.id,
     email: user.email,
@@ -91,9 +84,7 @@ export async function fetchAuthSession(
   apiClient: ApiClient,
 ): Promise<AuthSessionDescriptor | null> {
   try {
-    const response = await apiClient.fetch<unknown>(
-      '/api/v1/auth/better/get-session',
-    );
+    const response = await apiClient.fetch<unknown>('/api/v1/auth/better/get-session');
     return parseSessionResponse(response);
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {

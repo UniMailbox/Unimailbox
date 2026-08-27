@@ -117,9 +117,7 @@ function buildMailboxRoutes(rootRoute: TestRootRoute) {
     path: '/',
     component: () => <MailboxListPage />,
   });
-  return rootRoute.addChildren([
-    mailboxRoute.addChildren([listRoute, inboxRoute]),
-  ]);
+  return rootRoute.addChildren([mailboxRoute.addChildren([listRoute, inboxRoute])]);
 }
 
 describe('MailboxListPage', () => {
@@ -163,9 +161,7 @@ describe('MailboxListPage', () => {
   });
 
   it('renders the empty state when the user has no mailboxes', async () => {
-    const { fetchImpl } = spyFetch([
-      () => jsonResponse({ data: { items: [] } }),
-    ]);
+    const { fetchImpl } = spyFetch([() => jsonResponse({ data: { items: [] } })]);
     setAuthSession(SESSION);
     await mountAppRouter({
       fetchImpl: withAdminProbeDenied(fetchImpl),

@@ -166,9 +166,7 @@ function renderAuditEvents(options: RenderOptions): {
 }
 
 function auditGetCount(calls: ReadonlyArray<{ url: string; method: string }>): number {
-  return calls.filter(
-    (call) => call.method === 'GET' && call.url.includes(AUDIT_URL),
-  ).length;
+  return calls.filter((call) => call.method === 'GET' && call.url.includes(AUDIT_URL)).length;
 }
 
 describe('AuditEventsPage (CAP-044 Slice 2 / AC 14)', () => {
@@ -216,7 +214,9 @@ describe('AuditEventsPage (CAP-044 Slice 2 / AC 14)', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('audit-event-row')).toHaveLength(3);
     });
-    const secondPage = screen.getAllByTestId('audit-event-row').map((r) => r.getAttribute('data-event-id'));
+    const secondPage = screen
+      .getAllByTestId('audit-event-row')
+      .map((r) => r.getAttribute('data-event-id'));
     expect(secondPage).toContain('00000000-0000-4000-8000-000000000003');
     // Fix (g): inspect the spy's call arguments — the second fetch must
     // carry the first page's cursor as a query parameter (R-API-005).
@@ -258,9 +258,9 @@ describe('AuditEventsPage (CAP-044 Slice 2 / AC 14)', () => {
     // The filtered response replaced the rows.
     await waitFor(() => {
       expect(screen.getAllByTestId('audit-event-row')).toHaveLength(1);
-      expect(
-        screen.getAllByTestId('audit-event-row')[0]?.getAttribute('data-event-id'),
-      ).toBe('00000000-0000-4000-8000-000000000002');
+      expect(screen.getAllByTestId('audit-event-row')[0]?.getAttribute('data-event-id')).toBe(
+        '00000000-0000-4000-8000-000000000002',
+      );
     });
   });
 
@@ -347,9 +347,9 @@ describe('AuditEventsPage (CAP-044 Slice 2 / AC 14)', () => {
       expect(screen.queryByTestId('admin-error')).not.toBeInTheDocument();
       expect(screen.getAllByTestId('audit-event-row')).toHaveLength(1);
     });
-    expect(
-      screen.getAllByTestId('audit-event-row')[0]?.getAttribute('data-event-id'),
-    ).toBe('00000000-0000-4000-8000-000000000002');
+    expect(screen.getAllByTestId('audit-event-row')[0]?.getAttribute('data-event-id')).toBe(
+      '00000000-0000-4000-8000-000000000002',
+    );
     const correctedCall = fetchCalls.find(
       (call) => call.method === 'GET' && call.url.includes(`actorUserId=${goodActor}`),
     );

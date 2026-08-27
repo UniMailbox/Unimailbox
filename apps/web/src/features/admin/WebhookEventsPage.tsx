@@ -80,7 +80,10 @@ function WebhookEventsContent(): ReactElement {
         <header className="admin-header">
           <h1>Webhook events</h1>
         </header>
-        <Card title="Could not load webhook events" description="Webhook deliveries are unavailable.">
+        <Card
+          title="Could not load webhook events"
+          description="Webhook deliveries are unavailable."
+        >
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}

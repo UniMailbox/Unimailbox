@@ -23,7 +23,11 @@ import { QueryClient, QueryClientProvider, type InfiniteData } from '@tanstack/r
 import type { ReactElement } from 'react';
 import type { MessageListItem, MessageListResponse } from '@unimailbox/contracts';
 import { StarButton } from './StarButton';
-import { mailboxMessagesInfiniteQuery, mailboxQueryKeys, useDeleteMessageMutation } from './mailbox-queries';
+import {
+  mailboxMessagesInfiniteQuery,
+  mailboxQueryKeys,
+  useDeleteMessageMutation,
+} from './mailbox-queries';
 import { ApiClientProvider } from '../../infrastructure/api/client-provider';
 import { createApiClient } from '../../infrastructure/api/client';
 import { errorResponse, jsonResponse } from '../../test-utils';
@@ -73,10 +77,7 @@ function deferredStarFetch(): {
   const starPending = new Promise<Response>((resolve) => {
     resolveStar = resolve;
   });
-  const fetchImpl = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
     const headers: Record<string, string> = {};
@@ -86,7 +87,10 @@ function deferredStarFetch(): {
       }
     }
     calls.push({ url, method, headers });
-    if (method === 'PATCH' && url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}/star`) {
+    if (
+      method === 'PATCH' &&
+      url === `/api/v1/mailboxes/${MAILBOX_ID}/messages/${MESSAGE_ID}/star`
+    ) {
       return starPending;
     }
     if (method === 'GET' && url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`)) {
@@ -280,10 +284,7 @@ function perMessageStarFetch(items: MessageListItem[]): {
     return created;
   };
 
-  const fetchImpl = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
     const starMatch = url.match(/\/api\/v1\/mailboxes\/[^/]+\/messages\/([^/]+)\/star$/);
@@ -384,7 +385,7 @@ function starButtonForRow(messageId: string): HTMLElement {
 }
 
 describe('StarButton — Slice 3 fix pass (H7 row-scoped rollback, H10 server truth)', () => {
-  it('H7: two failed stars roll back independently — B\'s rollback does not resurrect A\'s optimistic star', async () => {
+  it("H7: two failed stars roll back independently — B's rollback does not resurrect A's optimistic star", async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const messageA = messageFixture(0, '00000000-0000-4000-8000-00000000000a');

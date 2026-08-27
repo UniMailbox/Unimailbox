@@ -53,9 +53,7 @@ const SESSION = {
 const WEBHOOK_EVENTS_URL = '/api/v1/admin/webhook-events';
 
 /** One valid row per webhookEventDeliverySchema (snake_case wire form). */
-function webhookEventRow(
-  overrides: Partial<WebhookEventDelivery> = {},
-): WebhookEventDelivery {
+function webhookEventRow(overrides: Partial<WebhookEventDelivery> = {}): WebhookEventDelivery {
   return {
     id: '00000000-0000-4000-8000-000000000001',
     connection_id: '00000000-0000-4000-8000-00000000000a',
@@ -152,9 +150,7 @@ function renderWebhookEventsPage(options: RenderOptions): {
   queryClient.setQueryData(authQueryKeys.session(), SESSION);
   if (options.seedEvents !== undefined) {
     // Fix (a): the cache key is scoped to the signed-in user's id.
-    queryClient.setQueryData(adminQueryKeys.webhookEvents(SESSION.userId), [
-      ...options.seedEvents,
-    ]);
+    queryClient.setQueryData(adminQueryKeys.webhookEvents(SESSION.userId), [...options.seedEvents]);
   }
   mountAdminRouter(apiClient, queryClient);
   return { fetchCalls: calls };
@@ -196,9 +192,8 @@ describe('WebhookEventsPage (CAP-044 Slice 3 / AC 21)', () => {
     });
     expect(screen.getByRole('status')).toBeInTheDocument();
     const eventGets = () =>
-      fetchCalls.filter(
-        (call) => call.method === 'GET' && call.url.includes(WEBHOOK_EVENTS_URL),
-      ).length;
+      fetchCalls.filter((call) => call.method === 'GET' && call.url.includes(WEBHOOK_EVENTS_URL))
+        .length;
     await waitFor(() => {
       expect(eventGets()).toBe(1);
     });

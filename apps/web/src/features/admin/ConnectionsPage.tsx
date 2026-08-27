@@ -102,7 +102,10 @@ function ConnectionsContent(): ReactElement {
         <header className="admin-header">
           <h1>Connections</h1>
         </header>
-        <Card title="Could not load connections" description="Provider connections are unavailable.">
+        <Card
+          title="Could not load connections"
+          description="Provider connections are unavailable."
+        >
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
@@ -144,9 +147,7 @@ function ConnectionsContent(): ReactElement {
           </div>
         ) : null}
         {items.length === 0 ? (
-          <p data-testid="admin-connections-empty">
-            No provider connections are configured yet.
-          </p>
+          <p data-testid="admin-connections-empty">No provider connections are configured yet.</p>
         ) : (
           <ul className="admin-connection-list" data-testid="admin-connections-list">
             {items.map((item) => (
@@ -194,7 +195,11 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
   });
 
   return (
-    <li className="admin-connection-row" data-testid="admin-connection-row" data-connection-id={item.id}>
+    <li
+      className="admin-connection-row"
+      data-testid="admin-connection-row"
+      data-connection-id={item.id}
+    >
       <div className="admin-connection-row-meta">
         <span className="admin-connection-row-provider">{item.providerKey}</span>
         <span className={`admin-connection-status admin-connection-status-${item.status}`}>
@@ -266,8 +271,8 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
           setRevealError(null);
         }}
       >
-        The secret for <strong>{item.label}</strong> ({item.providerKey}) will be shown once.
-        This action is audited.
+        The secret for <strong>{item.label}</strong> ({item.providerKey}) will be shown once. This
+        action is audited.
       </AlertDialog>
     </li>
   );

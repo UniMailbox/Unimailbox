@@ -18,10 +18,7 @@ import {
   renderAuthPage,
   spyFetch,
 } from '../../test-utils';
-import {
-  resetAuthSessionForTesting,
-  useAuthSession,
-} from './auth-session-store';
+import { resetAuthSessionForTesting, useAuthSession } from './auth-session-store';
 
 afterEach(() => {
   cleanup();
@@ -76,9 +73,7 @@ describe('LoginPage', () => {
     await user.click(screen.getByTestId('login-submit'));
     const code = await screen.findByTestId('login-unauthorized');
     expect(code).toBeInTheDocument();
-    expect(screen.getByTestId('error-code').textContent).toBe(
-      'INVALID_EMAIL_OR_PASSWORD',
-    );
+    expect(screen.getByTestId('error-code').textContent).toBe('INVALID_EMAIL_OR_PASSWORD');
   });
 
   it('surfaces the machine code on 4xx (R-API-002)', async () => {
@@ -123,9 +118,7 @@ describe('LoginPage', () => {
     expect(calls.length).toBe(0);
     expect(screen.queryByTestId('login-error')).toBeNull();
     expect(screen.queryByTestId('login-unauthorized')).toBeNull();
-    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe(
-      'true',
-    );
+    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe('true');
   });
 
   it('rejects a 31-character password with a max-length validation error (R-AUTH-007)', async () => {
@@ -138,8 +131,6 @@ describe('LoginPage', () => {
     expect(calls.length).toBe(0);
     expect(screen.queryByTestId('login-error')).toBeNull();
     expect(screen.queryByTestId('login-unauthorized')).toBeNull();
-    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe(
-      'true',
-    );
+    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe('true');
   });
 });

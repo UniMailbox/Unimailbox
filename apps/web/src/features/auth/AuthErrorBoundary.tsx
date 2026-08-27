@@ -21,10 +21,7 @@ interface AuthErrorBoundaryState {
   readonly error: Error | null;
 }
 
-export class AuthErrorBoundary extends Component<
-  AuthErrorBoundaryProps,
-  AuthErrorBoundaryState
-> {
+export class AuthErrorBoundary extends Component<AuthErrorBoundaryProps, AuthErrorBoundaryState> {
   override state: AuthErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): AuthErrorBoundaryState {

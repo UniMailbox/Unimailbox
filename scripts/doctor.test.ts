@@ -99,7 +99,9 @@ describe('CAP-045 — preview-gate suite-present doctor check', () => {
   });
 
   it('reports every missing file in a single failure detail', () => {
-    const r = evaluatePreviewGateSuitePresent({ fsRead: fixtureMap({ [helperPath]: null, [runbookPath]: null }) });
+    const r = evaluatePreviewGateSuitePresent({
+      fsRead: fixtureMap({ [helperPath]: null, [runbookPath]: null }),
+    });
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('helper');
     expect(r.detail).toContain('runbook');
@@ -151,9 +153,7 @@ describe('CAP-045 — preview-gate helper credential-leak detection', () => {
     // operator helper would actually emit if it built the headers
     // object literally.
     const r = evaluatePreviewGateSuitePresent({
-      fsRead: fixtureFor(
-        `fetch(...) { headers: { api-key: "xkeysib-deadbeefcafef00d1234" } }\n`,
-      ),
+      fsRead: fixtureFor(`fetch(...) { headers: { api-key: "xkeysib-deadbeefcafef00d1234" } }\n`),
     });
     expect(r.ok).toBe(false);
     expect(r.detail).toContain('credential');
@@ -173,7 +173,7 @@ describe('CAP-045 — forbidden log patterns (HIGH 1 fix)', () => {
   });
 
   it('rejects a value-bearing api-key header', () => {
-    expect(isForbidden("api-key: xkeysib-deadbeefcafef00d1234")).toBe(true);
+    expect(isForbidden('api-key: xkeysib-deadbeefcafef00d1234')).toBe(true);
   });
 
   it('rejects a webhook_secret field reference', () => {
@@ -181,9 +181,7 @@ describe('CAP-045 — forbidden log patterns (HIGH 1 fix)', () => {
   });
 
   it('rejects an idempotency_key field reference', () => {
-    expect(isForbidden('idempotency_key: aabbccdd-1111-2222-3333-444455556666')).toBe(
-      true,
-    );
+    expect(isForbidden('idempotency_key: aabbccdd-1111-2222-3333-444455556666')).toBe(true);
   });
 
   it('rejects a long bearer token assignment', () => {
@@ -191,17 +189,13 @@ describe('CAP-045 — forbidden log patterns (HIGH 1 fix)', () => {
     // after the separator; dropping the "Bearer " prefix lets the JWT's
     // base64url segments match. The "Bearer " word preceding the JWT is
     // exactly 6 chars and a space, so leaving it in fails the count.
-    expect(isForbidden('token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abcdefg')).toBe(
-      true,
-    );
+    expect(isForbidden('token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abcdefg')).toBe(true);
   });
 
   it('accepts the HIGH 1 false-positive target — `[preflight] secret read failed`', () => {
     // Benign production diagnostic. The substring `secret` is part of a
     // log message, not a key=value pair — the anchored regex does not match.
-    expect(isForbidden('[preflight] secret read failed TypeError: undefined')).toBe(
-      false,
-    );
+    expect(isForbidden('[preflight] secret read failed TypeError: undefined')).toBe(false);
   });
 
   it('accepts a generic "tokenize" log line', () => {
@@ -209,7 +203,11 @@ describe('CAP-045 — forbidden log patterns (HIGH 1 fix)', () => {
   });
 
   it('accepts a structured-logger JSON event line (no value-bearing fields)', () => {
-    expect(isForbidden('{"ts":"2026-08-24T12:34:56Z","level":"warn","event":"auth.login.invalid_credentials"}')).toBe(false);
+    expect(
+      isForbidden(
+        '{"ts":"2026-08-24T12:34:56Z","level":"warn","event":"auth.login.invalid_credentials"}',
+      ),
+    ).toBe(false);
   });
 
   it('accepts a generic body-parsed notice', () => {

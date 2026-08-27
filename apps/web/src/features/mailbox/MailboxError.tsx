@@ -17,11 +17,7 @@ export interface MailboxErrorProps {
   readonly onRetry: () => void;
 }
 
-export function MailboxError({
-  message,
-  code,
-  onRetry,
-}: MailboxErrorProps): ReactElement {
+export function MailboxError({ message, code, onRetry }: MailboxErrorProps): ReactElement {
   return (
     <main className="auth-page" data-testid="mailbox-error">
       <Card title="Could not load mailbox" description="The mailbox state is unavailable.">

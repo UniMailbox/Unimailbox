@@ -240,8 +240,7 @@ export async function createBetterAuth(
           before: async (session) => {
             const userId = session.userId;
             if (!userId) return;
-            const row = await env.DB
-              .prepare('SELECT status FROM users WHERE id = ?')
+            const row = await env.DB.prepare('SELECT status FROM users WHERE id = ?')
               .bind(userId)
               .first<{ status: string }>();
             if (row && row.status !== 'active') {

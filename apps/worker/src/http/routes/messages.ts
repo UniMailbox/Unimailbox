@@ -87,10 +87,7 @@ const MAX_LIMIT = 50;
  *
  * @returns the authenticated userId (401 DomainError when absent).
  */
-async function requireMailboxReadAccess(
-  c: Context<AppEnv>,
-  mailboxId: string,
-): Promise<string> {
+async function requireMailboxReadAccess(c: Context<AppEnv>, mailboxId: string): Promise<string> {
   const userId = c.get('userId');
   if (!userId) {
     throw new DomainError({
@@ -182,21 +179,19 @@ function prepareMessageAudit(
   createdAt: string,
 ) {
   const ctx = buildAppContext(c.env);
-  return ctx.auditEventWriter
-    .prepare({
-      id: systemIds.uuid(),
-      actorUserId: userId,
-      action,
-      resourceType: 'message',
-      resourceId: messageId,
-      requestId: c.get('requestId') ?? null,
-      metadata: JSON.stringify(metadata),
-      // AuditEventInput.createdAt is a SQLite datetime string; the route
-      // derives it once with sqliteTimestamp so the audit row and the
-      // idempotency record share one timestamp.
-      createdAt,
-    })
-    .statement as unknown as D1PreparedStatement;
+  return ctx.auditEventWriter.prepare({
+    id: systemIds.uuid(),
+    actorUserId: userId,
+    action,
+    resourceType: 'message',
+    resourceId: messageId,
+    requestId: c.get('requestId') ?? null,
+    metadata: JSON.stringify(metadata),
+    // AuditEventInput.createdAt is a SQLite datetime string; the route
+    // derives it once with sqliteTimestamp so the audit row and the
+    // idempotency record share one timestamp.
+    createdAt,
+  }).statement as unknown as D1PreparedStatement;
 }
 
 export function messageRoutes(): Hono<AppEnv> {

@@ -70,8 +70,7 @@ export type { MailboxListItem };
 export const mailboxQueryKeys = {
   all: ['mailbox'] as const,
   list: () => [...mailboxQueryKeys.all, 'list'] as const,
-  messages: (mailboxId: string) =>
-    [...mailboxQueryKeys.all, 'messages', mailboxId] as const,
+  messages: (mailboxId: string) => [...mailboxQueryKeys.all, 'messages', mailboxId] as const,
   message: (mailboxId: string, messageId: string) =>
     [...mailboxQueryKeys.all, 'messages', mailboxId, 'detail', messageId] as const,
   thread: (mailboxId: string, messageId: string) =>
@@ -81,9 +80,7 @@ export const mailboxQueryKeys = {
 /**
  * Fetcher for `GET /api/v1/mailboxes`.
  */
-export async function fetchMailboxList(
-  apiClient: ApiClient,
-): Promise<MailboxListItem[]> {
+export async function fetchMailboxList(apiClient: ApiClient): Promise<MailboxListItem[]> {
   const response = await apiClient.fetch<{
     readonly data: { readonly items: MailboxListItem[] };
   }>('/api/v1/mailboxes');
@@ -147,8 +144,7 @@ export function mailboxMessagesInfiniteQuery(mailboxId: string) {
   // so consumers narrow with `instanceof ApiError` — see InboxListPage.
   return useInfiniteQuery({
     queryKey: mailboxQueryKeys.messages(mailboxId),
-    queryFn: ({ pageParam }) =>
-      fetchMailboxMessagesPage(apiClient, mailboxId, pageParam),
+    queryFn: ({ pageParam }) => fetchMailboxMessagesPage(apiClient, mailboxId, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     staleTime: 0,
@@ -288,8 +284,7 @@ export function useMarkMessageReadMutation() {
       // a cached entry that is absent stays absent (nothing to correct).
       queryClient.setQueryData<MessageDetail>(
         mailboxQueryKeys.message(input.mailboxId, input.messageId),
-        (existing) =>
-          existing === undefined ? existing : { ...existing, isRead: 1 },
+        (existing) => (existing === undefined ? existing : { ...existing, isRead: 1 }),
       );
     },
     onError: (error, input) => {
@@ -570,11 +565,7 @@ export function useComposeMessageMutation() {
       try {
         messageId = composeResponseSchema.parse(response).data.messageId;
       } catch {
-        throw new ApiError(
-          'INVALID_RESPONSE',
-          'Unexpected response from the server.',
-          0,
-        );
+        throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
       }
       return messageId;
     },

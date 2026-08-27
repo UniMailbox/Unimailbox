@@ -48,8 +48,8 @@ export function ConfirmDeleteDialog({
       onConfirm={onConfirm}
       onCancel={onCancel}
     >
-      Delete “{subject}” from your inbox? This removes it for you only —
-      other members of the mailbox keep their copy.
+      Delete “{subject}” from your inbox? This removes it for you only — other members of the
+      mailbox keep their copy.
     </AlertDialog>
   );
 }

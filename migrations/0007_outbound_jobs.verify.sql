@@ -1,27 +1,23 @@
--- migrations/0007_outbound_jobs.verify.sql — Verification queries for 0007_outbound_jobs.sql.
--- Run after migration apply to confirm schema integrity.
---
--- Verification checks:
--- 1. outbound_jobs table exists with correct columns
--- 2. Indexes exist
--- 3. CHECK constraint on status rejects invalid values
--- 4. Foreign keys to messages and provider_connections are valid
--- 5. Migration tracking row exists
+-- Verification for 0007_outbound_jobs.sql.
 
--- Verify outbound_jobs table exists and has 14 columns
-SELECT COUNT(*) = 14 FROM pragma_table_info('outbound_jobs')
-WHERE name IN (
-  'id', 'message_id', 'provider_connection_id', 'status',
-  'attempts', 'max_attempts', 'locked_at', 'locked_by',
-  'provider_message_id', 'error_code', 'error_message',
-  'created_at', 'updated_at'
-);
+SELECT '0007_table_exists' AS assertion,
+  EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outbound_jobs') AS pass;
 
--- Verify indexes exist (status + message + implicit primary key)
-SELECT COUNT(*) = 2 FROM pragma_index_list('outbound_jobs');
+SELECT '0007_required_columns_exist' AS assertion,
+  COUNT(*) = 13 AS pass
+FROM pragma_table_info('outbound_jobs')
+WHERE name IN ('id', 'message_id', 'provider_connection_id', 'status', 'attempts', 'max_attempts', 'locked_at', 'locked_by', 'provider_message_id', 'error_code', 'error_message', 'created_at', 'updated_at');
 
--- Verify foreign keys are enabled (R-DATA-004)
-PRAGMA foreign_keys;
+SELECT '0007_named_indexes_exist' AS assertion,
+  COUNT(*) = 2 AS pass
+FROM sqlite_master
+WHERE type = 'index' AND name IN ('outbound_jobs_status_idx', 'outbound_jobs_message_idx');
 
--- Verify migration tracking row exists
-SELECT COUNT(*) = 1 FROM d1_migrations WHERE name = '0007_outbound_jobs.sql';
+SELECT '0007_foreign_keys_exist' AS assertion,
+  COUNT(*) = 2 AS pass
+FROM pragma_foreign_key_list('outbound_jobs')
+WHERE on_delete = 'CASCADE';
+
+SELECT '0007_tracking_row_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM d1_migrations WHERE name = '0007_outbound_jobs.sql';

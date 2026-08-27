@@ -119,9 +119,13 @@ function UsersContent(): ReactElement {
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
-            onRetry={apiError.code === 'INVALID_CURSOR' ? startOver : () => {
-              void query.refetch();
-            }}
+            onRetry={
+              apiError.code === 'INVALID_CURSOR'
+                ? startOver
+                : () => {
+                    void query.refetch();
+                  }
+            }
             retryLabel={apiError.code === 'INVALID_CURSOR' ? 'Start over' : 'Retry'}
             testId="admin-error-panel"
           />
@@ -202,9 +206,7 @@ function UserRow({ item }: { readonly item: UserListItem }): ReactElement {
     <li className="admin-user-row" data-testid="admin-user-row" data-user-id={item.id}>
       <div className="admin-user-row-meta">
         <span className="admin-user-row-email">{item.email}</span>
-        <span className={`admin-user-status admin-user-status-${item.status}`}>
-          {item.status}
-        </span>
+        <span className={`admin-user-status admin-user-status-${item.status}`}>{item.status}</span>
       </div>
       <div className="admin-user-row-detail">
         <span>name: {item.displayName ?? '—'}</span>

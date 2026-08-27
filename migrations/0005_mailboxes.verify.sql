@@ -1,117 +1,34 @@
--- 0005_mailboxes.verify.sql
--- CAP-020: Verify mailboxes and mailbox_members tables
+-- Verification for 0005_mailboxes.sql.
 
--- Verify mailboxes table structure
-SELECT
-  'mailboxes.id' as column_name,
-  type,
-  "notnull" as is_not_null,
-  pk as is_primary_key
-FROM pragma_table_info('mailboxes')
-WHERE name = 'id'
-UNION ALL
-SELECT
-  'mailboxes.domain_id',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'domain_id'
-UNION ALL
-SELECT
-  'mailboxes.owner_user_id',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'owner_user_id'
-UNION ALL
-SELECT
-  'mailboxes.local_part',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'local_part'
-UNION ALL
-SELECT
-  'mailboxes.display_name',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'display_name'
-UNION ALL
-SELECT
-  'mailboxes.status',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'status'
-UNION ALL
-SELECT
-  'mailboxes.created_at',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'created_at'
-UNION ALL
-SELECT
-  'mailboxes.updated_at',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'updated_at'
-UNION ALL
-SELECT
-  'mailboxes.deleted_at',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailboxes')
-WHERE name = 'deleted_at';
+SELECT '0005_tables_exist' AS assertion,
+  COUNT(*) = 2 AS pass
+FROM sqlite_master
+WHERE type = 'table' AND name IN ('mailboxes', 'mailbox_members');
 
--- Verify mailboxes_domain_local_unique index exists
-SELECT name FROM pragma_index_list('mailboxes') WHERE name = 'mailboxes_domain_local_unique';
+SELECT '0005_mailboxes_columns_exist' AS assertion,
+  COUNT(*) = 9 AS pass
+FROM pragma_table_info('mailboxes')
+WHERE name IN ('id', 'domain_id', 'owner_user_id', 'local_part', 'display_name', 'status', 'created_at', 'updated_at', 'deleted_at');
 
--- Verify mailboxes_owner_idx index exists
-SELECT name FROM pragma_index_list('mailboxes') WHERE name = 'mailboxes_owner_idx';
-
--- Verify mailbox_members table structure
-SELECT
-  'mailbox_members.mailbox_id' as column_name,
-  type,
-  "notnull" as is_not_null,
-  pk as is_primary_key
+SELECT '0005_mailbox_members_columns_exist' AS assertion,
+  COUNT(*) = 4 AS pass
 FROM pragma_table_info('mailbox_members')
-WHERE name = 'mailbox_id'
-UNION ALL
-SELECT
-  'mailbox_members.user_id',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailbox_members')
-WHERE name = 'user_id'
-UNION ALL
-SELECT
-  'mailbox_members.role',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailbox_members')
-WHERE name = 'role'
-UNION ALL
-SELECT
-  'mailbox_members.created_at',
-  type,
-  "notnull",
-  pk
-FROM pragma_table_info('mailbox_members')
-WHERE name = 'created_at';
+WHERE name IN ('mailbox_id', 'user_id', 'role', 'created_at');
 
--- Verify mailbox_members composite primary key
-SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'mailbox_members';
+SELECT '0005_indexes_exist' AS assertion,
+  COUNT(*) = 2 AS pass
+FROM sqlite_master
+WHERE type = 'index' AND name IN ('mailboxes_domain_local_unique', 'mailboxes_owner_idx');
+
+SELECT '0005_member_composite_primary_key' AS assertion,
+  SUM(name = 'mailbox_id' AND pk = 1) = 1
+  AND SUM(name = 'user_id' AND pk = 2) = 1 AS pass
+FROM pragma_table_info('mailbox_members');
+
+SELECT '0005_foreign_keys_exist' AS assertion,
+  (SELECT COUNT(*) FROM pragma_foreign_key_list('mailboxes')) = 2
+  AND (SELECT COUNT(*) FROM pragma_foreign_key_list('mailbox_members') WHERE on_delete = 'CASCADE') = 2 AS pass;
+
+SELECT '0005_tracking_row_exists' AS assertion,
+  COUNT(*) = 1 AS pass
+FROM d1_migrations WHERE name = '0005_mailboxes.sql';

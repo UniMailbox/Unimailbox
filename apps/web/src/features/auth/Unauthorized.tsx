@@ -20,9 +20,7 @@ export interface UnauthorizedProps {
   readonly variant?: 'unauthorized' | 'expired';
 }
 
-export function Unauthorized({
-  variant = 'unauthorized',
-}: UnauthorizedProps): ReactElement {
+export function Unauthorized({ variant = 'unauthorized' }: UnauthorizedProps): ReactElement {
   const navigate = useNavigate();
   const isExpired = variant === 'expired';
   return (

@@ -106,9 +106,10 @@ async function resolveBetterAuthUserId(
   // exactly like a Workers `Request`.
   const headers = new Headers();
   headers.set('cookie', `${BETTER_AUTH_COOKIE_NAME}=${token}`);
-  const result = (await auth.api.getSession({ headers })) as
-    | { user?: { id?: unknown }; session?: { userId?: unknown } }
-    | null;
+  const result = (await auth.api.getSession({ headers })) as {
+    user?: { id?: unknown };
+    session?: { userId?: unknown };
+  } | null;
   if (!result || typeof result !== 'object') return null;
   const userId =
     (typeof result.user?.id === 'string' && result.user.id) ||
@@ -245,8 +246,9 @@ export const authn: MiddlewareHandler<AppEnv> = async (c, next) => {
   // the standard envelope. We do NOT log the resolved userId (R-LOG-001).
   const candidateUserId = bearerUserId ?? betterAuthUserId;
   if (candidateUserId) {
-    const statusRow = await c.env.DB
-      .prepare(`SELECT status FROM users WHERE id = ? AND status = 'active' LIMIT 1`)
+    const statusRow = await c.env.DB.prepare(
+      `SELECT status FROM users WHERE id = ? AND status = 'active' LIMIT 1`,
+    )
       .bind(candidateUserId)
       .first<{ status: string }>();
     if (statusRow) {

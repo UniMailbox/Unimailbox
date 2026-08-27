@@ -55,11 +55,7 @@ import {
 import { InboxListPage } from './InboxListPage';
 import { mailboxQueryKeys, type MailboxListItem } from './mailbox-queries';
 import { authQueryKeys } from '../auth/auth-queries';
-import {
-  errorResponse,
-  jsonResponse,
-  spyFetch,
-} from '../../test-utils';
+import { errorResponse, jsonResponse, spyFetch } from '../../test-utils';
 import { resetAuthSessionForTesting } from '../auth/auth-session-store';
 
 afterEach(() => {
@@ -108,10 +104,7 @@ function withAdminProbe(
 }
 
 /** The member surface: the probe answers 403, so no Admin link renders. */
-function withAdminProbeDenied(
-  inner: typeof fetch,
-  sessionResponse: () => Response,
-): typeof fetch {
+function withAdminProbeDenied(inner: typeof fetch, sessionResponse: () => Response): typeof fetch {
   return withAdminProbe(inner, sessionResponse, () =>
     errorResponse('PERMISSION_DENIED', 'Forbidden', 403),
   );
@@ -296,9 +289,7 @@ describe('InboxListPage', () => {
 
   it('renders the empty state when the mailbox has no messages', async () => {
     renderInbox({
-      resolvers: [
-        () => jsonResponse({ data: { items: [], nextCursor: null } }),
-      ],
+      resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
       session: SESSION,
     });
     await waitFor(() => {
@@ -332,8 +323,7 @@ describe('InboxListPage', () => {
     expect(
       fetchCalls.some(
         (call) =>
-          call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`) &&
-          call.method === 'GET',
+          call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`) && call.method === 'GET',
       ),
     ).toBe(true);
   });
@@ -379,8 +369,7 @@ describe('InboxListPage', () => {
     expect(
       fetchCalls.filter(
         (call) =>
-          call.method === 'GET' &&
-          call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`),
+          call.method === 'GET' && call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`),
       ).length,
     ).toBe(2);
   });
@@ -618,7 +607,7 @@ describe('InboxListPage', () => {
     });
   });
 
-  it('does not render another mailbox\'s messages (IDOR-safe)', async () => {
+  it("does not render another mailbox's messages (IDOR-safe)", async () => {
     // The component is parameterized by `mailboxId`; the fetcher hits
     // /api/v1/mailboxes/{mailboxId}/messages. The fixture returns the
     // exact row whose `data-message-id` matches the requested mailbox.
@@ -756,7 +745,7 @@ describe('InboxListPage — row actions (CAP-043 Slice 3)', () => {
     recipients: { to: [], cc: [] },
   };
 
-  it('mounts a star and a delete button in every row, reflecting each row\'s star state', async () => {
+  it("mounts a star and a delete button in every row, reflecting each row's star state", async () => {
     renderInbox({
       resolvers: [
         () => jsonResponse({ data: { items: [STARRED_ROW, UNSTARRED_ROW], nextCursor: null } }),
@@ -830,7 +819,8 @@ describe('InboxListPage — row actions (CAP-043 Slice 3)', () => {
     expect(deleteCalls).toHaveLength(1);
     expect(deleteCalls[0]?.url).toBe(`/api/v1/mailboxes/${MAILBOX_ID}/messages/${STARRED_ROW.id}`);
     const messagesGets = fetchCalls.filter(
-      (call) => call.method === 'GET' && call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`),
+      (call) =>
+        call.method === 'GET' && call.url.includes(`/api/v1/mailboxes/${MAILBOX_ID}/messages`),
     );
     expect(messagesGets).toHaveLength(1);
   });
@@ -843,9 +833,7 @@ describe('InboxListPage — row actions (CAP-043 Slice 3)', () => {
   // dialog OPEN.
   it('H12: the row stays markup-valid with the delete dialog open — no <div> inside a <span> or <p>', async () => {
     renderInbox({
-      resolvers: [
-        () => jsonResponse({ data: { items: [STARRED_ROW], nextCursor: null } }),
-      ],
+      resolvers: [() => jsonResponse({ data: { items: [STARRED_ROW], nextCursor: null } })],
       session: SESSION,
     });
     await waitFor(() => {

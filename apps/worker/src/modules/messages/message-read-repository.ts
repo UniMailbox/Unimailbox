@@ -518,10 +518,7 @@ export async function getMessageThread(
   // G1: the root branch fetched newest-first under the cap; restore the
   // oldest-first presentation order the contract promises. The
   // singleton branch already returns ASC and needs no reversal.
-  const orderedRows =
-    rootId === null
-      ? (rows.results ?? [])
-      : [...(rows.results ?? [])].reverse();
+  const orderedRows = rootId === null ? (rows.results ?? []) : [...(rows.results ?? [])].reverse();
   const items: MessageListItem[] = orderedRows.map((row) => ({
     id: row.id,
     fromAddress: row.from_address,

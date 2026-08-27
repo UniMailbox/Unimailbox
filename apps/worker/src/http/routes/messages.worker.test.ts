@@ -650,11 +650,10 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
 
     // Both per-user rows exist with is_read = 1 — only possible post-0017,
     // where the PK is (mailbox_message_id, user_id).
-    const stateRows = await env.DB
-      .prepare(
-        `SELECT user_id, is_read FROM message_user_state
+    const stateRows = await env.DB.prepare(
+      `SELECT user_id, is_read FROM message_user_state
          WHERE mailbox_message_id = ? ORDER BY user_id`,
-      )
+    )
       .bind(mailboxMessageId)
       .all<{ user_id: string; is_read: number }>();
     expect(stateRows.results).toHaveLength(2);
@@ -667,10 +666,9 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/read', () => {
 
     // Each member's list resolves the message as read for themselves.
     for (const token of [ownerToken, viewerToken]) {
-      const list = await SELF.fetch(
-        `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+      const list = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       expect(list.status).toBe(200);
       const body = await list.json();
       expect(body.data.items).toHaveLength(1);
@@ -1058,7 +1056,7 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-de
     expect(page2Body.data.nextCursor).toBeNull();
   });
 
-  it('keeps per-user isDeleted independent (R-MESSAGE-005) — one user\'s delete does not hide it for another', async () => {
+  it("keeps per-user isDeleted independent (R-MESSAGE-005) — one user's delete does not hide it for another", async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const viewerId = await createUserWithRole('member', 'viewer@example.com');
     const ownerToken = await createSession(ownerId);
@@ -1091,29 +1089,26 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-de
     ]);
 
     // Sanity: both rows landed and only the owner's carries the delete.
-    const stateRows = await env.DB
-      .prepare(
-        `SELECT user_id, is_deleted FROM message_user_state
+    const stateRows = await env.DB.prepare(
+      `SELECT user_id, is_deleted FROM message_user_state
          WHERE mailbox_message_id = ? ORDER BY user_id`,
-      )
+    )
       .bind(mailboxMessageId)
       .all<{ user_id: string; is_deleted: number }>();
     expect(stateRows.results).toHaveLength(2);
 
     // Owner has soft-deleted → owner's inbox list excludes it.
-    const ownerList = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${ownerToken}` } },
-    );
+    const ownerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
     expect(ownerList.status).toBe(200);
     const ownerBody = await ownerList.json();
     expect(ownerBody.data.items).toEqual([]);
 
     // Viewer has an explicit non-deleted row → still sees it.
-    const viewerList = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${viewerToken}` } },
-    );
+    const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
     expect(viewerList.status).toBe(200);
     const viewerBody = await viewerList.json();
     expect(viewerBody.data.items).toHaveLength(1);
@@ -1139,10 +1134,9 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-de
       .bind(mailboxMessageId, ownerId)
       .run();
 
-    const response = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
+    const response = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.items).toEqual([]);
@@ -1338,9 +1332,7 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread — CAP-04
     // elsewhere" from "does not exist" (R-AUTHZ-004 no-leak).
     expect(crossBody.error.code).toBe('MESSAGE_NOT_FOUND');
     expect(missingBody.error.code).toBe('MESSAGE_NOT_FOUND');
-    expect(Object.keys(crossBody.error).sort()).toEqual(
-      Object.keys(missingBody.error).sort(),
-    );
+    expect(Object.keys(crossBody.error).sort()).toEqual(Object.keys(missingBody.error).sort());
   });
 
   it('excludes a soft-deleted-for-caller thread member but keeps it for another member (R-MESSAGE-005)', async () => {
@@ -1386,9 +1378,9 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread — CAP-04
     expect(ownerResponse.status).toBe(200);
     const ownerBody = await ownerResponse.json();
     expect(ownerBody.data.items).toHaveLength(2);
-    expect(
-      ownerBody.data.items.map((item: { id: string }) => item.id),
-    ).not.toContain(root.messageId);
+    expect(ownerBody.data.items.map((item: { id: string }) => item.id)).not.toContain(
+      root.messageId,
+    );
 
     // …the viewer still sees the full thread (3 items).
     const viewerResponse = await SELF.fetch(
@@ -1620,15 +1612,14 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread — CAP-04
       createdAt: '2026-01-01T00:00:00.000Z',
     });
     const malformedValues = ['no brackets here', '<', '><'];
-    const malformed = malformedValues.map(
-      (value, index) =>
-        insertMessage(mailboxId, {
-          subject: `G4 malformed ${index}`,
-          referencesHeader: value,
-          inReplyToHeader: '<fallback@example.com>',
-          messageIdHeader: `<self-${index}@example.com>`,
-          createdAt: `2026-01-0${index + 2}T00:00:00.000Z`,
-        }),
+    const malformed = malformedValues.map((value, index) =>
+      insertMessage(mailboxId, {
+        subject: `G4 malformed ${index}`,
+        referencesHeader: value,
+        inReplyToHeader: '<fallback@example.com>',
+        messageIdHeader: `<self-${index}@example.com>`,
+        createdAt: `2026-01-0${index + 2}T00:00:00.000Z`,
+      }),
     );
     const [m0, m1, m2] = await Promise.all(malformed);
 
@@ -1767,7 +1758,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     expect(dbSecond?.is_starred).toBe(0);
   });
 
-  it('AC 17 / D-CAP-043-A: the star is mailbox-level — another member\'s list shows isStarred = 1', async () => {
+  it("AC 17 / D-CAP-043-A: the star is mailbox-level — another member's list shows isStarred = 1", async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const viewerId = await createUserWithRole('member', 'viewer@example.com');
     const ownerToken = await createSession(ownerId);
@@ -1790,10 +1781,9 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
 
     // The viewer never touched the star, but the flag is mailbox-level:
     // their list resolves isStarred = 1 too (AC 17).
-    const viewerList = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${viewerToken}` } },
-    );
+    const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
     expect(viewerList.status).toBe(200);
     const viewerBody = await viewerList.json();
     expect(viewerBody.data.items).toHaveLength(1);
@@ -2001,10 +1991,9 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     const first = await SELF.fetch(url, { method: 'PATCH', headers });
     expect(first.status).toBe(200);
 
-    const auditRow = await env.DB
-      .prepare(
-        "SELECT actor_user_id, action, resource_type, resource_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
-      )
+    const auditRow = await env.DB.prepare(
+      "SELECT actor_user_id, action, resource_type, resource_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
+    )
       .bind(messageId)
       .first<{
         actor_user_id: string;
@@ -2141,8 +2130,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     );
     expect(readResponse.status).toBe(200);
 
-    const beforeDelete = await env.DB
-      .prepare('SELECT is_read, read_at, is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+    const beforeDelete = await env.DB.prepare(
+      'SELECT is_read, read_at, is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
       .bind(mailboxMessageId, ownerId)
       .first<{ is_read: number; read_at: string; is_deleted: number }>();
     expect(beforeDelete?.is_read).toBe(1);
@@ -2160,8 +2150,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     );
     expect(deleteResponse.status).toBe(204);
 
-    const afterDelete = await env.DB
-      .prepare('SELECT is_read, read_at, is_deleted, deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+    const afterDelete = await env.DB.prepare(
+      'SELECT is_read, read_at, is_deleted, deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
       .bind(mailboxMessageId, ownerId)
       .first<{ is_read: number; read_at: string; is_deleted: number; deleted_at: string }>();
     expect(afterDelete?.is_read).toBe(1);
@@ -2260,8 +2251,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     expect(first.status).toBe(204);
     expect(await first.text()).toBe('');
 
-    const afterFirst = await env.DB
-      .prepare('SELECT deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+    const afterFirst = await env.DB.prepare(
+      'SELECT deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
       .bind(mailboxMessageId, ownerId)
       .first<{ deleted_at: string }>();
     expect(afterFirst?.deleted_at).not.toBeNull();
@@ -2275,8 +2267,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
 
     // Exactly one record for the key, and the delete row was untouched by
     // the replay (deleted_at identical — the business write did not re-run).
-    const afterReplay = await env.DB
-      .prepare('SELECT deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?')
+    const afterReplay = await env.DB.prepare(
+      'SELECT deleted_at FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
       .bind(mailboxMessageId, ownerId)
       .first<{ deleted_at: string }>();
     expect(afterReplay?.deleted_at).toBe(afterFirst?.deleted_at);
@@ -2350,10 +2343,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
 
     // The soft-delete landed for the caller — the loser's duplicate UPSERT
     // rolled back with its failed record INSERT.
-    const stateRow = await env.DB
-      .prepare(
-        'SELECT is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
-      )
+    const stateRow = await env.DB.prepare(
+      'SELECT is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
       .bind(mailboxMessageId, ownerId)
       .first<{ is_deleted: number }>();
     expect(stateRow?.is_deleted).toBe(1);
@@ -2384,10 +2376,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     const first = await SELF.fetch(url, { method: 'DELETE', headers });
     expect(first.status).toBe(204);
 
-    const auditRow = await env.DB
-      .prepare(
-        "SELECT actor_user_id, action, resource_type, resource_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.soft_deleted'",
-      )
+    const auditRow = await env.DB.prepare(
+      "SELECT actor_user_id, action, resource_type, resource_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.soft_deleted'",
+    )
       .bind(messageId)
       .first<{
         actor_user_id: string;
@@ -2418,7 +2409,7 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
   // REAL routes (F4 convention from the review) — no direct state-row
   // inserts. The viewer reads first, the owner deletes; the viewer's read
   // state must survive the owner's delete untouched.
-  it('H10: another member\'s read state survives the owner\'s delete — seeded through the real routes (F4)', async () => {
+  it("H10: another member's read state survives the owner's delete — seeded through the real routes (F4)", async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const viewerId = await createUserWithRole('member', 'viewer@example.com');
     const ownerToken = await createSession(ownerId);
@@ -2453,10 +2444,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
 
     // The viewer's state row kept is_read = 1 and is_deleted = 0 (gate 1:
     // the owner's UPSERT cannot touch another member's row).
-    const viewerState = await env.DB
-      .prepare(
-        'SELECT is_read, read_at, is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
-      )
+    const viewerState = await env.DB.prepare(
+      'SELECT is_read, read_at, is_deleted FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
       .bind(mailboxMessageId, viewerId)
       .first<{ is_read: number; read_at: string; is_deleted: number }>();
     expect(viewerState?.is_read).toBe(1);
@@ -2464,10 +2454,9 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     expect(viewerState?.is_deleted).toBe(0);
 
     // And the message is still fully present in the viewer's list (AC 17).
-    const viewerList = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${viewerToken}` } },
-    );
+    const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
     expect(viewerList.status).toBe(200);
     const viewerListBody = await viewerList.json();
     expect(viewerListBody.data.items).toHaveLength(1);
@@ -2539,17 +2528,15 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
 
     // The viewer's list is empty; the owner still sees the message,
     // starred by the viewer (mailbox-level star, AC 17 / D-CAP-043-A).
-    const viewerList = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${viewerToken}` } },
-    );
+    const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
     const viewerListBody = await viewerList.json();
     expect(viewerListBody.data.items).toEqual([]);
 
-    const ownerList = await SELF.fetch(
-      `http://localhost/api/v1/mailboxes/${mailboxId}/messages`,
-      { headers: { Authorization: `Bearer ${ownerToken}` } },
-    );
+    const ownerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
     const ownerListBody = await ownerList.json();
     expect(ownerListBody.data.items).toHaveLength(1);
     expect(ownerListBody.data.items[0].isStarred).toBe(1);

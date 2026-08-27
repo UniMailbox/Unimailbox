@@ -32,7 +32,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migrationsDb, resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 
 import { betterAuthPassword } from '../../integrations/better-auth/password';
-import { BETTER_AUTH_BASE_PATH, BETTER_AUTH_COOKIE_NAME } from '../../integrations/better-auth/path';
+import {
+  BETTER_AUTH_BASE_PATH,
+  BETTER_AUTH_COOKIE_NAME,
+} from '../../integrations/better-auth/path';
 
 /**
  * Force `AUTH_PROVIDER` for the current test. The committed
@@ -92,46 +95,35 @@ async function seedUserAndCredential(): Promise<void> {
   const passwordEnvelope = await hashTestPassword();
   await env.DB.batch([
     // 1. canonical user row.
-    env.DB
-      .prepare(
-        `INSERT INTO users (
+    env.DB.prepare(
+      `INSERT INTO users (
            id, email, display_name, email_verified, status,
            password_algorithm, password_iterations, password_salt, password_hash,
            created_at, updated_at
          ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
-      )
-      .bind(
-        TEST_USER_ID,
-        TEST_USER_EMAIL,
-        TEST_DISPLAY_NAME,
-        // The legacy password columns are not used by the Better Auth
-        // sign-in path — it reads `auth_accounts.password` instead —
-        // but the canonical schema enforces NOT NULL on them, so we
-        // store a placeholder blob.
-        new Uint8Array(16),
-        new Uint8Array(32),
-        new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-        new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-      ),
+    ).bind(
+      TEST_USER_ID,
+      TEST_USER_EMAIL,
+      TEST_DISPLAY_NAME,
+      // The legacy password columns are not used by the Better Auth
+      // sign-in path — it reads `auth_accounts.password` instead —
+      // but the canonical schema enforces NOT NULL on them, so we
+      // store a placeholder blob.
+      new Uint8Array(16),
+      new Uint8Array(32),
+      new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+      new Date(NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+    ),
     // 2. Better Auth credential account. `issuer='local:credential'`
     //    matches the spike-evidence.md contract; `account_id` and
     //    `user_id` both equal the canonical user id so the adapter's
     //    `findOne({ userId, providerId: 'credential' })` resolves.
-    env.DB
-      .prepare(
-        `INSERT INTO auth_accounts (
+    env.DB.prepare(
+      `INSERT INTO auth_accounts (
            id, issuer, account_id, provider_id, user_id, password,
            created_at, updated_at
          ) VALUES (?, 'local:credential', ?, 'credential', ?, ?, ?, ?)`,
-      )
-      .bind(
-        'account-1',
-        TEST_USER_ID,
-        TEST_USER_ID,
-        passwordEnvelope,
-        NOW_MS,
-        NOW_MS,
-      ),
+    ).bind('account-1', TEST_USER_ID, TEST_USER_ID, passwordEnvelope, NOW_MS, NOW_MS),
   ]);
 }
 
@@ -161,14 +153,11 @@ describe('CAP-042 AC 12 — Better Auth shadow handler at /api/v1/auth/better', 
   // the framework's expected basePath.
   it('mounts /api/v1/auth/better/sign-in/email under BETTER_AUTH_BASE_PATH', async () => {
     expect(BETTER_AUTH_BASE_PATH).toBe('/api/v1/auth/better');
-    const response = await SELF.fetch(
-      `http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: TEST_USER_EMAIL, password: TEST_PASSWORD }),
-      },
-    );
+    const response = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: TEST_USER_EMAIL, password: TEST_PASSWORD }),
+    });
     if (response.status !== 200) {
       const body = await response.text();
       throw new Error(`Better Auth returned ${response.status}: ${body}`);
@@ -206,8 +195,9 @@ describe('CAP-042 AC 12 — Better Auth shadow handler at /api/v1/auth/better', 
       body: JSON.stringify({ email: TEST_USER_EMAIL, password: TEST_PASSWORD }),
     });
 
-    const sessionCount = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessionCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(TEST_USER_ID)
       .first<{ n: number }>();
     expect(sessionCount?.n ?? 0).toBeGreaterThan(0);
@@ -284,8 +274,9 @@ describe('CAP-042 AC 12 — Better Auth shadow handler at /api/v1/auth/better', 
         : undefined;
     expect(userField ?? null).toBeNull();
 
-    const sessionCount = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessionCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(TEST_USER_ID)
       .first<{ n: number }>();
     expect(sessionCount?.n ?? 0).toBe(0);
@@ -347,31 +338,34 @@ const CUTOVER_NOW_MS = Date.UTC(2026, 7, 23, 12, 0, 0);
 async function seedCutoverUserAndCredential(): Promise<void> {
   const passwordEnvelope = await hashTestPasswordFor(CUTOVER_PASSWORD);
   await env.DB.batch([
-    env.DB
-      .prepare(
-        `INSERT INTO users (
+    env.DB.prepare(
+      `INSERT INTO users (
            id, email, display_name, email_verified, status,
            password_algorithm, password_iterations, password_salt, password_hash,
            created_at, updated_at
          ) VALUES (?, ?, ?, 0, 'active', 'pbkdf2-sha256', 600000, ?, ?, ?, ?)`,
-      )
-      .bind(
-        CUTOVER_USER_ID,
-        CUTOVER_USER_EMAIL,
-        CUTOVER_DISPLAY_NAME,
-        new Uint8Array(16),
-        new Uint8Array(32),
-        new Date(CUTOVER_NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-        new Date(CUTOVER_NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
-      ),
-    env.DB
-      .prepare(
-        `INSERT INTO auth_accounts (
+    ).bind(
+      CUTOVER_USER_ID,
+      CUTOVER_USER_EMAIL,
+      CUTOVER_DISPLAY_NAME,
+      new Uint8Array(16),
+      new Uint8Array(32),
+      new Date(CUTOVER_NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+      new Date(CUTOVER_NOW_MS).toISOString().replace('T', ' ').replace('Z', ''),
+    ),
+    env.DB.prepare(
+      `INSERT INTO auth_accounts (
            id, issuer, account_id, provider_id, user_id, password,
            created_at, updated_at
          ) VALUES (?, 'local:credential', ?, 'credential', ?, ?, ?, ?)`,
-      )
-      .bind('ac23-account', CUTOVER_USER_ID, CUTOVER_USER_ID, passwordEnvelope, CUTOVER_NOW_MS, CUTOVER_NOW_MS),
+    ).bind(
+      'ac23-account',
+      CUTOVER_USER_ID,
+      CUTOVER_USER_ID,
+      passwordEnvelope,
+      CUTOVER_NOW_MS,
+      CUTOVER_NOW_MS,
+    ),
   ]);
 }
 
@@ -399,8 +393,9 @@ describe('CAP-042 AC 23 — Better Auth handler mode gating', () => {
     expect(body.error?.code).toBe('AUTHENTICATION_REQUIRED');
 
     // Authoritative proof the factory never ran: no auth_sessions row.
-    const sessionCount = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessionCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(CUTOVER_USER_ID)
       .first<{ n: number }>();
     expect(sessionCount?.n ?? 0).toBe(0);
@@ -514,9 +509,7 @@ async function seedLegacyUserAndBackfill(): Promise<void> {
     hashBytes[i] = parseInt(hashHex.substring(i * 2, i * 2 + 2), 16);
   }
   await db
-    .prepare(
-      `UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?`,
-    )
+    .prepare(`UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?`)
     .bind(saltBytes, hashBytes, AC16_USER_ID)
     .run();
 
@@ -524,13 +517,11 @@ async function seedLegacyUserAndBackfill(): Promise<void> {
   // with the real envelope. The unique index keeps the (issuer,
   // account_id) pair unique; the deterministic id from the migration
   // collides so we DELETE first.
-  await db
-    .prepare(`DELETE FROM auth_accounts WHERE user_id = ?`)
-    .bind(AC16_USER_ID)
-    .run();
+  await db.prepare(`DELETE FROM auth_accounts WHERE user_id = ?`).bind(AC16_USER_ID).run();
   await db.batch([
-    db.prepare(
-      `INSERT OR IGNORE INTO auth_accounts (
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO auth_accounts (
          id, issuer, account_id, provider_id, user_id, password, created_at, updated_at
        )
        SELECT
@@ -546,7 +537,8 @@ async function seedLegacyUserAndBackfill(): Promise<void> {
          CAST((julianday(u.updated_at) - 2440587.5) * 86400000 AS INTEGER)
        FROM users AS u
        WHERE u.id = ?`,
-    ).bind(AC16_USER_ID),
+      )
+      .bind(AC16_USER_ID),
   ]);
 }
 
@@ -599,22 +591,29 @@ describe('CAP-042 AC 16 — legacy user signs in without forced reset', () => {
     // outer shape agrees on `error` / `message` keys. The D1
     // `auth_sessions` count being zero in both cases is the
     // authoritative non-enumeration proof.
-    const wrongPassword = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: AC16_USER_EMAIL, password: 'definitely-wrong' }),
-    });
+    const wrongPassword = await SELF.fetch(
+      `http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: AC16_USER_EMAIL, password: 'definitely-wrong' }),
+      },
+    );
     expect(wrongPassword.status).toBe(401);
 
-    const unknownEmail = await SELF.fetch(`http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'never-existed@example.test', password: 'whatever' }),
-    });
+    const unknownEmail = await SELF.fetch(
+      `http://localhost${BETTER_AUTH_BASE_PATH}/sign-in/email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'never-existed@example.test', password: 'whatever' }),
+      },
+    );
     expect(unknownEmail.status).toBe(401);
 
-    const sessionsAfter = await env.DB
-      .prepare(`SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`)
+    const sessionsAfter = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM auth_sessions WHERE user_id = ?`,
+    )
       .bind(AC16_USER_ID)
       .first<{ n: number }>();
     expect(sessionsAfter?.n ?? 0).toBe(0);
