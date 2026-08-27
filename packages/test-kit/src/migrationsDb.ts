@@ -45,6 +45,11 @@ import messageUserStateSoftDeleteSql from '../../../migrations/0016_message_user
 // be written.
 import messageUserStateCompositePkSql from '../../../migrations/0017_message_user_state_composite_pk.sql?raw';
 import auditReadPermissionBackfillSql from '../../../migrations/0018_audit_read_permission_backfill.sql?raw';
+// CAP-036: role_policies JSON normalization. Drops the two JSON columns
+// (ban_email_patterns_json, avail_domain_patterns_json) and recreates
+// role_policies as metadata-only. Two child tables (role_policy_ban_emails,
+// role_policy_avail_domains) hold the patterns relationally.
+import rolePolicyNormalizeSql from '../../../migrations/0019_role_policy_normalize.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -144,6 +149,11 @@ const MIGRATIONS = [
     name: '0018_audit_read_permission_backfill',
     fileName: '0018_audit_read_permission_backfill.sql',
     sql: auditReadPermissionBackfillSql,
+  },
+  {
+    name: '0019_role_policy_normalize',
+    fileName: '0019_role_policy_normalize.sql',
+    sql: rolePolicyNormalizeSql,
   },
 ] as const;
 

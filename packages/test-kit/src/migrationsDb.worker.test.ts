@@ -209,7 +209,9 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0018');
+    // CAP-036 bumped the schema version from '0018' to '0019' after
+    // migrations/0019_role_policy_normalize.sql (R-DATA-005 strictness).
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0019');
   });
 
   it('CAP-044: upgrading an existing administrator grants audit.read', async () => {

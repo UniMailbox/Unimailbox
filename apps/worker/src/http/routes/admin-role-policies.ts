@@ -2,8 +2,8 @@
 // Hono sub-app for /api/v1/admin/roles/:id/policy endpoints.
 //
 // R-INBOUND-006: per-role policies (banEmail + availDomain). Empty arrays
-// mean "allow all" for availDomain; banEmail is empty by default. Patterns
-// are stored as JSON text — see migration's deferred-normalization comment.
+// mean "allow all" for availDomain; banEmail is empty by default. CAP-036
+// stores patterns relationally in two child tables.
 //
 // R-AUTHZ-001: requires 'role.manage' (matches the role-administration
 // permission key from the closed enum).
@@ -14,7 +14,11 @@ import { Hono } from 'hono';
 import { setRolePolicyRequestSchema, type RolePolicy } from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
-import { getRolePolicy, prepareSetRolePolicy, prepareCreateAuditEvent } from '../../modules/admin';
+import {
+  getRolePolicy,
+  prepareSetRolePolicyBatch,
+  prepareCreateAuditEvent,
+} from '../../modules/admin';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
 import {
@@ -119,10 +123,14 @@ export function adminRolePolicyRoutes(): Hono<AppEnv> {
 
       const now = sqliteTimestamp(systemClock.now());
 
+      // CAP-036: sort the patterns deterministically so the PUT response
+      // matches what GET returns. JSON-array storage previously preserved
+      // insertion order; the relational child tables don't, so the
+      // sorted form is the canonical projection on the wire.
       const policy = {
         roleId,
-        banEmail: [...body.banEmail],
-        availDomain: [...body.availDomain],
+        banEmail: [...body.banEmail].sort(),
+        availDomain: [...body.availDomain].sort(),
         updatedBy: userId,
         updatedAt: now,
       };
@@ -138,8 +146,13 @@ export function adminRolePolicyRoutes(): Hono<AppEnv> {
       // business write, the audit row, and the idempotency record all
       // land in one D1 batch so a crash between them cannot produce a
       // state change without the matching audit entry.
+      //
+      // CAP-036: prepareSetRolePolicyBatch returns 5 statements (delete
+      // ban rows, delete avail rows, set-based insert ban, set-based
+      // insert avail, metadata UPSERT). All statements are spread into
+      // the same D1 batch so atomicity covers the full logical write.
       await c.env.DB.batch([
-        prepareSetRolePolicy(c.env.DB, {
+        ...prepareSetRolePolicyBatch(c.env.DB, {
           roleId,
           banEmail: body.banEmail,
           availDomain: body.availDomain,

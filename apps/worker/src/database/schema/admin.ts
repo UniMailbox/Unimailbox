@@ -5,7 +5,14 @@
 // R-AUTHZ-005: admin identity comes from user_roles, never a flag on users.
 // R-AUDIT-001..004: audit_events shape.
 // R-WORKFLOW-005: maintenance_jobs cursor-based, idempotent.
-import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  sqliteTable,
+  text,
+  integer,
+  index,
+  uniqueIndex,
+  primaryKey,
+} from 'drizzle-orm/sqlite-core';
 import { users } from './identity';
 
 export const systemSettings = sqliteTable('system_settings', {
@@ -118,13 +125,15 @@ export const maintenanceJobs = sqliteTable(
 // R-INBOUND-005: blocklist_entries holds subject/content/from patterns
 // (case-insensitive substring). The admin module owns this table.
 //
-// R-INBOUND-006: role_policies holds banEmail + availDomain JSON arrays per
-// role. One row per role (PRIMARY KEY = role_id). Empty arrays mean "allow
-// all" for availDomain; banEmail is empty by default. R-DATA-005 is relaxed
-// for these two columns — see the migration's deferred-normalization comment.
+// R-INBOUND-006: role_policies is metadata-only after CAP-036 (0019):
+// role_id PK + updated_by + updated_at. The banEmail patterns live in
+// role_policy_ban_emails and the availDomain patterns in
+// role_policy_avail_domains. Both child tables have composite PK
+// (role_id, pattern) and FK CASCADE to roles(id).
 //
-// SQL in migrations/0010_blocklist_and_role_policies.sql is the deployable
-// artifact; these declarations are typing only.
+// SQL in migrations/0010_blocklist_and_role_policies.sql +
+// migrations/0019_role_policy_normalize.sql is the deployable artifact;
+// these declarations are typing only.
 // ---------------------------------------------------------------------------
 
 export const blocklistEntries = sqliteTable(
@@ -145,11 +154,38 @@ export const rolePolicies = sqliteTable('role_policies', {
   roleId: text('role_id')
     .primaryKey()
     .references(() => roles.id, { onDelete: 'cascade' }),
-  banEmailPatternsJson: text('ban_email_patterns_json').notNull(),
-  availDomainPatternsJson: text('avail_domain_patterns_json').notNull(),
   updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
   updatedAt: text('updated_at').notNull(),
 });
+
+// CAP-036: banEmail patterns live in their own relational table. One row
+// per (role_id, pattern). FK CASCADE follows the parent role.
+export const rolePolicyBanEmails = sqliteTable(
+  'role_policy_ban_emails',
+  {
+    roleId: text('role_id')
+      .notNull()
+      .references(() => roles.id, { onDelete: 'cascade' }),
+    pattern: text('pattern').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.roleId, t.pattern] }),
+  }),
+);
+
+// CAP-036: availDomain patterns live in their own relational table.
+export const rolePolicyAvailDomains = sqliteTable(
+  'role_policy_avail_domains',
+  {
+    roleId: text('role_id')
+      .notNull()
+      .references(() => roles.id, { onDelete: 'cascade' }),
+    pattern: text('pattern').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.roleId, t.pattern] }),
+  }),
+);
 
 export type SystemSetting = typeof systemSettings.$inferSelect;
 export type NewSystemSetting = typeof systemSettings.$inferInsert;
@@ -167,3 +203,5 @@ export type BlocklistEntryRowDrizzle = typeof blocklistEntries.$inferSelect;
 export type NewBlocklistEntryRowDrizzle = typeof blocklistEntries.$inferInsert;
 export type RolePolicyRowDrizzle = typeof rolePolicies.$inferSelect;
 export type NewRolePolicyRowDrizzle = typeof rolePolicies.$inferInsert;
+export type RolePolicyBanEmailRow = typeof rolePolicyBanEmails.$inferSelect;
+export type RolePolicyAvailDomainRow = typeof rolePolicyAvailDomains.$inferSelect;

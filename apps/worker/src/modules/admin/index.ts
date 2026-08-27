@@ -26,7 +26,7 @@ export {
   type AuditEventQueryResult,
 } from './audit-query-repository';
 
-// D-CAP-021 / CAP-035: blocklist + role policies.
+// D-CAP-021 / CAP-035 / CAP-036: blocklist + role policies.
 export {
   createBlocklistEntry,
   prepareCreateBlocklistEntry,
@@ -39,9 +39,8 @@ export {
 } from './blocklist-repository';
 export {
   getRolePolicy,
-  setRolePolicy,
-  prepareSetRolePolicy,
   loadRolePoliciesForRoleIds,
+  prepareSetRolePolicyBatch,
   createRolePolicyReader,
   type SetRolePolicyInput,
 } from './role-policy-repository';

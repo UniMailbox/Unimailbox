@@ -3,8 +3,8 @@
 // Worker-pool tests for the /api/v1/admin/roles/:id/policy endpoints. Covers
 // GET (read policy) and PUT (replace policy).
 //
-// R-INBOUND-006: per-role banEmail + availDomain JSON arrays. PUT replaces
-// both arrays atomically (INSERT OR REPLACE).
+// R-INBOUND-006: per-role banEmail + availDomain arrays. CAP-036 stores the
+// patterns in relational child tables; PUT replaces both arrays atomically.
 //
 // R-AUTHZ-001: requires role.manage. The PermissionKey enum is closed.
 
@@ -191,7 +191,12 @@ describe('GET /api/v1/admin/roles/:id/policy', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data.roleId).toBe(ROLE_ID);
-    expect(body.data.banEmail).toEqual(['spammer@example.com', '@evil.com']);
+    // CAP-036: patterns are now stored in relational child tables and read
+    // back with ORDER BY pattern, so the response is deterministically
+    // sorted. (Insertion-order preservation would require a sequence column
+    // on the child tables — the contract deliberately takes the cheaper,
+    // deterministic relational read.)
+    expect(body.data.banEmail).toEqual(['@evil.com', 'spammer@example.com']);
     expect(body.data.availDomain).toEqual(['@allowed.com']);
     expect(body.data.updatedBy).toEqual(expect.any(String));
     expect(body.data.updatedAt).toEqual(expect.any(String));
@@ -252,16 +257,29 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     expect(body.data.updatedBy).toEqual(expect.any(String));
     expect(body.data.updatedAt).toEqual(expect.any(String));
 
-    // Storage row exists with JSON columns populated.
-    const row = await env.DB.prepare(
-      'SELECT ban_email_patterns_json, avail_domain_patterns_json FROM role_policies WHERE role_id = ?',
+    // CAP-036: storage now lives in role_policy_ban_emails +
+    // role_policy_avail_domains (R-DATA-005 strictness). The metadata-only
+    // role_policies row exists too.
+    const banRows = await env.DB.prepare(
+      'SELECT pattern FROM role_policy_ban_emails WHERE role_id = ? ORDER BY pattern',
     )
       .bind(ROLE_ID)
-      .first<{ ban_email_patterns_json: string; avail_domain_patterns_json: string }>();
-    expect(row).toBeDefined();
-    if (!row) throw new Error('expected role_policies row');
-    expect(JSON.parse(row.ban_email_patterns_json)).toEqual(['spammer@example.com']);
-    expect(JSON.parse(row.avail_domain_patterns_json)).toEqual(['@allowed.com']);
+      .all<{ pattern: string }>();
+    expect(banRows.results?.map((r: { pattern: string }) => r.pattern)).toEqual([
+      'spammer@example.com',
+    ]);
+    const availRows = await env.DB.prepare(
+      'SELECT pattern FROM role_policy_avail_domains WHERE role_id = ? ORDER BY pattern',
+    )
+      .bind(ROLE_ID)
+      .all<{ pattern: string }>();
+    expect(availRows.results?.map((r: { pattern: string }) => r.pattern)).toEqual(['@allowed.com']);
+    const metaRow = await env.DB.prepare(
+      'SELECT role_id, updated_by, updated_at FROM role_policies WHERE role_id = ?',
+    )
+      .bind(ROLE_ID)
+      .first<{ role_id: string; updated_by: string | null; updated_at: string }>();
+    expect(metaRow?.role_id).toBe(ROLE_ID);
   });
 
   it('replaces both arrays on subsequent PUT (full-replace semantics)', async () => {
@@ -295,8 +313,9 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.data.banEmail).toEqual(['new@example.com', '*']);
-    expect(body.data.availDomain).toEqual(['@new.com', '@another.com']);
+    // CAP-036: patterns sorted deterministically (see comment above).
+    expect(body.data.banEmail).toEqual(['*', 'new@example.com']);
+    expect(body.data.availDomain).toEqual(['@another.com', '@new.com']);
   });
 
   it('accepts empty arrays (clears existing policy)', async () => {
@@ -360,6 +379,57 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${adminToken}`,
         'Idempotency-Key': 'role-policy-badavail-' + crypto.randomUUID(),
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 VALIDATION_ERROR for duplicate patterns without writing state', async () => {
+    const idempotencyKey = 'role-policy-duplicate-' + crypto.randomUUID();
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: ['duplicate@example.com', ' duplicate@example.com '],
+        availDomain: ['@Example.com', '@example.com'],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': idempotencyKey,
+      },
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    const policyCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM role_policies WHERE role_id = ?`,
+    )
+      .bind(ROLE_ID)
+      .first<{ count: number }>();
+    const idempotencyCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM idempotency_records WHERE idempotency_key = ?`,
+    )
+      .bind(idempotencyKey)
+      .first<{ count: number }>();
+    expect(policyCount?.count).toBe(0);
+    expect(idempotencyCount?.count).toBe(0);
+  });
+
+  it('returns 400 VALIDATION_ERROR for 501 patterns at the HTTP boundary', async () => {
+    const response = await SELF.fetch(`http://localhost/api/v1/admin/roles/${ROLE_ID}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        banEmail: Array.from({ length: 501 }, (_, index) => `user${index}@example.com`),
+        availDomain: [],
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'role-policy-501-' + crypto.randomUUID(),
       },
     });
 
@@ -537,18 +607,20 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     expect(secondBody.data.banEmail).toEqual(['memberban@example.com']);
 
     // Both rows exist with distinct content.
-    const adminRow = await env.DB.prepare(
-      'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
+    const adminBans = await env.DB.prepare(
+      'SELECT pattern FROM role_policy_ban_emails WHERE role_id = ?',
     )
       .bind('administrator')
-      .first<{ ban_email_patterns_json: string }>();
-    const memberRow = await env.DB.prepare(
-      'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
+      .all<{ pattern: string }>();
+    const memberBans = await env.DB.prepare(
+      'SELECT pattern FROM role_policy_ban_emails WHERE role_id = ?',
     )
       .bind('member')
-      .first<{ ban_email_patterns_json: string }>();
-    expect(JSON.parse(adminRow?.ban_email_patterns_json ?? '[]')).toEqual(['adminban@example.com']);
-    expect(JSON.parse(memberRow?.ban_email_patterns_json ?? '[]')).toEqual([
+      .all<{ pattern: string }>();
+    expect(adminBans.results?.map((r: { pattern: string }) => r.pattern)).toEqual([
+      'adminban@example.com',
+    ]);
+    expect(memberBans.results?.map((r: { pattern: string }) => r.pattern)).toEqual([
       'memberban@example.com',
     ]);
 
@@ -665,11 +737,11 @@ describe('PUT /api/v1/admin/roles/:id/policy', () => {
     const body = await response.json();
     expect(body.data.banEmail).toEqual(['*']);
 
-    const row = await env.DB.prepare(
-      'SELECT ban_email_patterns_json FROM role_policies WHERE role_id = ?',
+    const banRows = await env.DB.prepare(
+      'SELECT pattern FROM role_policy_ban_emails WHERE role_id = ?',
     )
       .bind(ROLE_ID)
-      .first<{ ban_email_patterns_json: string }>();
-    expect(JSON.parse(row?.ban_email_patterns_json ?? '[]')).toEqual(['*']);
+      .all<{ pattern: string }>();
+    expect(banRows.results?.map((r: { pattern: string }) => r.pattern)).toEqual(['*']);
   });
 });

@@ -3,4 +3,5 @@
 // migration filename against. Bump this when a new migration lands.
 // Hand-written; intentionally not auto-generated.
 // 0018 closes the audit.read upgrade gap for existing administrator roles.
-export const CURRENT_SCHEMA_VERSION = '0018' as const;
+// 0019 closes the role_policies JSON normalization gap (CAP-036).
+export const CURRENT_SCHEMA_VERSION = '0019' as const;

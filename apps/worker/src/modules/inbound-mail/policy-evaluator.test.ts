@@ -1,9 +1,12 @@
-// policy-evaluator.test.ts — D-CAP-021 / CAP-035.
+// policy-evaluator.test.ts — D-CAP-021 / CAP-035 / CAP-036.
 // Unit tests for the pure inbound evaluator. Tests are named after the
 // rule IDs they prove (R-INBOUND-005 / R-INBOUND-006).
+//
+// CAP-036: the evaluator consumes hydrated `RolePolicy` objects. The
+// factory below builds that shape, not the legacy JSON-row shape.
 
 import { describe, expect, it } from 'vitest';
-import type { BlocklistEntryRow, RolePolicyRow } from '@unimailbox/contracts';
+import type { BlocklistEntryRow, RolePolicy } from '@unimailbox/contracts';
 import type { ParsedEmail } from '@unimailbox/email-core';
 import { evaluateInboundPolicy } from './policy-evaluator';
 
@@ -13,13 +16,11 @@ function makeParsed(overrides: Partial<ParsedEmail> = {}): ParsedEmail {
     to: [{ address: 'inbox@example.com', name: 'Inbox' }],
     cc: [],
     subject: 'Hello',
-    messageIdHeader: '<test@message.id>',
-    inReplyToHeader: null,
-    referencesHeader: '',
+    messageId: '<test@message.id>',
+    inReplyTo: null,
+    references: '',
     htmlBody: '<p>Hello</p>',
     textBody: 'Hello',
-    attachments: [],
-    receivedAt: '2026-01-01 00:00:00',
     ...overrides,
   };
 }
@@ -34,13 +35,13 @@ function blocklistEntry(kind: 'subject' | 'content' | 'from', pattern: string): 
   };
 }
 
-function policy(overrides: Partial<RolePolicyRow> = {}): RolePolicyRow {
+function policy(overrides: Partial<RolePolicy> = {}): RolePolicy {
   return {
-    role_id: 'role-1',
-    ban_email_patterns_json: '[]',
-    avail_domain_patterns_json: '[]',
-    updated_by: null,
-    updated_at: '2026-01-01 00:00:00',
+    roleId: 'role-1',
+    banEmail: [],
+    availDomain: [],
+    updatedBy: null,
+    updatedAt: '2026-01-01 00:00:00',
     ...overrides,
   };
 }
@@ -60,6 +61,7 @@ describe('evaluateInboundPolicy — R-INBOUND-005 (blocklist)', () => {
       [blocklistEntry('subject', 'special offer')],
     );
     expect(decision.allow).toBe(false);
+    if (decision.allow === true) throw new Error('expected rejection');
     expect(decision.reason).toContain('subject');
     expect(decision.reason).toContain('special offer');
   });
@@ -72,6 +74,7 @@ describe('evaluateInboundPolicy — R-INBOUND-005 (blocklist)', () => {
       [blocklistEntry('content', 'special offer')],
     );
     expect(decision.allow).toBe(false);
+    if (decision.allow === true) throw new Error('expected rejection');
     expect(decision.reason).toContain('content');
   });
 
@@ -79,6 +82,7 @@ describe('evaluateInboundPolicy — R-INBOUND-005 (blocklist)', () => {
     const parsed = makeParsed({ from: { address: 'spammer@evil.com', name: '' } });
     const decision = evaluateInboundPolicy(parsed, [], [blocklistEntry('from', 'evil.com')]);
     expect(decision.allow).toBe(false);
+    if (decision.allow === true) throw new Error('expected rejection');
     expect(decision.reason).toContain('from');
   });
 
@@ -86,7 +90,7 @@ describe('evaluateInboundPolicy — R-INBOUND-005 (blocklist)', () => {
     const parsed = makeParsed({ from: { address: 'x@evil.com', name: '' } });
     const decision = evaluateInboundPolicy(
       parsed,
-      [policy({ avail_domain_patterns_json: '["@evil.com"]' })],
+      [policy({ availDomain: ['@evil.com'] })],
       [blocklistEntry('from', '@evil.com')],
     );
     expect(decision.allow).toBe(false);
@@ -98,7 +102,7 @@ describe('evaluateInboundPolicy — R-INBOUND-006 (banEmail)', () => {
     const parsed = makeParsed({ from: { address: 'spammer@evil.com', name: '' } });
     const decision = evaluateInboundPolicy(
       parsed,
-      [policy({ ban_email_patterns_json: '["spammer@evil.com"]' })],
+      [policy({ banEmail: ['spammer@evil.com'] })],
       [],
     );
     expect(decision.allow).toBe(false);
@@ -106,21 +110,13 @@ describe('evaluateInboundPolicy — R-INBOUND-006 (banEmail)', () => {
 
   it('rejects when a banEmail pattern matches a domain', () => {
     const parsed = makeParsed({ from: { address: 'anyone@evil.com', name: '' } });
-    const decision = evaluateInboundPolicy(
-      parsed,
-      [policy({ ban_email_patterns_json: '["@evil.com"]' })],
-      [],
-    );
+    const decision = evaluateInboundPolicy(parsed, [policy({ banEmail: ['@evil.com'] })], []);
     expect(decision.allow).toBe(false);
   });
 
   it('a wildcards banEmail rejects any sender', () => {
     const parsed = makeParsed({ from: { address: 'someone@allowed.com', name: '' } });
-    const decision = evaluateInboundPolicy(
-      parsed,
-      [policy({ ban_email_patterns_json: '["*"]' })],
-      [],
-    );
+    const decision = evaluateInboundPolicy(parsed, [policy({ banEmail: ['*'] })], []);
     expect(decision.allow).toBe(false);
   });
 
@@ -129,12 +125,7 @@ describe('evaluateInboundPolicy — R-INBOUND-006 (banEmail)', () => {
     const parsed = makeParsed({ from: { address: 'anyone@allowed.com', name: '' } });
     const decision = evaluateInboundPolicy(
       parsed,
-      [
-        policy({
-          ban_email_patterns_json: '["*"]',
-          avail_domain_patterns_json: '["@allowed.com"]',
-        }),
-      ],
+      [policy({ banEmail: ['*'], availDomain: ['@allowed.com'] })],
       [],
     );
     expect(decision.allow).toBe(false);
@@ -150,21 +141,13 @@ describe('evaluateInboundPolicy — R-INBOUND-006 (availDomain)', () => {
 
   it('allows when sender domain is on availDomain', () => {
     const parsed = makeParsed({ from: { address: 'someone@allowed.com', name: '' } });
-    const decision = evaluateInboundPolicy(
-      parsed,
-      [policy({ avail_domain_patterns_json: '["@allowed.com"]' })],
-      [],
-    );
+    const decision = evaluateInboundPolicy(parsed, [policy({ availDomain: ['@allowed.com'] })], []);
     expect(decision.allow).toBe(true);
   });
 
   it('rejects when sender domain is not on availDomain', () => {
     const parsed = makeParsed({ from: { address: 'someone@other.com', name: '' } });
-    const decision = evaluateInboundPolicy(
-      parsed,
-      [policy({ avail_domain_patterns_json: '["@allowed.com"]' })],
-      [],
-    );
+    const decision = evaluateInboundPolicy(parsed, [policy({ availDomain: ['@allowed.com'] })], []);
     expect(decision.allow).toBe(false);
   });
 
@@ -175,14 +158,8 @@ describe('evaluateInboundPolicy — R-INBOUND-006 (availDomain)', () => {
     const decision = evaluateInboundPolicy(
       parsed,
       [
-        policy({
-          role_id: 'role-a',
-          avail_domain_patterns_json: '["@allowed.com"]',
-        }),
-        policy({
-          role_id: 'role-b',
-          avail_domain_patterns_json: '["@other.com"]',
-        }),
+        policy({ roleId: 'role-a', availDomain: ['@allowed.com'] }),
+        policy({ roleId: 'role-b', availDomain: ['@other.com'] }),
       ],
       [],
     );
@@ -191,21 +168,10 @@ describe('evaluateInboundPolicy — R-INBOUND-006 (availDomain)', () => {
 });
 
 describe('evaluateInboundPolicy — robustness', () => {
-  it('treats malformed JSON as no patterns (fail-open at the policy level)', () => {
-    const parsed = makeParsed({ from: { address: 'someone@evil.com', name: '' } });
-    const decision = evaluateInboundPolicy(
-      parsed,
-      [
-        policy({
-          ban_email_patterns_json: 'not-valid-json',
-          avail_domain_patterns_json: 'not-valid-json',
-        }),
-      ],
-      [],
-    );
-    expect(decision.allow).toBe(true);
-  });
-
+  // CAP-036: malformed JSON is no longer a concern — the cross-module
+  // reader returns hydrated arrays, not raw rows. The closest analogue
+  // is "empty patterns do not deny", which is already covered above. This
+  // block now exercises the basic empty-input case only.
   it('evaluates a completely empty input set as allow', () => {
     const parsed = makeParsed();
     expect(evaluateInboundPolicy(parsed, [], []).allow).toBe(true);
