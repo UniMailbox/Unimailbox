@@ -10,6 +10,119 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-27 — CAP-036 implemented locally; workspace archived
+
+Migration 0019 replaces both JSON-in-TEXT role-policy columns with relational child
+tables and preserves the public 500-pattern limits through fixed-count set-based writes.
+The repository now rejects normalized duplicate patterns at the contract boundary, reads
+metadata and both child sets in one transactional D1 batch, and fails closed on malformed
+database rows. The review fix pass also strengthened the migration companion's primary-key
+assertions and pinned upgrade, repeat no-op, failure rollback, empty, cascade, boundary,
+and non-Cartesian read behavior.
+
+Main-Codex verification: doctor 14/14; lint/typecheck/format/diff clean; unit 900/900;
+Worker 783/783 plus one intentional skip; build and Wrangler dry-run clean. No dependency
+changed. AC 1–29 are complete; preview deployment and the real PUT/GET/audit round-trip
+remain operator-owned AC 30. CAP-036 is therefore **Implemented**, not Verified, and its
+contract moved to `work/archive/2026-08/CAP-036/task.md`. Phase 3 is ready; CAP-047 drafts
+is the next dispatch candidate.
+
+---
+
+## 2026-08-25 — Backend hardening: migration verification, upgrade RBAC, and deterministic gates
+
+The migration runners now fail closed on zero, malformed, or failing named assertions.
+All legacy companion SQL files return `{ assertion, pass }`; remote deploy verifies each
+newly applied migration before deploying. Migration 0018 backfills `audit.read` for an
+existing administrator role and is covered by a real D1 upgrade/repeat test. Unknown
+runtime/deploy environments no longer fall back to local behavior or permit target/config
+mismatches. Workers binding tests run file-serially, closing the shared-D1 race.
+
+Evidence: fresh temporary D1 applied and verified all 18 migrations (181 assertions);
+doctor 14/14; lint/typecheck/format clean; unit 898/898; Worker 763/763 plus one intentional
+skip; build clean; relevant non-Workers line coverage 82.7%. CAP-042's stale archived
+status/checkboxes and D-CAP-042/D-CAP-044-N ledger rows are synchronized to executable
+reality. CAP-036's false 100-statements-per-batch premise is withdrawn: 0019 uses two
+set-based `json_each(?)` child inserts, retains `.max(500)`, and forbids two-child JOINs.
+
+---
+
+## 2026-08-25 — CAP-036 contract drafted (R-DATA-005 strictness for v1, user-elected)
+
+**Trigger:** the user picked option 3 from the post-INV-002 dispatch menu —
+"CAP-036 first" over CAP-047 drafts. The Phase 2 audit (INV-001) recommended
+deferring CAP-036 to v2; the user has chosen strict R-DATA-005 compliance in v1.
+The audit's recommendation stands for future default behaviour — CAP-036 lands
+because the user picked it, not because the audit reversed itself.
+
+**Substrate walked:**
+
+- `migrations/0010_blocklist_and_role_policies.sql` — confirmed the two
+  `TEXT NOT NULL DEFAULT '[]' CHECK(length(...) <= 65536)` JSON columns that
+  R-DATA-005 forbids in v1.
+- `packages/contracts/src/admin/role-policy.ts` — `RolePolicyRow` (raw JSON
+  strings), `RolePolicyReader.loadRolePoliciesForRoleIds` (returns
+  `RolePolicyRow[]`), `setRolePolicyRequestSchema.max(500)` per array, two
+  pattern-match zod schemas (`banEmail` accepts exact/`@domain`/`*`;
+  `availDomain` accepts only `@domain`).
+- `apps/worker/src/modules/admin/role-policy-repository.ts` — `parsePatterns` +
+  `rowToPolicy` helpers; `setRolePolicy` uses `INSERT OR REPLACE` (single-statement
+  PUT semantics); `prepareSetRolePolicy` is built for batch folding.
+- `apps/worker/src/modules/inbound-mail/policy-evaluator.ts:98-106` — inline
+  `safeParseStringArray` defensive parsing; **CAP-036 deletes this** because
+  the reader returns parsed shapes directly.
+- `apps/worker/src/database/schema/admin.ts:144-149` — Drizzle `rolePolicies`
+  with `banEmailPatternsJson: text(...).notNull()` + `availDomainPatternsJson:
+  text(...).notNull()`.
+- `migrations/0017_message_user_state_composite_pk.verify.sql` —
+  the canonical `0019_role_policy_normalize.verify.sql` shape
+  (`SELECT (assertion TEXT, pass INTEGER)`; `scripts/db-migrate.ts` fails on
+  pass != 1).
+
+**Contract shape (corrected after review):** two child tables
+(`role_policy_ban_emails`, `role_policy_avail_domains`) with composite PK
+`(role_id, pattern)`; metadata-only `role_policies` table recreated from a
+`role_policies_new`; backfill via `json_each(... WHERE type='text')`; per-row
+length checks. `setRolePolicy` uses two deletes, two set-based
+`INSERT ... SELECT value FROM json_each(?)` statements, and one metadata upsert
+inside the route's existing business + audit + idempotency batch. Reads use
+three queries and application grouping, never a two-child Cartesian JOIN.
+
+**Spike verdicts:** V1 GREEN (recreate-table pattern over `ALTER TABLE DROP
+COLUMN`); V2 corrected — D1 documents 100 **bound parameters per query**, not
+100 statements per batch, so the public `.max(500)` contract remains and each
+array is expanded from one transient JSON binding; V3 GREEN (`json_each` with
+`type='text'`). Exact backfill equality belongs to the pre-0019 → 0019 Workers
+upgrade test because the companion runs after the source columns are dropped.
+
+**Contract scope:** 30 ACs across migration + Drizzle + contracts + repository +
+reader + inbound-mail consumer + route + worker tests + gates + operator
+closure. Backend-only; no `apps/web/` changes. 4-way parallel review
+(architecture / code / security / qa) gates implementation. Frontend N/A
+documented inline.
+
+**Correction:** the earlier 500 → 49 contract break was based on a false D1
+premise and is withdrawn. The migration is now 0019 because 0018 closes the
+`audit.read` upgrade gap.
+
+**Defers surfaced (in contract, to be added to the deferred registry at closure):**
+
+- `D-CAP-036-A` — rest of codebase `TEXT NOT NULL DEFAULT '[]'` audit (greppable
+  check before declaring CAP-036 closed).
+- `D-CAP-036-B` — per-pattern indexing on `role_policy_*` `pattern` columns
+  (only needed if future load observes per-pattern lookup hot paths).
+- `D-CAP-036-C` — reassess the public cap only if measured body/evaluation cost
+  requires it; do not infer a lower platform batch limit.
+
+**Status:** contract drafted; CAP-036 → `In Progress`; Phase 2 row updated
+to note CAP-036 closure is pending the operator FULL run. Next capability =
+**CAP-036 implementation** via `implementer-cap036`. CAP-047 contract archived
+at `work/archive/2026-08/CAP-047-drafts/task.md` (reactivated when drafts work
+resumes). Phase 3 decomposition document unchanged; INV-001 audit unchanged
+(recommendation stands; user overrode).
+
+---
+
 ## 2026-08-25 — Phase 2 closed: Verified (INV-001 Phase 2 audit)
 
 **Verdict:** Phase 2 returns to **Verified** (the audit was the gate per

@@ -2,7 +2,7 @@
 
 > The shared contract for this capability. Every agent working on it reads this file first.
 
-**Phase:** 1 closure / 2 in-progress · **Status:** In Progress · **Started:** 2026-08-22
+**Phase:** 1 closure / 2 in-progress · **Status:** Implemented · **Started:** 2026-08-22
 
 ## Goal
 
@@ -12,11 +12,11 @@ role permissions, or mailbox ownership.
 
 ## Current slice
 
-**Slice 0 and the additive migration subtask are complete — runtime config and the request-scoped
-auth factory are next.** Main-Codex investigation and architecture decisions are recorded in
-`spike-evidence.md`; the spike proofs and repository-owned 0014 migration passed main-Codex
-reproduction and Grok review. No production auth route or Better Auth secret/config binding has
-been cut over.
+**Complete and archived.** Better Auth runtime config, request-scoped factory, Hono routes,
+session bridge, existing-user backfill, registration/setup orchestration, browser shell, and
+local provider cutover/rollback are implemented. The final hardening pass also makes unknown
+environments fail closed, runs binding-backed test files without shared-D1 races, and proves the
+six gates plus 82.7% relevant line coverage.
 
 ## Scope
 
@@ -115,13 +115,13 @@ Objectively checkable. No criterion is complete from a typecheck or mocked Node-
 
 - [x] 10. Fresh and repeat migrations create verified `auth_accounts`, `auth_sessions`, and
       `auth_verifications` shapes without changing canonical user IDs or dropping legacy data.
-- [ ] 11. Wrangler production/test bindings, Env typing, deploy provisioning, doctor parity checks,
+- [x] 11. Wrangler production/test bindings, Env typing, deploy provisioning, doctor parity checks,
       and a new independent `BETTER_AUTH_SECRET` are wired and tested without exposing secret data.
-- [ ] 12. `/api/v1/auth/better/*` and Better Auth `basePath` match; sign-in, get-session, and sign-out
+- [x] 12. `/api/v1/auth/better/*` and Better Auth `basePath` match; sign-in, get-session, and sign-out
       work in Workers Pool tests while legacy issuance remains available in dual mode.
-- [ ] 13. The session bridge sets the existing `userId`; existing permission and mailbox IDOR tests
+- [x] 13. The session bridge sets the existing `userId`; existing permission and mailbox IDOR tests
       pass without moving authorization ownership into Better Auth.
-- [ ] 14. Conflicting cookie and bearer principals return 401; matching/sole credentials have named
+- [x] 14. Conflicting cookie and bearer principals return 401; matching/sole credentials have named
       precedence tests.
 
 ### Existing users and registration
@@ -150,9 +150,9 @@ Objectively checkable. No criterion is complete from a typecheck or mocked Node-
       real router-context test before the mailbox shell reuses that pattern.
 - [x] 23. Local `AUTH_PROVIDER=legacy|dual|better-auth` tests prove controlled cutover, legacy
       session invalidation at the final switch, and rollback on the same additive schema.
-- [ ] 24. All six gates pass after fixes: `pnpm scaffold doctor`, `pnpm lint`, `pnpm typecheck`,
+- [x] 24. All six gates pass after fixes: `pnpm scaffold doctor`, `pnpm lint`, `pnpm typecheck`,
       `pnpm test:unit`, `pnpm test:worker`, and `pnpm build`; relevant coverage remains at least 80%.
-- [ ] 25. Independent architecture, code, QA, security, and frontend reviews report no unresolved
+- [x] 25. Independent architecture, code, QA, security, and frontend reviews report no unresolved
       BLOCKER or HIGH. Every deferred MEDIUM has a ledger owner and reason.
 
 ## Vertical slice
@@ -160,21 +160,20 @@ Objectively checkable. No criterion is complete from a typecheck or mocked Node-
 Layers touched, in dependency order; exact files are finalized after Slice 0.
 
 - [x] decision/evidence — ADR-008 plus this contract's Slice 0 findings.
-- [ ] dependencies/runtime — workspace manifests, lockfile, Worker Wrangler production/test config,
+- [x] dependencies/runtime — workspace manifests, lockfile, Worker Wrangler production/test config,
       Env typing, secret provisioning, doctor parity checks.
 - [x] migration — next ordered `migrations/NNNN_*.sql` plus `.verify.sql`; schema version and Drizzle
       typing declarations.
-- [ ] integration boundary — request-scoped Better Auth factory and D1 Drizzle adapter.
-- [ ] identity — credential migration and application-owned registration/setup orchestration.
-- [ ] HTTP — shadow Better Auth handler and session-to-`userId` bridge.
-- [ ] contracts — only Unimailbox-owned orchestration/session-shell contracts; Better Auth remains
+- [x] integration boundary — request-scoped Better Auth factory and D1 Drizzle adapter.
+- [x] identity — credential migration and application-owned registration/setup orchestration.
+- [x] HTTP — shadow Better Auth handler and session-to-`userId` bridge.
+- [x] contracts — only Unimailbox-owned orchestration/session-shell contracts; Better Auth remains
       the source of its raw auth endpoint shapes.
-- [ ] client — auth routes, session recovery, authorized shell, and router/query follow-up fixes.
-- [ ] tests — unit, Workers Pool/D1, component/router, migration fresh/repeat, denial/failure, and
+- [x] client — auth routes, session recovery, authorized shell, and router/query follow-up fixes.
+- [x] tests — unit, Workers Pool/D1, component/router, migration fresh/repeat, denial/failure, and
       local cutover/rollback evidence.
 
-New module dependency edges introduced: none approved yet. Slice 0 must propose any necessary edge
-against `.claude/rules/architecture.md` before implementation.
+New module dependency edges introduced: none.
 
 ## Delivery path
 
