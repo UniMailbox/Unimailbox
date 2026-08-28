@@ -67,10 +67,12 @@ which is the wrong layer. The correct assertion parses `sendInit.body` and reads
    intercepts the outbound HTTP request before it leaves the Worker. No `.env` file is read.
 8. **Standard and configured-local test behavior no longer differ** for the wire-shape
    assertion: AC 5 runs in both modes.
-9. **Phase 2 may return to Verified** only after final review and every required gate passes:
-   `pnpm scaffold doctor`, `pnpm lint`, `pnpm typecheck`, `pnpm format:check`, `pnpm test:unit`,
-   `pnpm test:worker`, `pnpm build`, `git diff --check`. Required results documented in §Quality
-   gates below.
+9. The local gates below establish CAP-054 as **Implemented**. Phase 2 may return to `Verified`
+   only after the project-level ledger requirement is met: this revision is deployed to preview and
+   a controlled same-key retry/duplicate-send observation confirms provider-side suppression. Local
+   review and `pnpm scaffold doctor`, `pnpm lint`, `pnpm typecheck`, `pnpm format:check`,
+   `pnpm test:unit`, `pnpm test:worker`, `pnpm build`, and `git diff --check` remain required before
+   that operator step.
 
 ## File ownership
 
@@ -120,8 +122,8 @@ skip becomes a real run), zero skipped, zero failed.
 A user-driven path is not in scope for this slice (no UI surface changes). The production fix
 takes effect on the next outbound send after the slice is deployed: `processOutboundJob` already
 calls `brevoAdapter.send(...)` with `idempotencyKey: claimed.message_id`. After the slice, the
-HTTP request body carries that value in `headers['Idempotency-Key']`, and a redelivery with the
-same key is deduped by Brevo.
+HTTP request body carries that value in `headers['Idempotency-Key']`; a controlled preview
+redelivery with the same key must still be observed before claiming that Brevo dedupes it.
 
 ## Out-of-scope (explicit, non-overlapping follow-ups)
 

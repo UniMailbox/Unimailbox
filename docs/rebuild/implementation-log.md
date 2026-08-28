@@ -10,6 +10,25 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-28 — CAP-054 independent review: implementation accepted, preview verification still pending
+
+Codex independently reviewed the CAP-054 production diff and reran the focused and full gates on
+`cap/CAP-054-provider-idempotency`: Brevo adapter 10/10, preview-gate 27/27, unit 904/904, Worker
+784/784 with zero skipped, scaffold doctor 14/14, lint, typecheck, format, diff check, and build /
+Wrangler dry-run all pass. The adapter placement matches the `sendTransacEmail` JSON `headers`
+contract, and no runtime or secret-handling defect was found.
+
+This review does **not** treat the mocked-fetch wire-shape test as provider verification. CAP-045's
+preview run predates CAP-054, and its raw evidence was not committed. Phase 2 therefore remains
+implemented with CAP-054 preview verification pending: deploy this revision, perform a controlled
+same-key retry/duplicate-send observation against Brevo, and capture redacted evidence before
+restoring `Verified` or dispatching CAP-047.
+
+Process correction: the CAP-054 ledger row now records Claude Code as implementer and Codex as the
+independent gate reviewer; the prior "orchestrator-only; no subagent" wording was inaccurate.
+
+---
+
 ## 2026-08-27 — CAP-054 implemented; Phase 2 verification re-closed
 
 D-CAP-028-E is RESOLVED. The Brevo adapter now sends `Idempotency-Key: msg.idempotencyKey`
