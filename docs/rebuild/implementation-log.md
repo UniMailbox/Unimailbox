@@ -10,6 +10,21 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-28 — CAP-047 server draft-send slice completed
+
+The bounded server send path is now implemented and locally verified. `POST
+/api/v1/drafts/:draftId/send` requires `message.send` and an idempotency key, binds the request
+fingerprint to both the raw body and draft resource, authorizes against the resolved mailbox, and
+atomically promotes `draft → queued`, moves the mailbox copy to `sent`, records one idempotency row,
+creates one guarded outbound job, and writes the closed `draft.sent` audit action. The queue receives
+`{ jobId }` only after the D1 batch commits; provider credentials remain queue-consumer concerns.
+
+Coverage includes empty/`{}` bodies, strict whitespace rejection, same-key replay and concurrency,
+cross-draft key reuse, no-provider/no-leak authorization, non-draft no-op, and deterministic audit
+rollback. Focused draft-send tests pass 42/42; full Worker tests pass 826/826; unit tests pass
+961/961; contracts, lint, typecheck, format, build/dry-run, and `git diff --check` pass. The
+CAP-047 slice contract is archived at `work/archive/2026-08/CAP-047-draft-send/task.md`.
+
 ## 2026-08-28 — Deployment preflight compatibility fix (Wrangler 4.121)
 
 While executing the CAP-054 preview preflight, `scripts/deploy.ts` was found to assume the older
