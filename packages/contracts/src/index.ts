@@ -1048,6 +1048,104 @@ export const composeResponseSchema = z.object({
 export type ComposeResponse = z.infer<typeof composeResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// Drafts — CAP-047 wire contracts (slice 1.1: drafts core).
+//
+// These are the shared *wire* input contracts the CAP-047 draft routes will
+// validate against. They are intentionally written with the CAP-047 wire
+// names (`body_text` / `body_html`) — NOT the database Drizzle column names.
+// The wire shape is locked at this boundary so the storage layer can evolve
+// without breaking the public API (D-CAP-047-contracts: do not leak Drizzle
+// names across the contracts boundary).
+//
+// CAP-047 also needs `If-Match: <updated_at>` on PATCH and an
+// `Idempotency-Key` header on every mutating route. Those contracts are
+// enforced by HTTP middleware in `apps/worker/src/http/middleware/`, not by
+// the body schemas here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Request body for `POST /api/v1/mailboxes/:mailboxId/drafts`.
+ *
+ * - `subject`: required, ≤998 chars (matches the compose contract ceiling).
+ * - `body_text`: required, ≤65,536 chars (64 KiB; the wire ceiling for the
+ *   text body — drafts are server-authoritative, so the wire body is the
+ *   source of truth for content).
+ * - `body_html`: optional, ≤131,072 chars (128 KiB; the wire ceiling for
+ *   the HTML body).
+ * - `to`: required array of validated `EmailAddress` values, max 50.
+ *   `to` is required (no default) — callers must always supply it, even
+ *   as `[]`.
+ * - `cc` / `bcc`: optional arrays of validated `EmailAddress` values, max
+ *   50; default to `[]` to match the compose contract convention
+ *   (`composeRequestSchema.cc.default([])`) so the minimum payload
+ *   `{subject, body_text, to: []}` is valid without specifying `cc` or
+ *   `bcc`.
+ *
+ * Recipient arrays are *arrays of strings* (the `EmailAddress` inferred
+ * type), not objects — the wire shape does not carry per-recipient
+ * `displayName` on drafts. A future drafts slice can widen this if the UI
+ * needs a display name; the contracts layer is the boundary.
+ *
+ * The schema is `.strict()` so unknown fields (e.g. an `htmlBody` /
+ * `textBody` typo, an `id` slipped into the body, etc.) are rejected at
+ * the boundary instead of silently stripped: this is the same posture as
+ * `updateDraftSchema` and `sendDraftSchema`, and it makes a typo a 400-
+ * class error rather than a silent no-op against the wire contract.
+ */
+export const createDraftSchema = z
+  .object({
+    subject: z.string().max(998),
+    body_text: z.string().max(65_536),
+    body_html: z.string().max(131_072).optional(),
+    to: z.array(emailAddressSchema).max(50),
+    cc: z.array(emailAddressSchema).max(50).default([]),
+    bcc: z.array(emailAddressSchema).max(50).default([]),
+  })
+  .strict();
+
+export type CreateDraftRequest = z.infer<typeof createDraftSchema>;
+
+/**
+ * Request body for `PATCH /api/v1/drafts/:id`. All fields are optional —
+ * the client patches only the field(s) that changed. The schema is
+ * `.strict()` so unknown fields (e.g. a `draftId` typo) are rejected at
+ * the boundary instead of silently stripped: the route relies on
+ * `updated_at` for optimistic concurrency and on `Idempotency-Key` for
+ * replay safety, so a body that does not match the wire contract is a
+ * 400-class error, not a no-op.
+ *
+ * `If-Match: <updated_at>` is required by the route; it is a header, not a
+ * body field, so it is not modelled here.
+ */
+export const updateDraftSchema = z
+  .object({
+    subject: z.string().max(998).optional(),
+    body_text: z.string().max(65_536).optional(),
+    body_html: z.string().max(131_072).optional(),
+    to: z.array(emailAddressSchema).max(50).optional(),
+    cc: z.array(emailAddressSchema).max(50).optional(),
+    bcc: z.array(emailAddressSchema).max(50).optional(),
+  })
+  .strict();
+
+export type UpdateDraftRequest = z.infer<typeof updateDraftSchema>;
+
+/**
+ * Request body for `POST /api/v1/drafts/:id/send`. The send route requires
+ * an `Idempotency-Key` header (R-IDEMPOTENCY-*; ADR-004), but the *body*
+ * is empty — every piece of information the route needs (the draft's
+ * `updated_at` for optimistic concurrency, the recipient arrays from the
+ * stored draft, the mailbox it lives in) is already on the server.
+ *
+ * The schema is `.strict()` so an accidental payload (e.g. a client that
+ * POSTs `{ draftId }` or `{ to }`) is rejected at the boundary instead of
+ * silently accepted.
+ */
+export const sendDraftSchema = z.object({}).strict();
+
+export type SendDraftRequest = z.infer<typeof sendDraftSchema>;
+
+// ---------------------------------------------------------------------------
 // Admin: Inbound blocklist + per-role policies — D-CAP-021 / CAP-035.
 // ---------------------------------------------------------------------------
 export {

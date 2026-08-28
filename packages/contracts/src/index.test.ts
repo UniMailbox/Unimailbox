@@ -40,6 +40,9 @@ import {
   composeRecipientSchema,
   composeRequestSchema,
   composeResponseSchema,
+  createDraftSchema,
+  updateDraftSchema,
+  sendDraftSchema,
   messageStatusSchema,
   outboundJobStatusSchema,
   type MessageStatus,
@@ -2271,5 +2274,419 @@ describe('ALLOWED_*_TRANSITIONS — CAP-030 direction guard', () => {
       // any UPDATE targeting `draft` is rejected.
       expect([...allowedFromForMessageStatus('draft')]).toEqual([]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-047 (slice 1.1: drafts core) wire contracts. The wire names
+// (`body_text` / `body_html`) are the public shape; the Drizzle/database
+// column names are deliberately NOT modelled here. See the index.ts doc
+// block for the rationale (D-CAP-047-contracts).
+// ---------------------------------------------------------------------------
+
+describe('createDraftSchema — POST /mailboxes/:mailboxId/drafts (CAP-047)', () => {
+  // AC 1 (verification #1): valid create input with recipient arrays and
+  // defaults. cc/bcc default to [] when omitted — same convention as
+  // composeRequestSchema.
+  it('accepts a valid create with to/cc/bcc arrays (all three explicitly provided)', () => {
+    const result = createDraftSchema.parse({
+      subject: 'Hello',
+      body_text: 'Body text',
+      to: ['alice@example.com', 'bob@example.com'],
+      cc: ['carol@example.com'],
+      bcc: ['dan@example.com'],
+    });
+    expect(result).toEqual({
+      subject: 'Hello',
+      body_text: 'Body text',
+      to: ['alice@example.com', 'bob@example.com'],
+      cc: ['carol@example.com'],
+      bcc: ['dan@example.com'],
+    });
+  });
+
+  it('accepts an empty to array and defaults cc/bcc to []', () => {
+    const result = createDraftSchema.parse({
+      subject: 'No recipients yet',
+      body_text: '',
+      to: [],
+    });
+    expect(result.subject).toBe('No recipients yet');
+    expect(result.to).toEqual([]);
+    expect(result.cc).toEqual([]);
+    expect(result.bcc).toEqual([]);
+  });
+
+  it('accepts a minimal payload — to + subject + body_text only, defaults applied', () => {
+    const result = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Draft',
+      to: ['alice@example.com'],
+    });
+    expect(result.cc).toEqual([]);
+    expect(result.bcc).toEqual([]);
+    expect(result.body_html).toBeUndefined();
+  });
+
+  it('accepts body_html when present and omits it when absent', () => {
+    const withHtml = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      body_html: '<p>Hi</p>',
+      to: ['alice@example.com'],
+    });
+    expect(withHtml.body_html).toBe('<p>Hi</p>');
+
+    const withoutHtml = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+    });
+    expect(withoutHtml.body_html).toBeUndefined();
+  });
+
+  it('normalises recipient emails to lowercase (R-DATA-001)', () => {
+    const result = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['ALICE@Example.COM'],
+    });
+    expect(result.to).toEqual(['alice@example.com']);
+  });
+
+  it('normalises cc and bcc recipients to lowercase + trimmed form (R-DATA-001)', () => {
+    // The same trim+lowercase pipeline that gates `to` also gates `cc`
+    // and `bcc` — all three share `emailAddressSchema`. Cheap coverage
+    // so a future refactor that bypasses `emailAddressSchema` on the
+    // cc/bcc arrays fails loudly here.
+    const result = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+      cc: ['  CAROL@Example.COM  '],
+      bcc: ['  DAN@Example.COM  '],
+    });
+    expect(result.cc).toEqual(['carol@example.com']);
+    expect(result.bcc).toEqual(['dan@example.com']);
+  });
+
+  it('rejects a missing subject via safeParse', () => {
+    const result = createDraftSchema.safeParse({
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing body_text via safeParse', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      to: ['alice@example.com'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing to array via safeParse', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects unknown create fields instead of silently dropping compose names', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      htmlBody: '<p>wrong wire name</p>',
+      to: ['alice@example.com'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  // AC 1 (verification #2): subject/body/body_html boundary acceptance and
+  // one-over-limit rejection.
+  it('accepts subject at the 998-char boundary', () => {
+    const result = createDraftSchema.parse({
+      subject: 'a'.repeat(998),
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+    });
+    expect(result.subject).toHaveLength(998);
+  });
+
+  it('rejects subject at 999 chars (one over the limit)', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'a'.repeat(999),
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts body_text at the 65,536-char boundary', () => {
+    const result = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'a'.repeat(65_536),
+      to: ['alice@example.com'],
+    });
+    expect(result.body_text).toHaveLength(65_536);
+  });
+
+  it('rejects body_text at 65,537 chars (one over the limit)', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'a'.repeat(65_537),
+      to: ['alice@example.com'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts body_html at the 131,072-char boundary', () => {
+    const result = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      body_html: 'a'.repeat(131_072),
+      to: ['alice@example.com'],
+    });
+    expect(result.body_html).toHaveLength(131_072);
+  });
+
+  it('rejects body_html at 131,073 chars (one over the limit)', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      body_html: 'a'.repeat(131_073),
+      to: ['alice@example.com'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  // AC 1 (verification #3): each recipient array's 50-item limit and
+  // invalid-email rejection.
+  it('accepts to/cc/bcc at the 50-item boundary', () => {
+    const emails = Array.from({ length: 50 }, (_, i) => `user${i}@example.com`);
+    const result = createDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: emails,
+      cc: emails,
+      bcc: emails,
+    });
+    expect(result.to).toHaveLength(50);
+    expect(result.cc).toHaveLength(50);
+    expect(result.bcc).toHaveLength(50);
+  });
+
+  it('rejects to with 51 items (one over the limit)', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: Array.from({ length: 51 }, (_, i) => `user${i}@example.com`),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects cc with 51 items (one over the limit)', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+      cc: Array.from({ length: 51 }, (_, i) => `user${i}@example.com`),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects bcc with 51 items (one over the limit)', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+      bcc: Array.from({ length: 51 }, (_, i) => `user${i}@example.com`),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an invalid email in `to` via safeParse', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com', 'not-an-email'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an invalid email in `cc` via safeParse', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+      cc: ['not-an-email'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an invalid email in `bcc` via safeParse', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com'],
+      bcc: ['not-an-email'],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-string entry in `to` via safeParse', () => {
+    const result = createDraftSchema.safeParse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      to: ['alice@example.com', { address: 'bob@example.com' }],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('updateDraftSchema — PATCH /drafts/:id (CAP-047)', () => {
+  // AC 1 (verification #4): update accepts a partial payload but rejects
+  // an unknown field. The schema is .strict() — a typo'd field name is a
+  // 400-class error, not a silent no-op.
+  it('accepts an empty object (no fields changed)', () => {
+    const result = updateDraftSchema.parse({});
+    expect(result).toEqual({});
+  });
+
+  it('accepts a partial payload — only subject', () => {
+    const result = updateDraftSchema.parse({ subject: 'New subject' });
+    expect(result).toEqual({ subject: 'New subject' });
+  });
+
+  it('accepts a partial payload — only body_text', () => {
+    const result = updateDraftSchema.parse({ body_text: 'Updated text' });
+    expect(result).toEqual({ body_text: 'Updated text' });
+  });
+
+  it('accepts a partial payload — only body_html', () => {
+    const result = updateDraftSchema.parse({ body_html: '<p>Updated HTML</p>' });
+    expect(result).toEqual({ body_html: '<p>Updated HTML</p>' });
+  });
+
+  it('accepts a partial payload — only the recipient arrays', () => {
+    const result = updateDraftSchema.parse({
+      to: ['  NEW@Example.COM '],
+      cc: [],
+      bcc: [],
+    });
+    expect(result.to).toEqual(['new@example.com']);
+    expect(result.cc).toEqual([]);
+    expect(result.bcc).toEqual([]);
+  });
+
+  it('accepts a fully populated payload (every field at once)', () => {
+    const result = updateDraftSchema.parse({
+      subject: 'Hi',
+      body_text: 'Hi',
+      body_html: '<p>Hi</p>',
+      to: ['alice@example.com'],
+      cc: ['carol@example.com'],
+      bcc: ['dan@example.com'],
+    });
+    expect(result.subject).toBe('Hi');
+    expect(result.to).toEqual(['alice@example.com']);
+  });
+
+  it('still enforces the 998-char subject limit on update', () => {
+    const result = updateDraftSchema.safeParse({ subject: 'a'.repeat(999) });
+    expect(result.success).toBe(false);
+  });
+
+  it('still enforces the 65,536-char body_text limit on update', () => {
+    const result = updateDraftSchema.safeParse({ body_text: 'a'.repeat(65_537) });
+    expect(result.success).toBe(false);
+  });
+
+  it('still enforces the 131,072-char body_html limit on update', () => {
+    const result = updateDraftSchema.safeParse({ body_html: 'a'.repeat(131_073) });
+    expect(result.success).toBe(false);
+  });
+
+  it('still enforces the 50-item limit on to/cc/bcc on update', () => {
+    const tooMany = Array.from({ length: 51 }, (_, i) => `user${i}@example.com`);
+    expect(updateDraftSchema.safeParse({ to: tooMany }).success).toBe(false);
+    expect(updateDraftSchema.safeParse({ cc: tooMany }).success).toBe(false);
+    expect(updateDraftSchema.safeParse({ bcc: tooMany }).success).toBe(false);
+  });
+
+  it('still rejects invalid emails in to/cc/bcc on update', () => {
+    expect(updateDraftSchema.safeParse({ to: ['not-an-email'] }).success).toBe(false);
+    expect(updateDraftSchema.safeParse({ cc: ['not-an-email'] }).success).toBe(false);
+    expect(updateDraftSchema.safeParse({ bcc: ['not-an-email'] }).success).toBe(false);
+  });
+
+  it('rejects an unknown field — the schema is .strict()', () => {
+    const result = updateDraftSchema.safeParse({ unknownField: 'foo' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a typo of `subject` — `subjetc` is unknown, not silently stripped', () => {
+    const result = updateDraftSchema.safeParse({ subjetc: 'foo' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an attempt to patch `updated_at` via the body (it is a header, not a field)', () => {
+    const result = updateDraftSchema.safeParse({
+      subject: 'Hi',
+      updated_at: '2026-01-01T00:00:00.000Z',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an attempt to patch `id` via the body (the id is in the URL)', () => {
+    const result = updateDraftSchema.safeParse({
+      id: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a non-string `to` entry on update', () => {
+    const result = updateDraftSchema.safeParse({ to: [{ address: 'alice@example.com' }] });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('sendDraftSchema — POST /drafts/:id/send (CAP-047)', () => {
+  // AC 1 (verification #5): send accepts `{}` and rejects a non-empty
+  // body. The route requires an Idempotency-Key *header* — the body is
+  // empty by design.
+  it('accepts an empty body', () => {
+    const result = sendDraftSchema.parse({});
+    expect(result).toEqual({});
+  });
+
+  it('rejects a non-empty body — schema is .strict()', () => {
+    const result = sendDraftSchema.safeParse({ foo: 'bar' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a body that tries to pass a draftId', () => {
+    const result = sendDraftSchema.safeParse({
+      draftId: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a body that tries to pass recipients', () => {
+    const result = sendDraftSchema.safeParse({ to: ['alice@example.com'] });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects null and undefined inputs (the schema is z.object({}))', () => {
+    expect(sendDraftSchema.safeParse(null).success).toBe(false);
+    expect(sendDraftSchema.safeParse(undefined).success).toBe(false);
+  });
+
+  it('rejects non-object inputs', () => {
+    expect(sendDraftSchema.safeParse('send').success).toBe(false);
+    expect(sendDraftSchema.safeParse(42).success).toBe(false);
+    expect(sendDraftSchema.safeParse([]).success).toBe(false);
   });
 });
