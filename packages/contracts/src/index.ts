@@ -556,10 +556,12 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * CAP-043 Slice 1: bumped from `'0015'` to `'0016'` after
  * migrations/0016_message_user_state_soft_delete.sql (per-user
  * is_deleted / deleted_at columns), to `'0017'` for the composite primary
- * key, to `'0018'` for the audit.read upgrade backfill, and to `'0019'`
- * for the role_policies JSON normalization (CAP-036).
+ * key, to `'0018'` for the audit.read upgrade backfill, to `'0019'` for
+ * the role_policies JSON normalization (CAP-036), and to `'0020'` for
+ * the idempotency_records.response_json CHECK raise (CAP-047 PATCH
+ * slice).
  */
-export const CURRENT_SCHEMA_VERSION = '0019' as const;
+export const CURRENT_SCHEMA_VERSION = '0020' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008

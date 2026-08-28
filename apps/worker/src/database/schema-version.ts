@@ -4,4 +4,6 @@
 // Hand-written; intentionally not auto-generated.
 // 0018 closes the audit.read upgrade gap for existing administrator roles.
 // 0019 closes the role_policies JSON normalization gap (CAP-036).
-export const CURRENT_SCHEMA_VERSION = '0019' as const;
+// 0020 raises the idempotency_records.response_json CHECK to 524,288
+// (CAP-047 PATCH slice) so the GET-compatible PATCH replay body fits.
+export const CURRENT_SCHEMA_VERSION = '0020' as const;

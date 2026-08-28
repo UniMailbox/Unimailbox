@@ -50,6 +50,13 @@ import auditReadPermissionBackfillSql from '../../../migrations/0018_audit_read_
 // role_policies as metadata-only. Two child tables (role_policy_ban_emails,
 // role_policy_avail_domains) hold the patterns relationally.
 import rolePolicyNormalizeSql from '../../../migrations/0019_role_policy_normalize.sql?raw';
+// CAP-047 PATCH slice: raises the `idempotency_records.response_json`
+// CHECK ceiling from 65,536 to 524,288 so the GET-compatible PATCH replay
+// body fits. Without this import the loader would stop at 0019 and the
+// worker-pool DB would still carry the legacy 65,536 ceiling — the
+// focused large-body test would CHECK-reject and the entire D1 batch
+// would roll back.
+import idempotencyResponseSizeSql from '../../../migrations/0020_idempotency_response_size.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -154,6 +161,11 @@ const MIGRATIONS = [
     name: '0019_role_policy_normalize',
     fileName: '0019_role_policy_normalize.sql',
     sql: rolePolicyNormalizeSql,
+  },
+  {
+    name: '0020_idempotency_response_size',
+    fileName: '0020_idempotency_response_size.sql',
+    sql: idempotencyResponseSizeSql,
   },
 ] as const;
 
