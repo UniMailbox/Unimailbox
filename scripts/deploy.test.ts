@@ -78,7 +78,7 @@ describe('scripts/deploy.ts — pure logic', () => {
         secretsStoreId: 'ss-jkl012',
       };
 
-      const resolved = resolveConfigTemplate(mockTemplate, state);
+      const resolved = resolveConfigTemplate(mockTemplate, state, { targetEnv: 'local' });
 
       // Each placeholder should be replaced
       expect(resolved).toContain('"database_id": "d1-abc123"');
@@ -101,7 +101,7 @@ describe('scripts/deploy.ts — pure logic', () => {
         // Missing: kvSetupSessionId, kvCacheId, secretsStoreId
       };
 
-      const resolved = resolveConfigTemplate(mockTemplate, state);
+      const resolved = resolveConfigTemplate(mockTemplate, state, { targetEnv: 'local' });
 
       expect(resolved).toContain('"database_id": "d1-abc123"');
       expect(resolved).toContain('"id": "<missing>"');
@@ -121,7 +121,7 @@ describe('scripts/deploy.ts — pure logic', () => {
         secretsStoreId: 'ss-jkl012',
       };
 
-      const resolved = resolveConfigTemplate(alreadyResolved, state);
+      const resolved = resolveConfigTemplate(alreadyResolved, state, { targetEnv: 'local' });
 
       // Should not change anything (placeholders already gone)
       expect(resolved).toContain('real-d1-id');
@@ -129,6 +129,103 @@ describe('scripts/deploy.ts — pure logic', () => {
       expect(resolved).toContain('real-kv-cache-id');
       expect(resolved).toContain('real-ss-id');
       expect(resolved).not.toContain('d1-abc123');
+    });
+  });
+
+  // INV-003 / CAP-005 follow-up: target-value substitution. The deploy flow
+  // passes the requested ENVIRONMENT and an explicitly supplied
+  // BETTER_AUTH_URL into the pure resolver so the gitignored generated
+  // JSONC reflects the deploy target without mutating the committed
+  // template. The override is optional — when absent the template's
+  // local-default sentinel stays in place so the guard can still fail
+  // closed.
+  describe('resolveConfigTemplate target overrides (INV-003)', () => {
+    const varsTemplate = JSON.stringify({
+      vars: {
+        ENVIRONMENT: 'local',
+        BETTER_AUTH_URL: 'http://localhost',
+        AUTH_PROVIDER: 'legacy',
+      },
+    });
+
+    it('substitutes target ENVIRONMENT and an explicit https override for a preview target', () => {
+      const resolved = resolveConfigTemplate(
+        varsTemplate,
+        {},
+        {
+          targetEnv: 'preview',
+          betterAuthUrlOverride: 'https://preview.example.com',
+        },
+      );
+      expect(() => JSON.parse(resolved)).not.toThrow();
+      const parsed = JSON.parse(resolved) as {
+        vars: { ENVIRONMENT: string; BETTER_AUTH_URL: string; AUTH_PROVIDER: string };
+      };
+      expect(parsed.vars.ENVIRONMENT).toBe('preview');
+      expect(parsed.vars.BETTER_AUTH_URL).toBe('https://preview.example.com');
+      // Unrelated vars entries must remain untouched.
+      expect(parsed.vars.AUTH_PROVIDER).toBe('legacy');
+    });
+
+    it('keeps local template defaults when no BETTER_AUTH_URL override is supplied', () => {
+      const resolved = resolveConfigTemplate(varsTemplate, {}, { targetEnv: 'local' });
+      const parsed = JSON.parse(resolved) as {
+        vars: { ENVIRONMENT: string; BETTER_AUTH_URL: string; AUTH_PROVIDER: string };
+      };
+      expect(parsed.vars.ENVIRONMENT).toBe('local');
+      expect(parsed.vars.BETTER_AUTH_URL).toBe('http://localhost');
+    });
+
+    it('refuses a non-local target when BETTER_AUTH_URL override is missing (fails closed)', () => {
+      // No override supplied → the committed local-default sentinel
+      // (`http://localhost`) stays in place; the guard must reject it.
+      const resolved = resolveConfigTemplate(varsTemplate, {}, { targetEnv: 'preview' });
+      const parsed = JSON.parse(resolved) as {
+        vars: { ENVIRONMENT: string; BETTER_AUTH_URL: string; AUTH_PROVIDER: string };
+      };
+      expect(parsed.vars.ENVIRONMENT).toBe('preview');
+      expect(parsed.vars.BETTER_AUTH_URL).toBe('http://localhost');
+      const guard = evaluateDeployConfigForTarget(resolved, 'preview');
+      expect(guard.ok).toBe(false);
+      expect(guard.error).toContain('http://localhost');
+    });
+
+    it('refuses a non-local target when BETTER_AUTH_URL override is http:// (fails closed)', () => {
+      const resolved = resolveConfigTemplate(
+        varsTemplate,
+        {},
+        {
+          targetEnv: 'preview',
+          betterAuthUrlOverride: 'http://preview.example.com',
+        },
+      );
+      expect(resolved).toContain('"BETTER_AUTH_URL": "http://preview.example.com"');
+      const guard = evaluateDeployConfigForTarget(resolved, 'preview');
+      expect(guard.ok).toBe(false);
+      expect(guard.error).toContain('https');
+    });
+
+    it('escapes JSON-unsafe characters so generated JSONC stays valid', () => {
+      // Pathological value containing embedded quote, backslash, and
+      // newline — the kind of input JSON.stringify handles by default.
+      // The resolver must produce a string that re-parses cleanly and
+      // round-trips the original value byte-for-byte.
+      const unsafe = 'https://example.com/"q"\\q\nnext';
+      const resolved = resolveConfigTemplate(
+        varsTemplate,
+        {},
+        {
+          targetEnv: 'preview',
+          betterAuthUrlOverride: unsafe,
+        },
+      );
+      expect(() => JSON.parse(resolved)).not.toThrow();
+      const parsed = JSON.parse(resolved) as {
+        vars: { ENVIRONMENT: string; BETTER_AUTH_URL: string; AUTH_PROVIDER: string };
+      };
+      expect(parsed.vars.ENVIRONMENT).toBe('preview');
+      expect(parsed.vars.BETTER_AUTH_URL).toBe(unsafe);
+      expect(parsed.vars.AUTH_PROVIDER).toBe('legacy');
     });
   });
 

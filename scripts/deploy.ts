@@ -974,7 +974,23 @@ export const evaluateDeployConfigForTarget = (
   return { ok: true };
 };
 
-export const resolveConfigTemplate = (template: string, state: ResourceState): string => {
+// INV-003 / CAP-005 follow-up: target-value substitution. The deploy flow
+// passes the requested target ENVIRONMENT and (when supplied) a
+// BETTER_AUTH_URL override into the pure resolver so the gitignored
+// generated JSONC reflects the deploy target without mutating the
+// committed template. The override is optional — when absent the
+// template's local-default sentinel stays in place so the existing
+// guard can still fail closed.
+export interface ResolveConfigOverrides {
+  targetEnv: string;
+  betterAuthUrlOverride?: string;
+}
+
+export const resolveConfigTemplate = (
+  template: string,
+  state: ResourceState,
+  overrides: ResolveConfigOverrides,
+): string => {
   let resolved = template;
 
   // Replace each placeholder with the real ID
@@ -995,6 +1011,29 @@ export const resolveConfigTemplate = (template: string, state: ResourceState): s
     `"store_id": "${state.secretsStoreId ?? '<missing>'}"`,
   );
 
+  // Substitute the target ENVIRONMENT into `vars.ENVIRONMENT`.
+  // JSON.stringify produces a JSON-safe encoding so a pathological value
+  // (control chars, embedded quotes, backslashes) cannot corrupt the
+  // generated JSONC. The guard above will already have rejected any value
+  // that is not local|preview|staging|production, but the resolver stays
+  // defensive on its own.
+  resolved = resolved.replace(
+    /"ENVIRONMENT"\s*:\s*"[^"]*"/,
+    `"ENVIRONMENT": ${JSON.stringify(overrides.targetEnv)}`,
+  );
+
+  // Substitute BETTER_AUTH_URL only when the operator explicitly supplied
+  // one. The committed template's local default (`http://localhost`) is the
+  // fail-closed sentinel that `evaluateDeployConfigForTarget` relies on for
+  // non-local targets; touching it when no override was given would mask
+  // operator omission and silently ship a non-routable origin.
+  if (overrides.betterAuthUrlOverride !== undefined) {
+    resolved = resolved.replace(
+      /"BETTER_AUTH_URL"\s*:\s*"[^"]*"/,
+      `"BETTER_AUTH_URL": ${JSON.stringify(overrides.betterAuthUrlOverride)}`,
+    );
+  }
+
   return resolved;
 };
 
@@ -1003,7 +1042,25 @@ const resolveConfig = (state: ResourceState, targetEnv: string): void => {
   const templatePath = resolve(WORKER_DIR, 'wrangler.jsonc');
   const template = readFileSync(templatePath, 'utf-8');
 
-  const resolved = resolveConfigTemplate(template, state);
+  // INV-003 / CAP-005 follow-up: pass the target ENVIRONMENT and the
+  // operator-supplied BETTER_AUTH_URL (trimmed; absent means no override)
+  // into the resolver. The generated JSONC is gitignored — the committed
+  // template stays at its local-default sentinel until a deploy target
+  // is chosen, and `evaluateDeployConfigForTarget` below still refuses to
+  // ship local defaults to a non-local target.
+  const rawBetterAuthUrl = process.env.BETTER_AUTH_URL?.trim() ?? '';
+  const betterAuthUrlOverride = rawBetterAuthUrl.length > 0 ? rawBetterAuthUrl : undefined;
+
+  // exactOptionalPropertyTypes: omit `betterAuthUrlOverride` when absent
+  // rather than passing `undefined` — passing undefined would be rejected
+  // by the type checker and would also leak the missing-override intent
+  // away from the resolver's own `!== undefined` check.
+  const overrides: ResolveConfigOverrides = { targetEnv };
+  if (betterAuthUrlOverride !== undefined) {
+    overrides.betterAuthUrlOverride = betterAuthUrlOverride;
+  }
+
+  const resolved = resolveConfigTemplate(template, state, overrides);
 
   // CAP-042 (AC 11): refuse to ship local-default config to a non-local
   // target. Better Auth cookies would be signed against a non-routable
