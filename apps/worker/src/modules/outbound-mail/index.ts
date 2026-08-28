@@ -15,6 +15,10 @@ export { prepareCreateConnection, type CreateConnectionInput } from './connectio
 
 export {
   prepareCreateOutboundJob,
+  // CAP-047: marker-guarded INSERT...SELECT for the draft→queued send path.
+  // Lives in the same D1 batch as the idempotency record so a replay cannot
+  // produce a second outbound_jobs row.
+  prepareCreateOutboundJobGuarded,
   getOutboundJob,
   updateJobStatus,
   claimOutboundJob,
@@ -25,6 +29,7 @@ export {
   findOrphanedQueuedJobs,
   isJobTerminal,
   type CreateJobInput,
+  type CreateJobGuardedInput,
   type OutboundJobRow,
   type UpdateJobStatusInput,
   type ReclaimResult,

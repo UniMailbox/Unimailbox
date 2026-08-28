@@ -13,6 +13,10 @@ export {
   prepareCreateRecipient,
   prepareCreateMailboxMessage,
   createMessageWithRelations,
+  // CAP-047: typed prepared writer for the draft→queued send-side transition.
+  // The route folds this UPDATE into the same D1 batch as the outbound_jobs
+  // INSERT and the idempotency record (one-atomic-send).
+  prepareQueueDraftForSend,
   updateMessageStatus,
   // CAP-040 / D-CAP-029-A: callers batching messages UPDATE into a
   // db.batch([...]) use this to fold the row write into the same
@@ -23,6 +27,7 @@ export type {
   CreateMessageInput,
   CreateRecipientInput,
   CreateMailboxMessageInput,
+  QueueDraftForSendInput,
   UpdateMessageStatusInput,
 } from './message-repository';
 

@@ -2,25 +2,25 @@
 //
 // Worker-pool tests for the CAP-047 draft routes. Uses SELF.fetch to
 // exercise the full request pipeline: router → authn → requirePermission
-// → assertCan → D1 batch insert (POST) or D1 SELECT (GET) → envelope.
-// Provider / queue is intentionally NOT exercised — a draft does not
-// enqueue a job, and the tests assert that no outbound_jobs row is
-// created.
+// → assertCan → D1 batch insert (POST/PATCH/send) or D1 SELECT (GET) → envelope.
+// The send block also verifies the post-commit queue handoff and provider
+// job shape; create/read/PATCH remain provider-free.
 //
 // The fixtures mirror compose.worker.test.ts: same role/permission seed,
-// same session helper, same domain + mailbox helpers. The only
-// divergence is no `createActiveProviderConnection()` call — drafts do
-// not touch the outbound pipeline.
+// same session helper, same domain + mailbox helpers. Only the send block
+// creates an active provider connection and touches the outbound queue.
 //
 // Slice: POST + GET cover the original server create / read slices. The
 // PATCH block at the bottom covers the optimistic-concurrency update
 // slice (`If-Match`, atomic conditional batch, replay, authz, atomicity).
 
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
-import { hashPassword } from '../src/platform/crypto';
+import { encrypt, hashPassword, importEncryptionKey } from '../src/platform/crypto';
 import { systemIds } from '../src/platform/ids';
+
+const ENCRYPTION_KEY = 'a'.repeat(64);
 
 // ---------------------------------------------------------------------------
 // Seeding helpers (mirrors compose.worker.test.ts / messages.worker.test.ts).
@@ -175,6 +175,27 @@ async function addMailboxMember(
   )
     .bind(mailboxId, userId, role, new Date().toISOString())
     .run();
+}
+
+async function createActiveProviderConnection(): Promise<string> {
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const connectionId = crypto.randomUUID();
+  const credentialId = crypto.randomUUID();
+  const key = await importEncryptionKey(ENCRYPTION_KEY);
+  const encrypted = await encrypt('test-brevo-api-key', key);
+
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
+       VALUES (?, 'brevo-api-key', 1, ?, ?, ?, ?, ?)`,
+    ).bind(credentialId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, now, now),
+    env.DB.prepare(
+      `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
+       VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
+    ).bind(connectionId, credentialId, now, now),
+  ]);
+
+  return connectionId;
 }
 
 const DRAFTS_PATH = (mailboxId: string) => `http://localhost/api/v1/mailboxes/${mailboxId}/drafts`;
@@ -2734,5 +2755,540 @@ describe('PATCH /api/v1/drafts/:draftId — CAP-047 server draft-update slice', 
       .bind(messageId)
       .first<{ html_body: string }>();
     expect(msg?.html_body).toBe(largeBodyHtml);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/drafts/:draftId/send
+//
+// The send slice is deliberately isolated from the create/read/PATCH suites:
+// it owns the draft -> queued transition, the atomic outbox write, and the
+// post-commit queue handoff. Provider HTTP is never called by this route.
+// ---------------------------------------------------------------------------
+
+const SEND_DRAFT_PATH = (draftId: string) => `http://localhost/api/v1/drafts/${draftId}/send`;
+const SEND_OPERATION = 'POST /api/v1/drafts/:draftId/send';
+
+describe('POST /api/v1/drafts/:draftId/send — CAP-047 draft-send slice', () => {
+  let queueSendSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+    queueSendSpy = vi.spyOn(env.OUTBOUND, 'send').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    queueSendSpy.mockRestore();
+  });
+
+  async function seedDraft(ownerEmail: string): Promise<{
+    ownerId: string;
+    token: string;
+    mailboxId: string;
+    messageId: string;
+  }> {
+    const ownerId = await createUserWithRole('member', ownerEmail);
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'send-mailbox');
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      token,
+      { subject: 'Send me', body_text: 'queued body', to: ['recipient@example.com'] },
+      `draft-send-seed-${crypto.randomUUID().slice(0, 8)}`,
+    );
+    return { ownerId, token, mailboxId, messageId };
+  }
+
+  it('queues the draft atomically and enqueues exactly one job after commit', async () => {
+    const { ownerId, token, mailboxId, messageId } = await seedDraft('send-owner@example.com');
+    const providerConnectionId = await createActiveProviderConnection();
+    const response = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': 'draft-send-happy-001' },
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get('Location')).toBe(`/api/v1/messages/${messageId}`);
+    expect(await response.json()).toEqual({ data: { messageId, status: 'queued' } });
+
+    const message = await env.DB.prepare(
+      `SELECT status, sent_at, provider_event_time FROM messages WHERE id = ?`,
+    )
+      .bind(messageId)
+      .first<{ status: string; sent_at: string | null; provider_event_time: number | null }>();
+    expect(message).toEqual({ status: 'queued', sent_at: null, provider_event_time: null });
+
+    const folder = await env.DB.prepare(
+      `SELECT folder FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?`,
+    )
+      .bind(mailboxId, messageId)
+      .first<{ folder: string }>();
+    expect(folder?.folder).toBe('sent');
+
+    const jobs = await env.DB.prepare(
+      `SELECT id, message_id, provider_connection_id, status FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .all<{ id: string; message_id: string; provider_connection_id: string; status: string }>();
+    expect(jobs.results).toHaveLength(1);
+    expect(jobs.results?.[0]).toMatchObject({
+      message_id: messageId,
+      provider_connection_id: providerConnectionId,
+      status: 'queued',
+    });
+
+    const audit = await env.DB.prepare(
+      `SELECT actor_user_id, action, resource_type, resource_id FROM audit_events
+       WHERE actor_user_id = ? AND action = 'draft.sent' AND resource_id = ?`,
+    )
+      .bind(ownerId, messageId)
+      .first<{
+        actor_user_id: string;
+        action: string;
+        resource_type: string;
+        resource_id: string;
+      }>();
+    expect(audit).toEqual({
+      actor_user_id: ownerId,
+      action: 'draft.sent',
+      resource_type: 'message',
+      resource_id: messageId,
+    });
+
+    expect(queueSendSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(queueSendSpy.mock.calls[0]?.[0]))).toEqual({
+      jobId: jobs.results?.[0]?.id,
+    });
+
+    const idem = await env.DB.prepare(
+      `SELECT response_status, response_json FROM idempotency_records
+       WHERE actor_id = ? AND operation = ? AND idempotency_key = ?`,
+    )
+      .bind(ownerId, SEND_OPERATION, 'draft-send-happy-001')
+      .first<{ response_status: number; response_json: string }>();
+    expect(idem?.response_status).toBe(202);
+    expect(idem?.response_json).toBe(
+      '{"data":{"messageId":"' + messageId + '","status":"queued"}}',
+    );
+  });
+
+  it('replays the same raw request byte-identically without a second job or queue send', async () => {
+    const { ownerId, token, messageId } = await seedDraft('send-replay@example.com');
+    await createActiveProviderConnection();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': 'draft-send-replay-001',
+    };
+    const first = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    const firstRaw = await first.text();
+    const second = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    const secondRaw = await second.text();
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(secondRaw).toBe(firstRaw);
+    expect(second.headers.get('Location')).toBe(`/api/v1/messages/${messageId}`);
+    expect(queueSendSpy).toHaveBeenCalledTimes(1);
+    const message = await env.DB.prepare(`SELECT status FROM messages WHERE id = ?`)
+      .bind(messageId)
+      .first<{ status: string }>();
+    expect(message?.status).toBe('queued');
+    const folder = await env.DB.prepare(`SELECT folder FROM mailbox_messages WHERE message_id = ?`)
+      .bind(messageId)
+      .first<{ folder: string }>();
+    expect(folder?.folder).toBe('sent');
+    const jobCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(jobCount?.n).toBe(1);
+    const auditCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE resource_id = ? AND action = 'draft.sent'`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(auditCount?.n).toBe(1);
+    const idemCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ? AND operation = ?`,
+    )
+      .bind(ownerId, SEND_OPERATION)
+      .first<{ n: number }>();
+    expect(idemCount?.n).toBe(1);
+  });
+
+  it('same-key concurrent sends return one stored response and create one job/audit', async () => {
+    const { ownerId, token, messageId } = await seedDraft('send-concurrent@example.com');
+    await createActiveProviderConnection();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': 'draft-send-concurrent-001',
+    };
+    const [first, second] = await Promise.all([
+      SELF.fetch(SEND_DRAFT_PATH(messageId), { method: 'POST', headers }),
+      SELF.fetch(SEND_DRAFT_PATH(messageId), { method: 'POST', headers }),
+    ]);
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect(await first.text()).toBe(await second.text());
+    expect(queueSendSpy).toHaveBeenCalledTimes(1);
+
+    const jobCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(jobCount?.n).toBe(1);
+    const auditCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE actor_user_id = ? AND action = 'draft.sent'`,
+    )
+      .bind(ownerId)
+      .first<{ n: number }>();
+    expect(auditCount?.n).toBe(1);
+  });
+
+  it('does not replay a key/body pair across two different drafts', async () => {
+    const ownerId = await createUserWithRole('member', 'send-cross-draft@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'cross-draft');
+    const firstDraftId = await createDraftViaPost(
+      mailboxId,
+      token,
+      { subject: 'First', body_text: 'first', to: [] },
+      'draft-send-cross-seed-001',
+    );
+    const secondDraftId = await createDraftViaPost(
+      mailboxId,
+      token,
+      { subject: 'Second', body_text: 'second', to: [] },
+      'draft-send-cross-seed-002',
+    );
+    await createActiveProviderConnection();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': 'draft-send-cross-resource-001',
+    };
+
+    const first = await SELF.fetch(SEND_DRAFT_PATH(firstDraftId), {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    expect(first.status).toBe(202);
+    const second = await SELF.fetch(SEND_DRAFT_PATH(secondDraftId), {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { error: { code: string } }).error.code).toBe(
+      'IDEMPOTENCY_KEY_REUSED',
+    );
+    expect(queueSendSpy).toHaveBeenCalledTimes(1);
+    const secondState = await env.DB.prepare(`SELECT status FROM messages WHERE id = ?`)
+      .bind(secondDraftId)
+      .first<{ status: string }>();
+    expect(secondState?.status).toBe('draft');
+  });
+
+  it('returns IDEMPOTENCY_KEY_REUSED for the same key with different bytes', async () => {
+    const { token, messageId } = await seedDraft('send-conflict@example.com');
+    await createActiveProviderConnection();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': 'draft-send-conflict-001',
+    };
+    const first = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers,
+      body: '{}',
+    });
+    expect(first.status).toBe(202);
+    const second = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers,
+      body: '{"unexpected":true}',
+    });
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { error: { code: string } }).error.code).toBe(
+      'IDEMPOTENCY_KEY_REUSED',
+    );
+    expect(queueSendSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a present whitespace body instead of treating it as an empty request', async () => {
+    const { token, messageId } = await seedDraft('send-whitespace@example.com');
+    await createActiveProviderConnection();
+    const response = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      body: '   ',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': 'draft-send-whitespace-001',
+        'Content-Type': 'application/json',
+      },
+    });
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      'INVALID_JSON',
+    );
+    expect(queueSendSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns PROVIDER_CONNECTION_NOT_FOUND without mutating the draft', async () => {
+    const { ownerId, token, mailboxId, messageId } = await seedDraft(
+      'send-no-provider@example.com',
+    );
+    const response = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': 'draft-send-no-provider-001',
+      },
+    });
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      'PROVIDER_CONNECTION_NOT_FOUND',
+    );
+    expect(queueSendSpy).not.toHaveBeenCalled();
+    const message = await env.DB.prepare(`SELECT status FROM messages WHERE id = ?`)
+      .bind(messageId)
+      .first<{ status: string }>();
+    expect(message?.status).toBe('draft');
+    const folder = await env.DB.prepare(
+      `SELECT folder FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?`,
+    )
+      .bind(mailboxId, messageId)
+      .first<{ folder: string }>();
+    expect(folder?.folder).toBe('drafts');
+    const idem = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ? AND operation = ?`,
+    )
+      .bind(ownerId, SEND_OPERATION)
+      .first<{ n: number }>();
+    expect(idem?.n).toBe(0);
+    const noProviderJobs = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(noProviderJobs?.n).toBe(0);
+    const noProviderAudit = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE resource_id = ? AND action = 'draft.sent'`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(noProviderAudit?.n).toBe(0);
+  });
+
+  it('collapses a foreign actor and a non-draft row to MESSAGE_NOT_FOUND', async () => {
+    const {
+      ownerId,
+      token: ownerToken,
+      messageId,
+    } = await seedDraft('send-owner-no-leak@example.com');
+    const foreignId = await createUserWithRole('member', 'send-foreign@example.com');
+    const foreignToken = await createSession(foreignId);
+    await createActiveProviderConnection();
+
+    const foreign = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${foreignToken}`,
+        'Idempotency-Key': 'draft-send-foreign-001',
+      },
+    });
+    expect(foreign.status).toBe(404);
+    expect(((await foreign.json()) as { error: { code: string } }).error.code).toBe(
+      'MESSAGE_NOT_FOUND',
+    );
+    expect(queueSendSpy).not.toHaveBeenCalled();
+    const foreignJobs = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(foreignJobs?.n).toBe(0);
+    const foreignAudit = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE resource_id = ? AND action = 'draft.sent'`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(foreignAudit?.n).toBe(0);
+    const foreignIdem = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ? AND operation = ?`,
+    )
+      .bind(foreignId, SEND_OPERATION)
+      .first<{ n: number }>();
+    expect(foreignIdem?.n).toBe(0);
+    const foreignState = await env.DB.prepare(
+      `SELECT m.status, mm.folder FROM messages m JOIN mailbox_messages mm ON mm.message_id = m.id WHERE m.id = ?`,
+    )
+      .bind(messageId)
+      .first<{ status: string; folder: string }>();
+    expect(foreignState).toEqual({ status: 'draft', folder: 'drafts' });
+
+    await env.DB.prepare(`UPDATE messages SET status = 'queued' WHERE id = ?`)
+      .bind(messageId)
+      .run();
+    const nondraft = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ownerToken}`,
+        'Idempotency-Key': 'draft-send-nondraft-001',
+      },
+    });
+    expect(nondraft.status).toBe(404);
+    expect(((await nondraft.json()) as { error: { code: string } }).error.code).toBe(
+      'MESSAGE_NOT_FOUND',
+    );
+    expect(queueSendSpy).not.toHaveBeenCalled();
+    const nondraftState = await env.DB.prepare(
+      `SELECT m.status, mm.folder FROM messages m
+       JOIN mailbox_messages mm ON mm.message_id = m.id
+       WHERE m.id = ?`,
+    )
+      .bind(messageId)
+      .first<{ status: string; folder: string }>();
+    expect(nondraftState).toEqual({ status: 'queued', folder: 'drafts' });
+    const nondraftJobs = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(nondraftJobs?.n).toBe(0);
+    const nondraftAudit = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE resource_id = ? AND action = 'draft.sent'`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(nondraftAudit?.n).toBe(0);
+    const nondraftIdem = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ? AND operation = ?`,
+    )
+      .bind(ownerId, SEND_OPERATION)
+      .first<{ n: number }>();
+    expect(nondraftIdem?.n).toBe(0);
+  });
+
+  it('returns the same no-leak 404 to a viewer member and leaves the draft untouched', async () => {
+    const { mailboxId, messageId } = await seedDraft('send-viewer-owner@example.com');
+    const viewerId = await createUserWithRole('member', 'send-viewer@example.com');
+    const viewerToken = await createSession(viewerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    await createActiveProviderConnection();
+
+    const response = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${viewerToken}`,
+        'Idempotency-Key': 'draft-send-viewer-001',
+      },
+    });
+    expect(response.status).toBe(404);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      'MESSAGE_NOT_FOUND',
+    );
+    expect(queueSendSpy).not.toHaveBeenCalled();
+    const state = await env.DB.prepare(
+      `SELECT m.status, mm.folder FROM messages m
+       JOIN mailbox_messages mm ON mm.message_id = m.id
+       WHERE m.id = ? AND mm.mailbox_id = ?`,
+    )
+      .bind(messageId, mailboxId)
+      .first<{ status: string; folder: string }>();
+    expect(state).toEqual({ status: 'draft', folder: 'drafts' });
+    const viewerJobs = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(viewerJobs?.n).toBe(0);
+    const viewerAudit = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE resource_id = ? AND action = 'draft.sent'`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(viewerAudit?.n).toBe(0);
+    const viewerIdem = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ? AND operation = ?`,
+    )
+      .bind(viewerId, SEND_OPERATION)
+      .first<{ n: number }>();
+    expect(viewerIdem?.n).toBe(0);
+  });
+
+  it('rolls back every send-side write when the audit insert collides', async () => {
+    const { ownerId, token, mailboxId, messageId } = await seedDraft('send-rollback@example.com');
+    await createActiveProviderConnection();
+    const fixtureAuditId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO audit_events
+         (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
+       VALUES (?, ?, 'setup.claim', 'rollback-fixture', NULL, NULL, NULL, datetime('now'))`,
+    )
+      .bind(fixtureAuditId, ownerId)
+      .run();
+
+    const uuidSpy = vi.spyOn(systemIds, 'uuid');
+    let uuidCalls = 0;
+    uuidSpy.mockImplementation(() => {
+      uuidCalls += 1;
+      // request-id middleware is call 1; send allocates job, marker, audit.
+      if (uuidCalls === 4) return fixtureAuditId;
+      return crypto.randomUUID();
+    });
+
+    try {
+      const response = await SELF.fetch(SEND_DRAFT_PATH(messageId), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': 'draft-send-rollback-001',
+        },
+      });
+      expect(response.status).toBe(500);
+    } finally {
+      uuidSpy.mockRestore();
+    }
+
+    expect(queueSendSpy).not.toHaveBeenCalled();
+    const state = await env.DB.prepare(
+      `SELECT m.status, mm.folder FROM messages m
+       JOIN mailbox_messages mm ON mm.message_id = m.id
+       WHERE m.id = ? AND mm.mailbox_id = ?`,
+    )
+      .bind(messageId, mailboxId)
+      .first<{ status: string; folder: string }>();
+    expect(state).toEqual({ status: 'draft', folder: 'drafts' });
+    const jobs = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM outbound_jobs WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(jobs?.n).toBe(0);
+    const sendAudit = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE resource_id = ? AND action = 'draft.sent'`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(sendAudit?.n).toBe(0);
+    const idem = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ? AND operation = ?`,
+    )
+      .bind(ownerId, SEND_OPERATION)
+      .first<{ n: number }>();
+    expect(idem?.n).toBe(0);
   });
 });

@@ -54,7 +54,7 @@ export interface D1StatementLike {
 // CAP-040 adds two for the new flows (reconciliation back-fill + admin
 // secret reveal); CAP-043 Slice 3 fix (D-CAP-043-I) adds the two message
 // presentation-state transitions — star toggle and per-user soft delete;
-// CAP-047 adds the server create-draft transition.
+// CAP-047 adds the server draft lifecycle transitions.
 export const auditActionSchema = z.enum([
   // CAP-026 / CAP-027 setup + admin
   'setup.claim',
@@ -79,6 +79,8 @@ export const auditActionSchema = z.enum([
   'draft.created',
   // CAP-047 draft PATCH slice — draft update transition (D-CAP-047-PATCH).
   'draft.updated',
+  // CAP-047 draft send slice — queue transition before provider delivery.
+  'draft.sent',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

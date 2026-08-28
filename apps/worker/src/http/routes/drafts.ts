@@ -57,9 +57,8 @@
 // disambiguation, never from a partial write.
 //
 // The CREATE route does NOT enqueue a job. A draft persists with
-// `status='draft'` and `mailbox_messages.folder='drafts'`; the queue
-// consumer is only reached when the future PATCH/send slice promotes the
-// row to 'queued'.
+// `status='draft'` and `mailbox_messages.folder='drafts'`; the send route
+// promotes it to 'queued' and enqueues the provider job after commit.
 //
 // On CREATION returns 201 { data: { messageId, status: 'draft', updatedAt } }
 // with a `Location: /api/v1/drafts/<messageId>` header. `updatedAt` is the
@@ -81,15 +80,21 @@
 // preserved by the conditional UPDATE not changing any rows. The set of
 // write-side tables touched is the SAME as POST (messages +
 // message_recipients + audit_events + idempotency_records); no
-// `outbound_jobs` row is ever created by this slice.
+// `outbound_jobs` row is ever created by the PATCH slice.
 
 import { Hono } from 'hono';
-import { createDraftSchema, updateDraftSchema, type AuditAction } from '@unimailbox/contracts';
+import {
+  createDraftSchema,
+  sendDraftSchema,
+  updateDraftSchema,
+  type AuditAction,
+} from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan, findMailboxById } from '../../modules/tenancy';
 import { checkPermission, prepareCreateAuditEvent } from '../../modules/admin';
-import { createMessageWithRelations } from '../../modules/messages';
+import { createMessageWithRelations, prepareQueueDraftForSend } from '../../modules/messages';
+import { prepareCreateOutboundJobGuarded } from '../../modules/outbound-mail';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors';
@@ -109,6 +114,38 @@ import { parseJsonBody } from '../middleware/parse-json-body';
 
 const CREATE_DRAFT_OPERATION = 'POST /api/v1/mailboxes/:mailboxId/drafts';
 const PATCH_DRAFT_OPERATION = 'PATCH /api/v1/drafts/:draftId';
+const SEND_DRAFT_OPERATION = 'POST /api/v1/drafts/:draftId/send';
+
+function replayDraftSend(record: Parameters<typeof replayResponse>[0]): Response {
+  const replay = replayResponse(record);
+  return setDraftSendLocation(replay, record.responseJson);
+}
+
+function setDraftSendLocation(replay: Response, responseJson: string): Response {
+  try {
+    const parsed: unknown = JSON.parse(responseJson);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'data' in parsed &&
+      typeof parsed.data === 'object' &&
+      parsed.data !== null &&
+      'messageId' in parsed.data &&
+      typeof parsed.data.messageId === 'string'
+    ) {
+      replay.headers.set('Location', `/api/v1/messages/${parsed.data.messageId}`);
+    }
+  } catch {
+    // The stored response was produced by this route and is JSON by contract.
+    // Keep the byte-identical replay even if a corrupt legacy row lacks a
+    // parseable body; no caller-supplied path is used for its Location.
+  }
+  return replay;
+}
+
+async function replayDraftSendResponse(replay: Response): Promise<Response> {
+  return setDraftSendLocation(replay, await replay.clone().text());
+}
 
 /**
  * Strict RFC-3339 second-precision canonical form:
@@ -483,6 +520,253 @@ export function draftRoutes(): Hono<AppEnv> {
   );
 
   /**
+   * POST /api/v1/drafts/:draftId/send
+   *
+   * Queue a server-authoritative draft for provider delivery. The message
+   * transition is draft -> queued; the existing queue consumer owns the
+   * provider call and the later queued -> sent transition. Every write that
+   * makes the send visible (message status, folder, outbound job, audit, and
+   * idempotency response) lands in one D1 batch.
+   *
+   * Idempotency lookup intentionally precedes the draft-status association
+   * query. A successful first send changes status from draft to queued, so a
+   * replay must still find and return its stored 202 after that transition.
+   */
+  routes.post(
+    '/drafts/:draftId/send',
+    requirePermission('message.send'),
+    requireIdempotencyKey,
+    async (c) => {
+      const userId = c.get('userId');
+      if (!userId) {
+        throw new DomainError({
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Authentication required',
+          httpStatus: 401,
+        });
+      }
+
+      const draftId = c.req.param('draftId');
+      const idempotencyKey = c.get('idempotencyKey');
+      if (!idempotencyKey) {
+        throw new DomainError({
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+          message: 'Idempotency-Key header required',
+          httpStatus: 400,
+        });
+      }
+
+      // Hash the exact bytes before parsing. The body digest is then
+      // domain-separated with this route's draftId so a replay must match
+      // both the raw body and the addressed resource.
+      const rawBody = await c.req.text();
+      const rawBodyHash = await sha256Hex(rawBody);
+      // Keep the body hash byte-based while domain-separating the resource
+      // identity. A key/body pair must never replay a different draft.
+      const requestHash = await sha256Hex(`draft-send:${draftId}:${rawBodyHash}`);
+      const existing = await findIdempotencyRecord(
+        c.env.DB,
+        userId,
+        SEND_DRAFT_OPERATION,
+        idempotencyKey,
+      );
+      if (existing) {
+        assertSameRequestHash(existing, requestHash);
+        return replayDraftSend(existing);
+      }
+
+      // An actually empty body is the canonical send request. Any present
+      // bytes — including whitespace — must parse through the strict empty
+      // object schema; the original bytes remain part of the idempotency hash.
+      if (rawBody !== '') {
+        parseJsonBody(rawBody, sendDraftSchema, {
+          event: 'drafts.send.invalid_json',
+          actorUserId: userId,
+        });
+      }
+
+      // Resolve every association while the message is still a draft. The
+      // first mailbox the actor may send from is the authority for this
+      // request; no mailbox ID is accepted from the client.
+      const associations = await c.env.DB.prepare(
+        `SELECT mm.mailbox_id AS mailbox_id,
+                mm.id          AS mailbox_message_id,
+                mm.created_at  AS mailbox_message_created_at
+           FROM messages m
+           JOIN mailbox_messages mm ON mm.message_id = m.id
+          WHERE m.id = ?
+            AND m.status = 'draft'
+       ORDER BY mm.created_at ASC, mm.id ASC`,
+      )
+        .bind(draftId)
+        .all<{
+          mailbox_id: string;
+          mailbox_message_id: string;
+          mailbox_message_created_at: string;
+        }>();
+      const associationRows = associations.results ?? [];
+      if (associationRows.length === 0) {
+        throw new DomainError({
+          code: 'MESSAGE_NOT_FOUND',
+          message: 'Message not found',
+          httpStatus: 404,
+        });
+      }
+
+      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
+      let authorizedMailboxId: string | null = null;
+      for (const association of associationRows) {
+        try {
+          await assertCan(c.env.DB, userId, association.mailbox_id, 'send', isAdmin);
+          authorizedMailboxId = association.mailbox_id;
+          break;
+        } catch (error) {
+          if (error instanceof DomainError) {
+            if (error.code === 'MAILBOX_ACCESS_DENIED' || error.code === 'MAILBOX_NOT_FOUND') {
+              continue;
+            }
+          }
+          throw error;
+        }
+      }
+      if (authorizedMailboxId === null) {
+        throw new DomainError({
+          code: 'MESSAGE_NOT_FOUND',
+          message: 'Message not found',
+          httpStatus: 404,
+        });
+      }
+
+      // Match the existing compose selection rule. The route only records the
+      // provider connection; decryption and the provider HTTP call belong to
+      // the queue consumer after this transaction commits.
+      const connection = await c.env.DB.prepare(
+        "SELECT id FROM provider_connections WHERE status = 'active' ORDER BY created_at ASC LIMIT 1",
+      ).first<{ id: string }>();
+      if (!connection) {
+        throw new DomainError({
+          code: 'PROVIDER_CONNECTION_NOT_FOUND',
+          message: 'No active provider connection',
+          httpStatus: 409,
+        });
+      }
+
+      const now = sqliteTimestamp(systemClock.now());
+      const jobId = systemIds.uuid();
+      const idempotencyRecordId = systemIds.uuid();
+      const auditEventId = systemIds.uuid();
+      const requestId = c.get('requestId') ?? null;
+      const successBody = JSON.stringify({
+        data: { messageId: draftId, status: 'queued' },
+      });
+      const auditAction: AuditAction = 'draft.sent';
+
+      // Statement 1 is the only status writer. The marker INSERT in statement
+      // 2 is request-specific and gated by changes() so a stale/concurrent
+      // loser cannot make any later statement visible.
+      const statements: D1PreparedStatement[] = [
+        prepareQueueDraftForSend(c.env.DB, { messageId: draftId, now }),
+        c.env.DB.prepare(
+          `INSERT INTO idempotency_records
+             (id, actor_id, operation, idempotency_key, request_hash,
+              response_status, response_json, created_at, expires_at)
+           SELECT ?, ?, ?, ?, ?, 202, ?, ?, datetime(?, '+${IDEMPOTENCY_TTL_HOURS} hours')
+            WHERE changes() > 0
+              AND EXISTS (
+                SELECT 1 FROM messages
+                 WHERE id = ? AND status = 'queued' AND updated_at = ?
+              )`,
+        ).bind(
+          idempotencyRecordId,
+          userId,
+          SEND_DRAFT_OPERATION,
+          idempotencyKey,
+          requestHash,
+          successBody,
+          now,
+          now,
+          draftId,
+          now,
+        ),
+        c.env.DB.prepare(
+          `UPDATE mailbox_messages
+              SET folder = 'sent'
+            WHERE message_id = ?
+              AND folder = 'drafts'
+              AND EXISTS (
+                SELECT 1 FROM idempotency_records WHERE id = ?
+              )`,
+        ).bind(draftId, idempotencyRecordId),
+        prepareCreateOutboundJobGuarded(c.env.DB, {
+          id: jobId,
+          messageId: draftId,
+          providerConnectionId: connection.id,
+          createdAt: now,
+          updatedAt: now,
+          idempotencyMarkerId: idempotencyRecordId,
+        }),
+        c.env.DB.prepare(
+          `INSERT INTO audit_events
+             (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
+           SELECT ?, ?, ?, 'message', ?, ?, NULL, ?
+            WHERE EXISTS (
+              SELECT 1 FROM idempotency_records WHERE id = ?
+            )`,
+        ).bind(auditEventId, userId, auditAction, draftId, requestId, now, idempotencyRecordId),
+      ];
+
+      let results: D1Result[];
+      try {
+        results = await c.env.DB.batch(statements);
+      } catch (error) {
+        if (isIdempotencyUniqueViolation(error)) {
+          const replay = await replayAfterRace(
+            c.env.DB,
+            userId,
+            SEND_DRAFT_OPERATION,
+            idempotencyKey,
+            requestHash,
+          );
+          return replayDraftSendResponse(replay);
+        }
+        throw error;
+      }
+
+      if ((results[0]?.meta?.changes ?? 0) === 0) {
+        // Another request already moved this draft out of draft status. Only
+        // a record for this exact key can turn that race into a replay; absent
+        // a winner, keep the same no-leak 404 used by the read/send lookup.
+        const winner = await findIdempotencyRecord(
+          c.env.DB,
+          userId,
+          SEND_DRAFT_OPERATION,
+          idempotencyKey,
+        );
+        if (winner) {
+          assertSameRequestHash(winner, requestHash);
+          return replayDraftSend(winner);
+        }
+        throw new DomainError({
+          code: 'MESSAGE_NOT_FOUND',
+          message: 'Message not found',
+          httpStatus: 404,
+        });
+      }
+
+      // Queue only after the D1 transaction commits. A retry of the same
+      // idempotency key returns the stored 202 and never sends a second job.
+      await c.env.OUTBOUND.send(JSON.stringify({ jobId }));
+      return new Response(successBody, {
+        status: 202,
+        headers: {
+          'Content-Type': 'application/json',
+          Location: `/api/v1/messages/${draftId}`,
+        },
+      });
+    },
+  );
+
+  /**
    * GET /api/v1/drafts/:draftId
    *
    * Read a single draft. Authorised against the RESOLVED mailboxId — the
@@ -785,8 +1069,8 @@ export function draftRoutes(): Hono<AppEnv> {
    * writer lands between the pre-validation read and the batch.
    *
    * No queue call. No `outbound_jobs` row. A draft that survives PATCH is
-   * still `status='draft'`; the queue is reached only when a future
-   * send slice promotes the row.
+   * still `status='draft'`; the send route is the only draft-side path that
+   * promotes the row to `queued` and creates an outbound job.
    */
   routes.patch(
     '/drafts/:draftId',

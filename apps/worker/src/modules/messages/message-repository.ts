@@ -134,6 +134,53 @@ export async function createMessageWithRelations(
   await db.batch(statements);
 }
 
+export interface QueueDraftForSendInput {
+  readonly messageId: string;
+  /**
+   * SQLite datetime string ('YYYY-MM-DD HH:MM:SS' UTC). Caller-controlled so
+   * tests can drive deterministic timestamps.
+   */
+  readonly now: string;
+}
+
+/**
+ * Builds a D1 UPDATE that flips a draft message to `status = 'queued'` and
+ * stamps `updated_at` — the legal send-side draft→queued transition (CAP-047).
+ *
+ * Direction guard: the `status = 'draft'` predicate is the FROM-state for the
+ * only legal target `queued` per ALLOWED_MESSAGE_TRANSITIONS. A draft that was
+ * concurrently edited (PUT) keeps `status='draft'` but its `updated_at`
+ * moves, so a stale send becomes a no-op here and the route re-reads.
+ *
+ * `provider_event_time` and `sent_at` are deliberately NOT set on this write:
+ *   - `provider_event_time` is a webhook-event timestamp populated by
+ *     `updateMessageStatus` when a real provider event lands (CAP-029). A
+ *     send-side write here would let any later `queued`-from-queued
+ *     transition advertise a server-clock timestamp as a provider timestamp,
+ *     defeating the R-MESSAGE-007 ordering.
+ *   - `sent_at` is set only by the post-send write that flips the message
+ *     to `sent`. Writing it now would mark the message as sent before the
+ *     provider actually accepts it.
+ *
+ * Returns the prepared statement so the route can fold this UPDATE into the
+ * same D1 batch as the outbound_jobs INSERT and the idempotency record
+ * (R-OUTBOUND-006 / one-atomic-send).
+ */
+export function prepareQueueDraftForSend(
+  db: Database,
+  input: QueueDraftForSendInput,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE messages
+          SET status = 'queued',
+              updated_at = ?
+        WHERE id = ?
+          AND status = 'draft'`,
+    )
+    .bind(input.now, input.messageId);
+}
+
 export interface UpdateMessageStatusInput {
   readonly messageId: string;
   readonly status: MessageStatus;

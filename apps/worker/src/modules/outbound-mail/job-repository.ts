@@ -24,6 +24,16 @@ export interface CreateJobInput {
   readonly updatedAt: string;
 }
 
+/**
+ * Marker-guarded variant of `CreateJobInput` for `prepareCreateOutboundJobGuarded`.
+ * The marker binds to `idempotency_records.id` (the row's primary key), never to
+ * the client-supplied `Idempotency-Key` header — so the guard cannot be spoofed
+ * by a duplicate client request.
+ */
+export interface CreateJobGuardedInput extends CreateJobInput {
+  readonly idempotencyMarkerId: string;
+}
+
 export interface OutboundJobRow {
   readonly id: string;
   readonly message_id: string;
@@ -69,6 +79,59 @@ export function prepareCreateOutboundJob(db: Database, input: CreateJobInput): D
      VALUES (?, ?, ?, 'queued', 0, 3, ?, ?)`,
     )
     .bind(input.id, input.messageId, input.providerConnectionId, input.createdAt, input.updatedAt);
+}
+
+/**
+ * Marker-guarded variant of `prepareCreateOutboundJob` (CAP-047). Inserts the
+ * `outbound_jobs` row in `status='queued'` only when the idempotency marker
+ * row exists in `idempotency_records` for the same D1 batch.
+ *
+ * Shape: INSERT ... SELECT ... WHERE EXISTS (SELECT 1 FROM idempotency_records WHERE id = ?)
+ *
+ * The marker id binds to `idempotency_records.id` (primary key) so the guard
+ * is per-row, not per-(actor, operation, key) tuple.
+ *
+ * Semantics: the route folds the idempotency-record INSERT and this
+ * INSERT ... SELECT into the same `db.batch([...])`. SQLite executes
+ * statements in order inside the batch, so by the time this statement runs
+ * the marker row exists iff the idempotency INSERT succeeded (the alternative
+ * is a UNIQUE collision that aborted the batch). When the marker is absent
+ * — a duplicate client request lost the idempotency race — the SELECT yields
+ * zero rows and this statement writes nothing. That is the desired
+ * protection: a replay must not produce a second outbound_jobs row.
+ *
+ * The companion writer, `prepareQueueDraftForSend` (messages module), lives in
+ * the same batch as this guarded INSERT so a send commits the message
+ * transition, the outbound_jobs row, and the idempotency record together or
+ * not at all.
+ *
+ * `prepareCreateOutboundJob` is preserved unchanged for callers that already
+ * gate on idempotency at a higher layer (the compose handler's
+ * R-OUTBOUND-006 batch for new messages).
+ */
+export function prepareCreateOutboundJobGuarded(
+  db: Database,
+  input: CreateJobGuardedInput,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO outbound_jobs (
+         id, message_id, provider_connection_id,
+         status, attempts, max_attempts, created_at, updated_at
+       )
+       SELECT ?, ?, ?, 'queued', 0, 3, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM idempotency_records WHERE id = ?
+         )`,
+    )
+    .bind(
+      input.id,
+      input.messageId,
+      input.providerConnectionId,
+      input.createdAt,
+      input.updatedAt,
+      input.idempotencyMarkerId,
+    );
 }
 
 /**
