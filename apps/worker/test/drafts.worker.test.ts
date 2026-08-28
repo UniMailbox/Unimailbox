@@ -1,16 +1,20 @@
-// apps/worker/test/drafts.worker.test.ts — CAP-047 server draft-create slice.
+// apps/worker/test/drafts.worker.test.ts — CAP-047 server draft slice.
 //
-// Worker-pool tests for POST /api/v1/mailboxes/:mailboxId/drafts. Uses
-// SELF.fetch to exercise the full request pipeline: router → authn →
-// requirePermission → assertCan → D1 batch insert → 201 response with
-// Location header. Provider / queue is intentionally NOT exercised — a
-// draft does not enqueue a job, and the tests assert that no outbound_jobs
-// row is created.
+// Worker-pool tests for the CAP-047 draft routes. Uses SELF.fetch to
+// exercise the full request pipeline: router → authn → requirePermission
+// → assertCan → D1 batch insert (POST) or D1 SELECT (GET) → envelope.
+// Provider / queue is intentionally NOT exercised — a draft does not
+// enqueue a job, and the tests assert that no outbound_jobs row is
+// created.
 //
 // The fixtures mirror compose.worker.test.ts: same role/permission seed,
 // same session helper, same domain + mailbox helpers. The only
 // divergence is no `createActiveProviderConnection()` call — drafts do
 // not touch the outbound pipeline.
+//
+// Slice: GET /api/v1/drafts/:draftId extends the existing POST coverage.
+// POST tests are unchanged; the GET block lives in its own describe
+// below.
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
@@ -754,5 +758,663 @@ describe('POST /api/v1/mailboxes/:mailboxId/drafts — CAP-047 server draft-crea
       n: number;
     }>();
     expect(outboundJobs?.n).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/drafts/:draftId
+//
+// CAP-047 read slice: every helper exists in the file above, so this
+// describe focuses on:
+//   - owner envelope shape (snake_case bodies / snake_case timestamps,
+//     status='draft', three recipient arrays, no write-side leaks);
+//   - empty recipient arrays are serialised as `[]`;
+//   - foreign actor reading another mailbox's draft → 404 MESSAGE_NOT_FOUND;
+//   - viewer member is allowed to read; unauthenticated GET → 401;
+//   - non-draft existing message and unknown draft ID both → 404;
+//   - response has no extraneous body/header fields.
+//
+// `createDraftViaPost` reuses the live POST route so this block exercises
+// the same pipeline a real client would (no test-private INSERT path that
+// could drift from the production writer). The direct INSERTs are reserved
+// for the negative paths the create route does not produce.
+// ---------------------------------------------------------------------------
+
+const DRAFT_PATH = (draftId: string) => `http://localhost/api/v1/drafts/${draftId}`;
+
+async function createDraftViaPost(
+  mailboxId: string,
+  token: string,
+  body: Record<string, unknown>,
+  idempotencyKey: string,
+): Promise<string> {
+  const response = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/drafts`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': idempotencyKey,
+    },
+  });
+  expect(response.status).toBe(201);
+  const payload = (await response.json()) as { data: { messageId: string } };
+  return payload.data.messageId;
+}
+
+describe('GET /api/v1/drafts/:draftId — CAP-047 server draft-read slice', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+  });
+
+  // -------- happy path: owner reads the full envelope ---------------------
+
+  it('owner reads the full envelope: snake_case wire keys, RFC-3339 timestamps, status=draft, three recipient arrays; no writes', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-read@example.com');
+    const ownerToken = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'owner-mailbox');
+
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'Read me back',
+        body_text: 'text body content',
+        body_html: '<p>html body content</p>',
+        to: ['to-read@example.com'],
+        cc: ['cc-read@example.com'],
+        bcc: ['bcc-read@example.com'],
+      },
+      'drafts-read-001',
+    );
+
+    // Snapshot write-side counts before the GET — the GET must be a pure
+    // read with no idempotency / audit / outbound / recipient mutation.
+    const auditBefore = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE actor_user_id = ?`,
+    )
+      .bind(ownerId)
+      .first<{ n: number }>();
+    const idemBefore = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ?`,
+    )
+      .bind(ownerId)
+      .first<{ n: number }>();
+    const recipientsBefore = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM message_recipients WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    const messagesBefore = await env.DB.prepare(`SELECT COUNT(*) AS n FROM messages WHERE id = ?`)
+      .bind(messageId)
+      .first<{ n: number }>();
+    const mailboxMessagesBefore = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM mailbox_messages WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    const outboundBefore = await env.DB.prepare(`SELECT COUNT(*) AS n FROM outbound_jobs`).first<{
+      n: number;
+    }>();
+
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('application/json');
+
+    const body = (await response.json()) as {
+      data: {
+        id: string;
+        mailboxId: string;
+        subject: string;
+        body_text: string;
+        body_html: string;
+        to: string[];
+        cc: string[];
+        bcc: string[];
+        status: string;
+        created_at: string;
+        updated_at: string;
+      };
+    };
+
+    // Envelope shape is EXACTLY the CAP-047 contract — sorted key order
+    // and no extras (assertion `Object.keys(body).sort() === [...]
+    // .sort()` is implicit because `toEqual` is a deep equality on the
+    // data object itself; we additionally pin the data-object keys).
+    expect(Object.keys(body)).toEqual(['data']);
+    expect(Object.keys(body.data).sort()).toEqual(
+      [
+        'bcc',
+        'body_html',
+        'body_text',
+        'cc',
+        'created_at',
+        'id',
+        'mailboxId',
+        'status',
+        'subject',
+        'to',
+        'updated_at',
+      ].sort(),
+    );
+    expect(body.data.id).toBe(messageId);
+    expect(body.data.mailboxId).toBe(mailboxId);
+    expect(body.data.subject).toBe('Read me back');
+    expect(body.data.body_text).toBe('text body content');
+    expect(body.data.body_html).toBe('<p>html body content</p>');
+    expect(body.data.status).toBe('draft');
+    expect(body.data.to).toEqual(['to-read@example.com']);
+    expect(body.data.cc).toEqual(['cc-read@example.com']);
+    expect(body.data.bcc).toEqual(['bcc-read@example.com']);
+
+    // RFC-3339 wire timestamps — pinned format includes milliseconds and
+    // the literal `Z` suffix (UTC). This is the same shape the create
+    // response used (Date#toISOString()), so the surface stays stable
+    // across create and read.
+    expect(body.data.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(body.data.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+
+    // The SQL storage is `YYYY-MM-DD HH:MM:SS`; the wire conversion is
+    // one instant expressed two ways. Round-trip the wire back to a
+    // comparable form and verify it sits on the same day as the stored
+    // row — a regression here means the read route is leaking a
+    // different instant than the create wrote, not just a mis-formatted
+    // string.
+    const storedRow = await env.DB.prepare(
+      `SELECT created_at, updated_at FROM messages WHERE id = ?`,
+    )
+      .bind(messageId)
+      .first<{ created_at: string; updated_at: string }>();
+    expect(storedRow).toBeTruthy();
+    expect(body.data.created_at.slice(0, 19).replace('T', ' ')).toBe(storedRow?.created_at);
+    expect(body.data.updated_at.slice(0, 19).replace('T', ' ')).toBe(storedRow?.updated_at);
+
+    // Read-only: every write-side counter is unchanged.
+    const auditAfter = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM audit_events WHERE actor_user_id = ?`,
+    )
+      .bind(ownerId)
+      .first<{ n: number }>();
+    expect(auditAfter?.n).toBe(auditBefore?.n);
+
+    const idemAfter = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM idempotency_records WHERE actor_id = ?`,
+    )
+      .bind(ownerId)
+      .first<{ n: number }>();
+    expect(idemAfter?.n).toBe(idemBefore?.n);
+
+    const recipientsAfter = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM message_recipients WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(recipientsAfter?.n).toBe(recipientsBefore?.n);
+
+    const messagesAfter = await env.DB.prepare(`SELECT COUNT(*) AS n FROM messages WHERE id = ?`)
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(messagesAfter?.n).toBe(messagesBefore?.n);
+
+    const mailboxMessagesAfter = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM mailbox_messages WHERE message_id = ?`,
+    )
+      .bind(messageId)
+      .first<{ n: number }>();
+    expect(mailboxMessagesAfter?.n).toBe(mailboxMessagesBefore?.n);
+
+    const outboundAfter = await env.DB.prepare(`SELECT COUNT(*) AS n FROM outbound_jobs`).first<{
+      n: number;
+    }>();
+    expect(outboundAfter?.n).toBe(outboundBefore?.n);
+  });
+
+  // -------- empty recipient arrays --------------------------------------
+
+  it('returns empty `to` / `cc` / `bcc` arrays (serialised as []) when the draft has no recipients', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-empty@example.com');
+    const ownerToken = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'No recipients',
+        body_text: 'Solo draft',
+        to: [],
+      },
+      'drafts-read-empty-001',
+    );
+
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    // Read the body once so we can both parse and assert on the raw
+    // string — multiple readers on the same Response is not supported.
+    const raw = await response.text();
+    const body = JSON.parse(raw) as {
+      data: { to: string[]; cc: string[]; bcc: string[] };
+    };
+    expect(body.data.to).toEqual([]);
+    expect(body.data.cc).toEqual([]);
+    expect(body.data.bcc).toEqual([]);
+    // Empty arrays must be JSON-array serialised, not `null` / `undefined`
+    // / missing — a regression here would break the wire contract's
+    // required-field list.
+    expect(raw).toContain('"to":[]');
+    expect(raw).toContain('"cc":[]');
+    expect(raw).toContain('"bcc":[]');
+  });
+
+  // -------- no leak: foreign actor receives 404 MESSAGE_NOT_FOUND ------
+
+  it("returns 404 MESSAGE_NOT_FOUND (NOT 403) when a foreign actor reads another mailbox's draft", async () => {
+    const ownerId = await createUserWithRole('member', 'owner-leak@example.com');
+    const ownerToken = await createSession(ownerId);
+    const foreignId = await createUserWithRole('member', 'foreign@example.com');
+    const foreignToken = await createSession(foreignId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'private');
+
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'Private draft',
+        body_text: 'should not leak',
+        to: ['to-leak@example.com'],
+      },
+      'drafts-read-leak-001',
+    );
+
+    // Foreign actor: not the owner, no membership, not a global admin.
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${foreignToken}` },
+    });
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('MESSAGE_NOT_FOUND');
+
+    // The response must NOT be 403 — the existence leak posture is that
+    // a foreign actor receives the SAME envelope a non-existent ID would.
+    const ownerResponse = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    const ownerBody = (await ownerResponse.json()) as { error?: { code?: string } };
+    expect(ownerResponse.status).toBe(200);
+    expect(ownerBody.error).toBeUndefined();
+  });
+
+  // -------- viewer member can read --------------------------------------
+
+  it('lets a viewer-role member read a draft (read op is allowed for viewer per R-MAILBOX-003 matrix)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerId = await createUserWithRole('member', 'viewer-read@example.com');
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'shared');
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'Viewer can see',
+        body_text: 'body',
+        to: ['to-viewer@example.com'],
+      },
+      'drafts-read-viewer-001',
+    );
+
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { id: string; subject: string } };
+    expect(body.data.id).toBe(messageId);
+    expect(body.data.subject).toBe('Viewer can see');
+  });
+
+  // -------- sender member can read --------------------------------------
+
+  it('lets a sender-role member read a draft (read op is allowed for sender per R-MAILBOX-003 matrix)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-sender@example.com');
+    const ownerToken = await createSession(ownerId);
+    const senderId = await createUserWithRole('member', 'sender-read@example.com');
+    const senderToken = await createSession(senderId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'shared');
+    await addMailboxMember(mailboxId, senderId, 'sender');
+
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'Sender can read',
+        body_text: 'body',
+        body_html: '<p>body</p>',
+        to: ['to-sender-read@example.com'],
+        cc: ['cc-sender-read@example.com'],
+        bcc: ['bcc-sender-read@example.com'],
+      },
+      'drafts-read-sender-001',
+    );
+
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${senderToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        id: string;
+        mailboxId: string;
+        subject: string;
+        body_text: string;
+        body_html: string;
+        to: string[];
+        cc: string[];
+        bcc: string[];
+        status: string;
+        created_at: string;
+        updated_at: string;
+      };
+    };
+    expect(body.data.id).toBe(messageId);
+    expect(body.data.mailboxId).toBe(mailboxId);
+    expect(body.data.subject).toBe('Sender can read');
+    expect(body.data.body_text).toBe('body');
+    expect(body.data.body_html).toBe('<p>body</p>');
+    expect(body.data.to).toEqual(['to-sender-read@example.com']);
+    expect(body.data.cc).toEqual(['cc-sender-read@example.com']);
+    expect(body.data.bcc).toEqual(['bcc-sender-read@example.com']);
+    expect(body.data.status).toBe('draft');
+    expect(body.data.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(body.data.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  // -------- global administrator (role.manage, no mailbox_members) -----
+
+  it("lets a global administrator (role.manage, no mailbox_members row) read another user's draft", async () => {
+    // The owner creates the draft in their own mailbox. The administrator
+    // is a separate user with NO mailbox_members entry — but they hold the
+    // 'administrator' role which carries role.manage, so the
+    // assertCan(c.env.DB, adminId, mailboxId, 'read', isAdmin=true) bypass
+    // authorises them. This exercises the multi-association iteration
+    // path indirectly (single association, admin bypass) and pins that a
+    // 200 is returned, not a 403 / 404.
+    const ownerId = await createUserWithRole('member', 'owner-admin@example.com');
+    const ownerToken = await createSession(ownerId);
+    const adminId = await createUserWithRole('administrator', 'admin@example.com');
+    const adminToken = await createSession(adminId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'admin-shared');
+
+    // Confirm the admin has NO mailbox_members row — the assertion relies
+    // on the role.manage bypass, not on membership.
+    const memberRow = await env.DB.prepare(
+      `SELECT role FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?`,
+    )
+      .bind(mailboxId, adminId)
+      .first<{ role: string }>();
+    expect(memberRow).toBeNull();
+
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'Admin can read',
+        body_text: 'body',
+        to: ['to-admin-read@example.com'],
+      },
+      'drafts-read-admin-001',
+    );
+
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        id: string;
+        mailboxId: string;
+        subject: string;
+        body_text: string;
+        body_html: string;
+        to: string[];
+        cc: string[];
+        bcc: string[];
+        status: string;
+        created_at: string;
+        updated_at: string;
+      };
+    };
+    expect(body.data.id).toBe(messageId);
+    expect(body.data.mailboxId).toBe(mailboxId);
+    expect(body.data.subject).toBe('Admin can read');
+    expect(body.data.body_text).toBe('body');
+    expect(body.data.to).toEqual(['to-admin-read@example.com']);
+    expect(body.data.status).toBe('draft');
+    expect(body.data.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(body.data.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  it('unauthenticated GET returns 401 AUTHENTICATION_REQUIRED', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-noauth@example.com');
+    const ownerToken = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'No auth',
+        body_text: 'body',
+        to: [],
+      },
+      'drafts-read-noauth-001',
+    );
+
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+    });
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+
+  // -------- no leak: non-draft + unknown ID both 404 --------------------
+
+  it('returns 404 MESSAGE_NOT_FOUND for a non-draft existing message (no status leak)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-nondraft@example.com');
+    const ownerToken = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // Insert a 'delivered' message directly — the create route only
+    // produces 'draft' rows, so we go around it for this single negative
+    // path. The mailbox_messages association is identical in shape.
+    const deliveredId = crypto.randomUUID();
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO messages (
+           id, from_address, from_name, subject, html_body, text_body,
+           message_id_header, in_reply_to_header, references_header,
+           status, created_by_user_id, created_at, updated_at
+         ) VALUES (?, 'delivered@example.com', '', 'Not a draft', '', 'body', '<old@host>', NULL, '', 'delivered', ?, ?, ?)`,
+      ).bind(deliveredId, ownerId, now, now),
+      env.DB.prepare(
+        `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
+         VALUES (?, ?, ?, 0, 0, 'inbox', ?)`,
+      ).bind(crypto.randomUUID(), mailboxId, deliveredId, now),
+    ]);
+
+    const response = await SELF.fetch(DRAFT_PATH(deliveredId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('MESSAGE_NOT_FOUND');
+  });
+
+  it('returns 404 MESSAGE_NOT_FOUND for an unknown draft ID (envelope identical to a non-draft ID)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-unknown@example.com');
+    const ownerToken = await createSession(ownerId);
+    const unknownId = crypto.randomUUID();
+
+    // Also create a real draft so the unknown-vs-known contrast is honest
+    // and the route has at least one row on disk to test against.
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      { subject: 'real', body_text: 'body', to: [] },
+      'drafts-read-unknown-001',
+    );
+
+    const response = await SELF.fetch(DRAFT_PATH(unknownId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('MESSAGE_NOT_FOUND');
+
+    // Cross-check: a non-draft known ID and an unknown ID both 404 with
+    // the same envelope — the existence-leak posture.
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const deliveredId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO messages (
+           id, from_address, from_name, subject, html_body, text_body,
+           message_id_header, in_reply_to_header, references_header,
+           status, created_by_user_id, created_at, updated_at
+         ) VALUES (?, 'x@example.com', '', '', '', '', NULL, NULL, '', 'queued', ?, ?, ?)`,
+      ).bind(deliveredId, ownerId, now, now),
+      env.DB.prepare(
+        `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
+         VALUES (?, ?, ?, 0, 0, 'inbox', ?)`,
+      ).bind(crypto.randomUUID(), mailboxId, deliveredId, now),
+    ]);
+    const nondraftResponse = await SELF.fetch(DRAFT_PATH(deliveredId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    const nondraftBody = (await nondraftResponse.json()) as { error: { code: string } };
+    expect(nondraftResponse.status).toBe(404);
+    expect(nondraftBody.error.code).toBe('MESSAGE_NOT_FOUND');
+  });
+
+  // -------- response has no extraneous body / header fields ------------
+
+  it('response has no extraneous body fields (no message_id / in_reply_to / references / audit metadata)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-extraneous@example.com');
+    const ownerToken = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    // The wire contract must NOT leak message-id / reply / references
+    // headers — those live on `messages.message_id_header` etc. and have
+    // no place on the draft read surface.
+    const messageId = await createDraftViaPost(
+      mailboxId,
+      ownerToken,
+      {
+        subject: 'Wire surface',
+        body_text: 'body',
+        body_html: '<p>body</p>',
+        to: ['to-wire@example.com'],
+      },
+      'drafts-read-wire-001',
+    );
+
+    // Patch the row to populate header columns that must NOT appear on
+    // the wire — this asserts the response is bounded by the contract
+    // and does not surface any column as an extra.
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE messages SET message_id_header = '<drafted@host>', in_reply_to_header = '<reply@host>', references_header = '<a@host> <b@host>' WHERE id = ?`,
+      ).bind(messageId),
+    ]);
+
+    const response = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+
+    expect(response.status).toBe(200);
+    // Read once — both the raw-text assertions and the JSON structural
+    // assertions ride on this single read (a Response body can only be
+    // consumed once).
+    const raw = await response.text();
+    const body = JSON.parse(raw) as {
+      data: Record<string, unknown>;
+    };
+    expect(raw).not.toContain('message_id_header');
+    expect(raw).not.toContain('messageIdHeader');
+    expect(raw).not.toContain('in_reply_to_header');
+    expect(raw).not.toContain('inReplyToHeader');
+    expect(raw).not.toContain('references_header');
+    expect(raw).not.toContain('referencesHeader');
+    expect(raw).not.toContain('drafted@host');
+    expect(raw).not.toContain('reply@host');
+    expect(raw).not.toContain('a@host');
+    // Audit metadata + from_address + from_name must also stay off the wire.
+    expect(raw).not.toContain('from_address');
+    expect(raw).not.toContain('fromAddress');
+    expect(raw).not.toContain('audit');
+    expect(raw).not.toContain('requestId');
+    expect(raw).not.toContain('metadata');
+
+    // Pin the data-object keys again here so a future drift in the
+    // route surfaces a precise diff (the sorted comparison also catches
+    // case / snake-vs-camel accidents).
+    expect(Object.keys(body.data).sort()).toEqual(
+      [
+        'bcc',
+        'body_html',
+        'body_text',
+        'cc',
+        'created_at',
+        'id',
+        'mailboxId',
+        'status',
+        'subject',
+        'to',
+        'updated_at',
+      ].sort(),
+    );
   });
 });

@@ -1,32 +1,45 @@
-// http/routes/drafts — CAP-047 server-side create-draft vertical slice.
+// http/routes/drafts — CAP-047 server-side draft vertical slice.
 //
 // POST /api/v1/mailboxes/:mailboxId/drafts — create a draft message.
+// GET  /api/v1/drafts/:draftId                       — read a draft.
 //
-// R-AUTHZ-003: Two layers — requirePermission('message.send') on the route,
-// then mailbox-scoped assertCan(..., 'send', isAdmin) inside the handler.
-// R-AUTHZ-004: assertCan authorises against the path's mailboxId, never a
-// client-supplied owner ID. The sender is the authenticated user; the
-// mailbox address is looked up from D1 and trusted as the canonical
-// from_address (never a client-supplied sender).
-// R-API-004 / ADR-004: create requires Idempotency-Key; replays return the
+// R-AUTHZ-003: Two layers — requirePermission on the route, then
+// mailbox-scoped assertCan inside the handler. The CREATE route requires
+// `message.send`; the GET route requires `message.read`.
+// R-AUTHZ-004: assertCan authorises against the resolved mailboxId, never a
+// client-supplied owner ID. The CREATE route resolves the mailbox from the
+// path; the GET route resolves it from the messages⇄mailbox_messages join —
+// the on-the-wire path carries no mailbox, so the row IS the authority. A
+// foreign actor reading another mailbox's draft must receive the same
+// 404 MESSAGE_NOT_FOUND envelope a non-existent ID would (no draft
+// existence leak).
+// R-API-004 / ADR-004: CREATE requires Idempotency-Key; replays return the
 // stored 201 response. The same key + different bytes returns 409
 // IDEMPOTENCY_KEY_REUSED via the platform replay helper.
-// R-OUTBOUND-006 (adapted for drafts): message + recipients + mailbox_message
-// + audit_event + idempotency row land in ONE D1 batch so a crash between
-// them cannot leave an unaudited or unrecorded draft. The audit row is
-// folded into the same batch via the existing `prepareCreateAuditEvent`
-// helper (CAP-046 / D-CAP-046-B precedent from compose.ts).
-// R-AUDIT-001: every state transition writes an audit_events row.
+// R-OUTBOUND-006 (adapted for drafts): CREATE folds message + recipients +
+// mailbox_message + audit_event + idempotency row in ONE D1 batch so a
+// crash between them cannot leave an unaudited or unrecorded draft. The
+// audit row is folded via the existing `prepareCreateAuditEvent` helper
+// (CAP-046 / D-CAP-046-B precedent from compose.ts).
+// R-AUDIT-001: every state transition writes an audit_events row. The GET
+// route is read-only — no idempotency record, no audit row, no recipient
+// mutation, no queue call, no other write.
 //
-// The route does NOT enqueue a job. A draft persists with `status='draft'`
-// and `mailbox_messages.folder='drafts'`; the queue consumer is only
-// reached when the future PATCH/send slice promotes the row to 'queued'.
+// The CREATE route does NOT enqueue a job. A draft persists with
+// `status='draft'` and `mailbox_messages.folder='drafts'`; the queue
+// consumer is only reached when the future PATCH/send slice promotes the
+// row to 'queued'.
 //
-// On success returns 201 { data: { messageId, status: 'draft', updatedAt } }
+// On CREATION returns 201 { data: { messageId, status: 'draft', updatedAt } }
 // with a `Location: /api/v1/drafts/<messageId>` header. `updatedAt` is the
 // same clock instant the DB columns were written — one instant, two
 // formats: SQLite (`YYYY-MM-DD HH:MM:SS`) for the row, RFC-3339
 // (`YYYY-MM-DDTHH:MM:SS.sssZ`) for the wire.
+//
+// On READ returns 200 { data: { id, mailboxId, subject, body_text,
+// body_html, to, cc, bcc, status, created_at, updated_at } } with the same
+// RFC-3339 timestamp format and snake_case wire names (CAP-047 wire
+// contract — D-CAP-047-contracts).
 
 import { Hono } from 'hono';
 import { createDraftSchema } from '@unimailbox/contracts';
@@ -66,6 +79,51 @@ async function replayDraftWithLocation(response: Response): Promise<Response> {
     response.headers.set('Location', `/api/v1/drafts/${payload.data.messageId}`);
   }
   return response;
+}
+
+/**
+ * Convert a SQLite datetime string (`YYYY-MM-DD HH:MM:SS`, UTC, the column
+ * default for every datetime column this slice writes) into an RFC-3339
+ * instant suitable for the wire (`YYYY-MM-DDTHH:MM:SS.sssZ`).
+ *
+ * SQLite stores the value as TEXT, and the `datetime('now')` default
+ * returns UTC. The read route returns the stored `created_at` /
+ * `updated_at` to the client, but keeps the wire format consistent with
+ * the create response (which writes the same instant via
+ * `Date#toISOString()` so the same RFC-3339 string is on both surfaces).
+ *
+ * `.000Z` is correct because the column is second-precision — a
+ * representation of an already-rounded instant cannot carry
+ * sub-millisecond truth, and `toISOString()` on the same Date would yield
+ * the same suffix. A future migration to millisecond-precision columns
+ * will need to read the fractional part here; this helper exists locally
+ * so the read route never depends on the SQLite-storage-format leakage.
+ *
+ * The parser is strict: the input must be the documented `YYYY-MM-DD
+ * HH:MM:SS` shape exactly. Any other shape — a malformed row, a stray
+ * suffix, a stray prefix, the wrong separator — throws a 500 rather than
+ * silently producing a double-suffixed or otherwise corrupted wire
+ * string. The read path is read-only, so a malformed value surfaces as
+ * an internal error rather than a 4xx (the contract is that the row
+ * shape is well-known: we wrote it ourselves).
+ */
+const SQLITE_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/;
+
+function sqliteTimestampToRFC3339(value: string): string {
+  const match = SQLITE_DATETIME_RE.exec(value);
+  if (!match) {
+    throw new DomainError({
+      code: 'INTERNAL',
+      message: 'Malformed stored timestamp',
+      httpStatus: 500,
+    });
+  }
+  const [, year, month, day, hour, minute, second] = match;
+  // The DB column is second-precision UTC; build the wire shape by hand
+  // so we never append `.000Z` onto an already-suffixed or otherwise
+  // pre-formatted string. `Z` is literal because the column default
+  // `datetime('now')` returns UTC.
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}.000Z`;
 }
 
 export function draftRoutes(): Hono<AppEnv> {
@@ -308,6 +366,241 @@ export function draftRoutes(): Hono<AppEnv> {
       });
     },
   );
+
+  /**
+   * GET /api/v1/drafts/:draftId
+   *
+   * Read a single draft. Authorised against the RESOLVED mailboxId — the
+   * path carries no mailbox, so the row's own mailbox_messages.mailbox_id
+   * is the only authority (R-AUTHZ-004). A foreign actor reading another
+   * mailbox's draft receives the same 404 MESSAGE_NOT_FOUND envelope as a
+   * non-existent ID (no draft existence leak).
+   *
+   * Resolution: every `mailbox_messages` row that links the draft to a
+   * mailbox, filtered by `messages.status='draft'`. A row whose status is
+   * anything other than 'draft' (delivered, queued, sent, etc.) is NOT a
+   * draft for this route and 404s the same way an unknown ID would. The
+   * draft can have multiple mailbox associations (e.g. moved across
+   * mailboxes); the route iterates every resolved mailbox and picks the
+   * first one the actor is authorised to `read`. If none is authorised
+   * the same 404 MESSAGE_NOT_FOUND envelope is returned — the existence
+   * of any single association must not leak through the response.
+   *
+   * Authorization layering:
+   *   1. `requirePermission('message.read')` middleware — global gate.
+   *   2. `assertCan(actorUserId, resolvedMailboxId, 'read', isAdmin)`
+   *      inside the handler, called once per resolved mailbox until one
+   *      succeeds. R-AUTHZ-004: the mailboxId comes from the row, never
+   *      the request.
+   *
+   * Read-only — no idempotency record, no audit row, no recipient mutation,
+   * no queue call. A failed open transaction cannot happen because no
+   * transaction is opened (read-only).
+   *
+   * Wire envelope: `{ data: { id, mailboxId, subject, body_text, body_html,
+   * to, cc, bcc, status, created_at, updated_at } }`. Snake_case wire
+   * names are preserved (`body_text`/`body_html`/`created_at`/`updated_at`)
+   * per the CAP-047 wire contract (D-CAP-047-contracts — wire names must
+   * not leak Drizzle column names across the contracts boundary). Bodies
+   * come from `messages.text_body` / `messages.html_body`. Timestamps are
+   * RFC-3339 (`YYYY-MM-DDTHH:MM:SS.sssZ`), produced from the stored
+   * SQLite datetime via the local helper so the storage format is not
+   * leaked to the wire. `to` / `cc` / `bcc` are arrays of normalized
+   * address strings; empty arrays when a category has no rows. We do not
+   * return audit metadata, message-id / reply / references headers, or
+   * any other column that is not part of the wire contract.
+   */
+  routes.get('/drafts/:draftId', requirePermission('message.read'), async (c) => {
+    const userId = c.get('userId');
+    if (!userId) {
+      throw new DomainError({
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'Authentication required',
+        httpStatus: 401,
+      });
+    }
+
+    const draftId = c.req.param('draftId');
+
+    // R-AUTHZ-004: resolve the draft's mailbox associations, never a
+    // client-supplied mailbox. Filtering on `m.status='draft'` makes
+    // every non-draft existing message indistinguishable from a missing
+    // ID — the same envelope a truly absent ID would surface (no
+    // existence leak). All associations are fetched in one query so
+    // the handler can iterate them and pick the first one the actor is
+    // authorised to read; if none is authorised, the same 404 envelope
+    // is returned (no association-existence leak). Ordering by
+    // `mm.created_at ASC, mm.id ASC` is the same stable tiebreaker the
+    // create route would have written with; LIMIT is intentionally NOT
+    // applied here — the row's mailbox is authoritative only AFTER the
+    // actor's read permission has been verified against it.
+    // Parameterised SQL throughout — no string interpolation.
+    const associations = await c.env.DB.prepare(
+      `SELECT mm.mailbox_id AS mailbox_id,
+              mm.id          AS mailbox_message_id,
+              mm.created_at  AS mailbox_message_created_at
+           FROM messages m
+           JOIN mailbox_messages mm ON mm.message_id = m.id
+          WHERE m.id = ?
+            AND m.status = 'draft'
+       ORDER BY mm.created_at ASC, mm.id ASC`,
+    )
+      .bind(draftId)
+      .all<{
+        mailbox_id: string;
+        mailbox_message_id: string;
+        mailbox_message_created_at: string;
+      }>();
+
+    const associationRows = associations.results ?? [];
+
+    // A missing ID, an ID whose `messages.status` is not 'draft', or an
+    // ID with no mailbox association all collapse to the same envelope
+    // — that is the whole point of the existence-leak posture.
+    if (associationRows.length === 0) {
+      throw new DomainError({
+        code: 'MESSAGE_NOT_FOUND',
+        message: 'Message not found',
+        httpStatus: 404,
+      });
+    }
+
+    // R-AUTHZ-004: assert against each resolved mailbox, never a
+    // client-supplied value. Foreign actors (no membership, not the
+    // owner, not a global admin) would normally get 403
+    // MAILBOX_ACCESS_DENIED — but for THIS route a 403 would leak the
+    // draft's existence in the target mailbox. Every negative
+    // outcome (MAILBOX_ACCESS_DENIED, MAILBOX_NOT_FOUND) collapses to
+    // a 404 MESSAGE_NOT_FOUND on the way out — the foreign envelope is
+    // observationally identical to the missing-ID envelope regardless
+    // of how many associations exist on disk.
+    const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
+    let authorizedMailboxId: string | null = null;
+    for (const assoc of associationRows) {
+      try {
+        await assertCan(c.env.DB, userId, assoc.mailbox_id, 'read', isAdmin);
+        authorizedMailboxId = assoc.mailbox_id;
+        break;
+      } catch (error) {
+        if (error instanceof DomainError) {
+          // 'read' is the lowest-privilege op in the matrix; a non-null
+          // negative here means the actor is not a member / owner / admin
+          // for THIS mailbox — keep iterating to the next association.
+          // A non-Mailbox error is rethrown unchanged.
+          if (error.code === 'MAILBOX_ACCESS_DENIED' || error.code === 'MAILBOX_NOT_FOUND') {
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
+
+    // No association was readable by this actor — same 404 envelope as a
+    // missing ID. The actor learns nothing about whether associations
+    // exist on disk for this draft.
+    if (authorizedMailboxId === null) {
+      throw new DomainError({
+        code: 'MESSAGE_NOT_FOUND',
+        message: 'Message not found',
+        httpStatus: 404,
+      });
+    }
+
+    // Load the draft body now that we know the authorised mailbox. The
+    // wire `mailboxId` is the resolved (authorised) one — never a
+    // client-supplied value (R-AUTHZ-004).
+    const draftRow = await c.env.DB.prepare(
+      `SELECT m.id         AS id,
+              m.subject    AS subject,
+              m.html_body  AS html_body,
+              m.text_body  AS text_body,
+              m.status     AS status,
+              m.created_at AS created_at,
+              m.updated_at AS updated_at
+         FROM messages m
+        WHERE m.id = ?
+          AND m.status = 'draft'
+          AND EXISTS (
+            SELECT 1 FROM mailbox_messages mm
+             WHERE mm.message_id = m.id
+               AND mm.mailbox_id = ?
+          )
+        LIMIT 1`,
+    )
+      .bind(draftId, authorizedMailboxId)
+      .first<{
+        id: string;
+        subject: string;
+        html_body: string;
+        text_body: string;
+        status: string;
+        created_at: string;
+        updated_at: string;
+      }>();
+
+    // The EXISTS subquery guards against a TOCTOU race where the
+    // association is removed between the iteration above and this read;
+    // if so, treat the same as a missing ID.
+    if (!draftRow) {
+      throw new DomainError({
+        code: 'MESSAGE_NOT_FOUND',
+        message: 'Message not found',
+        httpStatus: 404,
+      });
+    }
+
+    // Recipients: grouped by `type`, written to the wire as plain
+    // normalized-address arrays. `to` / `cc` / `bcc` are all required
+    // by the wire contract; an absent category is an empty array, never
+    // null. CAP-047 wire shape is `string[]` per category, not objects
+    // (displayName is intentionally absent on draft read — see
+    // D-CAP-047-contracts).
+    const recipientRows = await c.env.DB.prepare(
+      `SELECT type, address
+           FROM message_recipients
+          WHERE message_id = ?
+       ORDER BY type, address`,
+    )
+      .bind(draftId)
+      .all<{ type: 'to' | 'cc' | 'bcc'; address: string }>();
+
+    const to: string[] = [];
+    const cc: string[] = [];
+    const bcc: string[] = [];
+    for (const row of recipientRows.results ?? []) {
+      if (row.type === 'to') to.push(row.address);
+      else if (row.type === 'cc') cc.push(row.address);
+      else if (row.type === 'bcc') bcc.push(row.address);
+    }
+
+    // Wire response. The body keys are kept in the wire order documented
+    // in the CAP-047 read contract (id, mailboxId, subject, body_text,
+    // body_html, to, cc, bcc, status, created_at, updated_at). Stored
+    // `messages.status` is the canonical 'draft' value for this slice.
+    // `mailboxId` is the AUTHORISED mailbox from the iteration above —
+    // never a client-supplied value (R-AUTHZ-004) and never an
+    // association the actor could not read (the existence-leak posture).
+    const body = {
+      data: {
+        id: draftRow.id,
+        mailboxId: authorizedMailboxId,
+        subject: draftRow.subject,
+        body_text: draftRow.text_body,
+        body_html: draftRow.html_body,
+        to,
+        cc,
+        bcc,
+        status: draftRow.status,
+        created_at: sqliteTimestampToRFC3339(draftRow.created_at),
+        updated_at: sqliteTimestampToRFC3339(draftRow.updated_at),
+      },
+    };
+
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
 
   return routes;
 }
