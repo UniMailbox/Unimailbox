@@ -24,6 +24,7 @@ import {
   NO_PENDING_LOG_FORMAT,
   evaluateDeployConfigForTarget,
   parseMigrationVerificationOutput,
+  parseWranglerList,
   type ResourceState,
 } from './deploy.js';
 
@@ -200,6 +201,41 @@ describe('scripts/deploy.ts — pure logic', () => {
       const result = checkEnvironmentGuard('prod');
       expect(result.ok).toBe(false);
       expect(result.error).toContain('ENVIRONMENT=prod');
+    });
+  });
+
+  describe('parseWranglerList', () => {
+    it('accepts the current direct-array Wrangler list shape', () => {
+      const result = parseWranglerList<{ uuid: string; name: string }>(
+        {
+          status: 0,
+          stdout: JSON.stringify([{ uuid: 'd1-123', name: 'unimailbox-db' }]),
+        },
+        'd1-list',
+      );
+
+      expect(result).toEqual({ ok: true, data: [{ uuid: 'd1-123', name: 'unimailbox-db' }] });
+    });
+
+    it('continues to accept the legacy success/result wrapper', () => {
+      const result = parseWranglerList<{ uuid: string; name: string }>(
+        {
+          status: 0,
+          stdout: JSON.stringify([
+            { success: true, result: [{ uuid: 'd1-123', name: 'unimailbox-db' }] },
+          ]),
+        },
+        'd1-list',
+      );
+
+      expect(result).toEqual({ ok: true, data: [{ uuid: 'd1-123', name: 'unimailbox-db' }] });
+    });
+
+    it('treats an empty direct list as a valid empty result', () => {
+      expect(parseWranglerList({ status: 0, stdout: '[]' }, 'd1-list')).toEqual({
+        ok: true,
+        data: [],
+      });
     });
   });
 

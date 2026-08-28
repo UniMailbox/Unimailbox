@@ -142,7 +142,7 @@ interface WranglerListResult<T> {
   error?: string;
 }
 
-function parseWranglerList<T>(
+export function parseWranglerList<T>(
   r: { status: number | null; stdout: string },
   source: string,
 ): { ok: true; data: T[] } | { ok: false; error: string } {
@@ -162,69 +162,43 @@ function parseWranglerList<T>(
       error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}`,
     };
   }
-  // First element is the batch wrapper
-  const batch = parsed[0] as WranglerListResult<T> | undefined;
-  if (!batch) {
-    return {
-      ok: false,
-      error: `wrangler output missing first element (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
-    };
+  // Current Wrangler list commands return a direct JSON array (for example,
+  // `wrangler d1 list --json` returns `[ { uuid, name, ... } ]`). Keep
+  // accepting the older `{ success, result }` wrapper used by earlier
+  // versions so deploy remains compatible across Wrangler releases.
+  if (parsed.length === 0) {
+    return { ok: true, data: [] };
   }
-  if (batch.success === false) {
-    return {
-      ok: false,
-      error: `wrangler reported success=false: ${batch.error ?? 'unknown error'}`,
-    };
+  const firstValue = parsed[0];
+  if (
+    firstValue &&
+    typeof firstValue === 'object' &&
+    ('success' in firstValue || 'result' in firstValue || 'error' in firstValue)
+  ) {
+    // First element is the legacy batch wrapper.
+    const batch = firstValue as WranglerListResult<T>;
+    if (batch.success === false) {
+      return {
+        ok: false,
+        error: `wrangler reported success=false: ${batch.error ?? 'unknown error'}`,
+      };
+    }
+    if (!batch.result || !Array.isArray(batch.result)) {
+      return {
+        ok: false,
+        error: `wrangler batch missing or invalid 'result' field (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
+      };
+    }
+    return { ok: true, data: batch.result };
   }
-  if (!batch.result || !Array.isArray(batch.result)) {
-    return {
-      ok: false,
-      error: `wrangler batch missing or invalid 'result' field (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
-    };
-  }
-  return { ok: true, data: batch.result };
-}
 
-function parseWranglerSingle<T>(
-  r: { status: number | null; stdout: string },
-  source: string,
-): { ok: true; data: T } | { ok: false; error: string } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(r.stdout);
-  } catch (e) {
-    // F4: Include first 200 chars of stdout in parse error for diagnostics
+  if (!parsed.every((value) => value !== null && typeof value === 'object')) {
     return {
       ok: false,
-      error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}`,
+      error: `expected list entries to be objects (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
     };
   }
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    return {
-      ok: false,
-      error: `expected JSON array with one element from wrangler (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
-    };
-  }
-  const batch = parsed[0] as WranglerListResult<T> | undefined;
-  if (!batch) {
-    return {
-      ok: false,
-      error: `wrangler output missing first element (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
-    };
-  }
-  if (batch.success === false) {
-    return {
-      ok: false,
-      error: `wrangler reported success=false: ${batch.error ?? 'unknown error'}`,
-    };
-  }
-  if (!batch.result || !Array.isArray(batch.result) || batch.result.length === 0) {
-    return {
-      ok: false,
-      error: `wrangler batch missing or invalid 'result' field (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
-    };
-  }
-  return { ok: true, data: batch.result[0] as T };
+  return { ok: true, data: parsed as T[] };
 }
 
 // F12: CAP-039 — wrangler's --json output for a SELECT is the documented
@@ -449,8 +423,10 @@ const provisionR2 = (state: ResourceState): ResourceState => {
 
   const result = wrangler(['r2', 'bucket', 'create', 'unimailbox-attachments']);
   if (result.status !== 0) {
-    // F10: Try JSON parse for exact name match, fallback to substring
-    const listResult = wrangler(['r2', 'bucket', 'list', '--json']);
+    // Wrangler 4.121 lists R2 buckets as labelled text; older versions may
+    // emit JSON. The parser accepts either form and the substring fallback
+    // handles the labelled output.
+    const listResult = wrangler(['r2', 'bucket', 'list']);
     interface R2Bucket {
       name: string;
     }
@@ -492,7 +468,7 @@ const provisionKv = (
   }
 
   // Try to find existing by title
-  const listResult = wrangler(['kv', 'namespace', 'list', '--json']);
+  const listResult = wrangler(['kv', 'namespace', 'list']);
   const parsed = parseWranglerList<KvNamespace>(listResult, 'kv-list');
   if (parsed.ok) {
     const existing = parsed.data.find((ns) => ns.title === title);
@@ -516,16 +492,30 @@ const provisionKv = (
       : { ...state, kvCacheId: '<dry-run-id>' };
   }
 
-  const createResult = wrangler(['kv', 'namespace', 'create', title, '--json']);
-  const created = parseWranglerSingle<KvNamespace>(createResult, 'kv-create');
-  if (!created.ok) {
-    console.error(`Failed to create KV namespace: ${created.error}`);
-    process.exit(createResult.status ?? 1); // F12: propagate wrangler status
+  const createResult = wrangler(['kv', 'namespace', 'create', title]);
+  if (createResult.status !== 0) {
+    console.error(`Failed to create KV namespace. Exit code: ${createResult.status}`);
+    process.exit(createResult.status ?? 1);
   }
-  console.log(`  Created KV namespace: ${created.data.id}`);
+  // Wrangler 4.121's create command prints only a success line; re-list to
+  // retrieve the ID instead of relying on the removed --json flag.
+  const afterCreate = parseWranglerList<KvNamespace>(
+    wrangler(['kv', 'namespace', 'list']),
+    'kv-list-after-create',
+  );
+  if (!afterCreate.ok) {
+    console.error(`Failed to resolve created KV namespace: ${afterCreate.error}`);
+    process.exit(1);
+  }
+  const created = afterCreate.data.find((ns) => ns.title === title);
+  if (!created) {
+    console.error(`Failed to resolve created KV namespace: title ${title} not found`);
+    process.exit(1);
+  }
+  console.log(`  Created KV namespace: ${created.id}`);
   return binding === 'SETUP_SESSION'
-    ? { ...state, kvSetupSessionId: created.data.id }
-    : { ...state, kvCacheId: created.data.id };
+    ? { ...state, kvSetupSessionId: created.id }
+    : { ...state, kvCacheId: created.id };
 };
 
 const provisionQueue = (state: ResourceState): ResourceState => {
@@ -536,7 +526,7 @@ const provisionQueue = (state: ResourceState): ResourceState => {
   }
 
   // Try to find existing by name
-  const listResult = wrangler(['queues', 'list', '--json']);
+  const listResult = wrangler(['queues', 'list']);
   const parsed = parseWranglerList<Queue>(listResult, 'queues-list');
   if (parsed.ok) {
     const existing = parsed.data.find((q) => q.queue_name === 'unimailbox-outbound');
@@ -544,6 +534,12 @@ const provisionQueue = (state: ResourceState): ResourceState => {
       console.log('  Found existing queue: unimailbox-outbound');
       return { ...state, queue: 'unimailbox-outbound' };
     }
+  } else if (listResult.status === 0 && listResult.stdout.includes('unimailbox-outbound')) {
+    // Wrangler 4.121 exposes queues as a human-readable table without a
+    // --json option. The queue name is the resource identity, so an exact
+    // substring match is sufficient and no ID is needed in config.
+    console.log('  Found existing queue: unimailbox-outbound');
+    return { ...state, queue: 'unimailbox-outbound' };
   } else {
     // F4: Parse failures must be visible
     console.error(`Warning: could not parse wrangler list output for queues (${parsed.error}).`);
@@ -573,13 +569,24 @@ const provisionSecretsStore = (state: ResourceState): ResourceState => {
   }
 
   // Try to find existing by name
-  const listResult = wrangler(['secrets-store', 'store', 'list', '--json']);
+  const listResult = wrangler(['secrets-store', 'store', 'list', '--remote']);
   const parsed = parseWranglerList<SecretsStore>(listResult, 'secrets-store-list');
   if (parsed.ok) {
     const existing = parsed.data.find((s) => s.name === 'unimailbox-secrets');
     if (existing) {
       console.log(`  Found existing Secrets Store: ${existing.id}`);
       return { ...state, secretsStoreId: existing.id };
+    }
+  } else if (listResult.status === 0) {
+    // Wrangler 4.121 exposes Secrets Store as a table without a --json
+    // option. Resolve an exact-name row and its 32-hex store ID.
+    const line = listResult.stdout
+      .split(/\r?\n/)
+      .find((candidate) => candidate.includes('unimailbox-secrets'));
+    const id = line?.match(/\b[a-f0-9]{32}\b/i)?.[0];
+    if (id) {
+      console.log(`  Found existing Secrets Store: ${id}`);
+      return { ...state, secretsStoreId: id };
     }
   } else {
     // F4: Parse failures must be visible
@@ -600,15 +607,19 @@ const provisionSecretsStore = (state: ResourceState): ResourceState => {
     'store',
     'create',
     'unimailbox-secrets',
-    '--json',
+    '--remote',
   ]);
-  const created = parseWranglerSingle<SecretsStore>(createResult, 'secrets-store-create');
-  if (!created.ok) {
-    console.error(`Failed to create Secrets Store: ${created.error}`);
-    process.exit(createResult.status ?? 1); // F12: propagate wrangler status
+  if (createResult.status !== 0) {
+    console.error(`Failed to create Secrets Store. Exit code: ${createResult.status}`);
+    process.exit(createResult.status ?? 1);
   }
-  console.log(`  Created Secrets Store: ${created.data.id}`);
-  return { ...state, secretsStoreId: created.data.id };
+  const createdId = createResult.stdout.match(/\bID:\s*([a-f0-9]{32})\b/i)?.[1];
+  if (!createdId) {
+    console.error('Failed to parse created Secrets Store ID from Wrangler output');
+    process.exit(1);
+  }
+  console.log(`  Created Secrets Store: ${createdId}`);
+  return { ...state, secretsStoreId: createdId };
 };
 
 // ---------------------------------------------------------------------

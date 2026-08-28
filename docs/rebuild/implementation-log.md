@@ -10,6 +10,23 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-28 — Deployment preflight compatibility fix (Wrangler 4.121)
+
+While executing the CAP-054 preview preflight, `scripts/deploy.ts` was found to assume the older
+Wrangler list/create JSON flags. Wrangler 4.121 returns direct JSON for D1/KV lists, human-readable
+tables for queues/R2/Secrets Store, and no longer accepts `--json` on several list/create commands.
+The deploy parser now accepts direct and legacy list shapes; KV creation re-lists to resolve its ID;
+queue and Secrets Store discovery use the supported output; and unsupported create output is treated
+as a failure rather than parsed as a JSON resource.
+
+Regression coverage adds direct-array, legacy-wrapper, and empty-list cases to
+`scripts/deploy.test.ts` (48 tests pass). `ENVIRONMENT=preview pnpm scaffold deploy --dry-run` now
+reaches the configuration guard without creating resources. A single empty D1 accidentally created
+by the initial preflight was identified by UUID and deleted immediately; the pre-existing
+`unimailbox` database was not touched. No secrets were read or printed.
+
+---
+
 ## 2026-08-28 — CAP-054 independent review: implementation accepted, preview verification still pending
 
 Codex independently reviewed the CAP-054 production diff and reran the focused and full gates on
