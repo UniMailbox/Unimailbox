@@ -46,6 +46,7 @@ import { adminUserRoutes } from './routes/admin-users';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
+import { draftRoutes } from './routes/drafts';
 import { webhookRoutes } from './routes/webhooks';
 import { betterAuthRoutes } from './routes/better-auth';
 import type { AppEnv } from '../platform/env';
@@ -110,6 +111,11 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-023: Compose (send) routes.
   apiV1.route('/', composeRoutes());
+
+  // CAP-047 server draft-create slice: POST /api/v1/mailboxes/:mailboxId/drafts.
+  // Mounted next to compose so the create-draft route shares the same
+  // body-size cap and middleware chain.
+  apiV1.route('/', draftRoutes());
 
   // D-CAP-031-A: Webhooks. Sibling sub-app that does NOT chain the body
   // limit. Provider HMAC signatures are computed over the raw bytes and

@@ -1234,9 +1234,10 @@ describe('toggleStarResponseSchema', () => {
 });
 
 // CAP-043 Slice 3 fix H4 / D-CAP-043-I: the closed audit-action enum gains
-// `message.star_toggled` and `message.soft_deleted`. The enum is closed by
-// design — a value reaching audit_events that is not in this list is a
-// contract violation, so coverage pins the exact option set.
+// `message.star_toggled` and `message.soft_deleted`. CAP-047 server
+// draft-create slice adds `draft.created`. The enum is closed by design —
+// a value reaching audit_events that is not in this list is a contract
+// violation, so coverage pins the exact option set.
 describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
   it('contains the exact expected option set, including the CAP-043 message actions', () => {
     expect([...auditActionSchema.options].sort()).toEqual(
@@ -1254,6 +1255,7 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'webhook_secret.reveal',
         'message.star_toggled',
         'message.soft_deleted',
+        'draft.created',
       ].sort(),
     );
   });
@@ -1267,6 +1269,10 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
   it('accepts message.star_toggled and message.soft_deleted (the H4 additions)', () => {
     expect(auditActionSchema.parse('message.star_toggled')).toBe('message.star_toggled');
     expect(auditActionSchema.parse('message.soft_deleted')).toBe('message.soft_deleted');
+  });
+
+  it('accepts draft.created (the CAP-047 addition)', () => {
+    expect(auditActionSchema.parse('draft.created')).toBe('draft.created');
   });
 
   it('rejects an undeclared action (the enum is closed)', () => {

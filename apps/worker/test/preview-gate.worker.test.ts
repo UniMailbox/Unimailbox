@@ -87,9 +87,10 @@ export const DEFERRED_REQUEST_ID_ACTIONS: ReadonlyArray<string> = [];
 // regression) is caught at compile-test boundary, and an action that
 // appears here but never reaches the closed enum is caught at runtime.
 //
-// Mirrors the 13 values listed in
-// packages/contracts/src/admin/audit.ts:57-76 (auditActionSchema, the
-// closed zod enum).
+// Mirrors the 14 values listed in
+// packages/contracts/src/admin/audit.ts:57-77 (auditActionSchema, the
+// closed zod enum). CAP-047 server draft-create slice adds
+// `draft.created`.
 const EXPECTED_AUDIT_ACTIONS: ReadonlyArray<string> = [
   'setup.claim',
   'setup.complete',
@@ -104,6 +105,7 @@ const EXPECTED_AUDIT_ACTIONS: ReadonlyArray<string> = [
   'webhook_secret.reveal',
   'message.star_toggled',
   'message.soft_deleted',
+  'draft.created',
 ];
 
 // RFC 4122 UUID shape — used by the route-level readback block below

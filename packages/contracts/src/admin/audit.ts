@@ -53,7 +53,8 @@ export interface D1StatementLike {
 // system. Existing entries are inherited from CAP-026 / CAP-027 / CAP-029;
 // CAP-040 adds two for the new flows (reconciliation back-fill + admin
 // secret reveal); CAP-043 Slice 3 fix (D-CAP-043-I) adds the two message
-// presentation-state transitions — star toggle and per-user soft delete.
+// presentation-state transitions — star toggle and per-user soft delete;
+// CAP-047 adds the server create-draft transition.
 export const auditActionSchema = z.enum([
   // CAP-026 / CAP-027 setup + admin
   'setup.claim',
@@ -74,6 +75,8 @@ export const auditActionSchema = z.enum([
   // CAP-043 Slice 3 fix / D-CAP-043-I — message presentation state
   'message.star_toggled',
   'message.soft_deleted',
+  // CAP-047 server draft-create slice — draft creation transition.
+  'draft.created',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;
