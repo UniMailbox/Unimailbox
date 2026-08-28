@@ -13,6 +13,11 @@ SELECT '0009_expiry_index_exists' AS assertion,
   COUNT(*) = 1 AS pass
 FROM sqlite_master WHERE type = 'index' AND name = 'idempotency_records_expires_at_idx';
 
+-- 0009 originally declared `length(response_json) <= 65536`; migration 0020
+-- raised the ceiling to 524,288 to accommodate the GET-compatible PATCH replay
+-- body. 0020 owns the current ceiling — this assertion accepts either value
+-- (the legacy 65,536 ceiling or the current 524,288 ceiling) so it stays
+-- accurate across both eras, while every other length CHECK remains strict.
 SELECT '0009_length_checks_exist' AS assertion,
   EXISTS (
     SELECT 1 FROM sqlite_master
@@ -21,7 +26,10 @@ SELECT '0009_length_checks_exist' AS assertion,
       AND instr(sql, 'length(operation) <= 128') > 0
       AND instr(sql, 'length(idempotency_key) <= 128') > 0
       AND instr(sql, 'length(request_hash) = 64') > 0
-      AND instr(sql, 'length(response_json) <= 65536') > 0
+      AND (
+        instr(sql, 'length(response_json) <= 65536') > 0
+        OR instr(sql, 'length(response_json) <= 524288') > 0
+      )
   ) AS pass;
 
 SELECT '0009_status_check_exists' AS assertion,

@@ -77,6 +77,8 @@ export const auditActionSchema = z.enum([
   'message.soft_deleted',
   // CAP-047 server draft-create slice — draft creation transition.
   'draft.created',
+  // CAP-047 draft PATCH slice — draft update transition (D-CAP-047-PATCH).
+  'draft.updated',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

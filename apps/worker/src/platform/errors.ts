@@ -32,6 +32,7 @@ export type HttpStatusCode =
   | 403
   | 404
   | 409
+  | 412
   | 413
   | 429
   | 500
@@ -68,6 +69,15 @@ export const ERROR_CODES = {
   IDEMPOTENCY_KEY_REUSED: 'IDEMPOTENCY_KEY_REUSED',
   IDEMPOTENCY_CONFLICT: 'IDEMPOTENCY_CONFLICT',
   IDEMPOTENCY_REQUEST_PENDING: 'IDEMPOTENCY_REQUEST_PENDING',
+
+  // Concurrency / optimistic locking (400 / 412) — CAP-047 draft PATCH slice.
+  // `If-Match` carries the RFC-3339 `updated_at` returned by GET; the route
+  // rejects missing / malformed / weak / quoted / non-canonical headers
+  // with `IF_MATCH_INVALID` (400), and a header that no longer matches the
+  // stored value with `STALE_IF_MATCH` (412).
+  IF_MATCH_REQUIRED: 'IF_MATCH_REQUIRED',
+  IF_MATCH_INVALID: 'IF_MATCH_INVALID',
+  STALE_IF_MATCH: 'STALE_IF_MATCH',
 
   // Resource resolution (404 / 409)
   DOMAIN_NOT_FOUND: 'DOMAIN_NOT_FOUND',
