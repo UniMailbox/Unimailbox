@@ -28,7 +28,7 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 |---|---|
 | **Phase** | 2 — Reliable Business Loop (**Implemented; CAP-054 preview verification pending**, 2026-08-28) |
 | **Active capability** | **None.** CAP-050 attachment consume/send is implemented locally and archived; CAP-054's preview observation remains pending. |
-| **Next capability** | **CAP-051 — Attachment download/render and scheduled cleanup** after CAP-050 is reviewed and committed. |
+| **Next capability** | **CAP-051 — Attachment download/render and scheduled cleanup**. |
 | **Blocked** | Preview verification of CAP-054 is still required before Phase 2 can be called `Verified` or any Phase 3 slice can be preview-verified. Local CAP-049 work is allowed by the operator decision to defer deployment and temporarily use KV for bounded attachment staging. |
 | **Repository state** | Local branch `master` contains CAP-049 and CAP-050 code plus closure documentation after the local fast-forward. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0022 are registered and all 22 companion verification scripts pass. Latest local gates: doctor 14/14; lint/typecheck/format/diff clean; unit 974/974; Worker 857/857 (zero skipped, zero failed); CAP-050 focused Worker tests 20/20; contracts 368/368; build and Wrangler dry-run clean. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
 
