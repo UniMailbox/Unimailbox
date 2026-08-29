@@ -1,5 +1,6 @@
 // apps/web — MessageAttachments tests.
-// CAP-053: presentational attachment metadata and relative download controls.
+// CAP-053/CAP-055: presentational attachment metadata, previews, and relative
+// download controls.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -58,6 +59,64 @@ describe('MessageAttachments', () => {
       'href',
       `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/attachments/${encodeURIComponent(SECOND_ATTACHMENT.id)}/download`,
     );
+  });
+
+  it('R-ATTACHMENT-001/R-ATTACHMENT-006 previews only allowed inline raster types and keeps every fallback downloadable', () => {
+    const mailboxId = 'mailbox-preview';
+    const allowedTypes = [
+      'image/png',
+      'image/jpeg; charset=binary',
+      'IMAGE/GIF',
+      'image/webp',
+      'image/avif; profile=foo',
+    ];
+    const allowed = allowedTypes.map((contentType, index) => ({
+      ...SECOND_ATTACHMENT,
+      id: `00000000-0000-4000-8000-00000000010${index}`,
+      filename: `allowed-${index}.img`,
+      contentType,
+    }));
+    const fallback = [
+      {
+        ...SECOND_ATTACHMENT,
+        id: '00000000-0000-4000-8000-000000000120',
+        contentType: 'image/svg+xml',
+        filename: 'vector.svg',
+      },
+      {
+        ...SECOND_ATTACHMENT,
+        id: '00000000-0000-4000-8000-000000000121',
+        contentType: 'image/tiff',
+        filename: 'photo.tiff',
+      },
+      {
+        ...SECOND_ATTACHMENT,
+        id: '00000000-0000-4000-8000-000000000122',
+        contentType: 'image/png',
+        disposition: 'attachment' as const,
+        filename: 'ordinary.png',
+      },
+    ];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    render(<MessageAttachments mailboxId={mailboxId} attachments={[...allowed, ...fallback]} />);
+
+    const previews = screen.getAllByTestId('message-attachment-preview');
+    expect(previews).toHaveLength(allowed.length);
+    allowed.forEach((attachment, index) => {
+      expect(previews[index]).toHaveAttribute(
+        'src',
+        `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/attachments/${encodeURIComponent(attachment.id)}/download`,
+      );
+      expect(previews[index]).toHaveAttribute('alt', attachment.filename);
+    });
+    expect(screen.getAllByTestId('message-attachment-download')).toHaveLength(
+      allowed.length + fallback.length,
+    );
+    expect(screen.getByText('vector.svg')).toBeInTheDocument();
+    expect(screen.getByText('photo.tiff')).toBeInTheDocument();
+    expect(screen.getByText('ordinary.png')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('R-API-001/R-API-002 handles empty and legacy attachment fields without throwing', () => {
