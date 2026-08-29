@@ -27,10 +27,10 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | | |
 |---|---|
 | **Phase** | 2 — Reliable Business Loop (**Implemented; CAP-054 preview verification pending**, 2026-08-28) |
-| **Active capability** | **None.** CAP-052 message-detail attachment projection is implemented locally and archived. |
-| **Next capability** | **Attachment download/render UI follow-up, to be allocated after CAP-052.** |
+| **Active capability** | **None.** CAP-053 message-detail attachment download controls are implemented locally and archived. |
+| **Next capability** | **Inline image/CID rendering follow-up, to be allocated after CAP-053.** |
 | **Blocked** | Preview verification of CAP-054 is still required before Phase 2 can be called `Verified` or any Phase 3 slice can be preview-verified. Local CAP-049 work is allowed by the operator decision to defer deployment and temporarily use KV for bounded attachment staging. |
-| **Repository state** | Local branch `master` contains CAP-049 through CAP-052 code plus closure documentation. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0022 are registered and all 22 companion verification scripts pass. Latest local gates: doctor 14/14; lint/typecheck/format/diff clean; unit 977/977; Worker 870/870 (zero skipped, zero failed); CAP-052 focused Worker tests 4/4; contracts 371/371; build and Wrangler dry-run clean. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
+| **Repository state** | Local branch `master` contains CAP-049 through CAP-053 code plus closure documentation. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0022 are registered and all 22 companion verification scripts pass. Latest local gates: doctor 14/14; lint/typecheck/format/diff clean; unit 981/981; Worker 870/870 (zero skipped, zero failed); CAP-053 focused Web tests 18/18; contracts 371/371; build and Wrangler dry-run clean. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
 
 ## Phase progress
 
@@ -39,7 +39,7 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | 0 | Foundation | Verified 2026-08-25 (CAP-045 FULL) | Local `/setup`, asset serving, queue topology, and repeat-safe migration paths are implemented AND exercised end-to-end on a real Cloudflare preview deployment | `docs/rebuild/phase-0-audit.md` is superseded for current status by the 2026-08-19 reality audit, CAP-039/041 evidence, and CAP-045 FULL operator evidence |
 | 1 | Minimal Business Closed Loop | Verified 2026-08-25 (CAP-045 FULL) | Setup UI is implemented; auth, mailbox, inbox, compose/reply, admin UI, AND real browser/email verification are ALL MET | `docs/rebuild/phase-1-audit.md` is superseded for current status by the 2026-08-19 reality audit, CAP-041 evidence, and CAP-045 FULL operator evidence |
 | 2 | Reliable Business Loop | **Implemented 2026-08-27; CAP-054 preview verification pending** | Existing CAP-045 preview evidence covers the prior phase behavior. CAP-054 now places `Idempotency-Key` (the canonical message ID) on the Brevo `sendTransacEmail` JSON body; local wire-shape and gate evidence pass, but provider-side duplicate suppression after deployment remains to be observed. | `work/investigations/INV-001-phase-2-audit.md` + CAP-045 operator evidence + CAP-054 local wire-shape proof; new preview evidence pending |
-| 3 | Complete Core Business | In Progress (CAP-052 implemented locally; attachment render follow-up pending) | drafts + attachments | `work/investigations/INV-002-phase-3-decomposition.md` |
+| 3 | Complete Core Business | In Progress (CAP-053 implemented locally; inline CID follow-up pending) | drafts + attachments | `work/investigations/INV-002-phase-3-decomposition.md` |
 | 4 | Operations + Data Import | Not started | ops tooling + legacy import | — |
 | 5 | Automation & Multi-Provider | Not started | — | — |
 | 6 | Scale & Performance | Not started | — | — |
@@ -198,6 +198,7 @@ produces IDs that no longer match the work by the time it starts.
 | CAP-050 | Attachment consume/send integration | Implemented | CAP-049 | Archived contract at `work/archive/2026-08/CAP-050/task.md`; migration 0022, atomic compose consumption, CACHE byte-store queue reconstruction, attachment audit, race/rollback/no-write coverage; local gates green, no R2/new KV/deploy. |
 | CAP-051 | Attachment download and local expiry cleanup | Implemented | CAP-050 | Archived contract at `work/archive/2026-08/CAP-051-attachment-download-cleanup/task.md`; mailbox-scoped binary download, safe 404/no-leak behavior, race-safe scheduled expiry/audit and CACHE retry are locally verified. Client CID/render, durable R2 retention, and preview deployment remain deferred. |
 | CAP-052 | Message detail attachment projection | Implemented | CAP-051 | Archived contract at `work/archive/2026-08/CAP-052-message-detail-attachments/task.md`; consumed-only, stable ordered six-field projection with cross-mailbox/soft-delete/no-leak coverage, locally verified. Client rendering/CID, durable R2 retention, and preview deployment remain deferred. |
+| CAP-053 | Message detail attachment download controls | Implemented | CAP-052 | Archived contract at `work/archive/2026-08/CAP-053-attachment-download-controls/task.md`; bounded web UI consumes shared metadata and links to CAP-051's authorized download route. HTML/CID rewriting and previews remain deferred. |
 
 ---
 

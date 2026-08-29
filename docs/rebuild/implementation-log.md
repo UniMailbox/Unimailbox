@@ -10,6 +10,22 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-29 — CAP-053 message detail attachment download controls implemented locally
+
+CAP-053 adds the smallest client slice after the CAP-052 metadata projection: the message-detail
+page now renders each API-provided attachment descriptor once and links to CAP-051's existing
+mailbox-scoped download route. The UI preserves server order, encodes both path IDs, renders
+metadata as text, and omits the section for empty or legacy responses. It performs no byte fetch,
+prefetch, storage-key inference, HTML/CID rewrite, or authorization decision; the Worker remains
+the authority for access and binary response headers.
+
+Claude Code implemented the component, page integration, and focused tests. Grok's independent
+architecture and security reviews both returned ACCEPT with no findings. Codex verified the focused
+Web tests 18/18, full unit/Web tests 981/981, Worker tests 870/870, doctor 14/14, lint, typecheck,
+format, build, and `git diff --check`. The contract is archived at
+`work/archive/2026-08/CAP-053-attachment-download-controls/task.md`; inline image/CID rendering,
+durable R2 retention, preview verification, and deployment remain deferred.
+
 ## 2026-08-29 — CAP-052 message detail attachment projection implemented locally
 
 CAP-052 extends the existing message-detail response with an additive metadata-only `attachments`
