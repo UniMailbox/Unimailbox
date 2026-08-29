@@ -10,6 +10,33 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-29 — CAP-049 attachment staging implemented locally
+
+CAP-049 is complete on local `master` (`e7671b1`). The existing `CACHE` KV namespace now stores
+raw attachment bytes under `attachment:<uploadId>` with a bounded 5 MiB stream reader and one-hour
+TTL; `attachment_uploads` is the Messages-owned D1 metadata/lifecycle table. Upload, idempotency,
+and the closed `attachment.uploaded` audit event commit atomically, with fail-safe cleanup for D1
+acknowledgement ambiguity and concurrent loser KV objects. Foreign/missing mailbox outcomes are
+collapsed to 404 before body consumption, and no attachment bytes, filenames, or keys are logged.
+
+Independent architecture and security reviews both accepted the current tree. Evidence includes
+real D1/KV Worker coverage (11 focused tests; 837 Worker tests), pure route/contract coverage,
+real KV expiration metadata, concurrent same-key races, rollback, and no-write authorization cases.
+Local quality gates pass: doctor 14/14, unit 968/968, lint, typecheck, format, migration verification
+21/21, build, Wrangler dry-run, and diff check. The contract is archived at
+`work/archive/2026-08/CAP-049-attachments-kv/task.md`. CAP-050 is next; deployment, R2, and preview
+verification remain deferred.
+
+## 2026-08-28 — CAP-049 attachment staging policy selected
+
+For the local attachment slice, reuse the existing `CACHE` KV namespace with unique
+`attachment:<uploadId>` keys. Raw bytes are capped at 5 MiB and receive a one-hour KV TTL; D1
+remains the canonical owner/mailbox/status/expiry record. This is a temporary local policy below
+Cloudflare KV's 25 MiB value limit and the roadmap's 5 MB acceptance fixture. No third KV namespace
+is introduced, `SETUP_SESSION` remains separate, and R2 stays untouched. Message/draft consumption,
+download authorization, and scheduled D1 cleanup remain CAP-050/051 work. Deployment and preview
+verification are explicitly deferred.
+
 ## 2026-08-28 — CAP-047 server draft-send slice completed
 
 The bounded server send path is now implemented and locally verified. `POST
