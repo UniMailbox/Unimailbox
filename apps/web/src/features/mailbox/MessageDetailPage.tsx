@@ -30,6 +30,7 @@ import {
   useMarkMessageReadMutation,
 } from './mailbox-queries';
 import { MessageDetailSkeleton } from './MessageDetailSkeleton';
+import { MessageAttachments } from './MessageAttachments';
 import { MessageThreadPanel } from './MessageThreadPanel';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Card } from '../../components/ui/Card';
@@ -150,6 +151,8 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
         <pre className="message-detail-body" data-testid="message-body">
           {detail.textBody}
         </pre>
+
+        <MessageAttachments mailboxId={mailboxId} attachments={detail.attachments} />
 
         {/* Headers collapsed by default (AC 11). RFC 5322 threading
             headers shown verbatim — the raw values are what the thread

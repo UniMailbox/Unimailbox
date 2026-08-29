@@ -82,6 +82,20 @@ const DETAIL = {
   },
 };
 
+const DETAIL_ATTACHMENT = {
+  id: '00000000-0000-4000-8000-00000000000c',
+  filename: 'report.txt',
+  contentType: 'text/plain',
+  sizeBytes: 42,
+  disposition: 'attachment' as const,
+  contentId: null,
+};
+
+const DETAIL_WITH_ATTACHMENTS = {
+  ...DETAIL,
+  attachments: [DETAIL_ATTACHMENT],
+};
+
 const ROOT_THREAD_ITEM = {
   id: ROOT_ID,
   fromAddress: 'sender@example.com',
@@ -321,6 +335,26 @@ function detailBody(overrides: Partial<typeof DETAIL> = {}): typeof DETAIL {
 }
 
 describe('MessageDetailPage', () => {
+  it('R-ATTACHMENT-001/R-ATTACHMENT-006 integrates ordered attachment controls into detail', async () => {
+    await renderDetailPage({
+      routes: [
+        sessionRoute({ session: SESSION }),
+        detailRoute(() => jsonResponse({ data: DETAIL_WITH_ATTACHMENTS })),
+        threadRoute(),
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-detail-page')).toBeInTheDocument();
+    });
+    const row = screen.getByTestId('message-attachment');
+    expect(row).toHaveTextContent('report.txt');
+    expect(screen.getByTestId('message-attachment-download')).toHaveAttribute(
+      'href',
+      `/api/v1/mailboxes/${encodeURIComponent(MAILBOX_ID)}/attachments/${encodeURIComponent(DETAIL_ATTACHMENT.id)}/download`,
+    );
+  });
+
   it('renders subject, from, to, cc, date, body, and headers collapsed by default', async () => {
     await renderDetailPage({
       routes: [
