@@ -7,6 +7,7 @@
  * pipeline has something to type-check. Real contracts land with CAP-004+.
  */
 import { z } from 'zod';
+import { attachmentContentTypeSchema, attachmentFilenameSchema } from './attachments';
 
 export * from './attachments';
 
@@ -915,6 +916,26 @@ export const messageListResponseSchema = z.object({
 export type MessageListResponse = z.infer<typeof messageListResponseSchema>;
 
 /**
+ * Metadata-only attachment relation in a message detail response.
+ *
+ * R-ATTACHMENT-001 / R-SECRET-003: the client receives the relation ID and
+ * display metadata needed to render a download control, never the consumed
+ * upload ID, storage object key, or bytes.
+ */
+export const messageAttachmentMetadataSchema = z
+  .object({
+    id: uuidSchema,
+    filename: attachmentFilenameSchema,
+    contentType: attachmentContentTypeSchema,
+    sizeBytes: z.number().int().positive(),
+    disposition: z.enum(['attachment', 'inline']),
+    contentId: z.string().nullable(),
+  })
+  .strict();
+
+export type MessageAttachmentMetadata = z.infer<typeof messageAttachmentMetadataSchema>;
+
+/**
  * Full message detail (GET /api/v1/mailboxes/:mailboxId/messages/:messageId).
  *
  * messageIdHeader/inReplyToHeader are nullable RFC 5322 headers; referencesHeader
@@ -939,6 +960,8 @@ export const messageDetailSchema = z.object({
     to: z.array(messageRecipientSchema),
     cc: z.array(messageRecipientSchema),
   }),
+  // Optional during client rollout; the Worker always emits an array.
+  attachments: z.array(messageAttachmentMetadataSchema).optional(),
 });
 
 export type MessageDetail = z.infer<typeof messageDetailSchema>;

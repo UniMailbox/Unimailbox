@@ -30,6 +30,7 @@
 // the priority order exists only there so the anchor and the candidate
 // rows can never drift apart.
 
+import type { MessageAttachmentMetadata } from '@unimailbox/contracts';
 import type { Database } from '../../platform/database';
 import { signCursor, verifyCursor, type CursorPayload } from '../../platform/cursor';
 import { sqliteTimestamp } from '../../platform/idempotency';
@@ -68,6 +69,7 @@ export interface MessageDetail {
   folder: string;
   createdAt: string;
   recipients: { to: RecipientInfo[]; cc: RecipientInfo[] };
+  attachments: MessageAttachmentMetadata[];
 }
 
 export interface ListMessagesResult {
@@ -113,6 +115,15 @@ interface RecipientRow {
   address: string;
   display_name: string;
   type: 'to' | 'cc' | 'bcc';
+}
+
+interface MessageAttachmentDetailRow {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  disposition: 'attachment' | 'inline';
+  content_id: string | null;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -387,6 +398,29 @@ export async function getMessageDetail(
     .bind(messageId)
     .all<RecipientRow>();
 
+  // R-ATTACHMENT-001 / R-ATTACHMENT-006: only persisted relations whose
+  // upload has completed the consume transition are visible. The public
+  // detail projection deliberately selects no upload ID, object key, or
+  // byte-store field (R-SECRET-003). Stable ordering uses the relation's
+  // canonical creation timestamp and UUID tie-breaker.
+  const attachmentRows = await db
+    .prepare(
+      `SELECT ma.id AS id,
+              ma.filename AS filename,
+              ma.content_type AS content_type,
+              ma.size_bytes AS size_bytes,
+              ma.disposition AS disposition,
+              ma.content_id AS content_id
+         FROM message_attachments ma
+         JOIN attachment_uploads au
+           ON au.id = ma.upload_id
+          AND au.status = 'consumed'
+        WHERE ma.message_id = ?
+        ORDER BY ma.created_at ASC, ma.id ASC`,
+    )
+    .bind(messageId)
+    .all<MessageAttachmentDetailRow>();
+
   return {
     id: row.id,
     fromAddress: row.from_address,
@@ -403,6 +437,14 @@ export async function getMessageDetail(
     folder: row.folder,
     createdAt: row.created_at,
     recipients: groupRecipients(recipientRows.results ?? []),
+    attachments: (attachmentRows.results ?? []).map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      contentType: attachment.content_type,
+      sizeBytes: attachment.size_bytes,
+      disposition: attachment.disposition,
+      contentId: attachment.content_id,
+    })),
   };
 }
 

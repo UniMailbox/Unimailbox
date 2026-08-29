@@ -1080,6 +1080,91 @@ describe('messageDetailSchema', () => {
     expect(result.htmlBody).toBe('<p>Hi</p>');
   });
 
+  it('accepts an empty attachment projection and legacy details without the field', () => {
+    const base = {
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: 'Sender',
+      subject: 'Hello',
+      htmlBody: '<p>Hi</p>',
+      textBody: 'Hi',
+      messageIdHeader: null,
+      inReplyToHeader: null,
+      referencesHeader: '',
+      status: 'delivered',
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
+    };
+
+    expect(messageDetailSchema.parse({ ...base, attachments: [] }).attachments).toEqual([]);
+    expect(messageDetailSchema.parse(base).attachments).toBeUndefined();
+  });
+
+  it('accepts public attachment metadata and rejects storage fields', () => {
+    const result = messageDetailSchema.safeParse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: 'Sender',
+      subject: 'Hello',
+      htmlBody: '<p>Hi</p>',
+      textBody: 'Hi',
+      messageIdHeader: null,
+      inReplyToHeader: null,
+      referencesHeader: '',
+      status: 'delivered',
+      isRead: 0,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
+      attachments: [
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          filename: 'photo.png',
+          contentType: 'image/png',
+          sizeBytes: 42,
+          disposition: 'inline',
+          contentId: 'cid-photo',
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      messageDetailSchema.safeParse({
+        id: '00000000-0000-4000-8000-000000000001',
+        fromAddress: 'sender@example.com',
+        fromName: 'Sender',
+        subject: 'Hello',
+        htmlBody: '<p>Hi</p>',
+        textBody: 'Hi',
+        messageIdHeader: null,
+        inReplyToHeader: null,
+        referencesHeader: '',
+        status: 'delivered',
+        isRead: 0,
+        isStarred: 0,
+        folder: 'inbox',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        recipients: { to: [], cc: [] },
+        attachments: [
+          {
+            id: '00000000-0000-4000-8000-000000000002',
+            filename: 'photo.png',
+            contentType: 'image/png',
+            sizeBytes: 42,
+            disposition: 'inline',
+            contentId: null,
+            uploadId: '00000000-0000-4000-8000-000000000003',
+          },
+        ],
+      }),
+    ).toMatchObject({ success: false });
+  });
+
   it('accepts non-null header values', () => {
     const result = messageDetailSchema.parse({
       id: '00000000-0000-4000-8000-000000000001',
