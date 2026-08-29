@@ -9,13 +9,39 @@ import {
 } from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
-import { uploadAttachment } from '../../modules/attachments';
+import { downloadAttachment, uploadAttachment } from '../../modules/attachments';
 import { assertCan } from '../../modules/tenancy';
 import { checkPermission } from '../../modules/admin';
 import { buildAppContext } from '../../app-context';
 import { getAttachmentByteStore } from '../../platform/cache';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
+
+function attachmentNotFound(): never {
+  // Keep every attachment existence/authorization/byte-store failure on the
+  // same stable envelope. MESSAGE_NOT_FOUND is the existing 404 catalog code;
+  // the closed error catalog does not expose a second attachment code.
+  throw new DomainError({
+    code: 'MESSAGE_NOT_FOUND',
+    message: 'Attachment not found',
+    httpStatus: 404,
+  });
+}
+
+function encodeFilenameParameter(filename: string): string {
+  const bytes = new TextEncoder().encode(filename);
+  return Array.from(bytes, (byte) => `%${byte.toString(16).toUpperCase().padStart(2, '0')}`).join(
+    '',
+  );
+}
+
+function contentDisposition(disposition: 'attachment' | 'inline', filename: string): string {
+  // The ASCII fallback prevents path separators, quotes, and control/non-ASCII
+  // characters from becoming unsafe header syntax. filename* retains the
+  // canonical UTF-8 name for clients that support RFC 5987.
+  const fallback = filename.replace(/[^\x20-\x7e]|[\\"/]/g, '_') || 'attachment';
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeFilenameParameter(filename)}`;
+}
 
 function rejectOversizedContentLength(contentLength: string | undefined): void {
   if (!contentLength) return;
@@ -72,6 +98,66 @@ export async function readBoundedBody(request: Request, maxBytes: number): Promi
 
 export function attachmentRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
+
+  routes.get(
+    '/mailboxes/:mailboxId/attachments/:attachmentId/download',
+    requirePermission('message.read'),
+    async (c) => {
+      const userId = c.get('userId');
+      if (!userId) {
+        throw new DomainError({
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Authentication required',
+          httpStatus: 401,
+        });
+      }
+
+      const mailboxId = c.req.param('mailboxId');
+      const attachmentId = c.req.param('attachmentId');
+      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
+
+      let result;
+      try {
+        result = await downloadAttachment(
+          {
+            db: c.env.DB,
+            cache: getAttachmentByteStore(c.env),
+          },
+          {
+            actorUserId: userId,
+            mailboxId,
+            attachmentId,
+            isAdmin,
+          },
+        );
+      } catch (error) {
+        // The path mailbox is part of the protected resource identity. A
+        // foreign/nonexistent mailbox and every inaccessible attachment state
+        // collapse to one 404, with no D1 metadata or CACHE distinction.
+        if (
+          error instanceof DomainError &&
+          (error.code === 'MAILBOX_NOT_FOUND' ||
+            error.code === 'MAILBOX_ACCESS_DENIED' ||
+            error.code === 'MESSAGE_NOT_FOUND')
+        ) {
+          attachmentNotFound();
+        }
+        throw error;
+      }
+
+      const response = new Response(result.bytes, {
+        status: 200,
+        headers: {
+          'Content-Type': result.contentType,
+          'Content-Length': String(result.sizeBytes),
+          'Content-Disposition': contentDisposition(result.disposition, result.filename),
+        },
+      });
+      const requestId = c.get('requestId');
+      if (requestId) response.headers.set('X-Request-Id', requestId);
+      return response;
+    },
+  );
 
   routes.post(
     '/mailboxes/:mailboxId/attachments/uploads',

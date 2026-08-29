@@ -54,7 +54,8 @@ export interface D1StatementLike {
 // CAP-040 adds two for the new flows (reconciliation back-fill + admin
 // secret reveal); CAP-043 Slice 3 fix (D-CAP-043-I) adds the two message
 // presentation-state transitions — star toggle and per-user soft delete;
-// CAP-047 adds the server draft lifecycle transitions.
+// CAP-047 adds the server draft lifecycle transitions; CAP-051 adds the
+// scheduled attachment expiry transition.
 export const auditActionSchema = z.enum([
   // CAP-026 / CAP-027 setup + admin
   'setup.claim',
@@ -86,6 +87,9 @@ export const auditActionSchema = z.enum([
   // CAP-050 attachment consume/send integration — each successful compose
   // writes one `attachment.consumed` audit row per attachment.
   'attachment.consumed',
+  // CAP-051 scheduled cleanup — one row per uploaded attachment whose
+  // CACHE bytes were removed and D1 lifecycle transitioned to expired.
+  'attachment.expired',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

@@ -252,3 +252,169 @@ export async function listMessageAttachmentsForSend(
     contentId: row.content_id,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// Mailbox-scoped attachment download projection.
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical metadata needed to serve one consumed attachment. The
+ * `message_attachments` row is authoritative for the wire metadata; the
+ * upload row is joined only to require the consume-side lifecycle state and
+ * to retain the canonical CACHE key.
+ */
+export interface MessageAttachmentForDownload {
+  readonly uploadId: string;
+  readonly objectKey: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly sizeBytes: number;
+  readonly disposition: 'attachment' | 'inline';
+}
+
+export interface FindMessageAttachmentForDownloadInput {
+  readonly mailboxId: string;
+  readonly attachmentId: string;
+  readonly userId: string;
+}
+
+/**
+ * Reads the public download projection through the Messages seam.
+ *
+ * A row is returned only when the relation is persisted, its upload is
+ * consumed, the relation belongs to the requested mailbox, and the
+ * requesting user has not soft-deleted that mailbox message. Every other
+ * state returns null so the use case can expose one stable not-found result.
+ */
+export async function findMessageAttachmentForDownload(
+  db: Database,
+  input: FindMessageAttachmentForDownloadInput,
+): Promise<MessageAttachmentForDownload | null> {
+  const row = await db
+    .prepare(
+      `SELECT ma.upload_id AS upload_id,
+              ma.object_key AS object_key,
+              ma.filename AS filename,
+              ma.content_type AS content_type,
+              ma.size_bytes AS size_bytes,
+              ma.disposition AS disposition
+         FROM message_attachments ma
+         JOIN attachment_uploads au
+           ON au.id = ma.upload_id
+          AND au.status = 'consumed'
+         JOIN messages m
+           ON m.id = ma.message_id
+         JOIN mailbox_messages mm
+           ON mm.message_id = m.id
+          AND mm.mailbox_id = ?
+    LEFT JOIN message_user_state mus
+           ON mus.mailbox_message_id = mm.id
+          AND mus.user_id = ?
+        WHERE ma.id = ?
+          AND COALESCE(mus.is_deleted, 0) = 0
+        LIMIT 1`,
+    )
+    .bind(input.mailboxId, input.userId, input.attachmentId)
+    .first<{
+      upload_id: string;
+      object_key: string;
+      filename: string;
+      content_type: string;
+      size_bytes: number;
+      disposition: 'attachment' | 'inline';
+    }>();
+
+  if (!row) return null;
+
+  return {
+    uploadId: row.upload_id,
+    objectKey: row.object_key,
+    filename: row.filename,
+    contentType: row.content_type,
+    sizeBytes: row.size_bytes,
+    disposition: row.disposition,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Expired upload cleanup projection and guarded transition.
+// ---------------------------------------------------------------------------
+
+export interface ExpiredAttachmentUpload {
+  readonly uploadId: string;
+  readonly kvKey: string;
+  readonly status: 'uploaded' | 'expired';
+}
+
+/** Lists expired uploads, including rows awaiting a CACHE-delete retry. */
+export async function listExpiredAttachmentUploads(
+  db: Database,
+  input: { readonly now: string },
+): Promise<ReadonlyArray<ExpiredAttachmentUpload>> {
+  const rows = await db
+    .prepare(
+      `SELECT id AS upload_id, kv_key AS kv_key, status AS status
+         FROM attachment_uploads
+        WHERE (status = 'uploaded' AND expires_at <= ?)
+           OR status = 'expired'
+        ORDER BY expires_at ASC, id ASC`,
+    )
+    .bind(input.now)
+    .all<{ upload_id: string; kv_key: string; status: 'uploaded' | 'expired' }>();
+
+  return rows.results.map((row) => ({
+    uploadId: row.upload_id,
+    kvKey: row.kv_key,
+    status: row.status,
+  }));
+}
+
+/** Prepares the guarded uploaded -> expired lifecycle transition. */
+export function prepareExpireAttachmentUpload(
+  db: Database,
+  input: { readonly uploadId: string; readonly now: string },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE attachment_uploads
+          SET status = 'expired'
+        WHERE id = ?
+          AND status = 'uploaded'
+          AND expires_at <= ?`,
+    )
+    .bind(input.uploadId, input.now);
+}
+
+/**
+ * Guards the audit statement in the same D1 batch as the lifecycle UPDATE.
+ * SQLite's changes() is the row count from the immediately preceding UPDATE.
+ * A stale cleanup sees zero changes and this deliberately conflicting INSERT
+ * aborts the transaction before the audit INSERT executes. When the UPDATE
+ * changed one row, the WHERE is false and this statement is a no-op.
+ */
+export function prepareRequireAttachmentExpiryTransition(
+  db: Database,
+  input: { readonly uploadId: string },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO attachment_uploads (
+         id, owner_user_id, mailbox_id, kv_key, filename, content_type,
+         disposition, size_bytes, status, expires_at, consumed_at, created_at
+       )
+       SELECT ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        WHERE changes() = 0`,
+    )
+    .bind(input.uploadId);
+}
+
+export async function findAttachmentUploadStatus(
+  db: Database,
+  input: { readonly uploadId: string },
+): Promise<'uploaded' | 'consumed' | 'expired' | null> {
+  const row = await db
+    .prepare(`SELECT status FROM attachment_uploads WHERE id = ?`)
+    .bind(input.uploadId)
+    .first<{ status: 'uploaded' | 'consumed' | 'expired' }>();
+  return row?.status ?? null;
+}

@@ -83,6 +83,11 @@ export {
   prepareCreateMessageAttachment,
   prepareConsumeAttachmentUpload,
   listMessageAttachmentsForSend,
+  findMessageAttachmentForDownload,
+  listExpiredAttachmentUploads,
+  prepareExpireAttachmentUpload,
+  prepareRequireAttachmentExpiryTransition,
+  findAttachmentUploadStatus,
 } from './attachment-consume-repository';
 export type {
   AttachmentUploadForConsumeRow,
@@ -91,6 +96,9 @@ export type {
   ListAttachmentUploadsForConsumeInput,
   ListAttachmentUploadsForConsumeResult,
   MessageAttachmentForSend,
+  MessageAttachmentForDownload,
+  FindMessageAttachmentForDownloadInput,
+  ExpiredAttachmentUpload,
 } from './attachment-consume-repository';
 export type {
   MessageListItem,

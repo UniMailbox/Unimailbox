@@ -9,13 +9,16 @@
 // capability owns its target; we do not introduce a "cron bus".
 //
 // CAP-040 / R-AUDIT-001: a per-tick correlation UUID is synthesised and
-// passed through to every audit row that the cron path emits (currently
-// none — the reclaim does not write audit rows; the field is wired in
-// for symmetry with the queue entrypoint and for any future audit emit).
+// passed through to every audit row that the cron path emits (CAP-051
+// attachment expiry now emits one row per expired upload; reclaim itself
+// does not write audit rows).
 import type { ScheduledController } from '@cloudflare/workers-types';
 import type { Env } from '../platform/env';
 import { reclaimStaleJobs } from '../modules/outbound-mail';
+import { expireAttachments } from '../modules/attachments';
 import { systemIds } from '../platform/ids';
+import { buildAppContext } from '../app-context';
+import { getAttachmentByteStore } from '../platform/cache';
 
 export default {
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
@@ -28,7 +31,19 @@ export default {
     // re-enqueue them onto the OUTBOUND queue. CRON cadence is
     // `*/2 * * * *` (see apps/worker/wrangler.jsonc).
     // The requestId is currently unused by reclaimStaleJobs (no audit
-    // emits); threaded through for forward compatibility.
+    // emits); attachment expiry below consumes the same tick correlation.
     await reclaimStaleJobs(env.DB, new Date(), env.OUTBOUND, requestId);
+
+    // CAP-051: remove expired, unconsumed upload bytes and atomically mark
+    // their Messages-owned D1 rows expired with one correlated audit event.
+    const ctx = buildAppContext(env);
+    await expireAttachments(
+      {
+        db: env.DB,
+        cache: getAttachmentByteStore(env),
+        auditEventWriter: ctx.auditEventWriter,
+      },
+      { requestId },
+    );
   },
 };
