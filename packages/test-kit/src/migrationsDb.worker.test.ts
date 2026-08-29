@@ -209,10 +209,9 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    // CAP-047 PATCH slice: bumped the schema version from '0019' to
-    // '0020' after migrations/0020_idempotency_response_size.sql raised
-    // the idempotency_records.response_json CHECK ceiling.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0020');
+    // CAP-049: 0021 adds attachment_uploads after CAP-047's 0020
+    // idempotency response-size migration.
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0021');
   });
 
   it('CAP-044: upgrading an existing administrator grants audit.read', async () => {

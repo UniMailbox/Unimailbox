@@ -1259,6 +1259,7 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'draft.created',
         'draft.updated',
         'draft.sent',
+        'attachment.uploaded',
       ].sort(),
     );
   });
@@ -1284,6 +1285,10 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
 
   it('accepts draft.sent (the CAP-047 send-slice addition)', () => {
     expect(auditActionSchema.parse('draft.sent')).toBe('draft.sent');
+  });
+
+  it('accepts attachment.uploaded (the CAP-049 staging addition)', () => {
+    expect(auditActionSchema.parse('attachment.uploaded')).toBe('attachment.uploaded');
   });
 
   it('rejects an undeclared action (the enum is closed)', () => {

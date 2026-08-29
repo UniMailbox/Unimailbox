@@ -8,6 +8,8 @@
  */
 import { z } from 'zod';
 
+export * from './attachments';
+
 // R-DATA-001 — email addresses are compared and stored case-insensitively.
 export const emailAddressSchema = z.string().trim().toLowerCase().email().max(254);
 
@@ -559,9 +561,9 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * key, to `'0018'` for the audit.read upgrade backfill, to `'0019'` for
  * the role_policies JSON normalization (CAP-036), and to `'0020'` for
  * the idempotency_records.response_json CHECK raise (CAP-047 PATCH
- * slice).
+ * slice), and to `'0021'` for attachment_uploads (CAP-049).
  */
-export const CURRENT_SCHEMA_VERSION = '0020' as const;
+export const CURRENT_SCHEMA_VERSION = '0021' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008

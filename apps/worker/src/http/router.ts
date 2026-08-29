@@ -11,8 +11,10 @@
 // reader, surfaced as a 500 with an empty body).
 //
 // The router composition follows those exceptions literally:
-//   - `apiV1` sub-app chains `enforceBodySize(1024*1024)` for every route
-//     except the Better Auth shadow handler.
+//   - `apiV1` sub-app chains `enforceBodySize(1024*1024)` for ordinary API
+//     routes.
+//   - `attachmentV1` is mounted before `apiV1`; its raw-binary route performs
+//     a binary-safe 5 MiB declared/actual byte check (CAP-049).
 //   - `betterAuthRoutes()` is mounted inside `apiV1` but its handler
 //     rebuilds a Request from the cached body that `enforceBodySize`
 //     has already materialised (see `http/routes/better-auth.ts`).
@@ -47,6 +49,7 @@ import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
 import { draftRoutes } from './routes/drafts';
+import { attachmentRoutes } from './routes/attachments';
 import { webhookRoutes } from './routes/webhooks';
 import { betterAuthRoutes } from './routes/better-auth';
 import type { AppEnv } from '../platform/env';
@@ -75,6 +78,13 @@ export function buildRouter(): Hono<AppEnv> {
   // `betterAuthV1` below for the exempt siblings.
   const apiV1 = new Hono<AppEnv>();
   apiV1.use('*', enforceBodySize(BODY_SIZE_LIMIT_BYTES));
+
+  // CAP-049: attachments accept binary bodies up to 5 MiB. Mount this
+  // sibling before the general apiV1 app so its terminal handler runs without
+  // the text-reading 1 MiB middleware. The route performs a binary-safe
+  // Content-Length precheck and actual ArrayBuffer byte-length check.
+  const attachmentV1 = new Hono<AppEnv>();
+  attachmentV1.route('/', attachmentRoutes());
 
   // Setup API routes — mounted under the body-size-limited sub-app so setup
   // POST endpoints respect the 1 MB cap.
@@ -138,6 +148,7 @@ export function buildRouter(): Hono<AppEnv> {
   // leaving other sub-app routes untouched.
   apiV1.route('/auth/better', betterAuthRoutes());
 
+  router.route('/api/v1', attachmentV1);
   router.route('/api/v1', apiV1);
   router.route('/api/v1', webhookV1);
 

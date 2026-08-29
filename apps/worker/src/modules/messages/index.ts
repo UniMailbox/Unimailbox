@@ -58,6 +58,16 @@ export {
   // encodeCursor alias — it had no callers).
   CursorInvalidError,
 } from './message-read-repository';
+
+export {
+  findAttachmentUploadCommitState,
+  prepareCreateAttachmentUpload,
+} from './attachment-upload-repository';
+export type {
+  AttachmentUploadCommitState,
+  AttachmentUploadCommitStateInput,
+  CreateAttachmentUploadInput,
+} from './attachment-upload-repository';
 export type {
   MessageListItem,
   MessageDetail,

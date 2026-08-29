@@ -81,6 +81,8 @@ export const auditActionSchema = z.enum([
   'draft.updated',
   // CAP-047 draft send slice — queue transition before provider delivery.
   'draft.sent',
+  // CAP-049 attachment staging lifecycle creation.
+  'attachment.uploaded',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;
