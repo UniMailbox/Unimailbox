@@ -209,9 +209,10 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    // CAP-049: 0021 adds attachment_uploads after CAP-047's 0020
-    // idempotency response-size migration.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0021');
+    // CAP-050: 0022 adds message_attachments (consume-side of CAP-049's
+    // 0021 attachment_uploads) with the UNIQUE index and BEFORE INSERT
+    // trigger that close the consume race at the schema layer.
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0022');
   });
 
   it('CAP-044: upgrading an existing administrator grants audit.read', async () => {

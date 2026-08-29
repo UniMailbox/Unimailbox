@@ -25,6 +25,7 @@ import { processOutboundJob } from '../modules/outbound-mail';
 import { providerRegistry } from '../integrations/providers/provider-registry';
 import { buildAppContext } from '../app-context';
 import { systemIds } from '../platform/ids';
+import { getAttachmentByteStore } from '../platform/cache';
 
 interface OutboundJobPayload {
   readonly jobId: string;
@@ -51,6 +52,10 @@ export default {
     // carries it through to every audit_events row it writes.
     const requestId = systemIds.uuid();
     const ctx = buildAppContext(env);
+    // CAP-050: narrow CACHE seam for CAP-049-staged attachment bytes. The
+    // byte store is shared across messages in this batch so the per-batch
+    // wiring is the right granularity.
+    const attachmentByteStore = getAttachmentByteStore(env);
 
     for (const msg of batch.messages) {
       try {
@@ -67,6 +72,7 @@ export default {
           adapter,
           requestId,
           auditEventWriter: ctx.auditEventWriter,
+          attachmentByteStore,
         });
         msg.ack();
       } catch (error) {

@@ -561,9 +561,11 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * key, to `'0018'` for the audit.read upgrade backfill, to `'0019'` for
  * the role_policies JSON normalization (CAP-036), and to `'0020'` for
  * the idempotency_records.response_json CHECK raise (CAP-047 PATCH
- * slice), and to `'0021'` for attachment_uploads (CAP-049).
+ * slice), to `'0021'` for attachment_uploads (CAP-049), and to
+ * `'0022'` for message_attachments (CAP-050 — one-consume-per-upload
+ * via UNIQUE index + BEFORE INSERT trigger).
  */
-export const CURRENT_SCHEMA_VERSION = '0021' as const;
+export const CURRENT_SCHEMA_VERSION = '0022' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008
@@ -1015,15 +1017,42 @@ export const composeRecipientSchema = z.object({
  * The route is mutating, so per R-IDEMPOTENCY-* the handler requires an
  * Idempotency-Key header — that contract is enforced in middleware, not here.
  */
-export const composeRequestSchema = z.object({
-  to: z.array(composeRecipientSchema).min(1),
-  cc: z.array(composeRecipientSchema).default([]),
-  subject: z.string().max(998).default(''),
-  htmlBody: z.string().max(1_000_000).default(''),
-  textBody: z.string().max(1_000_000).default(''),
-  inReplyTo: z.string().optional(),
-  references: z.string().optional(),
-});
+export const composeRequestSchema = z
+  .object({
+    to: z.array(composeRecipientSchema).min(1),
+    cc: z.array(composeRecipientSchema).default([]),
+    subject: z.string().max(998).default(''),
+    htmlBody: z.string().max(1_000_000).default(''),
+    textBody: z.string().max(1_000_000).default(''),
+    inReplyTo: z.string().optional(),
+    references: z.string().optional(),
+    // CAP-050: optional list of CAP-049 staged upload IDs whose bytes
+    // (already in CACHE KV under `attachment:<uploadId>`) should be
+    // attached to this message. Defaults to empty so existing clients
+    // are byte-identical. The route layer enforces the actor/mailbox
+    // authorization and collapses every unavailable upload (missing,
+    // foreign, expired, already-consumed, KV-missing) into one stable
+    // safe error so ownership/lifecycle details never leak.
+    attachmentUploadIds: z.array(uuidSchema).max(10).default([]),
+  })
+  .superRefine((value, ctx) => {
+    // R-ATTACHMENT-001 / R-API-005: duplicate upload IDs in a single
+    // request collapse to the existing 400 validation envelope. We
+    // check both the existence-of-dup and the human-readable position
+    // so the client gets the standard `path: ['attachmentUploadIds', N]`
+    // shape used elsewhere in this contract.
+    const seen = new Set<string>();
+    value.attachmentUploadIds.forEach((id, index) => {
+      if (seen.has(id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['attachmentUploadIds', index],
+          message: 'duplicate attachmentUploadId',
+        });
+      }
+      seen.add(id);
+    });
+  });
 
 export type ComposeRequest = z.infer<typeof composeRequestSchema>;
 

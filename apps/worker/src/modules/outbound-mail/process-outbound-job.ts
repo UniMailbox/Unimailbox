@@ -33,10 +33,12 @@ import type { Database } from '../../platform/database';
 import type {
   AuditEventWriter,
   OutboundProviderAdapter,
+  ProviderAttachment,
   ProviderRuntimeContext,
   SendProviderMessage,
 } from '@unimailbox/contracts';
 import { TerminalProviderError } from '@unimailbox/contracts';
+import type { AttachmentByteStore } from '../../platform/cache';
 import { DomainError } from '../../platform/errors';
 import { systemIds } from '../../platform/ids';
 import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
@@ -44,7 +46,7 @@ import { sqliteTimestamp } from '../../platform/idempotency';
 import { importEncryptionKey, decrypt } from '../../platform/crypto';
 import { systemClock, type Clock } from '../../platform/clock';
 import { logger } from '../../platform/logger';
-import { updateMessageStatus } from '../messages';
+import { listMessageAttachmentsForSend, updateMessageStatus } from '../messages';
 import {
   claimOutboundJob,
   getOutboundJob,
@@ -85,6 +87,17 @@ export interface ProcessJobDeps {
    * audit row atomically with the back-fill UPDATEs.
    */
   readonly auditEventWriter?: AuditEventWriter;
+  /**
+   * CAP-050: narrow CACHE seam used to read CAP-049-staged attachment
+   * bytes for `SendProviderMessage.attachments`. Optional — the
+   * no-attachment test fixtures (and the early CAP-023 / CAP-028
+   * callers) never pass it, so existing entrypoints and tests stay
+   * byte-identical. When present, every attachment row from
+   * `listMessageAttachmentsForSend` is fetched through this store; a
+   * missing or size-mismatched byte aborts the pre-send step with
+   * SEND_FAILED, exactly like a missing credential.
+   */
+  readonly attachmentByteStore?: AttachmentByteStore;
 }
 
 /** Message columns read from the messages table for sending. */
@@ -226,6 +239,42 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
     const toRecipients = recipients.filter((r) => r.type === 'to');
     const ccRecipients = recipients.filter((r) => r.type === 'cc');
 
+    // CAP-050: read the per-message attachment projection from D1, then
+    // pull the exact bytes from CACHE through the `attachmentByteStore`
+    // seam. The metadata is the authoritative source — never anything
+    // derived from the client. Missing bytes or a size mismatch abort
+    // the pre-send step the same way a missing credential does, so the
+    // existing retryable/terminal decision treats this as a normal
+    // send failure.
+    const attachmentRows = await listMessageAttachmentsForSend(db, {
+      messageId: claimed.message_id,
+    });
+    const providerAttachments: ProviderAttachment[] = [];
+    for (const row of attachmentRows) {
+      if (!deps.attachmentByteStore) {
+        throw new Error(
+          `Attachment byte store not provided but message ${claimed.message_id} has ${row.uploadId}`,
+        );
+      }
+      const bytes = await deps.attachmentByteStore.get(row.objectKey);
+      if (!bytes) {
+        throw new Error(`Attachment bytes missing for upload ${row.uploadId}`);
+      }
+      if (bytes.byteLength !== row.sizeBytes) {
+        throw new Error(
+          `Attachment byte length mismatch for upload ${row.uploadId}: ` +
+            `metadata=${row.sizeBytes} bytes=${bytes.byteLength}`,
+        );
+      }
+      providerAttachments.push({
+        filename: row.filename,
+        contentType: row.contentType,
+        disposition: row.disposition,
+        ...(row.contentId ? { contentId: row.contentId } : {}),
+        content: bytes,
+      });
+    }
+
     const sendMsg: SendProviderMessage = {
       // R-OUTBOUND-004: provider calls use the canonical message ID as their
       // idempotency key so a redelivery cannot double-send.
@@ -249,7 +298,7 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
       ...(msg.message_id_header ? { messageId: msg.message_id_header } : {}),
       ...(msg.in_reply_to_header ? { inReplyTo: msg.in_reply_to_header } : {}),
       references: msg.references_header ?? '',
-      attachments: [],
+      attachments: providerAttachments,
     };
 
     const ctx: ProviderRuntimeContext = { env: { BREVO_API_KEY: apiKey } };

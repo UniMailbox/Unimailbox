@@ -107,6 +107,7 @@ const EXPECTED_AUDIT_ACTIONS: ReadonlyArray<string> = [
   'message.soft_deleted',
   'draft.created',
   'attachment.uploaded',
+  'attachment.consumed',
 ];
 
 // RFC 4122 UUID shape — used by the route-level readback block below

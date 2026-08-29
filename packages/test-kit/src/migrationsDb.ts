@@ -58,6 +58,10 @@ import rolePolicyNormalizeSql from '../../../migrations/0019_role_policy_normali
 // would roll back.
 import idempotencyResponseSizeSql from '../../../migrations/0020_idempotency_response_size.sql?raw';
 import attachmentUploadsSql from '../../../migrations/0021_attachment_uploads.sql?raw';
+// CAP-050: message_attachments consumed-relation rows. Two D1-enforced
+// guards (UNIQUE index + BEFORE INSERT trigger) make one-consume-per-upload
+// safe under concurrent compose requests.
+import messageAttachmentsSql from '../../../migrations/0022_message_attachments.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -172,6 +176,11 @@ const MIGRATIONS = [
     name: '0021_attachment_uploads',
     fileName: '0021_attachment_uploads.sql',
     sql: attachmentUploadsSql,
+  },
+  {
+    name: '0022_message_attachments',
+    fileName: '0022_message_attachments.sql',
+    sql: messageAttachmentsSql,
   },
 ] as const;
 

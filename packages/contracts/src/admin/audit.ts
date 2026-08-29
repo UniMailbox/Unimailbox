@@ -83,6 +83,9 @@ export const auditActionSchema = z.enum([
   'draft.sent',
   // CAP-049 attachment staging lifecycle creation.
   'attachment.uploaded',
+  // CAP-050 attachment consume/send integration — each successful compose
+  // writes one `attachment.consumed` audit row per attachment.
+  'attachment.consumed',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

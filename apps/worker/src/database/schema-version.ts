@@ -7,4 +7,6 @@
 // 0020 raises the idempotency_records.response_json CHECK to 524,288
 // (CAP-047 PATCH slice) so the GET-compatible PATCH replay body fits.
 // 0021 adds attachment_uploads metadata for temporary CACHE KV staging.
-export const CURRENT_SCHEMA_VERSION = '0021' as const;
+// 0022 adds message_attachments consumed-relation rows for CAP-050
+// (one-consume-per-upload via UNIQUE index + BEFORE INSERT trigger).
+export const CURRENT_SCHEMA_VERSION = '0022' as const;

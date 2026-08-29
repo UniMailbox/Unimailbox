@@ -20,6 +20,32 @@
 // CAP-027 wires Idempotency-Key: the record INSERT is appended to the
 // route's existing D1 batch so message + job + idempotency row land
 // atomically.
+//
+// CAP-050 extends the same D1 batch with attachment-consume rows. The
+// ordering is load-bearing (see `statements` below):
+//
+//   1. messages row
+//   2. message_recipients (to + cc)
+//   3. mailbox_messages
+//   4. message_attachments INSERTs — must precede (5) so the
+//      `message_attachments_upload_consumable` BEFORE INSERT trigger
+//      observes the pre-transition `status='uploaded'` row.
+//   5. UPDATE attachment_uploads ... SET status='consumed' — the
+//      `attachment_uploads_consume_once` trigger prevents any second
+//      transition from a non-`uploaded` state.
+//   6. outbound_jobs
+//   7. message.send audit
+//   8. attachment.consumed audit per upload (R-AUDIT-001)
+//   9. idempotency_records
+//
+// The route preflights every attachmentUploadId against D1 metadata
+// (authorising against the path mailbox and authenticated actor) and
+// against the live CACHE bytes (length must equal the D1 metadata)
+// BEFORE the batch begins. Any of the four unavailable conditions
+// (missing, foreign, expired, already-consumed, KV-missing or
+// length-mismatched) collapses to the single stable
+// ATTACHMENT_UPLOAD_NOT_FOUND 400 envelope so we never disclose
+// ownership or lifecycle details to the caller.
 
 import { Hono } from 'hono';
 import { composeRequestSchema } from '@unimailbox/contracts';
@@ -28,7 +54,13 @@ import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan, findMailboxById } from '../../modules/tenancy';
 import { checkPermission, prepareCreateAuditEvent } from '../../modules/admin';
 import { prepareCreateOutboundJob } from '../../modules/outbound-mail';
-import { createMessageWithRelations } from '../../modules/messages';
+import {
+  createMessageWithRelations,
+  listAttachmentUploadsForConsume,
+  prepareConsumeAttachmentUpload,
+  prepareCreateMessageAttachment,
+  type AttachmentUploadForConsumeRow,
+} from '../../modules/messages';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors';
@@ -43,9 +75,66 @@ import {
   replayAfterRace,
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
+import { getAttachmentByteStore } from '../../platform/cache';
 import { parseJsonBody } from '../middleware/parse-json-body';
 
 const SEND_OPERATION = 'POST /api/v1/mailboxes/:mailboxId/messages/send';
+
+/** CAP-050 — stable surface for any "this upload is unusable" preflight. */
+function throwAttachmentUnavailable(): never {
+  throw new DomainError({
+    code: 'ATTACHMENT_UPLOAD_NOT_FOUND',
+    message: 'One or more attachment uploads are unavailable',
+    httpStatus: 400,
+  });
+}
+
+/**
+ * CAP-050 — a UNIQUE-violation message that names `message_attachments`
+ * is the consume-race signature (the second of two concurrent compose
+ * requests trying to attach the same upload). Distinct from the
+ * idempotency_records race that `isIdempotencyUniqueViolation` already
+ * recognises — that helper explicitly checks for the
+ * `idempotency_records` table name in the error text. We do not want a
+ * concurrent double-consume to be mis-routed through `replayAfterRace`,
+ * which would return a 202 carrying a *different* messageId than the
+ * caller's. The right surface is the same stable
+ * ATTACHMENT_UPLOAD_NOT_FOUND envelope as the preflight, so the caller
+ * can retry with a fresh upload (or omit the attachment).
+ */
+function isMessageAttachmentsUniqueViolation(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.message.includes('UNIQUE constraint failed') &&
+    error.message.includes('message_attachments')
+  );
+}
+
+/**
+ * CAP-050 — the `message_attachments_upload_consumable` BEFORE INSERT
+ * trigger raises `ATTACHMENT_UPLOAD_NOT_CONSUMABLE` when an INSERT
+ * observes an upload row whose `status` is no longer `uploaded` (a
+ * sibling request won the consume race first). The trigger is the
+ * schema-layer guarantee behind R-ATTACHMENT-006 for the same-key
+ * concurrent case where the message_attachments UNIQUE is also about
+ * to fire; depending on statement ordering within the batch, D1 may
+ * surface one constraint or the other. Both map to the same race
+ * handling in the route's catch — replay the winner if the keys
+ * match, otherwise ATTACHMENT_UPLOAD_NOT_FOUND.
+ *
+ * The check is scoped to the specific error code raised by the
+ * migration 0022 trigger on purpose — a generic `SQLITE_CONSTRAINT_TRIGGER`
+ * could come from a sabotage / sibling trigger and must keep propagating
+ * as its own failure (not be mis-routed through the consume-race replay).
+ */
+function isAttachmentUploadNotConsumableTrigger(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.message.includes('ATTACHMENT_UPLOAD_NOT_CONSUMABLE');
+}
 
 export function composeRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -153,12 +242,47 @@ export function composeRoutes(): Hono<AppEnv> {
         });
       }
 
+      // CAP-050: preflight every requested upload against D1 metadata
+      // (ownership + mailbox + live `uploaded` state) and against the
+      // matching CACHE bytes (length must equal the D1 metadata). A
+      // failure on either check collapses to ATTACHMENT_UPLOAD_NOT_FOUND
+      // with no D1 writes and no queue enqueue — we keep the upload in
+      // its original `uploaded` state for the caller to retry / re-upload.
+      const attachmentUploadIds = body.attachmentUploadIds ?? [];
+      let attachmentRows: ReadonlyArray<AttachmentUploadForConsumeRow> = [];
+      if (attachmentUploadIds.length > 0) {
+        const preflight = await listAttachmentUploadsForConsume(c.env.DB, {
+          uploadIds: attachmentUploadIds,
+          expectedOwnerUserId: userId,
+          expectedMailboxId: mailboxId,
+          now: sqliteTimestamp(systemClock.now()),
+        });
+        if (preflight.kind === 'missing') {
+          throwAttachmentUnavailable();
+        }
+        attachmentRows = preflight.rows;
+        // KV byte-length verification — R-ATTACHMENT-003 / R-ATTACHMENT-005.
+        // Bytes that are absent, garbage-collected, TTL-expired, or whose
+        // length does not match the D1 size_bytes all collapse to the same
+        // stable envelope. CAP-049 CAP-051 owns KV cleanup, so we never
+        // delete here.
+        const attachmentByteStore = getAttachmentByteStore(c.env);
+        for (const row of attachmentRows) {
+          const bytes = await attachmentByteStore.get(row.kvKey);
+          if (!bytes || bytes.byteLength !== row.sizeBytes) {
+            throwAttachmentUnavailable();
+          }
+        }
+      }
+
       const now = sqliteTimestamp(systemClock.now());
       const messageId = systemIds.uuid();
       const jobId = systemIds.uuid();
       const idempotencyRecordId = systemIds.uuid();
       const idempotencyNow = sqliteTimestamp(systemClock.now());
       const auditEventId = systemIds.uuid();
+      const attachmentAuditEventIds = attachmentRows.map(() => systemIds.uuid());
+      const messageAttachmentIds = attachmentRows.map(() => systemIds.uuid());
       // CAP-046 / D-CAP-046-A: pull the request correlation UUID the
       // request-id middleware stamped on this request so the audit row
       // carries it through.
@@ -228,7 +352,41 @@ export function composeRoutes(): Hono<AppEnv> {
           `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
            VALUES (?, ?, ?, 1, 0, 'sent', ?)`,
         ).bind(systemIds.uuid(), mailboxId, messageId, now),
-        // 5. Outbound job — the bridge to the queue consumer.
+        // 5. CAP-050 message_attachments INSERTs — must come BEFORE the
+        // consume UPDATE so the BEFORE INSERT trigger observes the
+        // pre-transition `status='uploaded'` row. Any missing / expired
+        // / already-consumed / wrong-owner upload is rejected here at
+        // the schema layer (migration 0022) before any UPDATE fires.
+        ...attachmentRows.map((row, index) => {
+          const attachId = messageAttachmentIds[index];
+          if (!attachId) {
+            throw new Error('messageAttachmentIds index out of range');
+          }
+          return prepareCreateMessageAttachment(c.env.DB, {
+            id: attachId,
+            messageId,
+            uploadId: row.uploadId,
+            objectKey: row.kvKey,
+            filename: row.filename,
+            contentType: row.contentType,
+            sizeBytes: row.sizeBytes,
+            disposition: row.disposition,
+            contentId: null,
+            sha256: null,
+            createdAt: now,
+          });
+        }),
+        // 6. CAP-050 consume UPDATEs — upload `uploaded` → `consumed`.
+        // The BEFORE UPDATE OF status trigger
+        // (`attachment_uploads_consume_once`) refuses any non-`uploaded`
+        // transition, so a stale row cannot re-stamp `consumed_at`.
+        ...attachmentRows.map((row) =>
+          prepareConsumeAttachmentUpload(c.env.DB, {
+            uploadId: row.uploadId,
+            consumedAt: now,
+          }),
+        ),
+        // 7. Outbound job — the bridge to the queue consumer.
         prepareCreateOutboundJob(c.env.DB, {
           id: jobId,
           messageId,
@@ -236,8 +394,8 @@ export function composeRoutes(): Hono<AppEnv> {
           createdAt: now,
           updatedAt: now,
         }),
-        // 6. Audit row (R-AUDIT-001) — folded into the same batch so
-        // the message INSERT and the audit entry land atomically.
+        // 8. message.send audit row (R-AUDIT-001) — folded into the same
+        // batch so the message INSERT and the audit entry land atomically.
         prepareCreateAuditEvent(c.env.DB, {
           id: auditEventId,
           actorUserId: userId,
@@ -247,7 +405,28 @@ export function composeRoutes(): Hono<AppEnv> {
           requestId,
           createdAt: now,
         }),
-        // 7. Idempotency record (R-API-004, R-OUTBOUND-006).
+        // 9. CAP-050 attachment.consumed audit rows — one per consumed
+        // upload (R-AUDIT-001). Metadata is intentionally empty so we
+        // never leak filenames, bytes, or KV keys into the audit log
+        // (R-LOG-001 / R-SECRET-003). The resourceId is the upload ID
+        // so an investigator can pivot from the audit row back to the
+        // still-`consumed` attachment_uploads row.
+        ...attachmentRows.map((row, index) => {
+          const auditId = attachmentAuditEventIds[index];
+          if (!auditId) {
+            throw new Error('attachmentAuditEventIds index out of range');
+          }
+          return prepareCreateAuditEvent(c.env.DB, {
+            id: auditId,
+            actorUserId: userId,
+            action: 'attachment.consumed',
+            resourceType: 'attachment_upload',
+            resourceId: row.uploadId,
+            requestId,
+            createdAt: now,
+          });
+        }),
+        // 10. Idempotency record (R-API-004, R-OUTBOUND-006).
         prepareCreateIdempotencyRecord(c.env.DB, {
           id: idempotencyRecordId,
           actorId: userId,
@@ -263,11 +442,41 @@ export function composeRoutes(): Hono<AppEnv> {
       try {
         await createMessageWithRelations(c.env.DB, statements);
       } catch (error) {
-        // Fix 3: Handle UNIQUE-constraint race — two concurrent requests with
-        // the same Idempotency-Key raced to INSERT. Re-read the winner's row
-        // and replay it.
-        if (isIdempotencyUniqueViolation(error)) {
-          return replayAfterRace(c.env.DB, userId, SEND_OPERATION, idempotencyKey, requestHash);
+        // CAP-050 race routing: three constraints can fire here for the
+        // same logical race — two concurrent compose requests with the
+        // same Idempotency-Key, or two concurrent requests that raced on
+        // the same attachment upload:
+        //   - idempotency_records UNIQUE → idem-race
+        //   - message_attachments.upload_id UNIQUE → consume-race
+        //   - message_attachments_upload_consumable trigger → consume-race
+        //     (the trigger fires when the INSERT observes a `consumed`
+        //     upload row because a sibling request won the race first)
+        //
+        // In all three cases the right answer is to replay the winner's
+        // response if one exists under the same key (same-key concurrent).
+        // If no winner exists — i.e. the upload was consumed by a request
+        // carrying a *different* Idempotency-Key — the caller never saw
+        // the bytes, and we surface ATTACHMENT_UPLOAD_NOT_FOUND instead
+        // of the generic 409 IDEMPOTENCY_CONFLICT, so the caller cannot
+        // distinguish a true upload race from a wrong-key retry.
+        const isConsumeRace =
+          isMessageAttachmentsUniqueViolation(error) ||
+          isAttachmentUploadNotConsumableTrigger(error);
+        const isIdempotencyRace = isIdempotencyUniqueViolation(error);
+        if (isConsumeRace || isIdempotencyRace) {
+          try {
+            return replayAfterRace(c.env.DB, userId, SEND_OPERATION, idempotencyKey, requestHash);
+          } catch (raceReplayError) {
+            // No matching idempotency record — the upload was consumed by
+            // a request with a *different* Idempotency-Key (or the trigger
+            // fired for some other reason). For a consume-race that is the
+            // canonical "already consumed" outcome; collapse to the same
+            // stable envelope as the preflight.
+            if (isConsumeRace) {
+              throwAttachmentUnavailable();
+            }
+            throw raceReplayError;
+          }
         }
         throw error;
       }

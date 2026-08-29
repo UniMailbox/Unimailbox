@@ -1260,6 +1260,7 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'draft.updated',
         'draft.sent',
         'attachment.uploaded',
+        'attachment.consumed',
       ].sort(),
     );
   });
@@ -1289,6 +1290,10 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
 
   it('accepts attachment.uploaded (the CAP-049 staging addition)', () => {
     expect(auditActionSchema.parse('attachment.uploaded')).toBe('attachment.uploaded');
+  });
+
+  it('accepts attachment.consumed (the CAP-050 consume-slice addition)', () => {
+    expect(auditActionSchema.parse('attachment.consumed')).toBe('attachment.consumed');
   });
 
   it('rejects an undeclared action (the enum is closed)', () => {
@@ -1801,6 +1806,63 @@ describe('composeRequestSchema', () => {
     const result = composeRequestSchema.safeParse({
       to: [{ address: 'recipient@example.com' }],
       htmlBody: 'a'.repeat(1_000_001),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  // CAP-050 — attachmentUploadIds wire contract.
+  it('defaults attachmentUploadIds to an empty array', () => {
+    const result = composeRequestSchema.parse({
+      to: [{ address: 'recipient@example.com' }],
+    });
+    expect(result.attachmentUploadIds).toEqual([]);
+  });
+
+  it('accepts up to ten attachmentUploadIds', () => {
+    const ids = Array.from(
+      { length: 10 },
+      (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+    );
+    const result = composeRequestSchema.parse({
+      to: [{ address: 'recipient@example.com' }],
+      attachmentUploadIds: ids,
+    });
+    expect(result.attachmentUploadIds).toEqual(ids);
+  });
+
+  it('rejects more than ten attachmentUploadIds via safeParse', () => {
+    const ids = Array.from(
+      { length: 11 },
+      (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+    );
+    const result = composeRequestSchema.safeParse({
+      to: [{ address: 'recipient@example.com' }],
+      attachmentUploadIds: ids,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a duplicate attachmentUploadId in the same request via safeParse', () => {
+    const result = composeRequestSchema.safeParse({
+      to: [{ address: 'recipient@example.com' }],
+      attachmentUploadIds: [
+        '00000000-0000-4000-8000-000000000001',
+        '00000000-0000-4000-8000-000000000001',
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const dupIssue = result.error.issues.find(
+        (issue) => issue.message === 'duplicate attachmentUploadId',
+      );
+      expect(dupIssue?.path).toEqual(['attachmentUploadIds', 1]);
+    }
+  });
+
+  it('rejects an attachmentUploadId that is not a UUID via safeParse', () => {
+    const result = composeRequestSchema.safeParse({
+      to: [{ address: 'recipient@example.com' }],
+      attachmentUploadIds: ['not-a-uuid'],
     });
     expect(result.success).toBe(false);
   });

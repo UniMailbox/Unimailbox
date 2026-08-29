@@ -4,6 +4,7 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { users } from './identity';
 import { mailboxes } from './tenancy';
+import { messages } from './messages';
 
 export const attachmentUploads = sqliteTable(
   'attachment_uploads',
@@ -37,3 +38,38 @@ export const attachmentUploads = sqliteTable(
 
 export type AttachmentUpload = typeof attachmentUploads.$inferSelect;
 export type NewAttachmentUpload = typeof attachmentUploads.$inferInsert;
+
+/**
+ * CAP-050 consumed attachment relations. Owned by the `messages` module.
+ * `objectKey` mirrors the canonical `attachment:<uploadId>` CACHE KV key so
+ * the queue consumer reads bytes without re-deriving the key shape.
+ */
+export const messageAttachments = sqliteTable(
+  'message_attachments',
+  {
+    id: text('id').primaryKey(),
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    uploadId: text('upload_id')
+      .notNull()
+      .references(() => attachmentUploads.id, { onDelete: 'restrict' }),
+    objectKey: text('object_key').notNull(),
+    filename: text('filename').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    disposition: text('disposition', { enum: ['attachment', 'inline'] })
+      .notNull()
+      .default('attachment'),
+    contentId: text('content_id'),
+    sha256: text('sha256'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    uploadUnique: uniqueIndex('message_attachments_upload_unique').on(table.uploadId),
+    messageIdx: index('message_attachments_message_idx').on(table.messageId),
+  }),
+);
+
+export type MessageAttachment = typeof messageAttachments.$inferSelect;
+export type NewMessageAttachment = typeof messageAttachments.$inferInsert;

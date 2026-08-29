@@ -152,6 +152,14 @@ export const ERROR_CODES = {
   // carries a CHECK constraint — the repository's safeParse is
   // defense-in-depth against schema drift.)
   USER_ROW_INVALID: 'USER_ROW_INVALID',
+
+  // CAP-050: a compose-time `attachmentUploadId` is missing, foreign to
+  // the actor/mailbox, expired, already consumed, or its KV bytes are
+  // gone. Every one of those paths collapses to this single stable
+  // code so we never disclose ownership or lifecycle details to the
+  // client (R-API-002 / R-AUTHZ-004). Mapped to 400 — the request was
+  // syntactically valid, but one of its inputs cannot be honored.
+  ATTACHMENT_UPLOAD_NOT_FOUND: 'ATTACHMENT_UPLOAD_NOT_FOUND',
 } as const satisfies Readonly<Record<string, string>>;
 
 /**

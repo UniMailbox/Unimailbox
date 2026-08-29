@@ -68,6 +68,30 @@ export type {
   AttachmentUploadCommitStateInput,
   CreateAttachmentUploadInput,
 } from './attachment-upload-repository';
+
+// CAP-050 — messages-owned attachment-consume surface. The compose route
+// preflights each upload through `listAttachmentUploadsForConsume`, then
+// folds the resulting prepareCreateMessageAttachment /
+// prepareConsumeAttachmentUpload statements into the same D1 batch as
+// the message INSERT. `listMessageAttachmentsForSend` is the read-only
+// projection the outbound-mail queue consumer uses to rebuild the
+// provider-neutral attachment payload (the bytes themselves are pulled
+// from CACHE through the `AttachmentByteStore` platform seam, never
+// from D1).
+export {
+  listAttachmentUploadsForConsume,
+  prepareCreateMessageAttachment,
+  prepareConsumeAttachmentUpload,
+  listMessageAttachmentsForSend,
+} from './attachment-consume-repository';
+export type {
+  AttachmentUploadForConsumeRow,
+  CreateMessageAttachmentInput,
+  ConsumeAttachmentUploadInput,
+  ListAttachmentUploadsForConsumeInput,
+  ListAttachmentUploadsForConsumeResult,
+  MessageAttachmentForSend,
+} from './attachment-consume-repository';
 export type {
   MessageListItem,
   MessageDetail,
