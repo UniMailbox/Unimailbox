@@ -10,6 +10,23 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-29 — CAP-050 attachment consume/send implemented locally
+
+CAP-050 completes the local compose half of the attachment lifecycle. The compose contract now
+accepts up to ten unique staged upload IDs; the Messages-owned migration 0022 relation and
+ownership/canonical-metadata triggers consume live CAP-049 uploads atomically with message,
+outbound-job, idempotency, and audit writes. The existing `CACHE` KV remains the byte store; the
+queue reads exact `ArrayBuffer` bytes through the platform seam and reconstructs provider-neutral
+attachments without adding R2 or another KV namespace.
+
+Codex review required and verified the cross-owner trigger guard, direct UNIQUE rollback proof,
+same-key race replay, different-key unavailability, deterministic batch rollback, and no-write
+authorization paths. Final local evidence: migration reset/verify 22/22; focused CAP-050 Worker
+tests 20/20; contracts 368/368; unit 974/974; Worker 857/857 after `pnpm build:web`; doctor
+14/14; lint, typecheck, format, Worker build, and `git diff --check` all pass. The contract is
+archived at `work/archive/2026-08/CAP-050/task.md`. Preview/deployment, R2 migration, and any
+additional KV namespace remain deferred; CAP-051 is next.
+
 ## 2026-08-29 — CAP-049 attachment staging implemented locally
 
 CAP-049 is complete on local `master` (`e7671b1`). The existing `CACHE` KV namespace now stores

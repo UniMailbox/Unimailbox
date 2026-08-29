@@ -27,10 +27,10 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | | |
 |---|---|
 | **Phase** | 2 — Reliable Business Loop (**Implemented; CAP-054 preview verification pending**, 2026-08-28) |
-| **Active capability** | **None.** CAP-049 attachment staging is implemented locally and archived; CAP-054's preview observation remains pending. |
-| **Next capability** | **CAP-050 — Attachment consume/send integration** after CAP-049 is reviewed and committed. |
+| **Active capability** | **None.** CAP-050 attachment consume/send is implemented locally and archived; CAP-054's preview observation remains pending. |
+| **Next capability** | **CAP-051 — Attachment download/render and scheduled cleanup** after CAP-050 is reviewed and committed. |
 | **Blocked** | Preview verification of CAP-054 is still required before Phase 2 can be called `Verified` or any Phase 3 slice can be preview-verified. Local CAP-049 work is allowed by the operator decision to defer deployment and temporarily use KV for bounded attachment staging. |
-| **Repository state** | Local branch `master` contains CAP-049 code commit `e7671b1` plus its closure documentation. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0021 are registered and all 21 companion verification scripts pass. Latest local gates: doctor 14/14; lint/typecheck/format/diff clean; unit 968/968; Worker 837/837 (zero skipped, zero failed); build and Wrangler dry-run clean. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
+| **Repository state** | Local branch `master` contains CAP-049 and CAP-050 code plus closure documentation after the local fast-forward. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0022 are registered and all 22 companion verification scripts pass. Latest local gates: doctor 14/14; lint/typecheck/format/diff clean; unit 974/974; Worker 857/857 (zero skipped, zero failed); CAP-050 focused Worker tests 20/20; contracts 368/368; build and Wrangler dry-run clean. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
 
 ## Phase progress
 
@@ -39,7 +39,7 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | 0 | Foundation | Verified 2026-08-25 (CAP-045 FULL) | Local `/setup`, asset serving, queue topology, and repeat-safe migration paths are implemented AND exercised end-to-end on a real Cloudflare preview deployment | `docs/rebuild/phase-0-audit.md` is superseded for current status by the 2026-08-19 reality audit, CAP-039/041 evidence, and CAP-045 FULL operator evidence |
 | 1 | Minimal Business Closed Loop | Verified 2026-08-25 (CAP-045 FULL) | Setup UI is implemented; auth, mailbox, inbox, compose/reply, admin UI, AND real browser/email verification are ALL MET | `docs/rebuild/phase-1-audit.md` is superseded for current status by the 2026-08-19 reality audit, CAP-041 evidence, and CAP-045 FULL operator evidence |
 | 2 | Reliable Business Loop | **Implemented 2026-08-27; CAP-054 preview verification pending** | Existing CAP-045 preview evidence covers the prior phase behavior. CAP-054 now places `Idempotency-Key` (the canonical message ID) on the Brevo `sendTransacEmail` JSON body; local wire-shape and gate evidence pass, but provider-side duplicate suppression after deployment remains to be observed. | `work/investigations/INV-001-phase-2-audit.md` + CAP-045 operator evidence + CAP-054 local wire-shape proof; new preview evidence pending |
-| 3 | Complete Core Business | In Progress (CAP-049 implemented locally; CAP-050 next) | drafts + attachments | `work/investigations/INV-002-phase-3-decomposition.md` |
+| 3 | Complete Core Business | In Progress (CAP-050 implemented locally; CAP-051 next) | drafts + attachments | `work/investigations/INV-002-phase-3-decomposition.md` |
 | 4 | Operations + Data Import | Not started | ops tooling + legacy import | — |
 | 5 | Automation & Multi-Provider | Not started | — | — |
 | 6 | Scale & Performance | Not started | — | — |
@@ -195,7 +195,7 @@ produces IDs that no longer match the work by the time it starts.
 |---|---|---|---|---|
 | CAP-047 | Server-authoritative drafts and draft send | Implemented locally | CAP-043, CAP-054 code slice | Archived contracts under `work/archive/2026-08/CAP-047-*`; local gates and independent reviews recorded in `docs/rebuild/implementation-log.md`. Preview verification remains separate. |
 | CAP-049 | Attachment upload staging in existing `CACHE` KV (temporary 5 MiB cap) | Implemented | CAP-047, CAP-054 code slice | Archived contract at `work/archive/2026-08/CAP-049-attachments-kv/task.md`; 5 MiB bounded stream, one-hour KV TTL, D1 metadata, atomic audit/idempotency, local gates green; no new KV binding, R2 untouched. |
-| CAP-050 | Attachment consume/send integration | Pending | CAP-049 | `work/investigations/INV-002-phase-3-decomposition.md` (originally attachment compose slice). |
+| CAP-050 | Attachment consume/send integration | Implemented | CAP-049 | Archived contract at `work/archive/2026-08/CAP-050/task.md`; migration 0022, atomic compose consumption, CACHE byte-store queue reconstruction, attachment audit, race/rollback/no-write coverage; local gates green, no R2/new KV/deploy. |
 | CAP-051 | Attachment download/render and scheduled cleanup | Pending | CAP-050 | `work/investigations/INV-002-phase-3-decomposition.md` (originally attachment render slice). |
 
 ---
