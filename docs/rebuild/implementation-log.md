@@ -10,6 +10,22 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-29 — CAP-055 inline image attachment preview implemented locally
+
+CAP-055 extends the CAP-053 attachment list with a narrow, safe preview path. Only `inline`
+attachments whose media type is exactly one of PNG, JPEG, GIF, WebP, or AVIF render an `<img>` from
+the existing CAP-051 same-origin download URL. SVG, unknown media, and ordinary attachments keep a
+download link. The component preserves API order, encodes both route IDs, renders metadata as text,
+and performs no JavaScript byte fetch, blob creation, HTML rendering, or `cid:` rewriting.
+
+Claude Code implemented the component and focused tests. Grok's independent architecture and
+security reviews both returned ACCEPT with no findings. Codex verified focused Web tests 19/19, full
+unit/Web tests 982/982, Worker tests 870/870, doctor 14/14, lint, typecheck, format, build, and
+`git diff --check`. The contract is archived at
+`work/archive/2026-08/CAP-055-inline-image-preview/task.md`; HTML body rendering and CID
+substitution remain a separate future capability, with R2, extra KV, preview, and deployment
+deferred.
+
 ## 2026-08-29 — CAP-053 message detail attachment download controls implemented locally
 
 CAP-053 adds the smallest client slice after the CAP-052 metadata projection: the message-detail
