@@ -2,7 +2,7 @@
 
 > Bounded local-only backend slice. R2 remains declared but is not used by this capability.
 
-**Phase:** 3 · **Status:** In Progress · **Started:** 2026-08-28
+**Phase:** 3 · **Status:** Implemented locally · **Started:** 2026-08-28 · **Closed:** 2026-08-29
 
 ## Goal
 
@@ -50,27 +50,27 @@ the temporary KV decision recorded in this contract and the implementation log.
 
 ## Acceptance criteria
 
-- [ ] 1. `POST /api/v1/mailboxes/:mailboxId/attachments/uploads` with a valid sender, raw bytes,
+- [x] 1. `POST /api/v1/mailboxes/:mailboxId/attachments/uploads` with a valid sender, raw bytes,
   filename/content-type metadata, and `Idempotency-Key` stores exactly one `attachment_uploads`
   row (`status='uploaded'`), one `attachment:<uploadId>` value in `CACHE`, and one correlated
   `attachment.uploaded` audit row, returning 201 with `{ data: { uploadId, sizeBytes, expiresAt, ... } }`
   and no bytes in the response.
-- [ ] 2. A body exactly at 5 MiB succeeds; a body one byte over is rejected with 413 whether or
+- [x] 2. A body exactly at 5 MiB succeeds; a body one byte over is rejected with 413 whether or
   not `Content-Length` is present (the omitted-length path is rejected by a bounded stream reader
   before retaining more than the cap), and neither D1 nor KV contains a record for the rejected upload.
-- [ ] 3. Missing/invalid filename or content type, empty body, malformed metadata, and missing
+- [x] 3. Missing/invalid filename or content type, empty body, malformed metadata, and missing
   `Idempotency-Key` return the existing 400 envelope before any D1/KV write.
-- [ ] 4. A user without `message.send`, a user without mailbox `send`, and a different user's
+- [x] 4. A user without `message.send`, a user without mailbox `send`, and a different user's
   mailbox ID all receive the existing auth/authz/not-found response and produce zero D1/KV writes.
-- [ ] 5. Repeating the same key and byte-identical request returns the stored byte-identical
+- [x] 5. Repeating the same key and byte-identical request returns the stored byte-identical
   response without a second upload row or KV write; reusing the key with different raw bytes
   returns 409 `IDEMPOTENCY_KEY_REUSED`.
-- [ ] 6. If the D1 batch fails after the KV put, the route checks whether the batch committed before
+- [x] 6. If the D1 batch fails after the KV put, the route checks whether the batch committed before
   deleting bytes; it deletes only when absence is positively observed, otherwise preserves bytes
   for TTL cleanup. No partial `uploaded` row/audit/idempotency state is accepted.
-- [ ] 7. The focused route tests prove `attachment.uploaded` is emitted exactly once on first write,
+- [x] 7. The focused route tests prove `attachment.uploaded` is emitted exactly once on first write,
   not on replay, and that the audit row is request-correlated without sensitive metadata.
-- [ ] 8. The success test proves the KV key exposes an expiration approximately one hour after
+- [x] 8. The success test proves the KV key exposes an expiration approximately one hour after
   upload (in addition to the D1 expiry), and the focused migration/contract/Worker tests plus all
   standard local gates
   pass. No preview/deploy step is required for this local-only slice.
@@ -79,14 +79,14 @@ the temporary KV decision recorded in this contract and the implementation log.
 
 Layers touched, in dependency order:
 
-- [ ] domain/storage policy — `apps/worker/src/modules/attachments/`
-- [ ] migration — `migrations/0021_attachment_uploads.sql` + `.verify.sql`
-- [ ] repository/use case — `apps/worker/src/modules/attachments/` + `apps/worker/src/modules/messages/`
-- [ ] contract schema — `packages/contracts/src/attachments.ts` + `src/index.ts`
-- [ ] audit contract — `packages/contracts/src/admin/audit.ts` + its enum test
-- [ ] route — `apps/worker/src/http/routes/attachments.ts` + `src/http/router.ts`
-- [ ] tests — `apps/worker/test/attachments.worker.test.ts`, module/contract tests as needed
-- [ ] client — none (deferred)
+- [x] domain/storage policy — `apps/worker/src/modules/attachments/`
+- [x] migration — `migrations/0021_attachment_uploads.sql` + `.verify.sql`
+- [x] repository/use case — `apps/worker/src/modules/attachments/` + `apps/worker/src/modules/messages/`
+- [x] contract schema — `packages/contracts/src/attachments.ts` + `src/index.ts`
+- [x] audit contract — `packages/contracts/src/admin/audit.ts` + its enum test
+- [x] route — `apps/worker/src/http/routes/attachments.ts` + `src/http/router.ts`
+- [x] tests — `apps/worker/test/attachments.worker.test.ts`, module/contract tests as needed
+- [x] client — none (deferred)
 
 No disallowed module dependency edges are introduced. `attachments` uses only the allowed
 `platform/*`, `contracts/*`, `messages`, and `tenancy` edges from `.claude/rules/architecture.md`;
