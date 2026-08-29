@@ -10,6 +10,22 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-29 — CAP-052 message detail attachment projection implemented locally
+
+CAP-052 extends the existing message-detail response with an additive metadata-only `attachments`
+array. The Messages-owned read boundary emits only consumed relations in stable `created_at, id`
+order and exposes attachment ID, filename, content type, size, disposition, and nullable content ID;
+upload IDs, storage keys, and bytes remain internal. Existing global/mailbox authorization and
+per-user soft-delete behavior are unchanged, and the Worker always emits `attachments: []` when no
+consumed relations exist while the shared parser remains rollout-compatible with legacy fixtures.
+
+Codex independently verified the implementation after Grok architecture/security review: migration
+reset/verification 22/22, CAP-052 focused Worker tests 4/4, existing message Worker regression
+63/63, full Worker 870/870, unit 977/977, contracts 371/371, doctor 14/14, lint, typecheck,
+format, build, and `git diff --check`. The contract is archived at
+`work/archive/2026-08/CAP-052-message-detail-attachments/task.md`; client download/render and CID
+rewriting remain the next local slice, with R2, extra KV, preview, and deployment deferred.
+
 ## 2026-08-29 — CAP-051 attachment download and local expiry cleanup implemented locally
 
 CAP-051 adds the mailbox-scoped consumed-attachment download endpoint and scheduled cleanup for
