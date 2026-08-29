@@ -10,6 +10,22 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-29 — CAP-051 attachment download and local expiry cleanup implemented locally
+
+CAP-051 adds the mailbox-scoped consumed-attachment download endpoint and scheduled cleanup for
+unconsumed uploads. Downloads enforce global `message.read` plus mailbox-scoped `read`, read the
+Messages-owned projection, fetch exact binary bytes through the existing `CACHE` byte-store seam,
+and collapse missing, foreign, soft-deleted, and CACHE-missing states to one 404 without metadata
+leaks. The existing cron now marks expired uploads through a guarded D1 transition plus one
+correlated `attachment.expired` audit row before deleting CACHE bytes; failed deletes remain
+retryable and concurrent cleanup/consume races do not delete committed content.
+
+Codex independently verified migration reset/verification 22/22, CAP-051 focused Worker coverage
+9/9, full Worker coverage 866/866, unit 975/975, contracts 369/369, doctor 14/14, lint,
+typecheck, format, build, and `git diff --check`. The contract is archived at
+`work/archive/2026-08/CAP-051-attachment-download-cleanup/task.md`. Client CID/render, durable
+R2 retention, additional KV namespaces, preview verification, and deployment remain deferred.
+
 ## 2026-08-29 — CAP-050 attachment consume/send implemented locally
 
 CAP-050 completes the local compose half of the attachment lifecycle. The compose contract now
