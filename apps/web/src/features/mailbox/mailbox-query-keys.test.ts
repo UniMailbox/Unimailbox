@@ -17,6 +17,9 @@ describe('mailboxQueryKeys — CAP-058 per-user cache isolation', () => {
     expect(mailboxQueryKeys.thread('mailbox-1', 'message-1', userA)).not.toEqual(
       mailboxQueryKeys.thread('mailbox-1', 'message-1', userB),
     );
+    expect(mailboxQueryKeys.draft('mailbox-1', 'draft-1', userA)).not.toEqual(
+      mailboxQueryKeys.draft('mailbox-1', 'draft-1', userB),
+    );
   });
 
   it('keeps each folder view in its own user-scoped list cache', () => {
@@ -54,5 +57,12 @@ describe('mailboxQueryKeys — CAP-058 per-user cache isolation', () => {
     expect(
       queryClient.getQueryData(mailboxQueryKeys.messages('mailbox-1', 'user-b')),
     ).toBeUndefined();
+  });
+
+  it('keeps draft resources separate by user, mailbox, and draft ID', () => {
+    const userAKey = mailboxQueryKeys.draft('mailbox-1', 'draft-1', 'user-a');
+    expect(userAKey).not.toEqual(mailboxQueryKeys.draft('mailbox-1', 'draft-1', 'user-b'));
+    expect(userAKey).not.toEqual(mailboxQueryKeys.draft('mailbox-2', 'draft-1', 'user-a'));
+    expect(userAKey).not.toEqual(mailboxQueryKeys.draft('mailbox-1', 'draft-2', 'user-a'));
   });
 });

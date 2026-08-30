@@ -48,6 +48,8 @@ import {
   composeRequestSchema,
   composeResponseSchema,
   createDraftSchema,
+  draftResponseSchema,
+  draftDetailResponseSchema,
   updateDraftSchema,
   sendDraftSchema,
   messageStatusSchema,
@@ -2940,6 +2942,46 @@ describe('updateDraftSchema — PATCH /drafts/:id (CAP-047)', () => {
   it('rejects a non-string `to` entry on update', () => {
     const result = updateDraftSchema.safeParse({ to: [{ address: 'alice@example.com' }] });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('draftResponseSchema — GET /drafts/:id (CAP-062)', () => {
+  const draft = {
+    id: '00000000-0000-4000-8000-000000000001',
+    mailboxId: '00000000-0000-4000-8000-000000000002',
+    subject: 'Subject',
+    body_text: 'Body',
+    body_html: '<p>Body</p>',
+    to: ['to@example.com'],
+    cc: [],
+    bcc: [],
+    status: 'draft',
+    created_at: '2026-08-30T00:00:00.000Z',
+    updated_at: '2026-08-30T00:00:01.000Z',
+  } as const;
+
+  it('accepts the strict server draft shape and envelope (R-MESSAGE-010 R-API-002)', () => {
+    expect(draftResponseSchema.parse(draft)).toEqual(draft);
+    expect(draftDetailResponseSchema.parse({ data: draft })).toEqual({ data: draft });
+  });
+
+  it('rejects storage-only fields and non-draft statuses (R-DATA-004 R-SECRET-003)', () => {
+    expect(
+      draftResponseSchema.safeParse({ ...draft, objectKey: 'must-not-cross-boundary' }).success,
+    ).toBe(false);
+    expect(draftResponseSchema.safeParse({ ...draft, status: 'sent' }).success).toBe(false);
+    expect(
+      draftDetailResponseSchema.safeParse({ data: { ...draft, accessToken: 'secret' } }).success,
+    ).toBe(false);
+  });
+
+  it('rejects non-RFC-3339 or non-canonical timestamp strings (R-API-002)', () => {
+    expect(draftResponseSchema.safeParse({ ...draft, created_at: 'not-a-timestamp' }).success).toBe(
+      false,
+    );
+    expect(
+      draftResponseSchema.safeParse({ ...draft, updated_at: '2026-08-30T00:00:00Z' }).success,
+    ).toBe(false);
   });
 });
 

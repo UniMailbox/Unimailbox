@@ -13,11 +13,19 @@
 // router's cache-backed `beforeLoad` path will be caught here.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import { createRoute, type RootRoute, type AnyRoute, redirect } from '@tanstack/react-router';
+import {
+  createMemoryHistory,
+  createRoute,
+  type RootRoute,
+  type AnyRoute,
+  redirect,
+} from '@tanstack/react-router';
+import { QueryClient } from '@tanstack/react-query';
 import { jsonResponse, lastPathname, mountAppRouter, spyFetch } from '../test-utils';
+import { createAppRouter, validateComposeSearch, validateFolderSearch } from './router';
 import type { RouterContext } from './router';
-import { validateComposeSearch, validateFolderSearch } from './router';
 import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
+import { createApiClient } from '../infrastructure/api/client';
 
 afterEach(() => {
   cleanup();
@@ -103,6 +111,56 @@ describe('router (D-CAP-041-9 closure)', () => {
     expect(lastPathname(history)).toBe('/mailbox');
     // No additional fetch — the cache was already warm.
     expect(calls.length).toBe(0);
+  });
+});
+
+describe('router — CAP-062 production draft route', () => {
+  it('redirects the real draft recovery route to login without a session', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const history = createMemoryHistory({
+      initialEntries: [
+        '/mailbox/00000000-0000-4000-8000-000000000001/draft/00000000-0000-4000-8000-000000000002',
+      ],
+    });
+    const router = createAppRouter(apiClient, queryClient, history);
+    await router.load();
+    expect(history.location.pathname).toBe('/login');
+  });
+
+  it('matches the real draft recovery route for an authenticated session', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    queryClient.setQueryData(authQueryKeys.session(), {
+      userId: 'user-a',
+      email: 'a@example.test',
+      displayName: 'User A',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+    const history = createMemoryHistory({
+      initialEntries: [
+        '/mailbox/00000000-0000-4000-8000-000000000001/draft/00000000-0000-4000-8000-000000000002',
+      ],
+    });
+    const router = createAppRouter(apiClient, queryClient, history);
+    await router.load();
+    expect(history.location.pathname).toBe(
+      '/mailbox/00000000-0000-4000-8000-000000000001/draft/00000000-0000-4000-8000-000000000002',
+    );
   });
 });
 

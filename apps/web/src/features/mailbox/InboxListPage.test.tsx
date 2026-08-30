@@ -153,6 +153,11 @@ function mountInboxRouter(
     path: '/mailbox/$mailboxId/compose',
     component: () => <div data-testid="arrived-compose">compose</div>,
   });
+  const draftRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/mailbox/$mailboxId/draft/$draftId',
+    component: () => <div data-testid="arrived-draft">draft</div>,
+  });
   const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/login',
@@ -166,7 +171,13 @@ function mountInboxRouter(
     component: () => <div data-testid="arrived-admin">admin</div>,
   });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([inboxRoute, composeRoute, loginRoute, adminRoute]),
+    routeTree: rootRoute.addChildren([
+      inboxRoute,
+      composeRoute,
+      draftRoute,
+      loginRoute,
+      adminRoute,
+    ]),
     history: createMemoryHistory({ initialEntries: [`/mailbox/${MAILBOX_ID}`] }),
   });
   render(
@@ -340,6 +351,7 @@ describe('InboxListPage', () => {
     }
     expect(screen.getByTestId('folder-link-sent')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('folder-link-inbox')).not.toHaveAttribute('aria-current');
+    expect(screen.queryByTestId('inbox-draft-link')).not.toBeInTheDocument();
     expect(
       fetchCalls.some(
         (call) =>
@@ -347,6 +359,41 @@ describe('InboxListPage', () => {
           call.url === `/api/v1/mailboxes/${MAILBOX_ID}/messages?folder=sent`,
       ),
     ).toBe(true);
+  });
+
+  it('CAP-062 R-MESSAGE-010: links draft rows to the mailbox-scoped recovery view', async () => {
+    const draftId = '00000000-0000-4000-8000-000000000062';
+    renderInbox({
+      folder: 'drafts',
+      resolvers: [
+        () =>
+          jsonResponse({
+            data: {
+              items: [
+                {
+                  id: draftId,
+                  fromAddress: SESSION.email,
+                  fromName: SESSION.displayName,
+                  subject: 'Unsaved draft',
+                  isRead: 1,
+                  isStarred: 0,
+                  folder: 'drafts',
+                  createdAt: '2026-08-30T00:00:00Z',
+                  recipients: { to: [], cc: [] },
+                },
+              ],
+              nextCursor: null,
+            },
+          }),
+      ],
+      session: SESSION,
+    });
+
+    await waitFor(() => expect(screen.getByTestId('inbox-draft-link')).toBeInTheDocument());
+    expect(screen.getByTestId('inbox-draft-link')).toHaveAttribute(
+      'href',
+      `/mailbox/${MAILBOX_ID}/draft/${draftId}`,
+    );
   });
 
   it('renders the error state with retry on a fetch failure', async () => {

@@ -10,6 +10,29 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-062 Draft server view and recovery decision implemented locally
+
+CAP-062 connects the CAP-061 browser working-copy cache to the Web mailbox without making the
+browser copy authoritative. The production router now protects `/mailbox/:mailboxId/draft/:draftId`
+with the existing session guard; Drafts-folder rows link to it, and the page renders strict server
+draft fields read-only. A dirty local copy with the same server base requires an explicit recovery
+choice, while an opaque server-base mismatch offers an explicit load-server choice. The latter
+deletes only the current user/mailbox/draft cache key after activation; no editor, autosave, PATCH,
+send, discard, attachment, or preview behavior was added.
+
+The shared contracts package owns the strict GET envelope, including canonical millisecond RFC-3339
+timestamps and recipient arrays. The existing draft GET route accepts an optional validated
+`mailboxId` query so a shared draft association is resolved for the mailbox in the Web URL while
+legacy no-query callers retain their behavior. The Web fetcher encodes both IDs, verifies both
+response identities, and rejects malformed or storage-only fields before rendering.
+
+Local evidence: focused Web 53/53, contracts 383/383, Worker draft routes 43/43, full unit
+1030/1030, doctor 14/14, typecheck/lint/format/build and `git diff --check` clean. Independent
+architecture review returned ACCEPT. No secrets were inspected; no preview, deploy, push, or R2
+operation occurred.
+
+The contract is archived at `work/archive/2026-08/CAP-062-draft-recovery-view/task.md`.
+
 ## 2026-08-30 — CAP-061 Draft IndexedDB working-copy cache implemented locally
 
 CAP-061 adds the browser-local foundation for draft crash recovery without changing the server

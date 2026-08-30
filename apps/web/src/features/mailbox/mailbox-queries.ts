@@ -47,6 +47,7 @@ import {
 } from '@tanstack/react-query';
 import {
   composeResponseSchema,
+  draftDetailResponseSchema,
   mailboxListResponseSchema,
   messageDetailSchema,
   messageListResponseSchema,
@@ -57,6 +58,7 @@ import {
   type MessageFolder,
   type MessageListResponse,
   type MessageThreadResponse,
+  type DraftResponse,
 } from '@unimailbox/contracts';
 import type { ApiClient } from '../../infrastructure/api/client';
 import { ApiError } from '../../infrastructure/api/errors';
@@ -102,6 +104,8 @@ export const mailboxQueryKeys = {
     [...mailboxQueryKeys.all(userId), 'messages', mailboxId, 'detail', messageId] as const,
   thread: (mailboxId: string, messageId: string, userId?: string | null) =>
     [...mailboxQueryKeys.all(userId), 'messages', mailboxId, 'thread', messageId] as const,
+  draft: (mailboxId: string, draftId: string, userId?: string | null) =>
+    [...mailboxQueryKeys.all(userId), 'drafts', mailboxId, draftId] as const,
 };
 
 /**
@@ -228,6 +232,37 @@ export function messageDetailQuery(
   return useQuery({
     queryKey: mailboxQueryKeys.message(mailboxId, messageId, userId),
     queryFn: () => fetchMessageDetail(apiClient, mailboxId, messageId),
+    enabled: userId !== null,
+    staleTime: 0,
+  });
+}
+
+/**
+ * Fetcher for the server-authoritative draft read route. The mailbox remains
+ * part of the caller's cache namespace even though the API resolves it from
+ * the draft's server-side associations.
+ */
+export async function fetchDraft(
+  apiClient: ApiClient,
+  mailboxId: string,
+  draftId: string,
+): Promise<DraftResponse> {
+  const response = await apiClient.fetch<unknown>(
+    `/api/v1/drafts/${encodeURIComponent(draftId)}?mailboxId=${encodeURIComponent(mailboxId)}`,
+  );
+  return draftDetailResponseSchema.parse(response).data;
+}
+
+export function draftQuery(
+  mailboxId: string,
+  draftId: string,
+): UseQueryResult<DraftResponse, ApiError> {
+  const apiClient = useApiClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
+  return useQuery({
+    queryKey: mailboxQueryKeys.draft(mailboxId, draftId, userId),
+    queryFn: () => fetchDraft(apiClient, mailboxId, draftId),
     enabled: userId !== null,
     staleTime: 0,
   });

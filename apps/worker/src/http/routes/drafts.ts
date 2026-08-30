@@ -1,7 +1,10 @@
 // http/routes/drafts — CAP-047 server-side draft vertical slice.
 //
 // POST  /api/v1/mailboxes/:mailboxId/drafts — create a draft message.
-// GET   /api/v1/drafts/:draftId             — read a draft.
+// GET   /api/v1/drafts/:draftId             — read a draft. An optional
+//                                             `mailboxId` query binds the
+//                                             response to the mailbox-scoped
+//                                             Web route.
 // PATCH /api/v1/drafts/:draftId             — update a draft (optimistic
 //                                             concurrency via `If-Match`).
 //
@@ -87,6 +90,7 @@ import {
   createDraftSchema,
   sendDraftSchema,
   updateDraftSchema,
+  uuidSchema,
   type AuditAction,
 } from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
@@ -820,6 +824,18 @@ export function draftRoutes(): Hono<AppEnv> {
     }
 
     const draftId = c.req.param('draftId');
+    // CAP-062: the Web route is mailbox-scoped. Keep the legacy no-query
+    // behavior for existing API callers, but when a mailbox is supplied,
+    // validate and bind it before resolving the association. Invalid or
+    // absent associations collapse to the same 404 envelope.
+    const requestedMailboxId = c.req.query('mailboxId');
+    if (requestedMailboxId !== undefined && !uuidSchema.safeParse(requestedMailboxId).success) {
+      throw new DomainError({
+        code: 'MESSAGE_NOT_FOUND',
+        message: 'Message not found',
+        httpStatus: 404,
+      });
+    }
 
     // R-AUTHZ-004: resolve the draft's mailbox associations, never a
     // client-supplied mailbox. Filtering on `m.status='draft'` makes
@@ -842,9 +858,10 @@ export function draftRoutes(): Hono<AppEnv> {
            JOIN mailbox_messages mm ON mm.message_id = m.id
           WHERE m.id = ?
             AND m.status = 'draft'
+            AND (? IS NULL OR mm.mailbox_id = ?)
        ORDER BY mm.created_at ASC, mm.id ASC`,
     )
-      .bind(draftId)
+      .bind(draftId, requestedMailboxId ?? null, requestedMailboxId ?? null)
       .all<{
         mailbox_id: string;
         mailbox_message_id: string;

@@ -20,3 +20,5 @@ export type { InboxListPageProps } from './InboxListPage';
 // ./reply-context, so the barrel exports were dead surface.)
 export { ComposeEmail } from './ComposeEmail';
 export type { ComposeEmailProps } from './ComposeEmail';
+export { DraftRecoveryPage } from './DraftRecoveryPage';
+export type { DraftRecoveryPageProps } from './DraftRecoveryPage';

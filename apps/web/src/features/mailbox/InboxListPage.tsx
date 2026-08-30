@@ -289,7 +289,19 @@ function InboxListRow({ mailboxId, folder, message }: InboxListRowProps): ReactE
       data-testid="inbox-list-row"
       data-message-id={message.id}
     >
-      <div className="inbox-list-row-subject">{message.subject}</div>
+      <div className="inbox-list-row-subject">
+        {folder === 'drafts' ? (
+          <Link
+            to="/mailbox/$mailboxId/draft/$draftId"
+            params={{ mailboxId, draftId: message.id }}
+            data-testid="inbox-draft-link"
+          >
+            {message.subject}
+          </Link>
+        ) : (
+          message.subject
+        )}
+      </div>
       <div className="inbox-list-row-meta">
         <span className="inbox-list-row-from">
           {message.fromName !== ''

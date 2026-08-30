@@ -1239,6 +1239,36 @@ export const createDraftSchema = z
 
 export type CreateDraftRequest = z.infer<typeof createDraftSchema>;
 
+const draftTimestampSchema = z.string().datetime({ precision: 3, offset: false });
+
+/**
+ * Server-authoritative draft returned by `GET /api/v1/drafts/:id`.
+ * The strict shape prevents storage-only fields from crossing into the Web
+ * draft view.
+ */
+export const draftResponseSchema = z
+  .object({
+    id: uuidSchema,
+    mailboxId: uuidSchema,
+    subject: z.string().max(998),
+    body_text: z.string().max(65_536),
+    body_html: z.string().max(131_072),
+    to: z.array(emailAddressSchema).max(50),
+    cc: z.array(emailAddressSchema).max(50),
+    bcc: z.array(emailAddressSchema).max(50),
+    status: z.literal('draft'),
+    created_at: draftTimestampSchema,
+    updated_at: draftTimestampSchema,
+  })
+  .strict();
+
+export type DraftResponse = z.infer<typeof draftResponseSchema>;
+
+/** Full `{ data: ... }` envelope for the draft read route. */
+export const draftDetailResponseSchema = z.object({ data: draftResponseSchema }).strict();
+
+export type DraftDetailResponse = z.infer<typeof draftDetailResponseSchema>;
+
 /**
  * Request body for `PATCH /api/v1/drafts/:id`. All fields are optional —
  * the client patches only the field(s) that changed. The schema is

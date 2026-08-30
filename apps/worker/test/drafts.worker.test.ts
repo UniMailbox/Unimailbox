@@ -996,6 +996,38 @@ describe('GET /api/v1/drafts/:draftId — CAP-047 server draft-read slice', () =
     expect(outboundAfter?.n).toBe(outboundBefore?.n);
   });
 
+  it('binds a mailbox-scoped read when a draft has multiple mailbox associations (CAP-062)', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-multi-mailbox@example.com');
+    const ownerToken = await createSession(ownerId);
+    const domainId = await createDomain('multi-mailbox.example.com');
+    const firstMailboxId = await createMailbox(domainId, ownerId, 'first');
+    const secondMailboxId = await createMailbox(domainId, ownerId, 'second');
+    const messageId = await createDraftViaPost(
+      firstMailboxId,
+      ownerToken,
+      { subject: 'Shared draft', body_text: 'body', to: [] },
+      'drafts-read-multi-mailbox-001',
+    );
+
+    // The current create route writes one association. Add a second one to
+    // model a shared message without changing the production writer.
+    await env.DB.prepare(
+      `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
+       VALUES (?, ?, ?, 0, 0, 'drafts', ?)`,
+    )
+      .bind(crypto.randomUUID(), secondMailboxId, messageId, new Date().toISOString())
+      .run();
+
+    const response = await SELF.fetch(
+      `${DRAFT_PATH(messageId)}?mailboxId=${encodeURIComponent(secondMailboxId)}`,
+      { method: 'GET', headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { id: string; mailboxId: string } };
+    expect(body.data.id).toBe(messageId);
+    expect(body.data.mailboxId).toBe(secondMailboxId);
+  });
+
   // -------- empty recipient arrays --------------------------------------
 
   it('returns empty `to` / `cc` / `bcc` arrays (serialised as []) when the draft has no recipients', async () => {

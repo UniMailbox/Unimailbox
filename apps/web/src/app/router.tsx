@@ -46,6 +46,7 @@ import {
   redirect,
   useParams,
 } from '@tanstack/react-router';
+import type { RouterHistory } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 import {
@@ -79,6 +80,7 @@ import { MailboxListPage } from '../features/mailbox/MailboxListPage';
 import { InboxListPage } from '../features/mailbox/InboxListPage';
 import { MessageDetailPage } from '../features/mailbox/MessageDetailPage';
 import { ComposeEmail } from '../features/mailbox/ComposeEmail';
+import { DraftRecoveryPage } from '../features/mailbox/DraftRecoveryPage';
 import { AdminLandingPage } from '../features/admin/AdminLandingPage';
 import { AuditEventsPage } from '../features/admin/AuditEventsPage';
 import { UsersPage } from '../features/admin/UsersPage';
@@ -309,6 +311,26 @@ const composeRoute = createRoute({
     // validateSearch output, not from a globally registered router.
     const search = composeRoute.useSearch();
     return <ComposeEmail mailboxId={params.mailboxId} replyToMessageId={search.replyTo} />;
+  },
+});
+
+// CAP-062 — read-only server draft view with an explicit CAP-061 recovery
+// decision. Editing and autosave are intentionally separate capabilities.
+const draftRecoveryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mailbox/$mailboxId/draft/$draftId',
+  beforeLoad: async ({ context }) => {
+    const descriptor = await context.queryClient.ensureQueryData({
+      queryKey: authQueryKeys.session(),
+      queryFn: () => fetchAuthSession(context.apiClient),
+    });
+    if (descriptor === null) {
+      throw redirect({ to: '/login' });
+    }
+  },
+  component: function DraftRecoveryRoute(): ReactElement {
+    const params = useParams({ strict: false });
+    return <DraftRecoveryPage mailboxId={params.mailboxId} draftId={params.draftId} />;
   },
 });
 
@@ -547,6 +569,7 @@ const routeTree = rootRoute.addChildren([
   inboxRoute,
   messageDetailRoute,
   composeRoute,
+  draftRecoveryRoute,
   adminLandingRoute,
   adminAuditEventsRoute,
   adminUsersRoute,
@@ -562,10 +585,15 @@ export type AppRouter = typeof routeTree;
 // AND the queryClient as constructor arguments and exposes both via
 // `context`. `beforeLoad` reads them via `({ context })`; step / page
 // components still use `useApiClient()` and `useQueryClient()`.
-export function createAppRouter(apiClient: ApiClient, queryClient: QueryClient) {
+export function createAppRouter(
+  apiClient: ApiClient,
+  queryClient: QueryClient,
+  history?: RouterHistory,
+) {
   return createRouter({
     routeTree,
     defaultPreload: false,
     context: { apiClient, queryClient },
+    ...(history === undefined ? {} : { history }),
   });
 }
