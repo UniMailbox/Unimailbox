@@ -4,6 +4,10 @@
 // the key value is never echoed back into the success view. AC #15:
 // 4xx returns ErrorPanel with machine code. HIGH 2 (CAP-041 fix):
 // 401 surfaces the re-claim button.
+//
+// CAP-063: the skip affordance's wire behavior lives in
+// `use-skip-remaining-setup.test.ts`. The step-level test only asserts
+// that the button is rendered (enabled on mount).
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -66,5 +70,15 @@ describe('BrevoStep', () => {
     await renderStep({ fetchImpl, step: <BrevoStep /> });
     await user.click(screen.getByTestId('brevo-submit'));
     expect(calls.length).toBe(0);
+  });
+
+  // CAP-063 AC-3: skip button is rendered + enabled on mount. Wire
+  // behavior is owned by `use-skip-remaining-setup.test.ts`.
+  it('renders the skip button enabled on mount (AC-3)', async () => {
+    const { fetchImpl } = spyFetch([]);
+    await renderStep({ fetchImpl, step: <BrevoStep /> });
+    const skip = await screen.findByTestId('setup-skip-remaining');
+    expect(skip).toBeEnabled();
+    expect(skip.textContent).toBe('Skip remaining setup');
   });
 });

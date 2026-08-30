@@ -4,6 +4,11 @@
 // is in form state only, never echoed into a success view, never
 // persisted. The submit posts the API key; the response never contains
 // the key.
+//
+// CAP-063: skip button rendered via <SkipRemainingSetupButton /> below
+// the form. R-WORKFLOW-002 reuses the existing /complete endpoint.
+// Critical: the skip body must be the empty object — R-SECRET-003
+// forbids leaking the API key into any other request.
 import { useNavigate } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -18,13 +23,18 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import { clearSetupSession } from '../setup-session-store';
+import {
+  reclaimInstallationToken,
+  useSkipRemainingSetup,
+} from '../use-skip-remaining-setup';
+import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function BrevoStep(): ReactElement {
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const skipRemaining = useSkipRemainingSetup();
   const [submitError, setSubmitError] = useState<{
     readonly message: string;
     readonly code: string;
@@ -42,8 +52,7 @@ export function BrevoStep(): ReactElement {
 
   // HIGH 2 (CAP-041 fix): 401 → re-claim the installation token.
   const handleReclaim = (): void => {
-    clearSetupSession();
-    void navigate({ to: '/setup/claim' });
+    reclaimInstallationToken(navigate);
   };
 
   const onSubmit = handleSubmit(async (values) => {
@@ -122,6 +131,22 @@ export function BrevoStep(): ReactElement {
           </Button>
         </div>
       </form>
+      {skipRemaining.error !== null ? (
+        <ErrorPanel
+          message={skipRemaining.error.message}
+          code={skipRemaining.error.code}
+          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          onRetry={
+            skipRemaining.isUnauthorized
+              ? handleReclaim
+              : () => void skipRemaining.skip()
+          }
+        />
+      ) : null}
+      <SkipRemainingSetupButton
+        onSkip={() => void skipRemaining.skip()}
+        submitting={skipRemaining.submitting}
+      />
     </Card>
   );
 }

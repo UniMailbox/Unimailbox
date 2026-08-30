@@ -3,6 +3,11 @@
 // CAP-041 / step 8. Submits the outbound smoke test. On success the
 // server advances the step to 'complete' (R-WORKFLOW-003); this step
 // simply waits and advances to /setup/complete.
+//
+// CAP-063: skip button rendered via <SkipRemainingSetupButton /> below
+// the wizard actions. R-WORKFLOW-002 reuses the existing /complete
+// endpoint. Critically, the skip fires /complete directly — it does
+// NOT fire /outbound-smoke-test first.
 import { useNavigate } from '@tanstack/react-router';
 import { useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -14,13 +19,18 @@ import { Alert } from '../../../components/ui/Alert';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import { clearSetupSession } from '../setup-session-store';
+import {
+  reclaimInstallationToken,
+  useSkipRemainingSetup,
+} from '../use-skip-remaining-setup';
+import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function OutboundSmokeStep(): ReactElement {
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const skipRemaining = useSkipRemainingSetup();
   const [submitError, setSubmitError] = useState<{
     readonly message: string;
     readonly code: string;
@@ -31,8 +41,7 @@ export function OutboundSmokeStep(): ReactElement {
 
   // HIGH 2 (CAP-041 fix): 401 → re-claim the installation token.
   const handleReclaim = (): void => {
-    clearSetupSession();
-    void navigate({ to: '/setup/claim' });
+    reclaimInstallationToken(navigate);
   };
 
   const onSubmit = async (): Promise<void> => {
@@ -112,6 +121,22 @@ export function OutboundSmokeStep(): ReactElement {
           {submitting ? <Spinner /> : 'Send outbound smoke test'}
         </Button>
       </div>
+      {skipRemaining.error !== null ? (
+        <ErrorPanel
+          message={skipRemaining.error.message}
+          code={skipRemaining.error.code}
+          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          onRetry={
+            skipRemaining.isUnauthorized
+              ? handleReclaim
+              : () => void skipRemaining.skip()
+          }
+        />
+      ) : null}
+      <SkipRemainingSetupButton
+        onSkip={() => void skipRemaining.skip()}
+        submitting={skipRemaining.submitting}
+      />
     </Card>
   );
 }

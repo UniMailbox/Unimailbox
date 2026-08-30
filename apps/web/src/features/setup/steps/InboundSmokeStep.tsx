@@ -11,6 +11,11 @@
 //
 // HIGH 2 (CAP-041 fix): if either start or check returns 401 the
 // session token is gone — surface a re-claim affordance.
+//
+// CAP-063: skip button rendered via <SkipRemainingSetupButton /> below
+// the wizard actions. The hook stops the 5s check poll before leaving
+// (an in-flight refetch after navigation would surface a stale
+// ErrorPanel during the route transition).
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactElement } from 'react';
@@ -22,7 +27,11 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import { clearSetupSession } from '../setup-session-store';
+import {
+  reclaimInstallationToken,
+  useSkipRemainingSetup,
+} from '../use-skip-remaining-setup';
+import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 interface StartResult {
@@ -38,6 +47,7 @@ export function InboundSmokeStep(): ReactElement {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [pollingEnabled, setPollingEnabled] = useState(false);
+  const skipRemaining = useSkipRemainingSetup();
 
   const startQuery = useQuery({
     queryKey: [...setupQueryKeys.all, 'inbound-smoke-start'] as const,
@@ -84,8 +94,7 @@ export function InboundSmokeStep(): ReactElement {
 
   // HIGH 2 (CAP-041 fix): 401 → re-claim the installation token.
   const handleReclaim = (): void => {
-    clearSetupSession();
-    void navigate({ to: '/setup/claim' });
+    reclaimInstallationToken(navigate);
   };
 
   const renderError = (error: unknown, retry: () => void): ReactElement => {
@@ -161,6 +170,28 @@ export function InboundSmokeStep(): ReactElement {
           {checkQuery.isFetching ? <Spinner /> : 'Check now'}
         </Button>
       </div>
+      {skipRemaining.error !== null ? (
+        <ErrorPanel
+          message={skipRemaining.error.message}
+          code={skipRemaining.error.code}
+          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          onRetry={
+            skipRemaining.isUnauthorized
+              ? handleReclaim
+              : () => void skipRemaining.skip()
+          }
+        />
+      ) : null}
+      <SkipRemainingSetupButton
+        onSkip={() => {
+          // Stop the 5s check poll before leaving: the smoke test is moot
+          // once the installation is complete, and an in-flight refetch
+          // would surface a stale ErrorPanel during the navigation.
+          setPollingEnabled(false);
+          void skipRemaining.skip();
+        }}
+        submitting={skipRemaining.submitting}
+      />
     </Card>
   );
 }

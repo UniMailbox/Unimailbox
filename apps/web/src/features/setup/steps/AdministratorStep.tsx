@@ -4,12 +4,19 @@
 // user is created with status='active' and the `administrator` role.
 // The form uses the contracts zod schema directly via zodResolver — the
 // UI does not invent a second contract model.
+//
+// CAP-063 / D-CAP-063-2: the "Skip remaining setup" button is disabled
+// here until the administrator form submits successfully. Completing the
+// installation with no administrator user (R-AUTH-005) leaves nobody able
+// to sign in, and no UI page can recover from that.
 import { useNavigate } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState, type ReactElement } from 'react';
 import {
+  installationStepSchema,
   setupAdministratorRequestSchema,
+  type InstallationStateInfo,
   type SetupAdministratorRequest,
 } from '@unimailbox/contracts';
 import { Button } from '../../../components/ui/Button';
@@ -20,19 +27,52 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import { clearSetupSession } from '../setup-session-store';
-import { useQueryClient } from '@tanstack/react-query';
+import {
+  reclaimInstallationToken,
+  useSkipRemainingSetup,
+} from '../use-skip-remaining-setup';
+import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SetupGuidance } from '../setup-guidance';
+
+// CAP-063 / D-CAP-063-2: the steps whose presence as `currentStep` proves
+// the administrator was already created. Derived from the contracts enum
+// rather than hand-listed so a new wizard step cannot silently fall out of
+// the set. `administrator` itself is excluded — the server only advances
+// past it once the user row is committed.
+const STEPS_IMPLYING_ADMINISTRATOR_EXISTS: ReadonlySet<string> = new Set(
+  installationStepSchema.options.slice(
+    installationStepSchema.options.indexOf('administrator') + 1,
+  ),
+);
 
 export function AdministratorStep(): ReactElement {
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const skipRemaining = useSkipRemainingSetup();
   const [submitError, setSubmitError] = useState<{
     readonly message: string;
     readonly code: string;
     readonly status: number | null;
   } | null>(null);
+  // CAP-063 / D-CAP-063-2: gates the skip button. Local state alone is
+  // not enough — a successful POST navigates to /setup/domain, unmounting
+  // this component, so an operator who returns here would find the button
+  // disabled again despite the admin existing. The router already primed
+  // `setupQueryKeys.status()` in the cache (see `requireSetupStep`), so
+  // reading it here adds no request; `enabled: false` keeps this component
+  // from issuing its own fetch.
+  const [adminCreated, setAdminCreated] = useState(false);
+  const statusQuery = useQuery<InstallationStateInfo>({
+    queryKey: setupQueryKeys.status(),
+    enabled: false,
+  });
+  const serverSaysAdminExists =
+    statusQuery.data !== undefined &&
+    (statusQuery.data.status === 'complete' ||
+      STEPS_IMPLYING_ADMINISTRATOR_EXISTS.has(statusQuery.data.currentStep));
+  const canSkip = adminCreated || serverSaysAdminExists;
 
   const {
     register,
@@ -45,8 +85,7 @@ export function AdministratorStep(): ReactElement {
 
   // HIGH 2 (CAP-041 fix): 401 → re-claim the installation token.
   const handleReclaim = (): void => {
-    clearSetupSession();
-    void navigate({ to: '/setup/claim' });
+    reclaimInstallationToken(navigate);
   };
 
   const onSubmit = handleSubmit(async (values) => {
@@ -56,6 +95,7 @@ export function AdministratorStep(): ReactElement {
         method: 'POST',
         body: values,
       });
+      setAdminCreated(true);
       await queryClient.invalidateQueries({ queryKey: setupQueryKeys.status() });
       await navigate({ to: '/setup/domain' });
     } catch (error) {
@@ -142,6 +182,23 @@ export function AdministratorStep(): ReactElement {
           </Button>
         </div>
       </form>
+      {skipRemaining.error !== null ? (
+        <ErrorPanel
+          message={skipRemaining.error.message}
+          code={skipRemaining.error.code}
+          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          onRetry={
+            skipRemaining.isUnauthorized
+              ? handleReclaim
+              : () => void skipRemaining.skip()
+          }
+        />
+      ) : null}
+      <SkipRemainingSetupButton
+        onSkip={() => void skipRemaining.skip()}
+        submitting={skipRemaining.submitting}
+        disabled={!canSkip}
+      />
     </Card>
   );
 }

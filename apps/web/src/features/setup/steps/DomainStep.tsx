@@ -6,6 +6,9 @@
 //
 // H2 (CAP-041 fix): the unused `normalized` state and its setter are
 // removed — the parsed form value is the single source of truth.
+//
+// CAP-063: skip button rendered via <SkipRemainingSetupButton /> below
+// the form. R-WORKFLOW-002 reuses the existing /complete endpoint.
 import { useNavigate } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -24,13 +27,18 @@ import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { useQueryClient } from '@tanstack/react-query';
 import { setupQueryKeys } from '../setup-queries';
-import { clearSetupSession } from '../setup-session-store';
+import {
+  reclaimInstallationToken,
+  useSkipRemainingSetup,
+} from '../use-skip-remaining-setup';
+import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function DomainStep(): ReactElement {
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const skipRemaining = useSkipRemainingSetup();
   const [submitError, setSubmitError] = useState<{
     readonly message: string;
     readonly code: string;
@@ -53,8 +61,7 @@ export function DomainStep(): ReactElement {
   // (e.g. server rotates the session), the next mutation returns 401.
   // Surface that as a clear action: re-claim the installation token.
   const handleReclaim = (): void => {
-    clearSetupSession();
-    void navigate({ to: '/setup/claim' });
+    reclaimInstallationToken(navigate);
   };
 
   const onSubmit = handleSubmit(async (values) => {
@@ -147,6 +154,22 @@ export function DomainStep(): ReactElement {
           </Button>
         </div>
       </form>
+      {skipRemaining.error !== null ? (
+        <ErrorPanel
+          message={skipRemaining.error.message}
+          code={skipRemaining.error.code}
+          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          onRetry={
+            skipRemaining.isUnauthorized
+              ? handleReclaim
+              : () => void skipRemaining.skip()
+          }
+        />
+      ) : null}
+      <SkipRemainingSetupButton
+        onSkip={() => void skipRemaining.skip()}
+        submitting={skipRemaining.submitting}
+      />
     </Card>
   );
 }

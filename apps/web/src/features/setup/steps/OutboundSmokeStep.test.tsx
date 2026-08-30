@@ -3,7 +3,11 @@
 // CAP-041 AC #12: POST /api/v1/setup/outbound-smoke-test, then advances
 // to /setup/complete. AC #15: 4xx returns ErrorPanel with machine code.
 // HIGH 2 (CAP-041 fix): 401 surfaces the re-claim button.
-import { afterEach, describe, expect, it, vi } from 'vitest';
+//
+// CAP-063: the skip affordance's wire behavior lives in
+// `use-skip-remaining-setup.test.ts`. The step-level test only asserts
+// that the button is rendered (enabled on mount).
+import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OutboundSmokeStep } from './OutboundSmokeStep';
@@ -17,7 +21,6 @@ import {
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
 });
 
 describe('OutboundSmokeStep', () => {
@@ -58,5 +61,15 @@ describe('OutboundSmokeStep', () => {
     expect(
       screen.getByRole('button', { name: /re-claim installation token/i }),
     ).toBeInTheDocument();
+  });
+
+  // CAP-063 AC-3: skip button is rendered + enabled on mount. Wire
+  // behavior is owned by `use-skip-remaining-setup.test.ts`.
+  it('renders the skip button enabled on mount (AC-3)', async () => {
+    const { fetchImpl } = spyFetch([]);
+    await renderStep({ fetchImpl, step: <OutboundSmokeStep /> });
+    const skip = await screen.findByTestId('setup-skip-remaining');
+    expect(skip).toBeEnabled();
+    expect(skip.textContent).toBe('Skip remaining setup');
   });
 });

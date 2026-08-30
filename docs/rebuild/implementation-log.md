@@ -10,6 +10,22 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-31 — CAP-063 lite: setup wizard `Skip remaining setup` affordance
+
+Per user direction ("在 Administrator 之后的 setup tabs 都可以跳过，在管理页面中配置" — lite path: single Skip button at Administrator; admin URLs documented in runbook; no new admin pages), the setup wizard gets a single secondary `Skip remaining setup` button on each of the six post-claim step components (`AdministratorStep`, `DomainStep`, `CloudflareVerifyStep`, `InboundSmokeStep`, `BrevoStep`, `OutboundSmokeStep`). The button is disabled at `AdministratorStep` until the admin form submits successfully (OR the server-reported `currentStep` is past `administrator` — local component state alone is insufficient because re-mount resets it, so the implementer added a `useQuery(setupQueryKeys.status(), { enabled: false })` to read the cached state without issuing its own fetch); always enabled on the other five. Click handler POSTs the existing `POST /api/v1/setup/complete` (no new server shape), invalidates `setupQueryKeys.status()`, navigates to `/`. Errors surface through `ErrorPanel`; on 401, the retry label is "Re-claim installation token" and the hook exposes `isUnauthorized` so the caller wires the same reclaim flow `CompleteStep` uses. Idempotency-Key is added by `apps/web/src/infrastructure/api/client.ts:73-80` per ADR-004 — step components never set the header themselves.
+
+**Refactor (implementer-flagged Rule-of-Three violation, Option B).** The click handler was byte-identical across all six steps — six concrete call sites, Rule of Three satisfied at three. Extracted `apps/web/src/features/setup/use-skip-remaining-setup.ts` (106 lines, hook owns the wire call shape + error state + re-entrancy guard + `isUnauthorized` flag) and `apps/web/src/features/setup/SkipRemainingSetupButton.tsx` (51 lines, owns the visual contract). Each step component becomes a ~5-line integration; ~195 lines of duplication removed net. The hook test (`use-skip-remaining-setup.test.tsx`, 7 tests) is the single source of truth for the wire behavior; per-step tests assert only the button render + gating. The button test (`SkipRemainingSetupButton.test.tsx`, 6 tests) pins the visual contract.
+
+Runbook at `docs/operations/post-setup-admin-urls.md` documents the six existing admin URLs the operator can bookmark (`/mailbox`, `/admin`, `/admin/connections`, `/admin/users`, `/admin/audit-events`, `/admin/webhook-events`), each with purpose + required permission + what you can do there today; then names the four known gaps (Domain / Role / Signature / Settings admin pages — none exist yet) with their `D-CAP-063-B..E` ledger IDs. Includes a pre-skip warning explaining the "complete with no admin" failure mode (R-AUTH-005), the symptom (nobody can sign in, wizard is locked, only D1 access recovers), and the gating that prevents it.
+
+**Gates** (orchestrator-run, post-implementer): doctor 14/14, lint clean, typecheck clean, unit 1061→1082 (21 new tests: 7 hook + 6 button + 8 per-step), web 337→358, worker 862/895 (33 pre-existing Brevo-mock failures isolated to `outbound-smoke-test.worker.test.ts`; unrelated, no regression), web build EXIT=0, worker `--dry-run` EXIT=0.
+
+**Files**: `apps/web/src/features/setup/use-skip-remaining-setup.ts` (NEW), `apps/web/src/features/setup/use-skip-remaining-setup.test.tsx` (NEW), `apps/web/src/features/setup/SkipRemainingSetupButton.tsx` (NEW), `apps/web/src/features/setup/SkipRemainingSetupButton.test.tsx` (NEW), `apps/web/src/features/setup/steps/{Administrator,Domain,CloudflareVerify,InboundSmoke,Brevo,OutboundSmoke}Step.tsx` + matching `*.test.tsx` (MODIFIED — ~5 lines added each, no other changes), `docs/operations/post-setup-admin-urls.md` (NEW), `docs/rebuild/capability-ledger.md` (CAP-063 row + D-CAP-063-A..E rows), `docs/rebuild/implementation-log.md` (this entry).
+
+**Defers** (recorded in §Deferred of the capability ledger): `D-CAP-063-A` (wizard re-entry after `status === 'complete'`, separate capability), `D-CAP-063-B..E` (Domain / Role / Signature / Settings admin pages — each a future capability that the runbook explicitly calls out as a known gap). **Status: Implemented locally** — code complete, implementer self-checked every gate, awaits peer review (architecture + frontend) before archive.
+
+---
+
 ## 2026-08-30 — CAP-041 follow-ups H1 + H3: sibling beforeLoad cache hydration + INSTALLATION_TOKEN drift root-cause
 
 Two deferred review findings from the CAP-041 preflight hotfix closed in a single chore commit:

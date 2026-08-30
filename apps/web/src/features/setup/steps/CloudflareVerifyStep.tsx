@@ -13,6 +13,11 @@
 //
 // HIGH 2 (CAP-041 fix): if /cloudflare/verify returns 401 the session
 // token is gone — surface a re-claim affordance.
+//
+// CAP-063: skip button rendered via <SkipRemainingSetupButton /> below
+// the wizard actions. R-WORKFLOW-002 reuses the existing /complete
+// endpoint. The popup-blocked state gates ONLY the confirm button, not
+// skip — operators can skip past a blocked popup.
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -24,13 +29,18 @@ import { Alert } from '../../../components/ui/Alert';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import { clearSetupSession } from '../setup-session-store';
+import {
+  reclaimInstallationToken,
+  useSkipRemainingSetup,
+} from '../use-skip-remaining-setup';
+import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function CloudflareVerifyStep(): ReactElement {
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const skipRemaining = useSkipRemainingSetup();
   const [linkError, setLinkError] = useState<{
     readonly message: string;
     readonly code: string;
@@ -99,8 +109,7 @@ export function CloudflareVerifyStep(): ReactElement {
 
   // HIGH 2 (CAP-041 fix): 401 → re-claim the installation token.
   const handleReclaim = (): void => {
-    clearSetupSession();
-    void navigate({ to: '/setup/claim' });
+    reclaimInstallationToken(navigate);
   };
 
   const onConfirm = async (): Promise<void> => {
@@ -211,6 +220,22 @@ export function CloudflareVerifyStep(): ReactElement {
           {verifying ? <Spinner /> : 'I have configured email routing'}
         </Button>
       </div>
+      {skipRemaining.error !== null ? (
+        <ErrorPanel
+          message={skipRemaining.error.message}
+          code={skipRemaining.error.code}
+          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          onRetry={
+            skipRemaining.isUnauthorized
+              ? handleReclaim
+              : () => void skipRemaining.skip()
+          }
+        />
+      ) : null}
+      <SkipRemainingSetupButton
+        onSkip={() => void skipRemaining.skip()}
+        submitting={skipRemaining.submitting}
+      />
     </Card>
   );
 }

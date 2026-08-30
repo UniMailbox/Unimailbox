@@ -4,6 +4,12 @@
 // confirm, then POSTs /cloudflare/verify and advances to /setup/inbound-smoke.
 // MEDIUM (CAP-041 fix): when window.open returns null the confirm button
 // stays disabled. AC #19: per-step happy + error path.
+//
+// CAP-063: the skip affordance's wire behavior lives in
+// `use-skip-remaining-setup.test.ts`. The step-level test only asserts
+// that the button is rendered enabled even when the Cloudflare popup
+// is blocked (an operator who cannot open the dashboard is exactly
+// the one who needs to skip).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -97,5 +103,21 @@ describe('CloudflareVerifyStep', () => {
     expect(
       screen.getByRole('button', { name: /re-claim installation token/i }),
     ).toBeInTheDocument();
+  });
+
+  // CAP-063 AC-3. The skip button stays enabled even when the popup
+  // is blocked — gating skip on the dashboard link would be the wrong
+  // direction (a blocked popup is exactly the case where the operator
+  // wants to skip).
+  it('renders the skip button enabled on mount, even when the popup is blocked (AC-3)', async () => {
+    const { fetchImpl } = spyFetch([
+      () => jsonResponse({ data: { url: 'https://dash.cloudflare.com/x' } }),
+    ]);
+    await renderStep({ fetchImpl, step: <CloudflareVerifyStep /> });
+    const skip = await screen.findByTestId('setup-skip-remaining');
+    expect(skip).toBeEnabled();
+    expect(skip.textContent).toBe('Skip remaining setup');
+    // window.open is stubbed to null in beforeEach → popup blocked.
+    expect(screen.getByTestId('cloudflare-confirm')).toBeDisabled();
   });
 });
