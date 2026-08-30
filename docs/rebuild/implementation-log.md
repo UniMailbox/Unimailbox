@@ -10,6 +10,22 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-059 folder-filtered message list backend implemented locally
+
+CAP-059 adds the server half of the Phase 3 folder views. The mailbox message-list endpoint now
+accepts the closed `inbox`, `sent`, `drafts`, `archive`, and `trash` vocabulary, defaults to
+`inbox`, and filters `mailbox_messages.folder` after the existing caller-scoped soft-delete and
+mailbox authorization predicates. Message list/detail/thread projections share the `MessageFolder`
+contract type. Signed messages cursors carry `scope=folder:<name>`; scope-less and cross-folder
+tokens return `INVALID_CURSOR`, while same-folder pagination remains deterministic.
+
+Focused evidence: contracts 380/380 and real-D1 Messages Worker 71/71. Full local evidence after
+the slice: unit 1002/1002, Worker 888/888, doctor 14/14, lint/typecheck/format/build and
+`git diff --check` clean. No migration or binding changed; the Web folder navigation/views,
+draft IndexedDB recovery, sharing UI, R2, preview, and deployment remain separate.
+
+The contract is archived at `work/archive/2026-08/CAP-059-folder-filter/task.md`.
+
 ## 2026-08-30 — CAP-058 per-user message star state implemented locally
 
 CAP-058 moves the user-visible star flag from the legacy mailbox-level column to the existing

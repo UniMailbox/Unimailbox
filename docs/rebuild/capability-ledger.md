@@ -27,10 +27,10 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | | |
 |---|---|
 | **Phase** | 2 — Reliable Business Loop (**Implemented; CAP-054 preview verification pending**, 2026-08-28) |
-| **Active capability** | None. CAP-058 per-user message star state is implemented locally and ready to archive. |
-| **Next capability** | **Folders and folder views**. |
+| **Active capability** | None. CAP-059 folder-filtered message list backend is implemented locally and archived. |
+| **Next capability** | **Folders and folder views UI**, then draft IndexedDB recovery. |
 | **Blocked** | Preview verification of CAP-054 is still required before Phase 2 can be called `Verified` or any Phase 3 slice can be preview-verified. Local CAP-049 work is allowed by the operator decision to defer deployment and temporarily use KV for bounded attachment staging. |
-| **Repository state** | Local branch `master` contains CAP-049 through CAP-058 code plus closure documentation in progress; CAP-058 is implemented locally and independently reviewed. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0023 are registered and companion verification passes. Latest CAP-058 gates: doctor 14/14; lint/typecheck/format/diff clean; unit 999/999; Worker 886/886 (zero skipped, zero failed); contracts 377/377; focused messages 68/68; focused Web 64/64; build and Wrangler dry-run clean. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
+| **Repository state** | Local branch `master` contains CAP-049 through CAP-059 code plus closure documentation; CAP-059 is the backend half of folder views. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0023 are registered and companion verification passes. Latest CAP-059 gates: doctor 14/14; lint/typecheck/format/diff clean; unit 1002/1002; Worker 888/888 (zero skipped, zero failed); contracts 380/380; focused messages 71/71; build and Wrangler dry-run clean. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
 
 ## Phase progress
 
@@ -39,7 +39,7 @@ observed end-to-end run. Never mark either from a subagent's unverified claim.
 | 0 | Foundation | Verified 2026-08-25 (CAP-045 FULL) | Local `/setup`, asset serving, queue topology, and repeat-safe migration paths are implemented AND exercised end-to-end on a real Cloudflare preview deployment | `docs/rebuild/phase-0-audit.md` is superseded for current status by the 2026-08-19 reality audit, CAP-039/041 evidence, and CAP-045 FULL operator evidence |
 | 1 | Minimal Business Closed Loop | Verified 2026-08-25 (CAP-045 FULL) | Setup UI is implemented; auth, mailbox, inbox, compose/reply, admin UI, AND real browser/email verification are ALL MET | `docs/rebuild/phase-1-audit.md` is superseded for current status by the 2026-08-19 reality audit, CAP-041 evidence, and CAP-045 FULL operator evidence |
 | 2 | Reliable Business Loop | **Implemented 2026-08-27; CAP-054 preview verification pending** | Existing CAP-045 preview evidence covers the prior phase behavior. CAP-054 now places `Idempotency-Key` (the canonical message ID) on the Brevo `sendTransacEmail` JSON body; local wire-shape and gate evidence pass, but provider-side duplicate suppression after deployment remains to be observed. | `work/investigations/INV-001-phase-2-audit.md` + CAP-045 operator evidence + CAP-054 local wire-shape proof; new preview evidence pending |
-| 3 | Complete Core Business | In Progress (CAP-058 implemented locally) | drafts + attachments + mailbox sharing + stars + folders | `work/investigations/INV-002-phase-3-decomposition.md` |
+| 3 | Complete Core Business | In Progress (CAP-059 backend implemented locally) | drafts + attachments + mailbox sharing + stars + folders | `work/investigations/INV-002-phase-3-decomposition.md` |
 | 4 | Operations + Data Import | Not started | ops tooling + legacy import | — |
 | 5 | Automation & Multi-Provider | Not started | — | — |
 | 6 | Scale & Performance | Not started | — | — |
@@ -203,6 +203,7 @@ produces IDs that no longer match the work by the time it starts.
 | CAP-056 | Safe message HTML rendering and inline CID substitution | Implemented | CAP-055 | Archived contract at `work/archive/2026-08/CAP-056-safe-html-cid/task.md`; DOMPurify allowlist, known-CID mapping to CAP-051 URLs, remote-image blocking, and plain-text fallback. Local gates and independent architecture review pass; preview/deployment remain deferred. |
 | CAP-057 | Mailbox sharing backend (member add/list/remove) | Implemented | CAP-020, CAP-017, CAP-040, CAP-042 | Contract archived at `work/archive/2026-08/CAP-057-mailbox-sharing/task.md`; owner/global `mailbox.share` authorization, safe Identity summary lookup, atomic membership + audit + POST/DELETE idempotency, replay/race and no-leak coverage pass locally. UI, invitation delivery, folders/stars, R2/KV, and deployment remain out of scope. |
 | CAP-058 | Per-user message star state | Implemented locally | CAP-043, CAP-040, CAP-042 | Contract archived at `work/archive/2026-08/CAP-058-per-user-stars/task.md`; migration 0023, owner/member legacy backfill, caller-scoped list/detail/thread/toggle state, resource-bound idempotency, soft-delete/no-write behavior, and user-scoped web cache keys are locally verified. Folders, deployment, and preview verification remain separate. |
+| CAP-059 | Folder-filtered message list backend | Implemented locally | CAP-043, CAP-047, CAP-058 | Contract archived at `work/archive/2026-08/CAP-059-folder-filter/task.md`; closed folder vocabulary, default inbox filter, caller/soft-delete-preserving D1 query, and folder-bound signed cursors are locally verified. Folder navigation/views remain the next UI slice. |
 
 ---
 
