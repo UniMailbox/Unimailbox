@@ -90,6 +90,9 @@ export const auditActionSchema = z.enum([
   // CAP-051 scheduled cleanup — one row per uploaded attachment whose
   // CACHE bytes were removed and D1 lifecycle transitioned to expired.
   'attachment.expired',
+  // CAP-057 mailbox sharing transitions.
+  'mailbox.member_added',
+  'mailbox.member_removed',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

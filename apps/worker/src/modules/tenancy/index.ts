@@ -11,7 +11,29 @@ export {
   listMailboxesByUser,
   listMailboxesByOwner,
   findMailboxMember,
+  listMailboxMemberRows,
+  prepareCreateMailboxMember,
+  prepareDeleteMailboxMember,
+  prepareRequireMailboxMemberDeleted,
 } from './mailbox-repository';
-export type { CreateMailboxInput, MailboxInfo, MailboxMemberInfo } from './mailbox-repository';
+export type {
+  CreateMailboxInput,
+  MailboxInfo,
+  MailboxMemberInfo,
+  MailboxMemberRow,
+  CreateMailboxMemberInput,
+} from './mailbox-repository';
 
 export { assertCan, type MailboxOp } from './authorizer';
+export {
+  assertCanManageMailboxMembers,
+  addMailboxMember,
+  listMailboxMembers,
+  removeMailboxMember,
+  mailboxMemberOperation,
+  type AddMailboxMemberInput,
+  type ListMailboxMembersInput,
+  type RemoveMailboxMemberInput,
+  type MailboxMemberServiceDependencies,
+  type MailboxMemberServiceResult,
+} from './mailbox-member-service';

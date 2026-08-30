@@ -13,10 +13,21 @@
 // R-API-004: POST /mailboxes requires Idempotency-Key; replays return the
 // stored response.
 
-import { Hono } from 'hono';
-import { createMailboxRequestSchema } from '@unimailbox/contracts';
-import { listMailboxesByOwner } from '../../modules/tenancy';
-import { prepareCreateAuditEvent } from '../../modules/admin';
+import { Hono, type Context } from 'hono';
+import {
+  createMailboxRequestSchema,
+  addMailboxMemberRequestSchema,
+  uuidSchema,
+} from '@unimailbox/contracts';
+import {
+  listMailboxesByOwner,
+  assertCanManageMailboxMembers,
+  addMailboxMember,
+  listMailboxMembers,
+  removeMailboxMember,
+  mailboxMemberOperation,
+} from '../../modules/tenancy';
+import { checkPermission, prepareCreateAuditEvent } from '../../modules/admin';
 import { systemClock } from '../../platform/clock';
 import { systemIds } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
@@ -34,8 +45,44 @@ import {
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
 import { parseJsonBody } from '../middleware/parse-json-body';
+import { buildAppContext } from '../../app-context';
 
 const CREATE_MAILBOX_OPERATION = 'POST /api/v1/mailboxes';
+
+function parseMailboxId(value: string): string {
+  return uuidSchema.parse(value);
+}
+
+function withRequestId(c: Context<AppEnv>, response: Response): Response {
+  const requestId = c.get('requestId');
+  if (requestId) response.headers.set('X-Request-Id', requestId);
+  return response;
+}
+
+function memberResponse(c: Context<AppEnv>, body: string, status: 200 | 201): Response {
+  const response = new Response(body, {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  return withRequestId(c, response);
+}
+
+async function requireMailboxShareAccess(
+  c: Context<AppEnv>,
+  mailboxId: string,
+): Promise<{ userId: string; hasGlobalShare: boolean }> {
+  const userId = c.get('userId');
+  if (!userId) {
+    throw new DomainError({
+      code: 'AUTHENTICATION_REQUIRED',
+      message: 'Authentication required',
+      httpStatus: 401,
+    });
+  }
+  const hasGlobalShare = await checkPermission(c.env.DB, userId, 'mailbox.share');
+  await assertCanManageMailboxMembers(c.env.DB, userId, mailboxId, hasGlobalShare);
+  return { userId, hasGlobalShare };
+}
 
 export function mailboxRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -258,6 +305,169 @@ export function mailboxRoutes(): Hono<AppEnv> {
     const mailboxes = await listMailboxesByOwner(c.env.DB, userId);
 
     return c.json({ data: { items: mailboxes } });
+  });
+
+  // CAP-057 mailbox sharing. These routes intentionally do not use
+  // requirePermission('mailbox.manage'): ownership or the separate global
+  // mailbox.share permission is the authority for the target mailbox.
+  routes.post('/mailboxes/:mailboxId/members', requireIdempotencyKey, async (c) => {
+    const mailboxId = parseMailboxId(c.req.param('mailboxId'));
+    const access = await requireMailboxShareAccess(c, mailboxId);
+    const rawBody = await c.req.text();
+    // Validate before hashing so equivalent JSON encodings replay the same
+    // operation, while malformed requests create no idempotency row.
+    const request = parseJsonBody(rawBody, addMailboxMemberRequestSchema, {
+      event: 'mailboxes.members.add.invalid_json',
+      actorUserId: access.userId,
+    });
+    const requestHash = await sha256Hex(JSON.stringify(request));
+    const idempotencyKey = c.get('idempotencyKey');
+    if (!idempotencyKey) {
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
+    }
+
+    const operation = mailboxMemberOperation('POST', mailboxId);
+    const existing = await findIdempotencyRecord(
+      c.env.DB,
+      access.userId,
+      operation,
+      idempotencyKey,
+    );
+    if (existing) {
+      assertSameRequestHash(existing, requestHash);
+      return withRequestId(c, replayResponse(existing));
+    }
+
+    try {
+      const result = await addMailboxMember(
+        {
+          db: c.env.DB,
+          auditEventWriter: buildAppContext(c.env).auditEventWriter,
+        },
+        {
+          actorUserId: access.userId,
+          mailboxId,
+          request,
+          hasGlobalShare: access.hasGlobalShare,
+          requestId: c.get('requestId') ?? null,
+          idempotencyKey,
+          requestHash,
+        },
+      );
+      return memberResponse(c, result.responseJson, result.status);
+    } catch (error) {
+      // The member primary key and idempotency unique index are the
+      // concurrency guards. A same-key race replays the committed winner;
+      // a different key racing for the same member maps to the stable
+      // duplicate code.
+      if (isIdempotencyUniqueViolation(error)) {
+        return withRequestId(
+          c,
+          await replayAfterRace(c.env.DB, access.userId, operation, idempotencyKey, requestHash),
+        );
+      }
+      if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+        // The membership insert runs before the idempotency insert. A
+        // same-key concurrent request can therefore report the member
+        // primary-key collision even though the winner's idempotency row is
+        // already committed. Replay that winner; a different key remains a
+        // genuine duplicate.
+        const winner = await findIdempotencyRecord(
+          c.env.DB,
+          access.userId,
+          operation,
+          idempotencyKey,
+        );
+        if (winner) {
+          assertSameRequestHash(winner, requestHash);
+          return withRequestId(c, replayResponse(winner));
+        }
+        if (error.message.includes('mailbox_members')) {
+          throw new DomainError({
+            code: 'MAILBOX_MEMBER_DUPLICATE',
+            message: 'User is already a member of this mailbox',
+            httpStatus: 409,
+          });
+        }
+      }
+      throw error;
+    }
+  });
+
+  routes.get('/mailboxes/:mailboxId/members', async (c) => {
+    const mailboxId = parseMailboxId(c.req.param('mailboxId'));
+    const access = await requireMailboxShareAccess(c, mailboxId);
+    const items = await listMailboxMembers(
+      {
+        db: c.env.DB,
+        auditEventWriter: buildAppContext(c.env).auditEventWriter,
+      },
+      {
+        actorUserId: access.userId,
+        mailboxId,
+        hasGlobalShare: access.hasGlobalShare,
+      },
+    );
+    return c.json({ data: { items } });
+  });
+
+  routes.delete('/mailboxes/:mailboxId/members/:userId', requireIdempotencyKey, async (c) => {
+    const mailboxId = parseMailboxId(c.req.param('mailboxId'));
+    const memberUserId = uuidSchema.parse(c.req.param('userId'));
+    const access = await requireMailboxShareAccess(c, mailboxId);
+    const rawBody = await c.req.text();
+    const requestHash = await sha256Hex(rawBody);
+    const idempotencyKey = c.get('idempotencyKey');
+    if (!idempotencyKey) {
+      throw new DomainError({
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+        message: 'Idempotency-Key header required',
+        httpStatus: 400,
+      });
+    }
+
+    const operation = mailboxMemberOperation('DELETE', mailboxId, memberUserId);
+    const existing = await findIdempotencyRecord(
+      c.env.DB,
+      access.userId,
+      operation,
+      idempotencyKey,
+    );
+    if (existing) {
+      assertSameRequestHash(existing, requestHash);
+      return withRequestId(c, replayResponse(existing));
+    }
+
+    try {
+      const result = await removeMailboxMember(
+        {
+          db: c.env.DB,
+          auditEventWriter: buildAppContext(c.env).auditEventWriter,
+        },
+        {
+          actorUserId: access.userId,
+          mailboxId,
+          memberUserId,
+          hasGlobalShare: access.hasGlobalShare,
+          requestId: c.get('requestId') ?? null,
+          idempotencyKey,
+          requestHash,
+        },
+      );
+      return memberResponse(c, result.responseJson, result.status);
+    } catch (error) {
+      if (isIdempotencyUniqueViolation(error)) {
+        return withRequestId(
+          c,
+          await replayAfterRace(c.env.DB, access.userId, operation, idempotencyKey, requestHash),
+        );
+      }
+      throw error;
+    }
   });
 
   return routes;

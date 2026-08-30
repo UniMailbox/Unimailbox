@@ -6,6 +6,7 @@
 // Mailbox address = {localPart}@{domain.name} — domain lookup required for full address.
 
 import type { Database } from '../../platform/database';
+import type { MailboxMemberRole } from '@unimailbox/contracts';
 
 export interface CreateMailboxInput {
   readonly id: string;
@@ -32,6 +33,62 @@ export interface MailboxMemberInfo {
   readonly mailboxId: string;
   readonly userId: string;
   readonly role: 'viewer' | 'sender' | 'admin';
+}
+
+export interface MailboxMemberRow {
+  readonly mailboxId: string;
+  readonly userId: string;
+  readonly role: MailboxMemberRole;
+  readonly createdAt: string;
+}
+
+export interface CreateMailboxMemberInput {
+  readonly mailboxId: string;
+  readonly userId: string;
+  readonly role: MailboxMemberRole;
+  readonly createdAt: string;
+}
+
+/** Prepares an explicit member insert for the tenancy-owned table. */
+export function prepareCreateMailboxMember(
+  db: Database,
+  input: CreateMailboxMemberInput,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO mailbox_members (mailbox_id, user_id, role, created_at)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .bind(input.mailboxId, input.userId, input.role, input.createdAt);
+}
+
+/** Prepares deletion of one explicit member; the owner has no row to delete. */
+export function prepareDeleteMailboxMember(
+  db: Database,
+  mailboxId: string,
+  userId: string,
+): D1PreparedStatement {
+  return db
+    .prepare('DELETE FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?')
+    .bind(mailboxId, userId);
+}
+
+/**
+ * Fails the surrounding D1 batch when the preceding DELETE changed no row.
+ * SQLite's changes() is scoped to the previous statement, so this keeps a
+ * concurrent loser from committing an audit for a non-deletion.
+ */
+export function prepareRequireMailboxMemberDeleted(
+  db: Database,
+  mailboxId: string,
+  userId: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO mailbox_members (mailbox_id, user_id, role, created_at)
+       SELECT ?, ?, NULL, ? WHERE changes() = 0`,
+    )
+    .bind(mailboxId, userId, '');
 }
 
 /**
@@ -313,4 +370,34 @@ export async function findMailboxMember(
     userId: result.user_id,
     role: result.role,
   };
+}
+
+/** Lists explicit members in deterministic creation/id order. */
+export async function listMailboxMemberRows(
+  db: Database,
+  mailboxId: string,
+): Promise<MailboxMemberRow[]> {
+  const results = await db
+    .prepare(
+      `SELECT mailbox_id, user_id, role, created_at
+       FROM mailbox_members
+       WHERE mailbox_id = ?
+       ORDER BY created_at ASC, user_id ASC`,
+    )
+    .bind(mailboxId)
+    .all<{
+      mailbox_id: string;
+      user_id: string;
+      role: MailboxMemberRole;
+      created_at: string;
+    }>();
+
+  return (
+    results.results?.map((row) => ({
+      mailboxId: row.mailbox_id,
+      userId: row.user_id,
+      role: row.role,
+      createdAt: row.created_at,
+    })) ?? []
+  );
 }

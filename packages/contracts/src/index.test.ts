@@ -21,6 +21,12 @@ import {
   createMailboxRequestSchema,
   mailboxListItemSchema,
   mailboxListResponseSchema,
+  mailboxMemberRoleSchema,
+  addMailboxMemberRequestSchema,
+  mailboxMemberItemSchema,
+  mailboxMemberListResponseSchema,
+  addMailboxMemberResponseSchema,
+  deleteMailboxMemberResponseSchema,
   messageRecipientSchema,
   messageListItemSchema,
   messageListResponseSchema,
@@ -54,6 +60,52 @@ import {
   assertCanTransition,
   allowedFromForMessageStatus,
 } from './index';
+
+describe('CAP-057 mailbox sharing contracts (R-API-001 R-API-002 R-API-003 R-DATA-001)', () => {
+  it('accepts only the closed member roles and strict add body', () => {
+    expect(mailboxMemberRoleSchema.options).toEqual(['viewer', 'sender', 'admin']);
+    expect(
+      addMailboxMemberRequestSchema.safeParse({ email: ' USER@example.com ', role: 'viewer' }).data,
+    ).toEqual({ email: 'user@example.com', role: 'viewer' });
+    expect(
+      addMailboxMemberRequestSchema.safeParse({
+        email: 'user@example.com',
+        role: 'viewer',
+        secret: 'x',
+      }).success,
+    ).toBe(false);
+    expect(
+      addMailboxMemberRequestSchema.safeParse({ email: 'user@example.com', role: 'owner' }).success,
+    ).toBe(false);
+  });
+
+  it('pins safe projection/list and canonical mutation envelopes (R-SECRET-003 R-AUDIT-001)', () => {
+    const item = {
+      userId: '00000000-0000-4000-8000-000000000001',
+      email: 'user@example.com',
+      displayName: null,
+      role: 'admin',
+      createdAt: '2026-08-30 00:00:00',
+    } as const;
+    expect(mailboxMemberItemSchema.parse(item)).toEqual(item);
+    expect(mailboxMemberListResponseSchema.parse({ items: [item] })).toEqual({ items: [item] });
+    expect(addMailboxMemberResponseSchema.parse({ data: item })).toEqual({ data: item });
+    expect(
+      deleteMailboxMemberResponseSchema.parse({
+        data: { removed: true, userId: item.userId },
+      }),
+    ).toEqual({ data: { removed: true, userId: item.userId } });
+    expect(
+      mailboxMemberItemSchema.safeParse({ ...item, passwordHash: 'must-not-cross-boundary' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('accepts exactly the mailbox member audit actions (R-AUDIT-001 R-AUDIT-004)', () => {
+    expect(auditActionSchema.safeParse('mailbox.member_added').success).toBe(true);
+    expect(auditActionSchema.safeParse('mailbox.member_removed').success).toBe(true);
+  });
+});
 
 describe('emailAddressSchema', () => {
   it('accepts a plain address', () => {
@@ -1322,7 +1374,8 @@ describe('toggleStarResponseSchema', () => {
 // `message.star_toggled` and `message.soft_deleted`. CAP-047 server
 // draft-create slice adds `draft.created`; CAP-047 draft PATCH slice adds
 // `draft.updated`; CAP-047 draft send slice adds `draft.sent`; CAP-051
-// attachment cleanup adds `attachment.expired`. The enum is closed by design — a value reaching
+// attachment cleanup adds `attachment.expired`; CAP-057 mailbox sharing adds
+// `mailbox.member_added` and `mailbox.member_removed`. The enum is closed by design — a value reaching
 // audit_events that is not in this list is a contract violation, so
 // coverage pins the exact option set.
 describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
@@ -1348,6 +1401,8 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'attachment.uploaded',
         'attachment.consumed',
         'attachment.expired',
+        'mailbox.member_added',
+        'mailbox.member_removed',
       ].sort(),
     );
   });
@@ -1373,6 +1428,11 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
 
   it('accepts draft.sent (the CAP-047 send-slice addition)', () => {
     expect(auditActionSchema.parse('draft.sent')).toBe('draft.sent');
+  });
+
+  it('accepts mailbox.member_added and mailbox.member_removed (CAP-057)', () => {
+    expect(auditActionSchema.parse('mailbox.member_added')).toBe('mailbox.member_added');
+    expect(auditActionSchema.parse('mailbox.member_removed')).toBe('mailbox.member_removed');
   });
 
   it('accepts attachment.uploaded (the CAP-049 staging addition)', () => {

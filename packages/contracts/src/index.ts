@@ -871,6 +871,69 @@ export const mailboxListResponseSchema = z.object({
 export type MailboxListResponse = z.infer<typeof mailboxListResponseSchema>;
 
 // ---------------------------------------------------------------------------
+// Mailbox sharing — CAP-057
+// ---------------------------------------------------------------------------
+
+/** Explicit roles for mailbox members. The owner remains implicit. */
+export const mailboxMemberRoleSchema = z.enum(['viewer', 'sender', 'admin']);
+export type MailboxMemberRole = z.infer<typeof mailboxMemberRoleSchema>;
+
+/** Strict request body for adding one explicit mailbox member. */
+export const addMailboxMemberRequestSchema = z
+  .object({
+    email: emailAddressSchema,
+    role: mailboxMemberRoleSchema,
+  })
+  .strict();
+
+export type AddMailboxMemberRequest = z.infer<typeof addMailboxMemberRequestSchema>;
+
+/** Safe member projection. Credentials, upload identifiers, and storage keys are absent. */
+export const mailboxMemberItemSchema = z
+  .object({
+    userId: uuidSchema,
+    email: emailAddressSchema,
+    displayName: z.string().nullable(),
+    role: mailboxMemberRoleSchema,
+    createdAt: z.string().min(1),
+  })
+  .strict();
+
+export type MailboxMemberItem = z.infer<typeof mailboxMemberItemSchema>;
+
+/** Inner list response shape for GET /mailboxes/:mailboxId/members. */
+export const mailboxMemberListResponseSchema = z
+  .object({
+    items: z.array(mailboxMemberItemSchema),
+  })
+  .strict();
+
+export type MailboxMemberListResponse = z.infer<typeof mailboxMemberListResponseSchema>;
+
+/** Canonical add response envelope. */
+export const addMailboxMemberResponseSchema = z
+  .object({
+    data: mailboxMemberItemSchema,
+  })
+  .strict();
+
+export type AddMailboxMemberResponse = z.infer<typeof addMailboxMemberResponseSchema>;
+
+/** Canonical remove response envelope. */
+export const deleteMailboxMemberResponseSchema = z
+  .object({
+    data: z
+      .object({
+        removed: z.literal(true),
+        userId: uuidSchema,
+      })
+      .strict(),
+  })
+  .strict();
+
+export type DeleteMailboxMemberResponse = z.infer<typeof deleteMailboxMemberResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Messages — CAP-022
 // ---------------------------------------------------------------------------
 /**

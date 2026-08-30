@@ -9,6 +9,11 @@
 export { createUser, prepareCreateUser, getFirstUser, findUserByEmail } from './user-repository';
 export { listUsers, UserCursorInvalidError, UserRowInvalidError } from './user-list-repository';
 export {
+  findActiveUserByEmail,
+  findActiveUserById,
+  findActiveUsersByIds,
+} from './user-summary-repository';
+export {
   createSession,
   findSessionByRefreshHash,
   revokeSession,
@@ -21,5 +26,6 @@ export {
 } from './credential-repository';
 export type { CreateUserInput, UserInfo } from './user-repository';
 export type { UserListResult } from './user-list-repository';
+export type { PublicUserSummary } from './user-summary-repository';
 export type { CreateSessionInput, SessionRow } from './session-repository';
 export type { CreateCredentialInput } from './credential-repository';
