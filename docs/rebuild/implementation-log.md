@@ -10,6 +10,18 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-062 Web root entrypoint connected to the mailbox shell
+
+The Web root route no longer renders the CAP-001 placeholder, which made a healthy client
+look blank/incomplete at `/`. It now redirects to the existing authenticated `/mailbox` route;
+that route remains the sole owner of the session guard, so unauthenticated users continue to
+land at `/login` and authenticated users see the mailbox list. Production-router tests cover both
+paths using the real route tree. No API, auth, storage, or deployment behavior changed.
+
+Local evidence: focused router 22/22, full unit 1032/1032, doctor 14/14, typecheck/lint/format/
+build and `git diff --check` clean. Independent architecture review returned ACCEPT. No secrets,
+preview, deploy, or push occurred.
+
 ## 2026-08-30 — CAP-062 Draft server view and recovery decision implemented locally
 
 CAP-062 connects the CAP-061 browser working-copy cache to the Web mailbox without making the

@@ -115,6 +115,48 @@ describe('router (D-CAP-041-9 closure)', () => {
 });
 
 describe('router — CAP-062 production draft route', () => {
+  it('redirects the root entrypoint to login when there is no session', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const history = createMemoryHistory({ initialEntries: ['/'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/login');
+  });
+
+  it('redirects the root entrypoint to the mailbox shell for an authenticated session', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    queryClient.setQueryData(authQueryKeys.session(), {
+      userId: 'user-root',
+      email: 'root@example.test',
+      displayName: 'Root User',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+    const history = createMemoryHistory({ initialEntries: ['/'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/mailbox');
+  });
+
   it('redirects the real draft recovery route to login without a session', async () => {
     const apiClient = createApiClient({
       baseUrl: '',

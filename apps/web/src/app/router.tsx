@@ -135,12 +135,14 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: () => (
-    <main className="unimailbox-stub">
-      <h1>Unimailbox</h1>
-      <p>The client is wired. Feature pages land with later capabilities.</p>
-    </main>
-  ),
+  // The application entrypoint is the mailbox shell. Keeping `/` as a
+  // placeholder made a successfully booted frontend look blank/incomplete
+  // even though the real feature routes were available. Let the mailbox
+  // route own the session guard so unauthenticated users land on `/login`.
+  beforeLoad: () => {
+    throw redirect({ to: '/mailbox' });
+  },
+  component: DefaultPending,
 });
 
 // CAP-042 Batch 5 — /login. The login form posts to
