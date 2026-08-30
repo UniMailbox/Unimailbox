@@ -10,6 +10,20 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-31 — Tooling fix: `pnpm scaffold db:migrate --reset` silently dropped `--reset`
+
+Operator reported `db:migrate --reset` only verified and never wiped the local D1 persist dir. Root cause: `scripts/scaffold.ts:28-32` filtered `v !== '--reset'` on **both** the alias path (where the flag was prepended) and the explicit `db:migrate` path (where the operator typed it). The runner saw no args, skipped the `rmSync` block at `scripts/db-migrate.ts:50-55`, and just verified.
+
+Fix: restrict the `--reset` dedup filter to the `db:reset` alias path (where the flag was prepended); on the `db:migrate` path, pass `--reset` through unchanged. While extracting the logic into a pure function (`forwardDbMigrateArgs`) for testability, the dispatcher body was gated behind `pathToFileURL(process.argv[1]).href === import.meta.url` so vitest can import the helper without triggering the dispatcher's top-level `process.exit(1)` — mirrors `scripts/deploy.ts:1416`.
+
+Test: `scripts/scaffold.test.ts` (NEW, 9 tests, 100 passing). Cases pin: `db:migrate` passes `--reset` through (the regression); `db:migrate --verify` passes through; `db:reset` prepends `--reset`; `db:reset --reset` dedupes; both dedup + verify combinations. The pure-function pattern also lets the unit test run in 87 ms instead of the 1+ s a subprocess round-trip would cost.
+
+**Files**: `scripts/scaffold.ts` (MODIFIED — extract `forwardDbMigrateArgs`, gate dispatcher body behind `import.meta.url` check, restrict `--reset` dedup to alias path), `scripts/scaffold.test.ts` (NEW, 9 tests), `docs/rebuild/capability-ledger.md` (D-CAP-041-H4 row), `docs/rebuild/implementation-log.md` (this entry).
+
+**Gates** (orchestrator-run): doctor 14/14, lint clean, typecheck clean, unit 1082→1091 (+9 new scaffold tests, zero regressions), web/worker pools not re-run (tooling fix, no app-code change). Live-dispatcher smoke test: `Removed /Users/john/Workspace/x/Unimailbox/apps/worker/.wrangler/state` printed and migrations re-applied from 0001.
+
+---
+
 ## 2026-08-31 — CAP-063 lite: setup wizard `Skip remaining setup` affordance
 
 Per user direction ("在 Administrator 之后的 setup tabs 都可以跳过，在管理页面中配置" — lite path: single Skip button at Administrator; admin URLs documented in runbook; no new admin pages), the setup wizard gets a single secondary `Skip remaining setup` button on each of the six post-claim step components (`AdministratorStep`, `DomainStep`, `CloudflareVerifyStep`, `InboundSmokeStep`, `BrevoStep`, `OutboundSmokeStep`). The button is disabled at `AdministratorStep` until the admin form submits successfully (OR the server-reported `currentStep` is past `administrator` — local component state alone is insufficient because re-mount resets it, so the implementer added a `useQuery(setupQueryKeys.status(), { enabled: false })` to read the cached state without issuing its own fetch); always enabled on the other five. Click handler POSTs the existing `POST /api/v1/setup/complete` (no new server shape), invalidates `setupQueryKeys.status()`, navigates to `/`. Errors surface through `ErrorPanel`; on 401, the retry label is "Re-claim installation token" and the hook exposes `isUnauthorized` so the caller wires the same reclaim flow `CompleteStep` uses. Idempotency-Key is added by `apps/web/src/infrastructure/api/client.ts:73-80` per ADR-004 — step components never set the header themselves.
