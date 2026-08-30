@@ -344,6 +344,65 @@ describe('router — CAP-041 preflight hotfix (AC-1 + AC-7)', () => {
   });
 });
 
+// CAP-041 follow-up (D-CAP-041-H1): the two setup-shim routes
+// (`/setup` index + `/setup/$subStep` unknown-step path) now hydrate
+// the React Query cache via `context.queryClient.fetchQuery` instead of
+// a direct fetch — same shape as `requireSetupStep` and
+// `requireCompletedSetup`. These tests pin that contract: a future
+// refactor that bypasses the cache again would silently break DRY
+// across the three call sites and re-open the chip-flash regression.
+describe('router — CAP-041 follow-up H1 (setup shim cache hydration)', () => {
+  // Helper: build a router that targets the requested path with a
+  // mocked `/api/v1/setup/status` returning the supplied state. Returns
+  // the post-`router.load()` cache snapshot for the status key.
+  async function loadSetupShimAndReadCache(
+    initialPath: '/setup' | '/setup/not-a-real-step',
+    currentStep: 'claim' | 'preflight' | 'administrator' | 'domain' | 'cloudflare-verify' | 'inbound-smoke' | 'brevo' | 'outbound-smoke' | 'complete',
+  ) {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({
+          data: { status: 'setup', currentStep },
+        })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const history = createMemoryHistory({ initialEntries: [initialPath] });
+    const router = createAppRouter(apiClient, queryClient, history);
+    await router.load();
+    return { queryClient, history, router };
+  }
+
+  it('setupIndexRoute.beforeLoad hydrates setupQueryKeys.status()', async () => {
+    const { queryClient, history } = await loadSetupShimAndReadCache('/setup', 'administrator');
+
+    // Cache populated by the beforeLoad's fetchQuery call.
+    expect(queryClient.getQueryData(setupQueryKeys.status())).toEqual({
+      status: 'setup',
+      currentStep: 'administrator',
+    });
+    // And the route shimmed through to the canonical current-step URL.
+    expect(history.location.pathname).toBe('/setup/administrator');
+  });
+
+  it('unknownSetupStepRoute.beforeLoad hydrates setupQueryKeys.status()', async () => {
+    const { queryClient, history } = await loadSetupShimAndReadCache(
+      '/setup/not-a-real-step',
+      'preflight',
+    );
+
+    expect(queryClient.getQueryData(setupQueryKeys.status())).toEqual({
+      status: 'setup',
+      currentStep: 'preflight',
+    });
+    // Stale sub-step URL falls back to the server's current step.
+    expect(history.location.pathname).toBe('/setup/preflight');
+  });
+});
+
 describe('router — CAP-062 production draft route', () => {
   it('redirects the root entrypoint to login when there is no session', async () => {
     const apiClient = createApiClient({

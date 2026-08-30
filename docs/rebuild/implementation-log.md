@@ -10,6 +10,47 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-041 follow-ups H1 + H3: sibling beforeLoad cache hydration + INSTALLATION_TOKEN drift root-cause
+
+Two deferred review findings from the CAP-041 preflight hotfix closed in a single chore commit:
+
+**H1 (LOW, consistency).** `setupIndexRoute.beforeLoad` (`router.tsx:411`) and
+`unknownSetupStepRoute.beforeLoad` (`router.tsx:530`) called `fetchSetupStatus(context.apiClient)`
+directly, the same bypass the hotfix closed at `requireSetupStep`. Both routes are pure redirect
+shims in production (their `component`s are `() => null`), so the bug was benign — but DRY across
+the three `fetchSetupStatus` call sites prevents a future maintainer from accidentally splitting
+the cache hydration shape. Both `beforeLoad`s now route through
+`context.queryClient.fetchQuery({ queryKey: setupQueryKeys.status(), queryFn: () =>
+fetchSetupStatus(context.apiClient), staleTime: 0 })`. Two new web tests in
+`router.test.tsx` (`describe('router — CAP-041 follow-up H1 ...')`) pin the contract: cache is
+populated before the route shims through to the canonical current-step URL on both
+`/setup` (index) and `/setup/not-a-real-step` (unknown sub-step).
+
+**H3 (MEDIUM, pre-existing local-infrastructure drift).** The committed
+`apps/worker/wrangler.test.jsonc` had the right value (`test-installation-token`) all along. The
+operator-local `apps/worker/.dev.vars` carried `INSTALLATION_TOKEN=local-installation-token`,
+which the vitest-pool-workers binding resolver merged over `wrangler.test.jsonc` — so tests
+sending the canonical `'test-installation-token'` saw 401 at `POST /api/v1/setup/claim` and never
+exercised their bodies. Operator aligned `.dev.vars` INSTALLATION_TOKEN to the canonical test
+value (gitignored; not part of this commit). The per-test `beforeEach` workaround at
+`preflight.worker.test.ts:397` is removed; the comment now documents that `wrangler.test.jsonc`
+is the canonical source. Test results before/after the `.dev.vars` realignment: **183 fail /
+712 pass → 33 fail / 862 pass** (150 previously 401-blocked tests now exercise their bodies).
+The remaining 33 failures are pre-existing `outbound-smoke-test.worker.test.ts` Brevo-mock
+interception issues (`vi.spyOn(globalThis, 'fetch')` cannot intercept workerd-internal fetch);
+they are unrelated to this follow-up and tracked separately.
+
+**H2** (onboarding `AuditEventWriter` seam — MEDIUM architectural consistency + ADR candidate)
+stays deferred per user direction; see `D-CAP-041-H2` in `capability-ledger.md`.
+
+Local evidence: doctor 14/14, lint clean, typecheck clean, unit 337/337, worker 862/895 (33
+pre-existing Brevo-mock failures isolated to `outbound-smoke-test.worker.test.ts`; pass when run
+in isolation; unrelated to this commit). Web diff and worker diff are confined to the 3 files
+named in the commit + the 2 documentation files (ledger + implementation log). The `.dev.vars`
+realignment is gitignored.
+
+---
+
 ## 2026-08-30 — CAP-041 preflight hotfix: state advance + cache hydration
 
 Two production bugs in the setup wizard at `/setup/preflight` reported during local testing,

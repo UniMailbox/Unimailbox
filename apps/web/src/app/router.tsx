@@ -406,9 +406,23 @@ const setupIndexRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/',
   beforeLoad: async ({ context }) => {
+    // CAP-041 follow-up (D-CAP-041-H1): route the setup-status fetch
+    // through `context.queryClient.fetchQuery` to mirror
+    // `requireCompletedSetup` + `requireSetupStep`. The previous direct
+    // `fetchSetupStatus` call bypassed React Query; the layout's
+    // `setupStatusQuery()` would then see an empty cache on first paint.
+    // Behaviour is benign here (the route is a pure redirect shim; the
+    // user always lands on a static step route whose own beforeLoad
+    // primes the cache before `<SetupLayout>` mounts), but DRY across
+    // the three `fetchSetupStatus` call sites prevents a future
+    // maintainer from accidentally splitting the cache hydration shape.
     let state: InstallationStateInfo;
     try {
-      state = await fetchSetupStatus(context.apiClient);
+      state = await context.queryClient.fetchQuery({
+        queryKey: setupQueryKeys.status(),
+        queryFn: () => fetchSetupStatus(context.apiClient),
+        staleTime: 0,
+      });
     } catch (error) {
       if (error instanceof ApiError) {
         throw redirect({ to: '/setup/claim' });
@@ -525,9 +539,16 @@ const unknownSetupStepRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/$subStep',
   beforeLoad: async ({ context }) => {
+    // CAP-041 follow-up (D-CAP-041-H1): same hydration shape as the
+    // sibling routes above — see setupIndexRoute.beforeLoad for the
+    // rationale and the maintainer foot-gun DRY closes.
     let state: InstallationStateInfo;
     try {
-      state = await fetchSetupStatus(context.apiClient);
+      state = await context.queryClient.fetchQuery({
+        queryKey: setupQueryKeys.status(),
+        queryFn: () => fetchSetupStatus(context.apiClient),
+        staleTime: 0,
+      });
     } catch (error) {
       if (error instanceof ApiError) {
         throw redirect({ to: '/setup/claim' });

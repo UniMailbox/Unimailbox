@@ -385,16 +385,10 @@ describe('POST /api/v1/setup/preflight', () => {
   describe('CAP-041 hotfix — atomic preflight advance', () => {
     beforeEach(async () => {
       await resetAndMigrate();
-      // Mirror the test pool's INSTALLATION_TOKEN to the value /claim
-      // expects. The test pool's wrangler.test.jsonc currently pins a
-      // `-local` suffixed value that does NOT match the literal in
-      // `claimSession()` below; without this override every /claim call
-      // returns 401 SETUP_CLAIM_INVALID_TOKEN and the suite is blocked
-      // on a pre-existing infrastructure mismatch (the original commit
-      // used `test-installation-token` and every call site was written
-      // against that value). Reverting wrangler.test.jsonc to its
-      // committed value would remove the need for this line.
-      (env as { INSTALLATION_TOKEN?: string }).INSTALLATION_TOKEN = 'test-installation-token';
+      // CAP-041 follow-up (D-CAP-041-H3): wrangler.test.jsonc's
+      // INSTALLATION_TOKEN is the literal `test-installation-token` —
+      // every test fixture sends the same value. No per-test override
+      // needed.
       sessionToken = await claimSession();
     });
 
