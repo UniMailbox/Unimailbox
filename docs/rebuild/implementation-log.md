@@ -10,6 +10,23 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-060 Web folder navigation and views implemented locally
+
+CAP-060 completes the client half of the folder-view slice begun by CAP-059. The mailbox route
+now validates the shared five-value folder vocabulary and defaults malformed or missing search
+values to `inbox`. The Web message query appends `folder=<value>` for non-inbox views and includes
+the folder in the authenticated user/mailbox cache key; compose invalidation covers the mailbox's
+folder family, while read/star/delete updates target the active folder.
+
+`InboxListPage` renders accessible Inbox, Sent, Drafts, Archive, and Trash links with a
+folder-specific heading, selected `aria-current="page"`, and preserved default-inbox behavior.
+Focused Web tests cover route validation, folder request shape, selected navigation, and cache
+isolation. Local evidence: focused Web 39/39, full unit 1006/1006, doctor 14/14, typecheck/lint/
+format/build and `git diff --check` clean; Worker and schema code were unchanged. Draft IndexedDB
+recovery, sharing/invitation UI, preview, deployment, and R2 remain separate.
+
+The contract is archived at `work/archive/2026-08/CAP-060/task.md`.
+
 ## 2026-08-30 — CAP-059 folder-filtered message list backend implemented locally
 
 CAP-059 adds the server half of the Phase 3 folder views. The mailbox message-list endpoint now
