@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ConfigError,
   loadConfig,
+  parseAdditionalTrustedOrigins,
   parseAuthProvider,
   parseBetterAuthUrl,
   parseEnvironment,
@@ -202,5 +203,103 @@ describe('loadConfig', () => {
       captured = err as ConfigError;
     }
     expect(captured?.code).toBe('INVALID_BETTER_AUTH_URL');
+  });
+});
+
+// D-CAP-042-auth-origin: parseAdditionalTrustedOrigins is the parser
+// that populates Better Auth's `trustedOrigins` array beyond
+// `betterAuthUrl`. Mirrors parseBetterAuthUrl rules so a typo'd origin
+// or a non-http(s) URL fails closed with the same ConfigError code.
+describe('parseAdditionalTrustedOrigins', () => {
+  it('returns [] when the env var is unset', () => {
+    expect(parseAdditionalTrustedOrigins(undefined, 'local')).toEqual([]);
+  });
+
+  it('returns [] when the env var is empty / whitespace', () => {
+    expect(parseAdditionalTrustedOrigins('', 'local')).toEqual([]);
+    expect(parseAdditionalTrustedOrigins('   ', 'local')).toEqual([]);
+  });
+
+  it('parses a single origin', () => {
+    expect(parseAdditionalTrustedOrigins('http://localhost:5173', 'local')).toEqual([
+      'http://localhost:5173',
+    ]);
+  });
+
+  it('parses multiple comma-separated origins and trims whitespace', () => {
+    expect(
+      parseAdditionalTrustedOrigins(
+        'http://localhost:5173 , https://preview.example.com,http://localhost:4173',
+        'local',
+      ),
+    ).toEqual([
+      'http://localhost:5173',
+      'https://preview.example.com',
+      'http://localhost:4173',
+    ]);
+  });
+
+  it('dedupes entries (case-sensitive on the canonical origin)', () => {
+    // parseBetterAuthUrl canonicalises to `${protocol}//${host}`; two
+    // inputs that differ only in path fragment or trailing slash
+    // collapse to the same canonical form.
+    expect(
+      parseAdditionalTrustedOrigins(
+        'http://localhost:5173,http://localhost:5173',
+        'local',
+      ),
+    ).toEqual(['http://localhost:5173']);
+  });
+
+  it('skips empty entries between commas', () => {
+    expect(
+      parseAdditionalTrustedOrigins('http://localhost:5173,,http://localhost:4173,', 'local'),
+    ).toEqual(['http://localhost:5173', 'http://localhost:4173']);
+  });
+
+  it('rejects a non-http(s) origin with INVALID_BETTER_AUTH_URL', () => {
+    expect(() =>
+      parseAdditionalTrustedOrigins('http://localhost:5173,ftp://example.com', 'local'),
+    ).toThrow(/http or https/);
+  });
+
+  it('rejects an origin with credentials (userinfo) with INVALID_BETTER_AUTH_URL', () => {
+    expect(() =>
+      parseAdditionalTrustedOrigins('http://attacker:pw@example.com', 'local'),
+    ).toThrow(/credentials/);
+  });
+
+  it('rejects an origin with a query string with INVALID_BETTER_AUTH_URL', () => {
+    expect(() =>
+      parseAdditionalTrustedOrigins('http://localhost:5173?token=x', 'local'),
+    ).toThrow(/query/);
+  });
+
+  it('requires https for non-local environments', () => {
+    expect(() =>
+      parseAdditionalTrustedOrigins('http://preview.example.com', 'preview'),
+    ).toThrow(/https/);
+    expect(
+      parseAdditionalTrustedOrigins('https://preview.example.com', 'preview'),
+    ).toEqual(['https://preview.example.com']);
+  });
+});
+
+// D-CAP-042-auth-origin: loadConfig wires additionalTrustedOrigins
+// into the returned PlatformConfig.
+describe('loadConfig — additionalTrustedOrigins', () => {
+  it('populates additionalTrustedOrigins from the env var', () => {
+    const cfg = loadConfig(
+      baseEnv({
+        BETTER_AUTH_URL: 'http://localhost:8787',
+        BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS: 'http://localhost:5173',
+      }),
+    );
+    expect(cfg.additionalTrustedOrigins).toEqual(['http://localhost:5173']);
+  });
+
+  it('defaults to [] when the env var is not set', () => {
+    const cfg = loadConfig(baseEnv({ BETTER_AUTH_URL: 'http://localhost:8787' }));
+    expect(cfg.additionalTrustedOrigins).toEqual([]);
   });
 });

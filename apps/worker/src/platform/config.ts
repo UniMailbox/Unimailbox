@@ -41,6 +41,17 @@ export interface PlatformConfig extends SharedConfig {
   readonly environment: EnvironmentName;
   readonly authProvider: AuthProviderName;
   readonly betterAuthUrl: string;
+  /**
+   * Origins (besides `betterAuthUrl`) that Better Auth accepts cross-origin
+   * requests from. Empty in production where the SPA and API are
+   * same-origin; populated in local dev where the Vite SPA (port 5173)
+   * and the Worker (port 8787) are different origins. The browser
+   * document origin is the Vite port, so BA's CSRF/origin middleware
+   * must allow it explicitly to avoid INVALID_ORIGIN on the login form.
+   * See `parseAdditionalTrustedOrigins` for the parser; values are
+   * validated through the same rules as `betterAuthUrl`.
+   */
+  readonly additionalTrustedOrigins: readonly string[];
 }
 
 export class ConfigError extends Error {
@@ -145,10 +156,53 @@ export function parseBetterAuthUrl(raw: string | undefined, environment: Environ
   return `${parsed.protocol}//${parsed.host}`;
 }
 
+/**
+ * Parse the optional `BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS` env var
+ * into a deduplicated list of canonical origins. The value is a
+ * comma-separated list (whitespace tolerated); each entry is validated
+ * through `parseBetterAuthUrl` so a typo or a non-http(s) URL fails
+ * closed with the same `INVALID_BETTER_AUTH_URL` code — the threat
+ * model is the same as the base URL (no credentials, no query, no
+ * fragment; https required for non-local).
+ *
+ * Returns `[]` when the env var is unset or empty, which is the
+ * production default: the SPA and API are same-origin so `betterAuthUrl`
+ * already covers the only allowed origin.
+ *
+ * Why this exists: in local dev the Vite SPA (port 5173) and the Worker
+ * (port 8787) are different origins. Vite proxies `/api/*` to the
+ * Worker with `changeOrigin: false`, so the browser document origin
+ * (5173) is preserved on every cross-origin request. Better Auth's
+ * CSRF/origin middleware rejects anything not in `trustedOrigins`;
+ * conflating `baseURL` with `trustedOrigins` (the prior factory shape)
+ * meant the SPA origin was unreachable from the login form.
+ */
+export function parseAdditionalTrustedOrigins(
+  raw: string | undefined,
+  environment: EnvironmentName,
+): readonly string[] {
+  if (raw === undefined || raw.trim() === '') return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw.split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed === '') continue;
+    const parsed = parseBetterAuthUrl(trimmed, environment);
+    if (seen.has(parsed)) continue;
+    seen.add(parsed);
+    out.push(parsed);
+  }
+  return out;
+}
+
 export function loadConfig(env: Env): PlatformConfig {
   const environment = parseEnvironment(env.ENVIRONMENT);
   const authProvider = parseAuthProvider(env.AUTH_PROVIDER);
   const betterAuthUrl = parseBetterAuthUrl(env.BETTER_AUTH_URL, environment);
+  const additionalTrustedOrigins = parseAdditionalTrustedOrigins(
+    env.BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS,
+    environment,
+  );
   // CAP-043 Slice 1 fix pass (F8): there is no `cursorSigningKey` field on
   // PlatformConfig. The key is Secrets-Store-backed and therefore read
   // asynchronously — the only valid path is `parseCursorSigningKey(env)`
@@ -158,6 +212,7 @@ export function loadConfig(env: Env): PlatformConfig {
     runtime: 'workerd',
     authProvider,
     betterAuthUrl,
+    additionalTrustedOrigins,
   };
 }
 

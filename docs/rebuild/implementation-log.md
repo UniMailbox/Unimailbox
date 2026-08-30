@@ -10,6 +10,24 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-31 — Worker fix: split Better Auth trustedOrigins from baseURL for local-dev SPA
+
+After the previous Content-Type fix made BA requests reach the handler, Better Auth rejected them with `INVALID_ORIGIN`. Root cause: the factory conflated two distinct concepts — `baseURL` (where BA itself is served) and `trustedOrigins` (which browser origins may call BA). In production these are the same (same-origin SPA + API). In local dev they differ: the Vite SPA (port 5173) and the Worker (port 8787) are different origins, and `vite.config.ts:21-26` proxies `/api/*` with `changeOrigin: false`, so the browser document origin (`http://localhost:5173`) reaches the Worker unchanged. The factory's `trustedOrigins: [config.betterAuthUrl]` only allowed `http://localhost:8787`, so the login form got `INVALID_ORIGIN`.
+
+Fix:
+- `apps/worker/src/platform/config.ts` — new `parseAdditionalTrustedOrigins(raw, environment)` parses the new env var `BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS` (comma-separated, validated through the same rules as `betterAuthUrl` via `parseBetterAuthUrl` so a typo'd origin or non-http(s) URL fails closed with `INVALID_BETTER_AUTH_URL`). Each entry is canonicalised to `${protocol}//${host}` and deduped. Empty / unset → `[]`. New field `additionalTrustedOrigins: readonly string[]` on `PlatformConfig`.
+- `apps/worker/src/integrations/better-auth/factory.ts:135` — `trustedOrigins: [config.betterAuthUrl, ...config.additionalTrustedOrigins]`. The `disableOriginCheck: false` default is preserved (`factory.ts` file header) — open-redirect payloads cannot escape.
+- `apps/worker/src/platform/env.ts:54-65` — `Env.BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS?: string`.
+- `apps/worker/wrangler.dev.jsonc:74-83` — set to `http://localhost:5173` (the Vite SPA origin). `wrangler.jsonc` (production) and `wrangler.test.jsonc` (worker-pool tests) leave it unset → empty list. The committed production default stays empty so production's same-origin SPA + API doesn't open the trust list unnecessarily.
+
+Tests (`apps/worker/src/platform/config.test.ts`, +12): unset/empty → `[]`; single origin; multiple comma-separated with whitespace; dedup; skips empty between commas; non-http(s) → `INVALID_BETTER_AUTH_URL`; userinfo → `INVALID_BETTER_AUTH_URL`; query → `INVALID_BETTER_AUTH_URL`; https required for non-local; loadConfig wires the field.
+
+**Gates**: doctor 14/14, lint clean, typecheck clean, unit 1095→1107 (+12), web 362→362 (no change), worker 862/895 (same baseline — 33 pre-existing Brevo-mock failures isolated to `outbound-smoke-test.worker.test.ts`; unrelated, no regression). Manual verify: BA sign-in no longer 401's on origin when reached from the Vite-served login form.
+
+**Likely-next follow-up** (recorded as `D-CAP-042-auth-cookie` in the ledger, not addressed here): once BA's origin check passes, the `Set-Cookie` response is scoped to `localhost:8787` (because `BETTER_AUTH_URL=http://localhost:8787` drives BA's cookie scoping). The browser at `localhost:5173` will not store or send it. Standard dev workarounds: have Vite proxy BOTH SPA and BA endpoints on the same port; or set the BA cookie with `SameSite=None; Secure` and a parent-host `Domain=localhost`; or change `BETTER_AUTH_URL` to the Vite origin (then BA's `baseURL` itself points at the proxy, which is fine for a proxied dev setup). Tracked so the next iteration of `pnpm dev` has a documented fix path.
+
+---
+
 ## 2026-08-31 — Frontend fix: apiClient now sets Content-Type: application/json for object bodies
 
 `apps/web/src/infrastructure/api/client.ts` was JSON-stringifying object bodies but never setting `Content-Type: application/json`. The browser's `fetch()` defaults the header for a string body to `text/plain;charset=UTF-8`, which Better Auth's `POST /api/v1/auth/better/sign-in/email` rejects with 415 `UNSUPPORTED_MEDIA_TYPE` (Better Auth strictly validates the header at its handler boundary; the rest of our worker routes tolerate `text/plain` because they `c.req.text()` and parse).

@@ -54,6 +54,13 @@ export type Env = {
   ENVIRONMENT?: string;
   BETTER_AUTH_URL?: string;
   AUTH_PROVIDER?: string;
+  // D-CAP-042-auth-origin: comma-separated origins (besides
+  // `BETTER_AUTH_URL`) that Better Auth will accept cross-origin requests
+  // from. Used in local dev where the Vite SPA (port 5173) and the Worker
+  // (port 8787) live on different origins; the browser document origin
+  // is the Vite port, so BA's CSRF/origin middleware must allow it
+  // explicitly. Production has same-origin SPA + API so this stays empty.
+  BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS?: string;
 };
 
 // Hono's `Bindings` slot on the app env. Lives here so middleware files

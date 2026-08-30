@@ -128,11 +128,24 @@ export async function createBetterAuth(
     basePath: BETTER_AUTH_BASE_PATH,
     secret,
     // Better Auth's CSRF/origin middleware validates form/origin/callback
-    // URLs against this list. We allow exactly the configured origin
-    // (the Worker + SPA host) and reject the universe; `disableOriginCheck`
-    // is intentionally left at its `false` default so open-redirect
-    // payloads cannot escape through the auth boundary.
-    trustedOrigins: [config.betterAuthUrl],
+    // URLs against this list. We allow the configured base URL (where
+    // BA itself is served) plus any operator-supplied additional
+    // origins from `BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS`. In
+    // production these are the same — the SPA and API are co-hosted
+    // behind a single origin so `baseURL` is sufficient. In local dev
+    // they differ: the Vite SPA (port 5173) and the Worker (port 8787)
+    // are separate origins, and Vite proxies `/api/*` with
+    // `changeOrigin: false` so the browser's `Origin: http://localhost:5173`
+    // reaches the Worker. Without the additional origin the login
+    // form gets 401 INVALID_ORIGIN.
+    //
+    // `disableOriginCheck` is intentionally left at its `false` default
+    // so open-redirect payloads cannot escape through the auth boundary.
+    // Each additional origin is validated by
+    // `platform/config.ts:parseAdditionalTrustedOrigins` against the
+    // same rules as `betterAuthUrl` (http/https, no credentials, no
+    // query, no fragment; https required outside the local environment).
+    trustedOrigins: [config.betterAuthUrl, ...config.additionalTrustedOrigins],
     advanced: {
       cookiePrefix: 'unimailbox',
       defaultCookieAttributes: {
