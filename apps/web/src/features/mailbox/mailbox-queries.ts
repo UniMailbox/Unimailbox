@@ -11,16 +11,17 @@
 // CAP-043 Slice 2 adds the message-detail surface:
 //   - `messageDetailQuery` / `messageThreadQuery` — the detail page's
 //     two reads (`GET .../messages/:messageId` + `GET .../thread`),
-//     keyed inside the existing `['mailbox', 'messages', mailboxId]`
-//     family so they extend, not fork, the cache tree.
+//     keyed inside the existing user-scoped mailbox messages family so they
+//     extend, not fork, the cache tree.
 //   - `useMarkMessageReadMutation` — `PATCH .../messages/:messageId/read`
 //     fired once per detail-page mount when the message is unread
 //     (R-MESSAGE-005). D-CAP-041-2: ApiClient mints the fresh
 //     Idempotency-Key; components never touch that header.
 //
-// CAP-043 Slice 3 adds the inbox-row actions:
+// CAP-043 Slice 3 adds the inbox-row actions (CAP-058 makes star state
+// caller-scoped):
 //   - `useToggleMessageStarMutation` — `PATCH .../messages/:messageId/star`
-//     (AC 13/14, D-CAP-043-A) with an optimistic flip on the inbox cache
+//     (AC 13/14) with an optimistic flip on the caller-scoped inbox cache
 //     and rollback on failure.
 //   - `useDeleteMessageMutation` — `DELETE .../messages/:messageId`
 //     (AC 15/16, D-CAP-043-B/E); the 204 response removes the row from
@@ -32,9 +33,10 @@
 //     invalidates the mailbox's messages family, failure surfaces to the
 //     caller (the form keeps its values, AC 4).
 //
-// The hooks are keyed on `['mailbox', 'messages', mailboxId]` so a
-// navigation to a different mailbox invalidates by query key (D-CAP-041-1
-// cache pattern). The cursor is opaque to the client; we never inspect it.
+// The hooks are keyed on `['mailbox', userId, 'messages', mailboxId]` so a
+// navigation to a different mailbox or account isolates its cache
+// (D-CAP-041-1 / CAP-058). The cursor is opaque to the client; we never
+// inspect it.
 import {
   useInfiniteQuery,
   useMutation,
@@ -58,6 +60,27 @@ import {
 import type { ApiClient } from '../../infrastructure/api/client';
 import { ApiError } from '../../infrastructure/api/errors';
 import { useApiClient } from '../../infrastructure/api/client-provider';
+import { authSessionQuery } from '../auth/auth-queries';
+
+// A query may be created briefly while the auth descriptor is loading. Keep
+// that cache namespace separate from every authenticated user; production
+// hooks enable their fetch only once a real userId is available.
+const ANONYMOUS_USER_KEY = '__anonymous__';
+
+function defaultUserKey(): string {
+  // Direct key-factory callers (including tests) can still seed the key that
+  // the hooks use when the auth query is not mounted. Production hooks pass
+  // the auth-query userId explicitly below.
+  return ANONYMOUS_USER_KEY;
+}
+
+function scopedUserKey(userId: string | null | undefined): string {
+  return userId === undefined ? defaultUserKey() : (userId ?? ANONYMOUS_USER_KEY);
+}
+
+function invertedStar(value: 0 | 1): 0 | 1 {
+  return value === 1 ? 0 : 1;
+}
 
 // CAP-043 Slice 3 / gate 2: the mailbox-list wire shape was promoted
 // verbatim into `packages/contracts` (`mailboxListResponseSchema` +
@@ -68,13 +91,14 @@ import { useApiClient } from '../../infrastructure/api/client-provider';
 export type { MailboxListItem };
 
 export const mailboxQueryKeys = {
-  all: ['mailbox'] as const,
-  list: () => [...mailboxQueryKeys.all, 'list'] as const,
-  messages: (mailboxId: string) => [...mailboxQueryKeys.all, 'messages', mailboxId] as const,
-  message: (mailboxId: string, messageId: string) =>
-    [...mailboxQueryKeys.all, 'messages', mailboxId, 'detail', messageId] as const,
-  thread: (mailboxId: string, messageId: string) =>
-    [...mailboxQueryKeys.all, 'messages', mailboxId, 'thread', messageId] as const,
+  all: (userId?: string | null) => ['mailbox', scopedUserKey(userId)] as const,
+  list: (userId?: string | null) => [...mailboxQueryKeys.all(userId), 'list'] as const,
+  messages: (mailboxId: string, userId?: string | null) =>
+    [...mailboxQueryKeys.all(userId), 'messages', mailboxId] as const,
+  message: (mailboxId: string, messageId: string, userId?: string | null) =>
+    [...mailboxQueryKeys.all(userId), 'messages', mailboxId, 'detail', messageId] as const,
+  thread: (mailboxId: string, messageId: string, userId?: string | null) =>
+    [...mailboxQueryKeys.all(userId), 'messages', mailboxId, 'thread', messageId] as const,
 };
 
 /**
@@ -89,15 +113,18 @@ export async function fetchMailboxList(apiClient: ApiClient): Promise<MailboxLis
 
 /**
  * Query hook for the mailbox list. The shell calls this from
- * `MailboxListPage`; the cache is keyed on `mailboxQueryKeys.list()`
- * so a `setQueryData` write (CAP-043 Slice 3 — star/delete) updates
- * the list view without a refetch.
+ * `MailboxListPage`; the cache is keyed on the authenticated user's
+ * mailboxQueryKeys.list(userId) namespace so a cache write cannot cross
+ * account boundaries.
  */
 export function mailboxListQuery(): UseQueryResult<MailboxListItem[], ApiError> {
   const apiClient = useApiClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   return useQuery({
-    queryKey: mailboxQueryKeys.list(),
+    queryKey: mailboxQueryKeys.list(userId),
     queryFn: () => fetchMailboxList(apiClient),
+    enabled: userId !== null,
     staleTime: 0,
   });
 }
@@ -136,6 +163,8 @@ export async function fetchMailboxMessagesPage(
  */
 export function mailboxMessagesInfiniteQuery(mailboxId: string) {
   const apiClient = useApiClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   // Fix pass F8: no positional generics — the data shape, InfiniteData,
   // query key, and page-param all infer from the options object
   // (`initialPageParam` pins the page-param to `string | undefined`).
@@ -143,10 +172,11 @@ export function mailboxMessagesInfiniteQuery(mailboxId: string) {
   // `ApiError` at runtime, but `Promise<T>` carries no rejection type),
   // so consumers narrow with `instanceof ApiError` — see InboxListPage.
   return useInfiniteQuery({
-    queryKey: mailboxQueryKeys.messages(mailboxId),
+    queryKey: mailboxQueryKeys.messages(mailboxId, userId),
     queryFn: ({ pageParam }) => fetchMailboxMessagesPage(apiClient, mailboxId, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: userId !== null,
     staleTime: 0,
   });
 }
@@ -173,17 +203,21 @@ export async function fetchMessageDetail(
 
 /**
  * Query hook for the message detail. Keyed inside the
- * `['mailbox', 'messages', mailboxId]` family (extend, not fork) so the
- * detail cache lives beside the inbox pages it is opened from.
+ * user-scoped `['mailbox', userId, 'messages', mailboxId]` family (extend,
+ * not fork) so the detail cache lives beside the inbox pages it is opened
+ * from without crossing account boundaries.
  */
 export function messageDetailQuery(
   mailboxId: string,
   messageId: string,
 ): UseQueryResult<MessageDetail, ApiError> {
   const apiClient = useApiClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   return useQuery({
-    queryKey: mailboxQueryKeys.message(mailboxId, messageId),
+    queryKey: mailboxQueryKeys.message(mailboxId, messageId, userId),
     queryFn: () => fetchMessageDetail(apiClient, mailboxId, messageId),
+    enabled: userId !== null,
     staleTime: 0,
   });
 }
@@ -214,9 +248,12 @@ export function messageThreadQuery(
   messageId: string,
 ): UseQueryResult<MessageThreadResponse, ApiError> {
   const apiClient = useApiClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   return useQuery({
-    queryKey: mailboxQueryKeys.thread(mailboxId, messageId),
+    queryKey: mailboxQueryKeys.thread(mailboxId, messageId, userId),
     queryFn: () => fetchMessageThread(apiClient, mailboxId, messageId),
+    enabled: userId !== null,
     staleTime: 0,
   });
 }
@@ -252,6 +289,8 @@ export interface MarkMessageReadInput {
 export function useMarkMessageReadMutation() {
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   return useMutation({
     mutationFn: async (input: MarkMessageReadInput): Promise<void> => {
       await apiClient.fetch(
@@ -264,7 +303,7 @@ export function useMarkMessageReadMutation() {
       // write is structurally additive (pages/items copies) so an
       // in-flight fetch of the same key is not torn.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId),
+        mailboxQueryKeys.messages(input.mailboxId, userId),
         (existing) => {
           if (existing === undefined) {
             return existing;
@@ -283,7 +322,7 @@ export function useMarkMessageReadMutation() {
       // G6: flip the detail cache with the same additive-copy strategy —
       // a cached entry that is absent stays absent (nothing to correct).
       queryClient.setQueryData<MessageDetail>(
-        mailboxQueryKeys.message(input.mailboxId, input.messageId),
+        mailboxQueryKeys.message(input.mailboxId, input.messageId, userId),
         (existing) => (existing === undefined ? existing : { ...existing, isRead: 1 }),
       );
     },
@@ -307,14 +346,12 @@ export interface ToggleMessageStarInput {
 }
 
 /**
- * Star toggle mutation (CAP-043 Slice 3 / AC 13 + AC 14, D-CAP-043-A).
+ * Star toggle mutation (CAP-058 / AC 13 + AC 14).
  *
  * AC 16: the flip is OPTIMISTIC — `onMutate` inverts the row's
  * `isStarred` in the inbox cache before the request flies, so the star
  * responds instantly. `onSuccess` then overwrites the guess with the
- * server's authoritative post-toggle value (mailbox-level star — another
- * member may have toggled concurrently, so the response is the only
- * truth).
+ * server's authoritative post-toggle value for the requesting user.
  *
  * Slice 3 fix H7: `onError` rolls back with a ROW-SCOPED inverse flip —
  * a functional `setQueryData` that inverts `isStarred` on THIS message's
@@ -333,8 +370,10 @@ export interface ToggleMessageStarInput {
 export function useToggleMessageStarMutation() {
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   return useMutation({
-    mutationFn: async (input: ToggleMessageStarInput): Promise<number> => {
+    mutationFn: async (input: ToggleMessageStarInput): Promise<0 | 1> => {
       const response = await apiClient.fetch<unknown>(
         `/api/v1/mailboxes/${encodeURIComponent(input.mailboxId)}/messages/${encodeURIComponent(input.messageId)}/star`,
         { method: 'PATCH' },
@@ -347,11 +386,11 @@ export function useToggleMessageStarMutation() {
     onMutate: async (input): Promise<void> => {
       // Stop in-flight refetches from clobbering the optimistic write.
       await queryClient.cancelQueries({
-        queryKey: mailboxQueryKeys.messages(input.mailboxId),
+        queryKey: mailboxQueryKeys.messages(input.mailboxId, userId),
       });
       // Structural additive copy — only this message's row changes.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId),
+        mailboxQueryKeys.messages(input.mailboxId, userId),
         (existing) =>
           existing === undefined
             ? existing
@@ -361,7 +400,7 @@ export function useToggleMessageStarMutation() {
                   ...page,
                   items: page.items.map((item) =>
                     item.id === input.messageId
-                      ? { ...item, isStarred: item.isStarred === 1 ? 0 : 1 }
+                      ? { ...item, isStarred: invertedStar(item.isStarred) }
                       : item,
                   ),
                 })),
@@ -371,7 +410,7 @@ export function useToggleMessageStarMutation() {
     onSuccess: (isStarred, input) => {
       // Server truth replaces the optimistic guess.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId),
+        mailboxQueryKeys.messages(input.mailboxId, userId),
         (existing) =>
           existing === undefined
             ? existing
@@ -392,7 +431,7 @@ export function useToggleMessageStarMutation() {
       // star, or a delete that removed this row) is never clobbered; the
       // functional update no-ops when the row is no longer in the cache.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId),
+        mailboxQueryKeys.messages(input.mailboxId, userId),
         (existing) =>
           existing === undefined
             ? existing
@@ -402,7 +441,7 @@ export function useToggleMessageStarMutation() {
                   ...page,
                   items: page.items.map((item) =>
                     item.id === input.messageId
-                      ? { ...item, isStarred: item.isStarred === 1 ? 0 : 1 }
+                      ? { ...item, isStarred: invertedStar(item.isStarred) }
                       : item,
                   ),
                 })),
@@ -447,6 +486,8 @@ export interface DeleteMessageInput {
 export function useDeleteMessageMutation() {
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   return useMutation({
     mutationFn: async (input: DeleteMessageInput): Promise<void> => {
       await apiClient.fetch(
@@ -458,14 +499,14 @@ export function useDeleteMessageMutation() {
       // H11: stop in-flight refetches of the inbox key so the success
       // filter is the last write.
       await queryClient.cancelQueries({
-        queryKey: mailboxQueryKeys.messages(input.mailboxId),
+        queryKey: mailboxQueryKeys.messages(input.mailboxId, userId),
       });
     },
     onSuccess: (_result, input) => {
       // Structural removal: pages/items copies with this message
       // filtered out; an absent cache stays absent.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId),
+        mailboxQueryKeys.messages(input.mailboxId, userId),
         (existing) =>
           existing === undefined
             ? existing
@@ -480,10 +521,10 @@ export function useDeleteMessageMutation() {
       // Soft-deleted-for-this-user messages 404 at the detail and thread
       // routes; cached entries for them must not render again.
       queryClient.removeQueries({
-        queryKey: mailboxQueryKeys.message(input.mailboxId, input.messageId),
+        queryKey: mailboxQueryKeys.message(input.mailboxId, input.messageId, userId),
       });
       queryClient.removeQueries({
-        queryKey: mailboxQueryKeys.thread(input.mailboxId, input.messageId),
+        queryKey: mailboxQueryKeys.thread(input.mailboxId, input.messageId, userId),
       });
     },
     onError: (error, input) => {
@@ -527,7 +568,7 @@ export interface ComposeMessageInput {
  * mutations do not auto-retry (App.tsx sets `mutations.retry: false`;
  * the ApiClient's 5xx backoff happens within a single call only).
  *
- * On success the `['mailbox','messages',mailboxId]` family is
+ * On success the user-scoped `['mailbox',userId,'messages',mailboxId]` family is
  * invalidated: the sent copy appears in the mailbox's 'sent' folder and
  * the next inbox render refetches. On failure nothing is cached or
  * reset — the caller keeps the form's values and surfaces the error
@@ -537,6 +578,8 @@ export interface ComposeMessageInput {
 export function useComposeMessageMutation() {
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
   return useMutation({
     mutationFn: async (input: ComposeMessageInput): Promise<string> => {
       const response = await apiClient.fetch<unknown>(
@@ -571,7 +614,7 @@ export function useComposeMessageMutation() {
     },
     onSuccess: (_messageId, input) => {
       void queryClient.invalidateQueries({
-        queryKey: mailboxQueryKeys.messages(input.mailboxId),
+        queryKey: mailboxQueryKeys.messages(input.mailboxId, userId),
       });
     },
   });

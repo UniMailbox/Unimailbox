@@ -1709,20 +1709,19 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages/:messageId/thread — CAP-04
 });
 
 // ---------------------------------------------------------------------------
-// CAP-043 Slice 3 — PATCH .../messages/:messageId/star (AC 13 + AC 14).
-// D-CAP-043-A: the star is MAILBOX-LEVEL (mailbox_messages.is_starred) —
-// one atomic UPDATE ... RETURNING, last-write-wins. Any member's star is
-// every member's star (AC 17). D-CAP-043-H: rides the read surface
-// (requirePermission('message.read') + assertCan('read')).
+// CAP-058 — PATCH .../messages/:messageId/star.
+// R-MESSAGE-005: the star is per-user on message_user_state; the legacy
+// mailbox_messages.is_starred column remains unchanged and non-authoritative.
+// R-AUTHZ-003 / R-AUTHZ-004: rides the existing read authorization surface.
 // ---------------------------------------------------------------------------
 
-describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-043 Slice 3', () => {
+describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-058', () => {
   beforeEach(async () => {
     await resetAndMigrate();
     await completeSetup();
   });
 
-  it('AC 14: toggles the star both directions — each response value matches the DB truth', async () => {
+  it('R-MESSAGE-005 R-API-002 R-API-004: toggles the caller star both directions and preserves the legacy column', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
     const domainId = await createDomain();
@@ -1742,8 +1741,10 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     const firstBody = await first.json();
     expect(firstBody.data.id).toBe(messageId);
     expect(firstBody.data.isStarred).toBe(1);
-    const dbFirst = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
-      .bind(mailboxMessageId)
+    const dbFirst = await env.DB.prepare(
+      'SELECT is_starred FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
+      .bind(mailboxMessageId, ownerId)
       .first<{ is_starred: number }>();
     expect(dbFirst?.is_starred).toBe(1);
 
@@ -1752,13 +1753,115 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     expect(second.status).toBe(200);
     const secondBody = await second.json();
     expect(secondBody.data.isStarred).toBe(0);
-    const dbSecond = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
-      .bind(mailboxMessageId)
+    const dbSecond = await env.DB.prepare(
+      'SELECT is_starred FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
+      .bind(mailboxMessageId, ownerId)
       .first<{ is_starred: number }>();
     expect(dbSecond?.is_starred).toBe(0);
   });
 
-  it("AC 17 / D-CAP-043-A: the star is mailbox-level — another member's list shows isStarred = 1", async () => {
+  it('R-MESSAGE-005 R-DATA-005: star UPSERT preserves an existing caller read and delete state', async () => {
+    const ownerId = await createUserWithRole('member', 'cap058-state@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+    const readAt = '2026-01-02T03:04:05.000Z';
+    const updatedAt = '2026-01-02T03:04:06.000Z';
+
+    await env.DB.prepare(
+      `INSERT INTO message_user_state (
+         mailbox_message_id, user_id, is_read, read_at, updated_at,
+         is_deleted, deleted_at, is_starred
+       ) VALUES (?, ?, 1, ?, ?, 0, NULL, 0)`,
+    )
+      .bind(mailboxMessageId, ownerId, readAt, updatedAt)
+      .run();
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.isStarred).toBe(1);
+
+    const state = await env.DB.prepare(
+      `SELECT is_read, read_at, is_deleted, deleted_at, is_starred
+         FROM message_user_state
+        WHERE mailbox_message_id = ? AND user_id = ?`,
+    )
+      .bind(mailboxMessageId, ownerId)
+      .first<{
+        is_read: number;
+        read_at: string | null;
+        is_deleted: number;
+        deleted_at: string | null;
+        is_starred: number;
+      }>();
+    expect(state).toEqual({
+      is_read: 1,
+      read_at: readAt,
+      is_deleted: 0,
+      deleted_at: null,
+      is_starred: 1,
+    });
+  });
+
+  it('R-MESSAGE-005 R-API-004: the same idempotency key is independent across authorized users', async () => {
+    const ownerId = await createUserWithRole('member', 'cap058-key-owner@example.com');
+    const viewerId = await createUserWithRole('member', 'cap058-key-viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+    const idempotencyKey = crypto.randomUUID();
+    const path = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`;
+
+    const ownerResponse = await SELF.fetch(path, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': idempotencyKey },
+    });
+    const viewerResponse = await SELF.fetch(path, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${viewerToken}`, 'Idempotency-Key': idempotencyKey },
+    });
+    expect(ownerResponse.status).toBe(200);
+    expect(viewerResponse.status).toBe(200);
+    expect((await ownerResponse.json()).data.isStarred).toBe(1);
+    expect((await viewerResponse.json()).data.isStarred).toBe(1);
+
+    const records = await env.DB.prepare(
+      `SELECT COUNT(*) AS count
+         FROM idempotency_records
+        WHERE operation = ? AND idempotency_key = ?`,
+    )
+      .bind('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star', idempotencyKey)
+      .first<{ count: number }>();
+    expect(records?.count).toBe(2);
+
+    const states = await env.DB.prepare(
+      `SELECT user_id, is_starred
+         FROM message_user_state
+        WHERE mailbox_message_id = ?
+        ORDER BY user_id`,
+    )
+      .bind(mailboxMessageId)
+      .all<{ user_id: string; is_starred: number }>();
+    expect(states.results).toEqual(
+      expect.arrayContaining([
+        { user_id: ownerId, is_starred: 1 },
+        { user_id: viewerId, is_starred: 1 },
+      ]),
+    );
+  });
+
+  it("R-MESSAGE-005 R-AUTHZ-003: another member's list does not inherit the caller's star", async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const viewerId = await createUserWithRole('member', 'viewer@example.com');
     const ownerToken = await createSession(ownerId);
@@ -1779,18 +1882,17 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     );
     expect(starResponse.status).toBe(200);
 
-    // The viewer never touched the star, but the flag is mailbox-level:
-    // their list resolves isStarred = 1 too (AC 17).
+    // The viewer never touched the star; per-user state defaults to 0.
     const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
       headers: { Authorization: `Bearer ${viewerToken}` },
     });
     expect(viewerList.status).toBe(200);
     const viewerBody = await viewerList.json();
     expect(viewerBody.data.items).toHaveLength(1);
-    expect(viewerBody.data.items[0].isStarred).toBe(1);
+    expect(viewerBody.data.items[0].isStarred).toBe(0);
   });
 
-  it('returns 404 MESSAGE_NOT_FOUND for a non-existent message and for a message in ANOTHER mailbox (identical envelope)', async () => {
+  it('R-AUTHZ-003 R-AUTHZ-004 R-API-002: returns an identical 404 for missing and cross-mailbox messages', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
     const domainId = await createDomain();
@@ -1823,7 +1925,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     expect(Object.keys(crossBody.error).sort()).toEqual(Object.keys(missingBody.error).sort());
   });
 
-  it('blocks a non-member from starring (IDOR)', async () => {
+  it('R-AUTHZ-003 R-AUTHZ-004: blocks a non-member from starring (IDOR)', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const otherId = await createUserWithRole('member', 'other@example.com');
     const otherToken = await createSession(otherId);
@@ -1845,7 +1947,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     expect(body.error.code).toBe('MAILBOX_ACCESS_DENIED');
   });
 
-  it('returns 400 when the Idempotency-Key header is missing', async () => {
+  it('R-API-004 R-API-002: returns 400 when the Idempotency-Key header is missing', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
     const domainId = await createDomain();
@@ -1865,7 +1967,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
   });
 
-  it('replays the stored response on same key + body — the star does NOT toggle twice', async () => {
+  it('R-API-004 R-AUDIT-001: replays the stored per-user star response without toggling twice', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
     const domainId = await createDomain();
@@ -1888,13 +1990,15 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     const replayBody = await replay.json();
     expect(replayBody).toEqual(firstBody);
 
-    const row = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
-      .bind(mailboxMessageId)
+    const row = await env.DB.prepare(
+      'SELECT is_starred FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
+      .bind(mailboxMessageId, ownerId)
       .first<{ is_starred: number }>();
     expect(row?.is_starred).toBe(1);
   });
 
-  it('returns 409 when the same Idempotency-Key is reused with a different body', async () => {
+  it('R-API-004 R-API-002: returns 409 when the same Idempotency-Key is reused with a different body', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
     const domainId = await createDomain();
@@ -1923,7 +2027,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
   // settle must leave the store exactly as a single toggle would — the
   // invariants below hold under every interleaving, so the test cannot pass
   // by luck of scheduling.
-  it('H1: same-key concurrent star toggles settle atomically — identical responses, one record, one audit row, DB matches the response', async () => {
+  it('R-API-004 R-AUDIT-001 R-DATA-004: same-key concurrent per-user toggles settle atomically', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
     const domainId = await createDomain();
@@ -1960,8 +2064,10 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
     // The DB matches the response value: the loser's flip rolled back with
     // its failed record INSERT (a double-toggle would leave the DB at the
     // OPPOSITE of the replayed response).
-    const row = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
-      .bind(mailboxMessageId)
+    const row = await env.DB.prepare(
+      'SELECT is_starred FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
+      .bind(mailboxMessageId, ownerId)
       .first<{ is_starred: number }>();
     expect(row?.is_starred).toBe(aBody.data.isStarred);
 
@@ -1977,7 +2083,7 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
   // Slice 3 fix H4 / R-AUDIT-001 / D-CAP-043-I: the star transition writes
   // its audit row in the SAME batch as the business write; a replay (which
   // never re-runs the write) must add none.
-  it('H4: a star toggle writes exactly one audit row; a replay adds none', async () => {
+  it('R-AUDIT-001 R-API-004: a per-user star toggle writes one correlated audit row and replay adds none', async () => {
     const ownerId = await createUserWithRole('member', 'owner@example.com');
     const token = await createSession(ownerId);
     const domainId = await createDomain();
@@ -1990,9 +2096,11 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
 
     const first = await SELF.fetch(url, { method: 'PATCH', headers });
     expect(first.status).toBe(200);
+    const responseRequestId = first.headers.get('X-Request-Id');
+    expect(responseRequestId).toBeDefined();
 
     const auditRow = await env.DB.prepare(
-      "SELECT actor_user_id, action, resource_type, resource_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
+      "SELECT actor_user_id, action, resource_type, resource_id, request_id, metadata FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
     )
       .bind(messageId)
       .first<{
@@ -2000,12 +2108,14 @@ describe('PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star — CAP-04
         action: string;
         resource_type: string;
         resource_id: string;
+        request_id: string | null;
         metadata: string;
       }>();
     expect(auditRow?.actor_user_id).toBe(ownerId);
     expect(auditRow?.action).toBe('message.star_toggled');
     expect(auditRow?.resource_type).toBe('message');
     expect(auditRow?.resource_id).toBe(messageId);
+    expect(auditRow?.request_id).toBe(responseRequestId);
     expect(JSON.parse(auditRow?.metadata ?? '{}')).toEqual({ mailboxId, isStarred: 1 });
 
     // Replay the same key: the stored response returns, the batch never
@@ -2504,7 +2614,7 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     await addMailboxMember(mailboxId, viewerId, 'viewer');
     const { messageId } = await insertMessage(mailboxId, { subject: 'viewer tidies inbox' });
 
-    // Viewer stars the message — 200, and the mailbox-level flag flips.
+    // Viewer stars the message — 200, and only the viewer's state flips.
     const starResponse = await SELF.fetch(
       `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`,
       {
@@ -2526,8 +2636,8 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     );
     expect(deleteResponse.status).toBe(204);
 
-    // The viewer's list is empty; the owner still sees the message,
-    // starred by the viewer (mailbox-level star, AC 17 / D-CAP-043-A).
+    // The viewer's list is empty; the owner still sees the message with
+    // their independent default star state.
     const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
       headers: { Authorization: `Bearer ${viewerToken}` },
     });
@@ -2539,6 +2649,197 @@ describe('DELETE /api/v1/mailboxes/:mailboxId/messages/:messageId — CAP-043 Sl
     });
     const ownerListBody = await ownerList.json();
     expect(ownerListBody.data.items).toHaveLength(1);
-    expect(ownerListBody.data.items[0].isStarred).toBe(1);
+    expect(ownerListBody.data.items[0].isStarred).toBe(0);
+  });
+
+  it('R-MESSAGE-005 R-AUTHZ-003 R-AUTHZ-004 R-DATA-005: list, detail, and thread project independent caller stars with a no-state default', async () => {
+    const ownerId = await createUserWithRole('member', 'cap058-owner@example.com');
+    const viewerId = await createUserWithRole('member', 'cap058-viewer@example.com');
+    const ownerToken = await createSession(ownerId);
+    const viewerToken = await createSession(viewerId);
+
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await addMailboxMember(mailboxId, viewerId, 'viewer');
+    const root = await insertMessage(mailboxId, {
+      subject: 'per-user star root',
+      threadId: 'cap058-thread',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const reply = await insertMessage(mailboxId, {
+      subject: 'per-user star reply',
+      threadId: 'cap058-thread',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    const starUrl = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${root.messageId}/star`;
+    const ownerStar = await SELF.fetch(starUrl, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${ownerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+    });
+    expect(ownerStar.status).toBe(200);
+    expect((await ownerStar.json()).data.isStarred).toBe(1);
+
+    const ownerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    const ownerListBody = await ownerList.json();
+    expect(
+      ownerListBody.data.items.find((item: { id: string }) => item.id === root.messageId).isStarred,
+    ).toBe(1);
+
+    const viewerList = await SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages`, {
+      headers: { Authorization: `Bearer ${viewerToken}` },
+    });
+    const viewerListBody = await viewerList.json();
+    expect(
+      viewerListBody.data.items.find((item: { id: string }) => item.id === root.messageId)
+        .isStarred,
+    ).toBe(0);
+
+    const viewerDetail = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${root.messageId}`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    expect((await viewerDetail.json()).data.isStarred).toBe(0);
+    const ownerDetail = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${root.messageId}`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    expect((await ownerDetail.json()).data.isStarred).toBe(1);
+
+    const viewerThread = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${root.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${viewerToken}` } },
+    );
+    const viewerThreadBody = await viewerThread.json();
+    expect(viewerThreadBody.data.items).toHaveLength(2);
+    expect(
+      viewerThreadBody.data.items.find((item: { id: string }) => item.id === root.messageId)
+        .isStarred,
+    ).toBe(0);
+    expect(
+      viewerThreadBody.data.items.find((item: { id: string }) => item.id === reply.messageId)
+        .isStarred,
+    ).toBe(0);
+
+    const ownerThread = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${root.messageId}/thread`,
+      { headers: { Authorization: `Bearer ${ownerToken}` } },
+    );
+    const ownerThreadBody = await ownerThread.json();
+    expect(
+      ownerThreadBody.data.items.find((item: { id: string }) => item.id === root.messageId)
+        .isStarred,
+    ).toBe(1);
+    expect(
+      ownerThreadBody.data.items.find((item: { id: string }) => item.id === reply.messageId)
+        .isStarred,
+    ).toBe(0);
+
+    // Give the viewer an explicit state row and then clear it. The users
+    // now hold opposite values for the same message: owner=1, viewer=0.
+    const viewerToggle = async () =>
+      SELF.fetch(starUrl, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${viewerToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      });
+    expect((await (await viewerToggle()).json()).data.isStarred).toBe(1);
+    expect((await (await viewerToggle()).json()).data.isStarred).toBe(0);
+    const states = await env.DB.prepare(
+      `SELECT user_id, is_starred
+         FROM message_user_state
+        WHERE mailbox_message_id = ?
+        ORDER BY user_id`,
+    )
+      .bind(root.mailboxMessageId)
+      .all<{ user_id: string; is_starred: number }>();
+    expect(states.results).toHaveLength(2);
+    expect(states.results).toEqual(
+      expect.arrayContaining([
+        { user_id: ownerId, is_starred: 1 },
+        { user_id: viewerId, is_starred: 0 },
+      ]),
+    );
+
+    // The legacy compatibility column remains untouched by a per-user toggle.
+    const legacy = await env.DB.prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
+      .bind(root.mailboxMessageId)
+      .first<{ is_starred: number }>();
+    expect(legacy?.is_starred).toBe(0);
+  });
+
+  it('R-MESSAGE-005 R-API-004 R-DATA-004: same key is bound to its message resource and cannot replay another message', async () => {
+    const ownerId = await createUserWithRole('member', 'cap058-resource@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const first = await insertMessage(mailboxId, { subject: 'first resource' });
+    const second = await insertMessage(mailboxId, { subject: 'second resource' });
+    const key = crypto.randomUUID();
+    const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': key };
+
+    const firstResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${first.messageId}/star`,
+      { method: 'PATCH', headers },
+    );
+    expect(firstResponse.status).toBe(200);
+    expect((await firstResponse.json()).data.id).toBe(first.messageId);
+
+    const secondResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${second.messageId}/star`,
+      { method: 'PATCH', headers },
+    );
+    expect(secondResponse.status).toBe(409);
+    expect((await secondResponse.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    const secondState = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM message_user_state WHERE mailbox_message_id = ?',
+    )
+      .bind(second.mailboxMessageId)
+      .first<{ count: number }>();
+    expect(secondState?.count).toBe(0);
+  });
+
+  it('R-MESSAGE-005 R-AUTHZ-003 R-AUTHZ-004: a caller soft-deleted message is not star-toggleable and creates no writes', async () => {
+    const ownerId = await createUserWithRole('member', 'cap058-delete@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { messageId, mailboxMessageId } = await insertMessage(mailboxId);
+    const deleteResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(deleteResponse.status).toBe(204);
+    const before = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
+    )
+      .bind(messageId)
+      .first<{ count: number }>();
+
+    const starResponse = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages/${messageId}/star`,
+      {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
+      },
+    );
+    expect(starResponse.status).toBe(404);
+    expect((await starResponse.json()).error.code).toBe('MESSAGE_NOT_FOUND');
+    const after = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM audit_events WHERE resource_id = ? AND action = 'message.star_toggled'",
+    )
+      .bind(messageId)
+      .first<{ count: number }>();
+    expect(after?.count).toBe(before?.count);
+    const state = await env.DB.prepare(
+      'SELECT is_starred FROM message_user_state WHERE mailbox_message_id = ? AND user_id = ?',
+    )
+      .bind(mailboxMessageId, ownerId)
+      .first<{ is_starred: number }>();
+    expect(state?.is_starred).toBe(0);
   });
 });

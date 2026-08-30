@@ -234,7 +234,7 @@ async function renderCompose(options: RenderComposeOptions): Promise<{
   }
   if (options.seedParentDetail !== undefined) {
     queryClient.setQueryData(
-      mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID),
+      mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID, SESSION.userId),
       options.seedParentDetail,
     );
   }
@@ -534,7 +534,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: mailboxQueryKeys.messages(MAILBOX_ID),
+        queryKey: mailboxQueryKeys.messages(MAILBOX_ID, SESSION.userId),
       });
     });
     // The confirmation carries the messageId parsed from the 202 body.
@@ -794,7 +794,8 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
     resolveRefetch(errorResponse('INTERNAL', 'refetch boom', 400));
     await waitFor(() => {
       expect(
-        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID))?.error,
+        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID, SESSION.userId))
+          ?.error,
       ).not.toBeNull();
     });
 
@@ -838,7 +839,8 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
     // and the refetch failed — the confirmation and blank form stay.
     await waitFor(() => {
       expect(
-        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID))?.error,
+        queryClient.getQueryState(mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID, SESSION.userId))
+          ?.error,
       ).not.toBeNull();
     });
     expect(screen.getByTestId('compose-confirmation')).toBeInTheDocument();

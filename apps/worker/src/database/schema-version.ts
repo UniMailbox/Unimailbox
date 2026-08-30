@@ -9,4 +9,5 @@
 // 0021 adds attachment_uploads metadata for temporary CACHE KV staging.
 // 0022 adds message_attachments consumed-relation rows for CAP-050
 // (one-consume-per-upload via UNIQUE index + BEFORE INSERT trigger).
-export const CURRENT_SCHEMA_VERSION = '0022' as const;
+// 0023 moves message stars onto per-user message_user_state rows (CAP-058).
+export const CURRENT_SCHEMA_VERSION = '0023' as const;

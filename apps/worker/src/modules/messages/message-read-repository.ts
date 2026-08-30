@@ -1,11 +1,12 @@
 // message-read-repository — read-side queries for messages.
 // Owner: messages module. Private file — export through modules/messages/index.ts.
 //
-// R-MESSAGE-005: isRead persists per user. The list and detail queries join
+// R-MESSAGE-005: isRead and isStarred persist per user. The list and detail queries join
 // message_user_state for the requesting user so two members of the same mailbox
 // see independent read state. mailbox_messages.is_read is a separate "any-reader"
 // flag set by markMessageAsRead for use by unread-count aggregations; the API
-// surface reports the per-user value.
+// surface reports the per-user values. mailbox_messages.is_starred is retained
+// only as a legacy compatibility column and is not authoritative.
 // R-AUTHZ-004: Callers must have already asserted access to the mailbox; these
 // queries authorise against the supplied mailboxId, never a client-supplied owner.
 //
@@ -46,8 +47,8 @@ export interface MessageListItem {
   fromAddress: string;
   fromName: string;
   subject: string;
-  isRead: number; // 0 or 1 (SQLite integer)
-  isStarred: number;
+  isRead: 0 | 1;
+  isStarred: 0 | 1;
   folder: string;
   createdAt: string;
   recipients: { to: RecipientInfo[]; cc: RecipientInfo[] };
@@ -64,8 +65,8 @@ export interface MessageDetail {
   inReplyToHeader: string | null;
   referencesHeader: string;
   status: string;
-  isRead: number;
-  isStarred: number;
+  isRead: 0 | 1;
+  isStarred: 0 | 1;
   folder: string;
   createdAt: string;
   recipients: { to: RecipientInfo[]; cc: RecipientInfo[] };
@@ -91,6 +92,13 @@ interface MessageListRow {
   folder: string;
   created_at: string;
   user_is_read: number;
+}
+
+// D1 returns INTEGER columns as numbers. Normalize the constrained storage
+// value at this boundary so the public contract remains the exact 0 | 1
+// presentation type even if a corrupt/legacy row is encountered.
+function stateFlag(value: number): 0 | 1 {
+  return value === 1 ? 1 : 0;
 }
 
 interface MessageDetailRow {
@@ -213,7 +221,8 @@ function groupRecipients(rows: RecipientRow[]): {
  * Lists messages in a mailbox, newest first, with cursor pagination.
  *
  * R-MESSAGE-005:
- *   - isRead is resolved per user via a LEFT JOIN on message_user_state.
+ *   - isRead and isStarred are resolved per user via a LEFT JOIN on
+ *     message_user_state.
  *   - isDeleted is filtered to 0 via `COALESCE(mus.is_deleted, 0) = 0`.
  *     A user who has never opened the message has no row; COALESCE
  *     reads 0 and the message shows. A user who soft-deleted has
@@ -270,7 +279,7 @@ export async function listMessagesByMailbox(
   const rows = await db
     .prepare(
       `SELECT m.id, m.from_address, m.from_name, m.subject,
-              mm.is_starred, mm.folder, m.created_at,
+              COALESCE(mus.is_starred, 0) AS is_starred, mm.folder, m.created_at,
               COALESCE(mus.is_read, 0) AS user_is_read
          FROM mailbox_messages mm
          JOIN messages m ON mm.message_id = m.id
@@ -292,8 +301,8 @@ export async function listMessagesByMailbox(
     fromAddress: row.from_address,
     fromName: row.from_name,
     subject: row.subject,
-    isRead: row.user_is_read,
-    isStarred: row.is_starred,
+    isRead: stateFlag(row.user_is_read),
+    isStarred: stateFlag(row.is_starred),
     folder: row.folder,
     createdAt: row.created_at,
     recipients: { to: [], cc: [] },
@@ -371,7 +380,7 @@ export async function getMessageDetail(
       `SELECT m.id, m.from_address, m.from_name, m.subject,
               m.html_body, m.text_body,
               m.message_id_header, m.in_reply_to_header, m.references_header,
-              m.status, mm.is_starred, mm.folder, m.created_at,
+              m.status, COALESCE(mus.is_starred, 0) AS is_starred, mm.folder, m.created_at,
               COALESCE(mus.is_read, 0) AS user_is_read
          FROM mailbox_messages mm
          JOIN messages m ON mm.message_id = m.id
@@ -432,8 +441,8 @@ export async function getMessageDetail(
     inReplyToHeader: row.in_reply_to_header,
     referencesHeader: row.references_header,
     status: row.status,
-    isRead: row.user_is_read,
-    isStarred: row.is_starred,
+    isRead: stateFlag(row.user_is_read),
+    isStarred: stateFlag(row.is_starred),
     folder: row.folder,
     createdAt: row.created_at,
     recipients: groupRecipients(recipientRows.results ?? []),
@@ -525,7 +534,7 @@ export async function getMessageThread(
     .prepare(
       rootId === null
         ? `SELECT m.id, m.from_address, m.from_name, m.subject,
-                  mm.is_starred, mm.folder, m.created_at,
+                  COALESCE(mus.is_starred, 0) AS is_starred, mm.folder, m.created_at,
                   COALESCE(mus.is_read, 0) AS user_is_read
              FROM mailbox_messages mm
              JOIN messages m ON mm.message_id = m.id
@@ -537,7 +546,7 @@ export async function getMessageThread(
               AND mm.message_id = ?
          ORDER BY m.created_at ASC, m.id ASC`
         : `SELECT m.id, m.from_address, m.from_name, m.subject,
-                  mm.is_starred, mm.folder, m.created_at,
+                  COALESCE(mus.is_starred, 0) AS is_starred, mm.folder, m.created_at,
                   COALESCE(mus.is_read, 0) AS user_is_read
              FROM mailbox_messages mm
              JOIN messages m ON mm.message_id = m.id
@@ -566,8 +575,8 @@ export async function getMessageThread(
     fromAddress: row.from_address,
     fromName: row.from_name,
     subject: row.subject,
-    isRead: row.user_is_read,
-    isStarred: row.is_starred,
+    isRead: stateFlag(row.user_is_read),
+    isStarred: stateFlag(row.is_starred),
     folder: row.folder,
     createdAt: row.created_at,
     recipients: { to: [], cc: [] },
@@ -675,68 +684,78 @@ export async function markMessageAsRead(
 }
 
 /**
- * Reads the current mailbox-level star flag (CAP-043 Slice 3 fix H1,
- * D-CAP-043-A).
+ * Reads the current star flag for one user (CAP-058, R-MESSAGE-005).
  *
- * H1 replaced the single-statement `NOT is_starred` toggle with a
- * read-compute-write pair: the route reads the current flag, computes the
- * target, and folds `prepareSetMessageStar` into the SAME D1 batch as the
- * idempotency record + audit row. A batched `UPDATE … RETURNING` cannot
- * feed the record's `responseJson` (D1 binds all statement values at
- * prepare time), hence the two-step shape — see the route for the
- * batch-atomicity rationale (R-API-004: a non-re-runnable write must
- * never execute under best-effort idempotency).
+ * The route reads the current flag, computes the target, and folds
+ * `prepareSetMessageStar` into the same D1 batch as the idempotency record
+ * and audit row. The two-step read/compute/write shape keeps the response
+ * deterministic while the batch keeps the non-re-runnable toggle atomic
+ * (R-API-004).
  *
  * @param db — D1 database binding
- * @param mailboxId — target mailbox (caller must have asserted read access
- *   per D-CAP-043-H)
+ * @param mailboxId — target mailbox (caller must have asserted read access)
  * @param messageId — target message
- * @returns the current `is_starred` (true/false), or null when no
- *   `mailbox_messages` row exists for the (mailbox, message) pair — the
- *   caller surfaces 404 MESSAGE_NOT_FOUND.
+ * @param userId — requesting user whose state is read
+ * @returns the user's current `is_starred` (true/false), or null when no
+ *   `mailbox_messages` row exists for the (mailbox, message) pair.
  */
 export async function getMessageStarState(
   db: Database,
   mailboxId: string,
   messageId: string,
+  userId: string,
 ): Promise<boolean | null> {
   const row = await db
-    .prepare('SELECT is_starred FROM mailbox_messages WHERE mailbox_id = ? AND message_id = ?')
-    .bind(mailboxId, messageId)
+    .prepare(
+      `SELECT COALESCE(mus.is_starred, 0) AS is_starred
+         FROM mailbox_messages mm
+    LEFT JOIN message_user_state mus
+              ON mus.mailbox_message_id = mm.id
+             AND mus.user_id = ?
+        WHERE mm.mailbox_id = ?
+          AND mm.message_id = ?
+          AND COALESCE(mus.is_deleted, 0) = 0`,
+    )
+    .bind(userId, mailboxId, messageId)
     .first<{ is_starred: number }>();
 
   return row === null ? null : row.is_starred === 1;
 }
 
 /**
- * Prepared `UPDATE` setting the mailbox-level star flag to a KNOWN target
- * (CAP-043 Slice 3 fix H1, D-CAP-043-A). The route computes `target` from
- * `getMessageStarState`'s read and appends this statement to the batch
- * that also carries the idempotency record and the audit row — the star
- * write, its replay record, and its audit row commit or roll back
- * together.
- *
- * `is_starred` is deliberately NOT per-user: the deferral to
- * `message_user_state.is_starred` is recorded in D-CAP-043-A, so any
- * member's star is every member's star (AC 17).
- *
- * The read→batch window for DIFFERENT-key concurrent toggles stays
- * last-write-wins (gate 5 / D-CAP-043-A).
+ * Prepared per-user star UPSERT setting a KNOWN target (CAP-058,
+ * R-MESSAGE-005). The INSERT ... SELECT scopes the state row through the
+ * requested mailbox/message association. Only `is_starred` and
+ * `updated_at` are changed on conflict; read and soft-delete state on the
+ * same composite row is preserved.
  *
  * @param db — D1 database binding
  * @param mailboxId — target mailbox
  * @param messageId — target message
+ * @param userId — requesting user whose state is written
  * @param target — the computed post-toggle value (SQLite 0/1)
+ * @param updatedAt — deterministic SQLite timestamp for the state write
  */
 export function prepareSetMessageStar(
   db: Database,
   mailboxId: string,
   messageId: string,
+  userId: string,
   target: 0 | 1,
+  updatedAt = sqliteTimestamp(systemClock.now()),
 ): D1PreparedStatement {
   return db
-    .prepare('UPDATE mailbox_messages SET is_starred = ? WHERE mailbox_id = ? AND message_id = ?')
-    .bind(target, mailboxId, messageId);
+    .prepare(
+      `INSERT INTO message_user_state (mailbox_message_id, user_id, is_starred, updated_at)
+       SELECT mm.id, ?, ?, ?
+         FROM mailbox_messages mm
+        WHERE mm.mailbox_id = ?
+          AND mm.message_id = ?
+       ON CONFLICT(mailbox_message_id, user_id) DO UPDATE SET
+         is_starred = excluded.is_starred,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(userId, target, updatedAt, mailboxId, messageId);
 }
 
 /**

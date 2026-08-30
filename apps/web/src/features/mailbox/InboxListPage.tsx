@@ -2,7 +2,8 @@
 //
 // CAP-043 Slice 1 (AC 8). The paginated inbox view for a single mailbox.
 // Built on TanStack Query's `useInfiniteQuery` keyed on
-// `['mailbox', 'messages', mailboxId]` (D-CAP-041-1 cache pattern).
+// `['mailbox', userId, 'messages', mailboxId]` (D-CAP-041-1 / CAP-058
+// cache pattern).
 //
 // State surface (data-first since the CAP-044 Slice 3 fix pass (g) —
 // the D-CAP-044-L fold-in; the admin pages' contract):
@@ -46,8 +47,8 @@ import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Button } from '../../components/ui/Button';
 import { AppNav } from '../../components/AppNav';
 import { LogoutButton } from '../auth/LogoutButton';
-// CAP-043 Slice 3 / AC 16: the inbox row's star + delete actions. Both
-// live here, not on the detail page — detail-page actions ride with
+// CAP-058 / CAP-043 Slice 3: the inbox row's per-user star + delete actions.
+// Both live here, not on the detail page — detail-page actions ride with
 // CAP-044.
 import { StarButton } from './StarButton';
 import { DeleteMessageButton } from './DeleteMessageButton';
@@ -88,7 +89,10 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
   // non-subscribing cache read is enough — a cache miss (direct URL
   // entry) falls back to the UUID rather than firing a fetch here.
   const queryClient = useQueryClient();
-  const cachedMailboxes = queryClient.getQueryData<MailboxListItem[]>(mailboxQueryKeys.list());
+  const userId = sessionQuery.data?.userId ?? null;
+  const cachedMailboxes = queryClient.getQueryData<MailboxListItem[]>(
+    mailboxQueryKeys.list(userId),
+  );
   const mailboxAddress =
     cachedMailboxes?.find((mailbox) => mailbox.id === mailboxId)?.address ?? `Mailbox ${mailboxId}`;
 
@@ -109,7 +113,7 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
   // CURSOR_SIGNING_KEY rotation fails forever under Retry.
   // `resetQueries` drops the accumulated chain and refetches page 1.
   const startOver = (): void => {
-    void queryClient.resetQueries({ queryKey: mailboxQueryKeys.messages(mailboxId) });
+    void queryClient.resetQueries({ queryKey: mailboxQueryKeys.messages(mailboxId, userId) });
   };
 
   // isPending, not isLoading (fix (b) applied to this file by follow-
@@ -268,9 +272,9 @@ function InboxListRow({ mailboxId, message }: InboxListRowProps): ReactElement {
             auth-session-storage markup guard asserts the row stays
             valid at every dialog state). */}
         <div className="inbox-list-row-actions">
-          {/* Slice 3 / AC 13 + AC 16: the star glyph is now the toggle
-              itself; the cached isStarred drives its filled/outline
-              state and the optimistic flip happens in the mutation. */}
+          {/* CAP-058 / AC 13 + AC 16: the per-user star glyph is the toggle
+              itself; the cached isStarred drives its filled/outline state
+              and the optimistic flip happens in the mutation. */}
           <StarButton mailboxId={mailboxId} message={message} />
           <DeleteMessageButton mailboxId={mailboxId} message={message} />
         </div>

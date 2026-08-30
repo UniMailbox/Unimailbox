@@ -209,10 +209,114 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    // CAP-050: 0022 adds message_attachments (consume-side of CAP-049's
-    // 0021 attachment_uploads) with the UNIQUE index and BEFORE INSERT
-    // trigger that close the consume race at the schema layer.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0022');
+    // CAP-058: 0023 adds the typed per-user star column while retaining
+    // the legacy mailbox-level compatibility column.
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0023');
+  });
+
+  it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {
+    const db = await migrationsDb({ through: '0022_message_attachments' });
+    const ownerId = '00000000-0000-4000-8000-000000005801';
+    const memberId = '00000000-0000-4000-8000-000000005802';
+    const domainId = '00000000-0000-4000-8000-000000005803';
+    const mailboxId = '00000000-0000-4000-8000-000000005804';
+    const messageId = '00000000-0000-4000-8000-000000005805';
+    const mailboxMessageId = '00000000-0000-4000-8000-000000005806';
+
+    const insertUser = db.prepare(
+      `INSERT INTO users (
+         id, email, display_name, status, password_algorithm, password_iterations,
+         password_salt, password_hash, created_at, updated_at
+       ) VALUES (?, ?, ?, 'active', 'pbkdf2-sha256', 600000, x'00', x'11', ?, ?)`,
+    );
+    await insertUser.bind(ownerId, 'cap058-owner@example.test', 'Owner', NOW, NOW).run();
+    await insertUser.bind(memberId, 'cap058-member@example.test', 'Member', NOW, NOW).run();
+    await db
+      .prepare(
+        `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
+         VALUES (?, 'cap058.example.test', 'active', NULL, ?, ?)`,
+      )
+      .bind(domainId, NOW, NOW)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'inbox', '', 'active', ?, ?)`,
+      )
+      .bind(mailboxId, domainId, ownerId, NOW, NOW)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO mailbox_members (mailbox_id, user_id, role, created_at)
+         VALUES (?, ?, 'viewer', ?)`,
+      )
+      .bind(mailboxId, memberId, NOW)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body, references_header, status, created_by_user_id, created_at, updated_at)
+         VALUES (?, 'sender@example.test', 'Sender', 'legacy star', '', '', '', 'delivered', ?, ?, ?)`,
+      )
+      .bind(messageId, ownerId, NOW, NOW)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
+         VALUES (?, ?, ?, 0, 1, 'inbox', ?)`,
+      )
+      .bind(mailboxMessageId, mailboxId, messageId, NOW)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO message_user_state (mailbox_message_id, user_id, is_read, read_at, updated_at, is_deleted, deleted_at)
+         VALUES (?, ?, 1, ?, ?, 0, NULL)`,
+      )
+      .bind(mailboxMessageId, ownerId, NOW, NOW)
+      .run();
+
+    await migrationsDb();
+
+    const column = await db
+      .prepare(
+        `SELECT type, "notnull" AS required, dflt_value
+           FROM pragma_table_info('message_user_state')
+          WHERE name = 'is_starred'`,
+      )
+      .first<{ type: string; required: number; dflt_value: string | null }>();
+    expect(column).toEqual({ type: 'INTEGER', required: 1, dflt_value: '0' });
+    const ddl = await db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_user_state'")
+      .first<{ sql: string }>();
+    expect(ddl?.sql).toContain('is_starred IN (0, 1)');
+
+    const stateRows = await db
+      .prepare(
+        `SELECT user_id, is_read, is_starred
+           FROM message_user_state
+          WHERE mailbox_message_id = ?
+          ORDER BY user_id`,
+      )
+      .bind(mailboxMessageId)
+      .all<{ user_id: string; is_read: number; is_starred: number }>();
+    expect(stateRows.results).toEqual([
+      { user_id: ownerId, is_read: 1, is_starred: 1 },
+      { user_id: memberId, is_read: 0, is_starred: 1 },
+    ]);
+
+    const legacy = await db
+      .prepare('SELECT is_starred FROM mailbox_messages WHERE id = ?')
+      .bind(mailboxMessageId)
+      .first<{ is_starred: number }>();
+    expect(legacy?.is_starred).toBe(1);
+    const duplicateCount = await db
+      .prepare(
+        `SELECT COUNT(*) AS count
+           FROM message_user_state
+          WHERE mailbox_message_id = ?`,
+      )
+      .bind(mailboxMessageId)
+      .first<{ count: number }>();
+    expect(duplicateCount?.count).toBe(2);
   });
 
   it('CAP-044: upgrading an existing administrator grants audit.read', async () => {

@@ -3,7 +3,7 @@
 // The repository is the public surface; private implementation is in message-repository.ts.
 //
 // R-INBOUND-008: Message + recipients + mailbox_messages inserted in one D1 batch
-// R-MESSAGE-005: isRead persists per user (message-read-repository).
+// R-MESSAGE-005: isRead and isStarred persist per user (message-read-repository).
 // R-MESSAGE-007: webhook status updates apply iff newer (or equal+higher-rank).
 //   The single `messages` row writer is updateMessageStatus — outbound-mail
 //   must use it (D-CAP-028-D).
@@ -41,9 +41,9 @@ export {
   // (mailboxId, messageId) itself — the route layer no longer runs raw SQL.
   // Returns false (→ 404 MESSAGE_NOT_FOUND) when the pair has no row.
   markMessageAsRead,
-  // CAP-043 Slice 3 fix H1 / AC 13 (D-CAP-043-A): read + prepared-write
-  // pair so the route folds the star UPDATE into the same D1 batch as the
-  // idempotency record and audit row. getMessageStarState returns null
+  // CAP-058 / R-MESSAGE-005: read + prepared-write pair so the route folds
+  // the per-user star UPSERT into the same D1 batch as the idempotency record
+  // and audit row. getMessageStarState returns null
   // (→ 404 MESSAGE_NOT_FOUND) when the pair has no row.
   getMessageStarState,
   prepareSetMessageStar,

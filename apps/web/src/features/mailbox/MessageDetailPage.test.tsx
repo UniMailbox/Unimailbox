@@ -36,7 +36,7 @@ import {
   useParams,
 } from '@tanstack/react-router';
 import type { AnyRouter } from '@tanstack/react-router';
-import type { MessageListResponse } from '@unimailbox/contracts';
+import type { MessageListItem, MessageListResponse } from '@unimailbox/contracts';
 import { MessageDetailPage } from './MessageDetailPage';
 import { mailboxQueryKeys } from './mailbox-queries';
 import { authQueryKeys } from '../auth/auth-queries';
@@ -108,7 +108,7 @@ const ROOT_THREAD_ITEM = {
   recipients: { to: [], cc: [] },
 };
 
-const ACTIVE_THREAD_ITEM = {
+const ACTIVE_THREAD_ITEM: MessageListItem = {
   id: MESSAGE_ID,
   fromAddress: 'sender@example.com',
   fromName: 'Sender Name',
@@ -267,7 +267,7 @@ async function renderDetailPage(options: RenderDetailOptions): Promise<{
   if (options.seedInboxWithActiveMessage === true) {
     // Pre-seed the inbox infinite-query cache exactly as the inbox page
     // would have left it: one page holding the active message unread.
-    queryClient.setQueryData(mailboxQueryKeys.messages(MAILBOX_ID), {
+    queryClient.setQueryData(mailboxQueryKeys.messages(MAILBOX_ID, SESSION.userId), {
       pages: [{ items: [{ ...ACTIVE_THREAD_ITEM }], nextCursor: null }],
       pageParams: [undefined],
     } satisfies InfiniteData<MessageListResponse>);
@@ -551,7 +551,7 @@ describe('MessageDetailPage', () => {
     // not mounted here, so the only way this flips is setQueryData.
     await waitFor(() => {
       const cached = queryClient.getQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(MAILBOX_ID),
+        mailboxQueryKeys.messages(MAILBOX_ID, SESSION.userId),
       );
       const item = cached?.pages[0]?.items.find((i) => i.id === MESSAGE_ID);
       expect(item?.isRead).toBe(1);
@@ -595,7 +595,7 @@ describe('MessageDetailPage', () => {
     // happens in the mutation's onSuccess, a tick after the response.
     await waitFor(() => {
       const cached = queryClient.getQueryData<{ isRead: number }>(
-        mailboxQueryKeys.message(MAILBOX_ID, MESSAGE_ID),
+        mailboxQueryKeys.message(MAILBOX_ID, MESSAGE_ID, SESSION.userId),
       );
       expect(cached?.isRead).toBe(1);
     });

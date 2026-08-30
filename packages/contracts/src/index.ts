@@ -564,9 +564,10 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * the idempotency_records.response_json CHECK raise (CAP-047 PATCH
  * slice), to `'0021'` for attachment_uploads (CAP-049), and to
  * `'0022'` for message_attachments (CAP-050 — one-consume-per-upload
- * via UNIQUE index + BEFORE INSERT trigger).
+ * via UNIQUE index + BEFORE INSERT trigger), and to `'0023'` for per-user
+ * message star state (CAP-058).
  */
-export const CURRENT_SCHEMA_VERSION = '0022' as const;
+export const CURRENT_SCHEMA_VERSION = '0023' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008
@@ -946,6 +947,11 @@ export const messageRecipientSchema = z.object({
 
 export type MessageRecipientInfo = z.infer<typeof messageRecipientSchema>;
 
+// D1 stores these presentation flags as constrained INTEGER 0/1 values.
+// Keep the wire contract equally narrow so an invalid state cannot cross the
+// module boundary as an arbitrary number.
+const messageStateFlagSchema = z.union([z.literal(0), z.literal(1)]);
+
 /**
  * One row in the inbox list response (GET /api/v1/mailboxes/:mailboxId/messages).
  *
@@ -956,8 +962,8 @@ export const messageListItemSchema = z.object({
   fromAddress: z.string(),
   fromName: z.string(),
   subject: z.string(),
-  isRead: z.number(),
-  isStarred: z.number(),
+  isRead: messageStateFlagSchema,
+  isStarred: messageStateFlagSchema,
   folder: z.string(),
   createdAt: z.string(),
   recipients: z.object({
@@ -1015,8 +1021,8 @@ export const messageDetailSchema = z.object({
   inReplyToHeader: z.string().nullable(),
   referencesHeader: z.string(),
   status: z.string(),
-  isRead: z.number(),
-  isStarred: z.number(),
+  isRead: messageStateFlagSchema,
+  isStarred: messageStateFlagSchema,
   folder: z.string(),
   createdAt: z.string(),
   recipients: z.object({
@@ -1055,12 +1061,12 @@ export type MessageThreadResponse = z.infer<typeof messageThreadResponseSchema>;
 
 /**
  * Full response body of PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star
- * (CAP-043 Slice 3 / AC 14). Unlike the list/detail schemas, which model the
+ * (CAP-058). Unlike the list/detail schemas, which model the
  * envelope's inner `data` object, this schema covers the whole wire body —
  * a one-shot action response is parsed in one step by the star mutation.
  *
  * `id` is the message id from the path (echoed so a replayed caller can
- * correlate); `isStarred` is the post-toggle mailbox-level flag (D-CAP-043-A)
+ * correlate); `isStarred` is the post-toggle caller-scoped flag (R-MESSAGE-005)
  * as the SQLite integer 0 or 1, consistent with `messageListItemSchema`.
  *
  * R-API-004: replays return the byte-identical stored response.
@@ -1068,7 +1074,7 @@ export type MessageThreadResponse = z.infer<typeof messageThreadResponseSchema>;
 export const toggleStarResponseSchema = z.object({
   data: z.object({
     id: uuidSchema,
-    isStarred: z.number(),
+    isStarred: messageStateFlagSchema,
   }),
 });
 

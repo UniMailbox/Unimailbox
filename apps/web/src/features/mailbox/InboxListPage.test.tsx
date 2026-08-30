@@ -228,7 +228,11 @@ function renderInbox(options: RenderInboxOptions): {
   });
   queryClient.setQueryData(authQueryKeys.session(), options.session);
   if (options.mailboxList !== undefined) {
-    queryClient.setQueryData(mailboxQueryKeys.list(), [...options.mailboxList]);
+    const userId =
+      typeof options.session === 'object' && options.session !== null && 'userId' in options.session
+        ? String((options.session as { userId: unknown }).userId)
+        : null;
+    queryClient.setQueryData(mailboxQueryKeys.list(userId), [...options.mailboxList]);
   }
   mountInboxRouter(apiClient, queryClient);
   return { fetchCalls: calls };

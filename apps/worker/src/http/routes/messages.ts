@@ -1,13 +1,14 @@
 // http/routes/messages — CAP-022 inbox routes.
 // Hono sub-app for /api/v1/mailboxes/:mailboxId/messages endpoints: list,
-// detail, thread (CAP-043 Slice 2), mark-read, star + per-user soft delete
-// (CAP-043 Slice 3).
+// detail, thread (CAP-043 Slice 2), mark-read, per-user star + soft delete
+// (CAP-058 star state; CAP-043 Slice 3 soft delete).
 //
 // R-AUTHZ-003: Two layers — requirePermission('message.read') on every route,
 // then mailbox-scoped assertCan(..., 'read', isAdmin) inside the handler.
 // R-AUTHZ-004: assertCan authorises against the path's mailboxId, never a
 // client body value.
-// R-MESSAGE-005: isRead resolves per requesting user (see message-read-repository).
+// R-MESSAGE-005: isRead and isStarred resolve per requesting user (see
+// message-read-repository).
 // R-API-004: PATCH /messages/:id/read, PATCH /messages/:id/star and DELETE
 // /messages/:id require Idempotency-Key; replays return the stored response.
 // R-API-005: the list cursor is HMAC-SHA-256 signed
@@ -124,17 +125,25 @@ interface IdempotencyRequestContext {
  * Throws 409 IDEMPOTENCY_KEY_REUSED when the key was spent on a different
  * request body.
  *
- * The hash covers exactly the raw bytes received — these routes send no
- * required body, so a missing body hashes as "". Retries with the same key
- * + same bytes replay; the same key with different bytes is a client bug.
+ * The hash covers the raw bytes received and, for resource-bound operations,
+ * the path resource. These routes send no required body, so a missing body
+ * hashes as "". Retries with the same key and resource replay; the same key
+ * with different request material is a client bug.
  */
 async function beginIdempotentOperation(
   c: Context<AppEnv>,
   userId: string,
   operation: string,
+  resource?: { readonly mailboxId: string; readonly messageId: string },
 ): Promise<{ context: IdempotencyRequestContext; replay: Response | null }> {
   const rawBody = await c.req.text();
-  const requestHash = await sha256Hex(rawBody);
+  // R-API-004: star operations are bound to their path resource as well as
+  // their (currently empty) body. This prevents a static operation name from
+  // replaying a response for another message; pre-CAP-058 records safely
+  // conflict unless their stored response is independently compatible.
+  const requestHash = await sha256Hex(
+    resource === undefined ? rawBody : JSON.stringify({ body: rawBody, resource }),
+  );
 
   const idempotencyKey = c.get('idempotencyKey');
   if (!idempotencyKey) {
@@ -383,9 +392,8 @@ export function messageRoutes(): Hono<AppEnv> {
   /**
    * PATCH /api/v1/mailboxes/:mailboxId/messages/:messageId/star
    *
-   * CAP-043 Slice 3 / AC 14. Toggles the MAILBOX-LEVEL star flag
-   * (D-CAP-043-A): any member's star is every member's star (AC 17). The
-   * per-user-star migration is the recorded follow-up gap.
+   * CAP-058: toggles the requesting user's per-message star state
+   * (R-MESSAGE-005). The legacy mailbox compatibility column remains unchanged.
    *
    * D-CAP-043-H: rides the read surface — requirePermission('message.read')
    * + assertCan('read') — because it toggles a presentation flag, not a
@@ -393,7 +401,7 @@ export function messageRoutes(): Hono<AppEnv> {
    *
    * Slice 3 fix H1 — batch-atomic star toggle. A toggle is NOT re-runnable
    * (re-running flips it back), so R-API-004 forbids the best-effort settle
-   * here: the star UPDATE, the idempotency record, and the audit row
+   * here: the per-user state UPSERT, the idempotency record, and the audit row
    * (H4 / R-AUDIT-001 / D-CAP-043-I) run in ONE db.batch([...]) — an
    * implicit transaction. The shape is read-compute-write by design: a
    * batched UPDATE … RETURNING cannot feed the record's responseJson,
@@ -420,17 +428,20 @@ export function messageRoutes(): Hono<AppEnv> {
       const messageId = c.req.param('messageId');
       const userId = await requireMailboxReadAccess(c, mailboxId);
 
-      const { context, replay } = await beginIdempotentOperation(c, userId, TOGGLE_STAR_OPERATION);
+      const { context, replay } = await beginIdempotentOperation(c, userId, TOGGLE_STAR_OPERATION, {
+        mailboxId,
+        messageId,
+      });
       if (replay !== null) {
         return replay;
       }
 
-      // H1 read step. Null means no mailbox_messages row for this
+      // CAP-058 read step. Null means no visible mailbox_messages row for this
       // (mailbox, message) pair — same envelope as every other not-found
       // path; a message that exists in another mailbox is indistinguishable
       // from a non-existent one (no existence leak). Thrown BEFORE any
       // write, so there is nothing to roll back.
-      const currentStarred = await getMessageStarState(c.env.DB, mailboxId, messageId);
+      const currentStarred = await getMessageStarState(c.env.DB, mailboxId, messageId, userId);
       if (currentStarred === null) {
         throw new DomainError({
           code: 'MESSAGE_NOT_FOUND',
@@ -444,10 +455,10 @@ export function messageRoutes(): Hono<AppEnv> {
       const now = sqliteTimestamp(systemClock.now());
 
       try {
-        // H1 + H4: ONE batch — star write + idempotency record + audit row
+        // CAP-058 + H4: ONE batch — per-user state write + idempotency record + audit row
         // commit or roll back together.
         await c.env.DB.batch([
-          prepareSetMessageStar(c.env.DB, mailboxId, messageId, target),
+          prepareSetMessageStar(c.env.DB, mailboxId, messageId, userId, target, now),
           prepareCreateIdempotencyRecord(c.env.DB, {
             id: systemIds.uuid(),
             actorId: userId,
@@ -472,7 +483,7 @@ export function messageRoutes(): Hono<AppEnv> {
           throw error;
         }
         // Lost the INSERT race. The batch was an implicit transaction, so
-        // this request's star UPDATE rolled back with the failed record
+        // this request's per-user star UPSERT rolled back with the failed record
         // INSERT — only the winner's write is in the database. Replay it.
         return replayAfterRace(
           c.env.DB,
@@ -485,7 +496,10 @@ export function messageRoutes(): Hono<AppEnv> {
 
       return new Response(successBody, {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(c.get('requestId') ? { 'X-Request-Id': c.get('requestId') } : {}),
+        },
       });
     },
   );

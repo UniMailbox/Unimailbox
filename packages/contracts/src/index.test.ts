@@ -1059,6 +1059,21 @@ describe('messageListItemSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('R-MESSAGE-005 R-DATA-006: rejects state flags outside the SQLite 0/1 domain', () => {
+    const result = messageListItemSchema.safeParse({
+      id: '00000000-0000-4000-8000-000000000001',
+      fromAddress: 'sender@example.com',
+      fromName: '',
+      subject: '',
+      isRead: 2,
+      isStarred: 0,
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      recipients: { to: [], cc: [] },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('messageListResponseSchema', () => {
@@ -1322,9 +1337,9 @@ describe('messageThreadResponseSchema', () => {
   });
 });
 
-// CAP-043 Slice 3 (AC 14): the star toggle response covers the full wire
+// CAP-058: the caller-scoped star toggle response covers the full wire
 // body `{ data: { id, isStarred } }`. isStarred is the SQLite 0/1 integer,
-// same convention as messageListItemSchema (D-CAP-043-A: mailbox-level).
+// same convention as messageListItemSchema (R-MESSAGE-005).
 describe('toggleStarResponseSchema', () => {
   it('accepts a starred response', () => {
     const result = toggleStarResponseSchema.parse({
@@ -1365,6 +1380,13 @@ describe('toggleStarResponseSchema', () => {
   it('rejects a non-number isStarred via safeParse', () => {
     const result = toggleStarResponseSchema.safeParse({
       data: { id: '00000000-0000-4000-8000-000000000001', isStarred: true },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('R-MESSAGE-005 R-DATA-006: rejects an isStarred value outside 0/1', () => {
+    const result = toggleStarResponseSchema.safeParse({
+      data: { id: '00000000-0000-4000-8000-000000000001', isStarred: 2 },
     });
     expect(result.success).toBe(false);
   });

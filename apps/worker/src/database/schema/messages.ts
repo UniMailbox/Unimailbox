@@ -117,8 +117,9 @@ export const mailboxMessages = sqliteTable(
 export type MailboxMessage = typeof mailboxMessages.$inferSelect;
 export type NewMailboxMessage = typeof mailboxMessages.$inferInsert;
 
-// message_user_state — CAP-021; CAP-043 Slice 1 (0016 + 0017).
+// message_user_state — CAP-021; CAP-043 Slice 1 (0016 + 0017); CAP-058 (0023).
 // D-CAP-043-B: per-user soft delete (is_deleted / deleted_at).
+// CAP-058: per-user star state (is_starred).
 // D-CAP-043-F: PK is (mailbox_message_id, user_id) — one row per user,
 // not one row per mailbox message (R-MESSAGE-005).
 export const messageUserState = sqliteTable(
@@ -131,6 +132,7 @@ export const messageUserState = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     isRead: integer('is_read', { mode: 'boolean' }).notNull().default(false),
+    isStarred: integer('is_starred', { mode: 'boolean' }).notNull().default(false),
     readAt: text('read_at'),
     updatedAt: text('updated_at').notNull(),
     isDeleted: integer('is_deleted', { mode: 'boolean' }).notNull().default(false),

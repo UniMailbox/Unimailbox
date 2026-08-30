@@ -62,6 +62,7 @@ import attachmentUploadsSql from '../../../migrations/0021_attachment_uploads.sq
 // guards (UNIQUE index + BEFORE INSERT trigger) make one-consume-per-upload
 // safe under concurrent compose requests.
 import messageAttachmentsSql from '../../../migrations/0022_message_attachments.sql?raw';
+import messageUserStateStarSql from '../../../migrations/0023_message_user_state_star.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -181,6 +182,11 @@ const MIGRATIONS = [
     name: '0022_message_attachments',
     fileName: '0022_message_attachments.sql',
     sql: messageAttachmentsSql,
+  },
+  {
+    name: '0023_message_user_state_star',
+    fileName: '0023_message_user_state_star.sql',
+    sql: messageUserStateStarSql,
   },
 ] as const;
 

@@ -41,7 +41,7 @@ const MESSAGE_ID = '00000000-0000-4000-8000-00000000000a';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function messageFixture(isStarred: number, id: string = MESSAGE_ID): MessageListItem {
+function messageFixture(isStarred: 0 | 1, id: string = MESSAGE_ID): MessageListItem {
   return {
     id,
     fromAddress: 'sender@example.com',
