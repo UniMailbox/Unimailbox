@@ -10,6 +10,28 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-061 Draft IndexedDB working-copy cache implemented locally
+
+CAP-061 adds the browser-local foundation for draft crash recovery without changing the server
+draft routes or editor surface. A Dexie-backed working-copy store persists the server-compatible
+`to`/`cc`/`bcc`, subject, text, and HTML fields under a length-framed user/mailbox/draft key;
+strict Zod validation rejects malformed rows and credential-shaped extras. Revision, dirty,
+`baseServerUpdatedAt`, and `baseServerRevision` markers provide deterministic recovery decisions
+without wall-clock comparisons. Server acknowledgements carry the revision that produced them and
+are applied in one IndexedDB transaction, so stale or out-of-order responses cannot clear newer
+dirty content or regress the acknowledged base. Dexie v2 upgrades initial v1 rows with the new
+base-revision marker.
+
+Focused real IndexedDB evidence is 7/7, including browser-restart persistence, same-ID
+cross-user/mailbox isolation, delimiter collision resistance, field/revision preservation,
+stale/ordered/future response handling, malformed/secret-shaped row rejection, and recovery
+decisions. Full local evidence is unit 1013/1013, doctor 14/14, typecheck/lint/format/build, and
+`git diff --check` clean. Independent architecture review returned ACCEPT. The draft editor,
+server fetch, autosave, and discard flows remain a separate next slice; no preview, deployment,
+R2, or secret access occurred.
+
+The contract is archived at `work/archive/2026-08/CAP-061-draft-cache/task.md`.
+
 ## 2026-08-30 — CAP-060 Web folder navigation and views implemented locally
 
 CAP-060 completes the client half of the folder-view slice begun by CAP-059. The mailbox route
