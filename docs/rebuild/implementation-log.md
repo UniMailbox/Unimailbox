@@ -10,6 +10,27 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-056 safe message HTML and inline CID rendering implemented locally
+
+CAP-056 enables the message-detail page to render a non-empty `htmlBody` only through a dedicated
+`SanitizedMessageHtml` boundary. DOMPurify 3.4.14 owns the explicit tag and attribute allowlists;
+the scoped URI policy rewrites only a uniquely matched consumed inline raster `cid:` to the shared
+encoded CAP-051 download path, while unknown, duplicate, external, data, blob, and non-inline image
+sources lose `src`. Unsafe links, executable markup, SVG/iframe/object/embed/form content, event and
+style attributes, control-character protocol obfuscation, and storage/idempotency sentinels are
+covered by focused tests. Empty or whitespace-only HTML continues to use the existing plain-text
+fallback, and CAP-053/CAP-055 attachment controls remain unchanged.
+
+The sanitizer now returns an inert DOMPurify fragment, applies only the image/link URI policy to
+surviving elements, and serializes that already-sanitized fragment without a second raw HTML parse.
+Safe descendants inside non-allowlisted wrappers are preserved. Codex repaired the implementation
+after architecture review; the final independent architecture verdict is ACCEPT with no findings.
+Focused Web tests pass 26/26; full unit tests pass 989/989; Worker tests pass 870/870; scaffold
+doctor passes 14/14; lint, typecheck, format, build/Wrangler dry-run, and `git diff --check` pass.
+The contract is archived at `work/archive/2026-08/CAP-056-safe-html-cid/task.md`. Provider-side CID
+rewriting, richer previews, R2 retention, preview verification, deployment, and additional KV
+namespaces remain deferred.
+
 ## 2026-08-29 — CAP-055 inline image attachment preview implemented locally
 
 CAP-055 extends the CAP-053 attachment list with a narrow, safe preview path. Only `inline`
