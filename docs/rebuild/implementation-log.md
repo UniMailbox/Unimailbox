@@ -10,6 +10,20 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-057 mailbox sharing backend implemented locally
+
+CAP-057 adds the tenancy-owned mailbox member API: owner/global `mailbox.share` authorization,
+strict normalized email + viewer/sender/admin validation, active-user credential-free Identity
+lookups, safe member projections, and add/list/remove routes. Add and remove transitions persist the
+membership mutation, correlated `mailbox.member_added` / `mailbox.member_removed` audit event, and
+mutating-endpoint idempotency record atomically. Same-key replays are byte-identical, concurrent
+losers do not duplicate rows, and missing/foreign/unauthorized mailbox IDs collapse to one 404
+envelope. Focused and full local gates pass: Worker 880/880, unit 993/993, contracts 375/375,
+doctor 14/14, lint/typecheck/format/build/diff clean. Independent architecture review returned
+ACCEPT with no findings. The contract is archived at
+`work/archive/2026-08/CAP-057-mailbox-sharing/task.md`; invitation delivery, UI, folders/stars,
+preview verification, and deployment remain separate or deferred.
+
 ## 2026-08-30 — CAP-056 safe message HTML and inline CID rendering implemented locally
 
 CAP-056 enables the message-detail page to render a non-empty `htmlBody` only through a dedicated
