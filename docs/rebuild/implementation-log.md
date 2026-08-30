@@ -10,6 +10,28 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-058 per-user message star state implemented locally
+
+CAP-058 moves the user-visible star flag from the legacy mailbox-level column to the existing
+per-user `message_user_state` composite row. Migration 0023 adds the constrained 0/1 field and
+backfills legacy stars for the current mailbox owner and explicit members without overwriting
+read/delete state. List, detail, thread, and toggle paths now resolve and write the caller's
+state; caller-soft-deleted messages remain an identical 404/no-write surface. Star idempotency
+hashes bind the mailbox/message resource, while state, idempotency, and audit remain one atomic
+D1 batch. The legacy column is retained but no longer read or written by the star path.
+
+The web mailbox query-key family (list, detail, thread, compose invalidation, and row mutations)
+is scoped by authenticated user ID, with a shared-QueryClient account-switch isolation test.
+Contracts and repository boundaries expose exact 0/1 flags. Local evidence: contracts 377/377,
+focused messages Worker 68/68, focused Web 64/64, unit 999/999, Worker 886/886, doctor 14/14;
+lint, typecheck, format, build/Wrangler dry-run, and `git diff --check` pass. Independent
+architecture review returned ACCEPT with no findings. No preview/deployment evidence was collected;
+CAP-054 provider verification and the remaining MessageDetailPage loading-gate follow-up stay
+separate.
+
+The contract is archived at `work/archive/2026-08/CAP-058-per-user-stars/task.md`; folders remain
+the next Phase 3 capability.
+
 ## 2026-08-30 — CAP-057 mailbox sharing backend implemented locally
 
 CAP-057 adds the tenancy-owned mailbox member API: owner/global `mailbox.share` authorization,
