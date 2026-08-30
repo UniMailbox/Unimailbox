@@ -59,7 +59,7 @@ import {
 import type { ReactElement } from 'react';
 import { ApiError } from '../infrastructure/api/errors';
 import type { ApiClient } from '../infrastructure/api/client';
-import { fetchSetupStatus } from '../features/setup/setup-queries';
+import { fetchSetupStatus, setupQueryKeys } from '../features/setup/setup-queries';
 import { SetupLayout } from '../features/setup/setup-layout';
 import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 import { LoginPage } from '../features/auth/LoginPage';
@@ -94,6 +94,38 @@ import { WebhookEventsPage } from '../features/admin/WebhookEventsPage';
 export interface RouterContext {
   readonly apiClient: ApiClient;
   readonly queryClient: QueryClient;
+}
+
+/**
+ * Keep split-origin Vite development aligned with the Worker's installation
+ * gate. The Worker redirects incomplete-installation API requests to the SPA
+ * setup route, but a browser fetch follows that redirect as JSON and can turn
+ * it into a misleading 404. Every application route uses this helper before
+ * its session guard so direct links enter the active setup step cleanly.
+ */
+async function requireCompletedSetup({ apiClient, queryClient }: RouterContext): Promise<void> {
+  const setupState = await queryClient.fetchQuery({
+    queryKey: setupQueryKeys.status(),
+    queryFn: () => fetchSetupStatus(apiClient),
+    staleTime: 0,
+  });
+  if (setupState.status !== 'complete') {
+    throw redirect({ to: `/setup/${setupState.currentStep}` as const });
+  }
+}
+
+async function requireAuthenticatedSession({
+  apiClient,
+  queryClient,
+}: RouterContext): Promise<void> {
+  await requireCompletedSetup({ apiClient, queryClient });
+  const descriptor = await queryClient.ensureQueryData({
+    queryKey: authQueryKeys.session(),
+    queryFn: () => fetchAuthSession(apiClient),
+  });
+  if (descriptor === null) {
+    throw redirect({ to: '/login' });
+  }
 }
 
 function DefaultPending(): ReactElement {
@@ -154,6 +186,7 @@ const indexRoute = createRoute({
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
+  beforeLoad: async ({ context }) => requireCompletedSetup(context),
   component: () => (
     <AuthErrorBoundary>
       <LoginPage />
@@ -169,6 +202,7 @@ const loginRoute = createRoute({
 const registerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/register',
+  beforeLoad: async ({ context }) => requireCompletedSetup(context),
   component: () => (
     <AuthErrorBoundary>
       <RegisterPage />
@@ -196,15 +230,7 @@ const registerRoute = createRoute({
 const mailboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: () => <MailboxListPage />,
 });
 
@@ -216,15 +242,7 @@ const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox/$mailboxId',
   validateSearch: validateFolderSearch,
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: function InboxListRoute(): ReactElement {
     // The path parameter drives the inbox query key. `useParams` is
     // a TanStack Router hook that resolves to the matched route's
@@ -242,15 +260,7 @@ const inboxRoute = createRoute({
 const messageDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox/$mailboxId/messages/$messageId',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: function MessageDetailRoute(): ReactElement {
     const params = useParams({ strict: false });
     return <MessageDetailPage mailboxId={params.mailboxId} messageId={params.messageId} />;
@@ -298,15 +308,7 @@ const composeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox/$mailboxId/compose',
   validateSearch: validateComposeSearch,
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: function ComposeRoute(): ReactElement {
     const params = useParams({ strict: false });
     // Route-bound hook: the search type comes from THIS route's
@@ -321,15 +323,7 @@ const composeRoute = createRoute({
 const draftRecoveryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox/$mailboxId/draft/$draftId',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: function DraftRecoveryRoute(): ReactElement {
     const params = useParams({ strict: false });
     return <DraftRecoveryPage mailboxId={params.mailboxId} draftId={params.draftId} />;
@@ -347,15 +341,7 @@ const draftRecoveryRoute = createRoute({
 const adminLandingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: AdminLandingPage,
 });
 
@@ -365,15 +351,7 @@ const adminLandingRoute = createRoute({
 const adminAuditEventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/audit-events',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: AuditEventsPage,
 });
 
@@ -385,45 +363,21 @@ const adminAuditEventsRoute = createRoute({
 const adminUsersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/users',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: UsersPage,
 });
 
 const adminConnectionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/connections',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: ConnectionsPage,
 });
 
 const adminWebhookEventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/webhook-events',
-  beforeLoad: async ({ context }) => {
-    const descriptor = await context.queryClient.ensureQueryData({
-      queryKey: authQueryKeys.session(),
-      queryFn: () => fetchAuthSession(context.apiClient),
-    });
-    if (descriptor === null) {
-      throw redirect({ to: '/login' });
-    }
-  },
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: WebhookEventsPage,
 });
 

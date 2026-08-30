@@ -10,6 +10,20 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — Local Vite API routing and setup-gate parity fixed
+
+The Web development server now proxies `/api/*` to the local Worker (default
+`http://localhost:8787`, overrideable with a validated loopback `VITE_WORKER_URL`). This keeps
+browser requests on the Vite origin while preventing JSON API calls from being answered by the
+Vite SPA fallback. The Web router also refreshes installation status before authentication on
+every application route, entering `/setup/<currentStep>` directly when the local installation is
+incomplete and avoiding the Worker's setup redirect being interpreted as a JSON 404.
+
+Focused browser smoke verification reached the setup wizard from both `/mailbox` and a direct
+mailbox child route with no route error. Local evidence: Web 328/328, full unit 1052/1052, Worker
+890/890, doctor 14/14, typecheck/lint/format/build and `git diff --check` clean. Independent
+architecture review returned ACCEPT. No secrets, preview, deploy, or push occurred.
+
 ## 2026-08-30 — CAP-062 Web root entrypoint connected to the mailbox shell
 
 The Web root route no longer renders the CAP-001 placeholder, which made a healthy client

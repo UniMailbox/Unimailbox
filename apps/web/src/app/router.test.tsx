@@ -25,6 +25,7 @@ import { jsonResponse, lastPathname, mountAppRouter, spyFetch } from '../test-ut
 import { createAppRouter, validateComposeSearch, validateFolderSearch } from './router';
 import type { RouterContext } from './router';
 import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
+import { setupQueryKeys } from '../features/setup/setup-queries';
 import { createApiClient } from '../infrastructure/api/client';
 
 afterEach(() => {
@@ -119,8 +120,12 @@ describe('router — CAP-062 production draft route', () => {
     const apiClient = createApiClient({
       baseUrl: '',
       getSessionToken: () => null,
-      fetchImpl: (async () =>
-        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+      fetchImpl: (async (input) => {
+        const url = String(input);
+        return url.endsWith('/api/v1/setup/status')
+          ? jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })
+          : jsonResponse({ data: { user: null, session: null } });
+      }) as typeof fetch,
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -138,7 +143,7 @@ describe('router — CAP-062 production draft route', () => {
       baseUrl: '',
       getSessionToken: () => null,
       fetchImpl: (async () =>
-        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+        jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -157,12 +162,91 @@ describe('router — CAP-062 production draft route', () => {
     expect(history.location.pathname).toBe('/mailbox');
   });
 
-  it('redirects the real draft recovery route to login without a session', async () => {
+  it('redirects the mailbox entrypoint to the active setup step before auth when setup is incomplete', async () => {
     const apiClient = createApiClient({
       baseUrl: '',
       getSessionToken: () => null,
       fetchImpl: (async () =>
-        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+        jsonResponse({ data: { status: 'setup', currentStep: 'claim' } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const history = createMemoryHistory({ initialEntries: ['/mailbox'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/setup/claim');
+  });
+
+  it('refreshes a stale incomplete setup cache before allowing the mailbox shell', async () => {
+    const { fetchImpl, calls } = spyFetch([
+      () => jsonResponse({ data: { status: 'complete', currentStep: 'complete' } }),
+    ]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    queryClient.setQueryData(setupQueryKeys.status(), {
+      status: 'setup',
+      currentStep: 'claim',
+    });
+    queryClient.setQueryData(authQueryKeys.session(), {
+      userId: 'user-root',
+      email: 'root@example.test',
+      displayName: 'Root User',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+    const apiClient = createApiClient({ baseUrl: '', getSessionToken: () => null, fetchImpl });
+    const history = createMemoryHistory({ initialEntries: ['/mailbox'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/mailbox');
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each([
+    '/mailbox/00000000-0000-4000-8000-000000000001',
+    '/mailbox/00000000-0000-4000-8000-000000000001/messages/00000000-0000-4000-8000-000000000002',
+    '/mailbox/00000000-0000-4000-8000-000000000001/compose',
+    '/mailbox/00000000-0000-4000-8000-000000000001/draft/00000000-0000-4000-8000-000000000002',
+    '/login',
+    '/register',
+    '/admin',
+    '/admin/audit-events',
+    '/admin/users',
+    '/admin/connections',
+    '/admin/webhook-events',
+  ])('redirects direct application route %s into setup when incomplete', async (path) => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { status: 'setup', currentStep: 'claim' } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const history = createMemoryHistory({ initialEntries: [path] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/setup/claim');
+  });
+
+  it('redirects the real draft recovery route to login without a session', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async (input) => {
+        const url = String(input);
+        return url.endsWith('/api/v1/setup/status')
+          ? jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })
+          : jsonResponse({ data: { user: null, session: null } });
+      }) as typeof fetch,
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -182,7 +266,7 @@ describe('router — CAP-062 production draft route', () => {
       baseUrl: '',
       getSessionToken: () => null,
       fetchImpl: (async () =>
-        jsonResponse({ data: { user: null, session: null } })) as typeof fetch,
+        jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },

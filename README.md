@@ -21,9 +21,12 @@ pnpm build
 Local development:
 
 ```sh
-pnpm dev:worker   # wrangler dev on apps/worker
-pnpm dev:web      # vite dev on apps/web
+pnpm dev:worker   # terminal 1: wrangler dev on apps/worker (http://localhost:8787)
+pnpm dev:web      # terminal 2: vite dev on apps/web (http://localhost:5173)
 ```
+
+The Vite server proxies `/api/*` to the local Worker, so use the Web URL during browser
+development. Set `VITE_WORKER_URL` if the Worker is running on a different local port.
 
 ## Repository layout
 
