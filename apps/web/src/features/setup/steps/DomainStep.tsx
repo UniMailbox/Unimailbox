@@ -25,6 +25,7 @@ import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { useQueryClient } from '@tanstack/react-query';
 import { setupQueryKeys } from '../setup-queries';
 import { clearSetupSession } from '../setup-session-store';
+import { SetupGuidance } from '../setup-guidance';
 
 export function DomainStep(): ReactElement {
   const apiClient = useApiClient();
@@ -100,6 +101,17 @@ export function DomainStep(): ReactElement {
       title="Add managed domain"
       description="The domain that will receive mail for this deployment."
     >
+      <SetupGuidance
+        purpose="Tell Unimailbox which domain should receive inbound mail."
+        prepare="A domain you control and can configure through Cloudflare Email Routing."
+        steps={[
+          'Enter the domain, including its suffix, such as mail.example.com.',
+          'Review the normalized lowercase preview.',
+          'Select Add domain to save the managed domain.',
+        ]}
+        success="The domain is saved as active and the wizard opens the Cloudflare Email Routing step."
+        note="The name is trimmed and lowercased; duplicate managed domains cannot be added."
+      />
       <form onSubmit={onSubmit} noValidate>
         <Input
           id="domain-name"

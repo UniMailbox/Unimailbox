@@ -23,6 +23,7 @@ import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
 import { clearSetupSession } from '../setup-session-store';
+import { SetupGuidance } from '../setup-guidance';
 
 interface StartResult {
   readonly smokeTestAddress: string;
@@ -107,6 +108,17 @@ export function InboundSmokeStep(): ReactElement {
       title="Inbound smoke test"
       description="Send an email to the smoke test address to confirm routing."
     >
+      <SetupGuidance
+        purpose="Prove that an external email can travel through Cloudflare Email Routing into the Worker."
+        prepare="An external mailbox from which you can send a test message."
+        steps={[
+          'Wait for the generated smoke-test address to appear.',
+          'Send any email to that address from the external mailbox.',
+          'Wait for the status to become received, or select Check now.',
+        ]}
+        success="The inbound route is confirmed and the wizard moves to Brevo configuration."
+        note="The generated address expires after 5 minutes. If it expires, reload this step to generate a new address."
+      />
       <div role="status" aria-live="polite">
         {startQuery.isPending ? (
           <p data-testid="inbound-starting">

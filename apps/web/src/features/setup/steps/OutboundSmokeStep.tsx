@@ -15,6 +15,7 @@ import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
 import { clearSetupSession } from '../setup-session-store';
+import { SetupGuidance } from '../setup-guidance';
 
 export function OutboundSmokeStep(): ReactElement {
   const apiClient = useApiClient();
@@ -71,6 +72,17 @@ export function OutboundSmokeStep(): ReactElement {
 
   return (
     <Card title="Outbound smoke test" description="Send a real outbound email to confirm delivery.">
+      <SetupGuidance
+        purpose="Confirm that Brevo accepts a real outbound message from this installation."
+        prepare="No additional input is required; the test is sent to the administrator email created earlier."
+        steps={[
+          'Confirm the administrator mailbox can receive email.',
+          'Select Send outbound smoke test once.',
+          'Check the administrator inbox for the test message after the provider accepts it.',
+        ]}
+        success="The provider acceptance advances the wizard to the final completion step."
+        note="This sends a real email. Provider acceptance is recorded immediately; inbox delivery may take longer."
+      />
       {submitted ? (
         <Alert variant="success" testId="outbound-success">
           Smoke test sent — the server is marking the installation complete.

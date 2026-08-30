@@ -25,6 +25,7 @@ import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
 import { clearSetupSession } from '../setup-session-store';
+import { SetupGuidance } from '../setup-guidance';
 
 export function CloudflareVerifyStep(): ReactElement {
   const apiClient = useApiClient();
@@ -141,6 +142,17 @@ export function CloudflareVerifyStep(): ReactElement {
       title="Verify Cloudflare Email Routing"
       description="Open the Cloudflare dashboard, configure Email Routing, then continue."
     >
+      <SetupGuidance
+        purpose="Connect the managed domain to Cloudflare Email Routing so inbound messages can reach the Worker."
+        prepare="Access to the Cloudflare account that controls the managed domain."
+        steps={[
+          'Open the Cloudflare Dashboard link in a new tab.',
+          'Configure Email Routing for the managed domain and complete any DNS or MX prompts.',
+          'Return here and select I have configured email routing.',
+        ]}
+        success="The domain configuration is recorded and the wizard starts the inbound smoke test."
+        note="This step is operator confirmation in the current release. The real routing check happens when the smoke-test email arrives."
+      />
       {linkLoading ? (
         <p data-testid="cloudflare-loading">
           <Spinner label="Opening Cloudflare dashboard" />

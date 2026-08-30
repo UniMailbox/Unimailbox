@@ -20,6 +20,7 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { Alert } from '../../../components/ui/Alert';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { setupPreflightQuery } from '../setup-queries';
+import { SetupGuidance } from '../setup-guidance';
 
 export function PreflightStep(): ReactElement {
   const navigate = useNavigate();
@@ -63,6 +64,17 @@ export function PreflightStep(): ReactElement {
       title="Preflight"
       description="Confirm the platform bindings are reachable before continuing."
     >
+      <SetupGuidance
+        purpose="Verify that the Worker has the resources and schema required by the setup flow."
+        prepare="All configured bindings and secrets must be available, and the database must be migrated to the expected schema."
+        steps={[
+          'Review each binding row and resolve every item marked missing.',
+          'Run pending local migrations if the schema version does not match the expected version.',
+          'Select Continue only after every check is present and the schema matches.',
+        ]}
+        success="The wizard unlocks administrator creation. This check does not modify your data."
+        note="Binding presence confirms configuration; it is not a deep health check of every remote service."
+      />
       <p data-testid="schema-version" className="wizard-subtitle">
         Schema version: <code>{data.schemaVersion}</code>
         {schemaOk ? null : (

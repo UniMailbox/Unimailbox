@@ -19,6 +19,7 @@ import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
 import { clearSetupSession } from '../setup-session-store';
+import { SetupGuidance } from '../setup-guidance';
 
 export function BrevoStep(): ReactElement {
   const apiClient = useApiClient();
@@ -81,6 +82,16 @@ export function BrevoStep(): ReactElement {
       title="Configure Brevo"
       description="Provide the Brevo API key for outbound email delivery."
     >
+      <SetupGuidance
+        purpose="Connect the provider that will send outbound email."
+        prepare="A Brevo API key with permission to send transactional email."
+        steps={[
+          'Paste the API key into the password field.',
+          'Select Save API key so the Worker can validate it with Brevo.',
+        ]}
+        success="The key is encrypted at rest, linked to the managed domain, and the wizard opens the outbound smoke test."
+        note="The key is never shown again or returned in the API response. Do not paste it into chat, tickets, or source control."
+      />
       <form onSubmit={onSubmit} noValidate>
         <Input
           id="brevo-api-key"

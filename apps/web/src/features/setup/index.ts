@@ -12,6 +12,7 @@ export { InboundSmokeStep } from './steps/InboundSmokeStep';
 export { BrevoStep } from './steps/BrevoStep';
 export { OutboundSmokeStep } from './steps/OutboundSmokeStep';
 export { CompleteStep } from './steps/CompleteStep';
+export { SetupGuidance } from './setup-guidance';
 export {
   useSetupSession,
   setSetupSession,

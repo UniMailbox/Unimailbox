@@ -2,8 +2,9 @@
 //
 // CAP-041 wires the wizard. The layout renders the step indicator (a chip
 // per installation step, with state baked in via `data-state`), the active
-// step's body via <Outlet>, and a "Restart wizard" affordance that clears
-// the in-memory session token and navigates to /setup/claim.
+// step's body via <Outlet>. Once a setup session exists it exposes a
+// "Clear setup session" affordance; the initial Claim page does not show a
+// restart action because there is no session to clear.
 //
 // The layout never makes API calls directly. It calls `setupStatusQuery()`
 // to read the current step — the step children do their own data fetching.
@@ -19,7 +20,7 @@ import { useNavigate, Outlet } from '@tanstack/react-router';
 import { useState, type ReactElement } from 'react';
 import { installationStepSchema, type InstallationStep } from '@unimailbox/contracts';
 import { Button } from '../../components/ui/Button';
-import { clearSetupSession } from './setup-session-store';
+import { clearSetupSession, useSetupSession } from './setup-session-store';
 import { setupStatusQuery } from './setup-queries';
 
 const STEP_LABELS: Readonly<Record<InstallationStep, string>> = {
@@ -43,6 +44,7 @@ const STEPS: ReadonlyArray<InstallationStep> =
 export function SetupLayout(): ReactElement {
   const navigate = useNavigate();
   const [showConfirm, setShowConfirm] = useState(false);
+  const hasSetupSession = useSetupSession((state) => state.sessionToken !== null);
   // H1 (CAP-041 fix): the layout reads the status via the same query the
   // router used to use. The query is shared with the router's caller via
   // the QueryClient; status updates flow into the chip indicator without
@@ -100,23 +102,25 @@ export function SetupLayout(): ReactElement {
       <div className="wizard-body">
         <Outlet />
       </div>
-      <footer className="wizard-footer">
-        {showConfirm ? (
-          <p className="wizard-subtitle" role="alert" data-testid="restart-confirm">
-            Restarting will clear your in-memory session token. Click &ldquo;Restart wizard&rdquo;
-            again to confirm.
-          </p>
-        ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleRestart}
-          data-testid="restart-wizard"
-        >
-          {showConfirm ? 'Confirm restart' : 'Restart wizard'}
-        </Button>
-      </footer>
+      {hasSetupSession ? (
+        <footer className="wizard-footer">
+          {showConfirm ? (
+            <p className="wizard-subtitle" role="alert" data-testid="restart-confirm">
+              Restarting will clear your in-memory session token. Click &ldquo;Clear setup
+              session&rdquo; again to confirm.
+            </p>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleRestart}
+            data-testid="restart-wizard"
+          >
+            {showConfirm ? 'Confirm restart' : 'Clear setup session'}
+          </Button>
+        </footer>
+      ) : null}
     </main>
   );
 }

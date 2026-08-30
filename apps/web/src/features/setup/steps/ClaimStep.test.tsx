@@ -34,8 +34,9 @@ describe('ClaimStep', () => {
     ]);
     const user = userEvent.setup();
     const { history } = await renderStep({ fetchImpl, step: <ClaimStep /> });
+    expect(screen.getByTestId('setup-guidance')).toHaveTextContent('INSTALLATION_TOKEN');
     await user.type(screen.getByLabelText(/installation token/i), 'INSTALL_TOKEN');
-    await user.click(screen.getByRole('button', { name: /^claim$/i }));
+    await user.click(screen.getByRole('button', { name: /^claim installation$/i }));
     expect(calls.length).toBe(1);
     expect(calls[0]?.method).toBe('POST');
     expect(calls[0]?.url).toBe('/api/v1/setup/claim');
@@ -50,7 +51,7 @@ describe('ClaimStep', () => {
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <ClaimStep /> });
     await user.type(screen.getByLabelText(/installation token/i), 'wrong');
-    await user.click(screen.getByRole('button', { name: /^claim$/i }));
+    await user.click(screen.getByRole('button', { name: /^claim installation$/i }));
     const code = await screen.findByTestId('error-code');
     expect(code.textContent).toBe('CLAIM_TOKEN_INVALID');
   });
@@ -59,7 +60,9 @@ describe('ClaimStep', () => {
     const { fetchImpl, calls } = spyFetch([]);
     const user = userEvent.setup();
     await renderStep({ fetchImpl, step: <ClaimStep /> });
-    await user.click(screen.getByRole('button', { name: /^claim$/i }));
+    const submit = screen.getByRole('button', { name: /^claim installation$/i });
+    expect(submit).toBeDisabled();
+    await user.click(submit);
     expect(calls.length).toBe(0);
     expect(useSetupSession.getState().sessionToken).toBeNull();
   });

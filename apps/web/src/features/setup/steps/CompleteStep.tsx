@@ -15,6 +15,7 @@ import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
 import { clearSetupSession } from '../setup-session-store';
+import { SetupGuidance } from '../setup-guidance';
 
 export function CompleteStep(): ReactElement {
   const apiClient = useApiClient();
@@ -73,6 +74,17 @@ export function CompleteStep(): ReactElement {
       title="Complete setup"
       description="Mark the installation complete and route the app to the dashboard."
     >
+      <SetupGuidance
+        purpose="Finalize installation and make the mailbox application available."
+        prepare="Confirm the previous inbound and outbound smoke tests completed successfully."
+        steps={[
+          'Review that the setup checks and provider tests are complete.',
+          'Select Complete setup to seed the default roles and finish the installation.',
+          'Select Go to app after the success message appears.',
+        ]}
+        success="The installation status becomes complete, the administrator role is assigned, and application routes are unlocked."
+        note="This is the final setup action. The setup gate will no longer redirect application routes to the wizard."
+      />
       {completed ? (
         <Alert variant="success" testId="complete-success">
           Installation is complete. The app is now live.

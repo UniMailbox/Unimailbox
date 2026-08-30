@@ -17,6 +17,7 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setSetupSession } from '../setup-session-store';
+import { SetupGuidance } from '../setup-guidance';
 
 interface ClaimFormFields {
   readonly token: string;
@@ -33,11 +34,14 @@ export function ClaimStep(): ReactElement {
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<ClaimFormFields>({
     resolver: zodResolver(setupClaimRequestSchema),
     defaultValues: { token: '' },
   });
+
+  const watchedToken = watch('token');
 
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(null);
@@ -64,13 +68,23 @@ export function ClaimStep(): ReactElement {
 
   return (
     <Card title="Claim installation" description="Provide the deploy-time INSTALLATION_TOKEN.">
+      <SetupGuidance
+        purpose="Confirm that you have access to the deployment before changing installation settings."
+        prepare="The INSTALLATION_TOKEN supplied through your protected deployment handoff or secret manager."
+        steps={[
+          'Retrieve the token from the secure deployment owner or secret-management process.',
+          'Paste it below and select Claim installation.',
+        ]}
+        success="A temporary setup session is created and the wizard moves to the preflight checks."
+        note="The token is never written to browser storage. If you do not have it, contact the deployment owner; it cannot be recovered from this page."
+      />
       <form onSubmit={onSubmit} noValidate>
         <Input
           id="claim-token"
           type="password"
           autoComplete="off"
           label="Installation token"
-          help="The token printed at the end of the deployment."
+          help="Required. Use the token from the protected deployment handoff."
           error={tokenError}
           {...register('token')}
         />
@@ -85,11 +99,11 @@ export function ClaimStep(): ReactElement {
           <Button
             type="submit"
             variant="primary"
-            disabled={isSubmitting}
+            disabled={isSubmitting || watchedToken.length === 0}
             aria-busy={isSubmitting}
             data-testid="claim-submit"
           >
-            {isSubmitting ? <Spinner /> : 'Claim'}
+            {isSubmitting ? <Spinner /> : 'Claim installation'}
           </Button>
         </div>
       </form>

@@ -22,6 +22,7 @@ import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
 import { clearSetupSession } from '../setup-session-store';
 import { useQueryClient } from '@tanstack/react-query';
+import { SetupGuidance } from '../setup-guidance';
 
 export function AdministratorStep(): ReactElement {
   const apiClient = useApiClient();
@@ -84,6 +85,17 @@ export function AdministratorStep(): ReactElement {
       title="Create administrator"
       description="The first user becomes the initial administrator."
     >
+      <SetupGuidance
+        purpose="Create the first active user who will administer this installation."
+        prepare="A monitored email address and a password you can use to sign in after setup."
+        steps={[
+          'Enter the administrator email address.',
+          'Choose a password between 6 and 30 characters, then add an optional display name.',
+          'Select Create administrator once the details are correct.',
+        ]}
+        success="The user, sign-in credential, and setup progress are committed together before the wizard advances to Domain."
+        note="Use an address that can receive the outbound smoke-test email later in the wizard."
+      />
       <form onSubmit={onSubmit} noValidate>
         <Input
           id="admin-email"
@@ -98,7 +110,7 @@ export function AdministratorStep(): ReactElement {
           type="password"
           autoComplete="new-password"
           label="Password"
-          help="Minimum 8 characters."
+          help="6–30 characters."
           error={errors.password?.message}
           {...register('password')}
         />

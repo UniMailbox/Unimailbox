@@ -284,6 +284,87 @@ body {
   line-height: 1.5;
 }
 
+/* ---- Setup guidance (operator runbook) ---- */
+.setup-guidance {
+  margin: 1rem 0 1.25rem;
+  padding: 1rem 1.125rem;
+  border: 1px solid hsl(var(--unimailbox-info));
+  border-left-width: 3px;
+  border-radius: var(--unimailbox-radius);
+  background: linear-gradient(
+    135deg,
+    hsl(var(--unimailbox-info-soft)),
+    hsl(var(--unimailbox-card))
+  );
+  color: hsl(var(--unimailbox-foreground));
+}
+
+.setup-guidance-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin-bottom: 0.75rem;
+}
+
+.setup-guidance-kicker {
+  color: hsl(var(--unimailbox-info));
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.setup-guidance-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.setup-guidance-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.setup-guidance-section h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.setup-guidance-section p,
+.setup-guidance-section ol {
+  margin: 0;
+  color: hsl(var(--unimailbox-muted-foreground));
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.setup-guidance-section ol {
+  padding-left: 1.125rem;
+}
+
+.setup-guidance-section li + li {
+  margin-top: 0.25rem;
+}
+
+.setup-guidance-note {
+  margin: 0.875rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid hsl(var(--unimailbox-border));
+  color: hsl(var(--unimailbox-muted-foreground));
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 560px) {
+  .setup-guidance-sections {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---- Spinner primitive (CAP-041) ---- */
 .spinner {
   display: inline-block;

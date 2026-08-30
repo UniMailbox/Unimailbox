@@ -10,6 +10,20 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — Setup wizard operator guidance added
+
+Each setup step now includes a consistent operator guide covering purpose, preparation, actions,
+and the expected result. Claim additionally explains where the deployment token comes from, keeps
+the token out of browser storage, disables submission until a token is entered, and hides the
+session-clear action until a setup session exists. The administrator copy now matches the active
+6–30 character password contract. The setup route tree was also corrected so the `/setup` layout
+parent owns the real `/claim`, `/preflight`, and remaining step paths; direct browser navigation
+now renders the active step instead of an empty Outlet.
+
+Local evidence: Setup tests 40/40, Web 332/332, full unit 1056/1056, doctor 14/14,
+typecheck/lint/format/build, browser `/setup/claim` smoke, and `git diff --check` clean. No API,
+database, secret, preview, or deployment behavior changed.
+
 ## 2026-08-30 — Local Vite API routing and setup-gate parity fixed
 
 The Web development server now proxies `/api/*` to the local Worker (default

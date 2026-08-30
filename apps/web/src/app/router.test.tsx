@@ -12,21 +12,23 @@
 // with the same `beforeLoad` shape — so a future regression in the
 // router's cache-backed `beforeLoad` path will be caught here.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import {
   createMemoryHistory,
   createRoute,
+  RouterProvider,
   type RootRoute,
   type AnyRoute,
   redirect,
 } from '@tanstack/react-router';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { jsonResponse, lastPathname, mountAppRouter, spyFetch } from '../test-utils';
 import { createAppRouter, validateComposeSearch, validateFolderSearch } from './router';
 import type { RouterContext } from './router';
 import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 import { setupQueryKeys } from '../features/setup/setup-queries';
 import { createApiClient } from '../infrastructure/api/client';
+import { ApiClientProvider } from '../infrastructure/api/client-provider';
 
 afterEach(() => {
   cleanup();
@@ -173,6 +175,51 @@ describe('router — CAP-062 production draft route', () => {
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
     });
     const history = createMemoryHistory({ initialEntries: ['/mailbox'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/setup/claim');
+  });
+
+  it('renders the production Claim step inside the setup layout', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { status: 'setup', currentStep: 'claim' } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const history = createMemoryHistory({ initialEntries: ['/setup/claim'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiClientProvider client={apiClient}>
+          <RouterProvider router={router} />
+        </ApiClientProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Claim installation' })).toBeInTheDocument();
+    expect(screen.getByTestId('setup-guidance')).toHaveTextContent('INSTALLATION_TOKEN');
+  });
+
+  it('recovers an unknown setup URL to the server-selected step', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { status: 'setup', currentStep: 'claim' } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const history = createMemoryHistory({ initialEntries: ['/setup/not-a-step'] });
     const router = createAppRouter(apiClient, queryClient, history);
 
     await router.load();

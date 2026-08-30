@@ -15,9 +15,11 @@
 // (already extracted in `setup-queries.ts`) instead of hand-rolling the
 // status fetch. Same behaviour, one source of truth.
 //
-// H2 (CAP-041 fix): sub-route path parsing is replaced by a typed
-// `$subStep` path parameter on `setupRoute`. The layout component reads
-// `params.subStep` directly.
+// H2 (CAP-041 fix): setup steps are nested below a `/setup` layout route so
+// the declared `/setup/<step>` URLs render their child through the layout's
+// Outlet. A dynamic parent with static children would create unreachable
+// `/setup/$subStep/<step>` paths. The dynamic fallback below retains the
+// previous recovery behavior for unknown setup-step URLs.
 //
 // H3 (CAP-041 fix): the dead `useState`/`useEffect` force-update
 // subscription to the query cache is removed. The TanStack `useQuery`
@@ -390,122 +392,147 @@ function stepIndex(step: InstallationStep): number {
   return STEP_PATHS.indexOf(step);
 }
 
-// H2 (CAP-041 fix): the setup route uses a typed `$subStep` path
-// parameter. `setupIndexRoute` (path `/`) handles the bare `/setup`
-// case; the rest are `/setup/<subStep>`. The `beforeLoad` no longer
-// hand-parses `location.pathname`.
+// H2 (CAP-041 fix): setup steps are children of a `/setup` layout route.
+// Keeping the layout parent free of a dynamic segment is important:
+// nesting `/claim` below `/setup/$subStep` would produce the unreachable
+// path `/setup/$subStep/claim` and leave the layout's Outlet empty.
 const setupRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/setup/$subStep',
-  parseParams: (raw) => ({
-    subStep: raw.subStep === '' ? undefined : raw.subStep,
-  }),
-  stringifyParams: ({ subStep }) => ({ subStep: subStep ?? '' }),
-  // B1 / H1 (CAP-041 fix): beforeLoad receives the router context
-  // (apiClient) as a plain argument. No hooks, safe outside React.
-  beforeLoad: async ({ context, params }) => {
-    const apiClient = context.apiClient;
+  path: '/setup',
+  component: SetupLayout,
+});
+
+const setupIndexRoute = createRoute({
+  getParentRoute: () => setupRoute,
+  path: '/',
+  beforeLoad: async ({ context }) => {
     let state: InstallationStateInfo;
     try {
-      state = await fetchSetupStatus(apiClient);
+      state = await fetchSetupStatus(context.apiClient);
     } catch (error) {
       if (error instanceof ApiError) {
         throw redirect({ to: '/setup/claim' });
       }
       throw error;
     }
-    const activeStep: InstallationStep = state.currentStep;
     if (state.status === 'complete') {
       throw redirect({ to: '/' });
     }
-    const subStep = params.subStep;
-    if (subStep === undefined) {
-      throw redirect({ to: `/setup/${activeStep}` as const });
-    }
-    if (subStep === activeStep) {
-      return;
-    }
-    const subIndex = STEP_PATHS.indexOf(subStep as InstallationStep);
-    const activeIndex = stepIndex(activeStep);
-    if (subIndex === -1) {
-      // Unknown sub-step (stale bookmark, typo, or operator URL tinkering).
-      // Fall back to the server's current step rather than rendering an
-      // empty <Outlet/>. Same path the stale-ahead branch takes.
-      throw redirect({ to: `/setup/${activeStep}` as const });
-    }
-    if (subIndex > activeIndex) {
-      throw redirect({ to: `/setup/${activeStep}` as const });
-    }
+    throw redirect({ to: `/setup/${state.currentStep}` as const });
   },
-  component: function SetupLayoutRoute(): ReactElement {
-    return <SetupLayout />;
-  },
+  component: () => null,
 });
 
-const setupIndexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/setup',
-  beforeLoad: () => {
-    throw redirect({ to: '/setup/claim' });
-  },
-  component: () => <Outlet />,
-});
+async function requireSetupStep(
+  context: RouterContext,
+  expectedStep: InstallationStep,
+): Promise<void> {
+  let state: InstallationStateInfo;
+  try {
+    state = await fetchSetupStatus(context.apiClient);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw redirect({ to: '/setup/claim' });
+    }
+    throw error;
+  }
+  if (state.status === 'complete') {
+    throw redirect({ to: '/' });
+  }
+
+  const expectedIndex = stepIndex(expectedStep);
+  const activeIndex = stepIndex(state.currentStep);
+  if (expectedIndex === -1 || expectedIndex > activeIndex) {
+    throw redirect({ to: `/setup/${state.currentStep}` as const });
+  }
+}
 
 const claimRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/claim',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'claim'),
   component: ClaimStep,
 });
 
 const preflightRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/preflight',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'preflight'),
   component: PreflightStep,
 });
 
 const administratorRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/administrator',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'administrator'),
   component: AdministratorStep,
 });
 
 const domainRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/domain',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'domain'),
   component: DomainStep,
 });
 
 const cloudflareVerifyRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/cloudflare-verify',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'cloudflare-verify'),
   component: CloudflareVerifyStep,
 });
 
 const inboundSmokeRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/inbound-smoke',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'inbound-smoke'),
   component: InboundSmokeStep,
 });
 
 const brevoRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/brevo',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'brevo'),
   component: BrevoStep,
 });
 
 const outboundSmokeRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/outbound-smoke',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'outbound-smoke'),
   component: OutboundSmokeStep,
 });
 
 const completeRoute = createRoute({
   getParentRoute: () => setupRoute,
   path: '/complete',
+  beforeLoad: async ({ context }) => requireSetupStep(context, 'complete'),
   component: CompleteStep,
 });
 
+const unknownSetupStepRoute = createRoute({
+  getParentRoute: () => setupRoute,
+  path: '/$subStep',
+  beforeLoad: async ({ context }) => {
+    let state: InstallationStateInfo;
+    try {
+      state = await fetchSetupStatus(context.apiClient);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw redirect({ to: '/setup/claim' });
+      }
+      throw error;
+    }
+    if (state.status === 'complete') {
+      throw redirect({ to: '/' });
+    }
+    throw redirect({ to: `/setup/${state.currentStep}` as const });
+  },
+  component: () => null,
+});
+
 const setupChildren = setupRoute.addChildren([
+  setupIndexRoute,
   claimRoute,
   preflightRoute,
   administratorRoute,
@@ -515,6 +542,7 @@ const setupChildren = setupRoute.addChildren([
   brevoRoute,
   outboundSmokeRoute,
   completeRoute,
+  unknownSetupStepRoute,
 ]);
 
 const routeTree = rootRoute.addChildren([
@@ -531,7 +559,6 @@ const routeTree = rootRoute.addChildren([
   adminUsersRoute,
   adminConnectionsRoute,
   adminWebhookEventsRoute,
-  setupIndexRoute,
   setupChildren,
 ]);
 
