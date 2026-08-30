@@ -36,7 +36,9 @@ export type CursorSurface = z.infer<typeof cursorSurfaceSchema>;
  * datetime string the list query uses as the page-boundary key; `id` is
  * the row UUID (the second sort key for deterministic ordering when two
  * rows share a `created_at`); `surface` names the API that minted the
- * cursor. A payload missing `surface` fails the schema — intentionally
+ * cursor. `scope` is an optional endpoint-specific discriminator; the
+ * messages list uses `folder:<name>` so a cursor cannot silently cross
+ * folder views. A payload missing `surface` fails the schema — intentionally
  * invalidating every pre-surface cursor (accepted pre-launch; see the
  * worker's platform/cursor.ts header note).
  */
@@ -44,6 +46,7 @@ export const cursorPayloadSchema = z.object({
   createdAt: z.string().min(1),
   id: z.string().min(1),
   surface: cursorSurfaceSchema,
+  scope: z.string().min(1).optional(),
 });
 
 export type CursorPayload = z.infer<typeof cursorPayloadSchema>;

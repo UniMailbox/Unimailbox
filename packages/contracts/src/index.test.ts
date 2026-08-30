@@ -28,6 +28,7 @@ import {
   addMailboxMemberResponseSchema,
   deleteMailboxMemberResponseSchema,
   messageRecipientSchema,
+  messageFolderSchema,
   messageListItemSchema,
   messageListResponseSchema,
   messageDetailSchema,
@@ -1076,6 +1077,21 @@ describe('messageListItemSchema', () => {
   });
 });
 
+describe('messageFolderSchema — CAP-059 folder filter contract', () => {
+  it('accepts exactly the five user-visible folders', () => {
+    expect(messageFolderSchema.options).toEqual(['inbox', 'sent', 'drafts', 'archive', 'trash']);
+    for (const folder of messageFolderSchema.options) {
+      expect(messageFolderSchema.parse(folder)).toBe(folder);
+    }
+  });
+
+  it('rejects empty, unknown, and non-string folder values', () => {
+    expect(messageFolderSchema.safeParse('').success).toBe(false);
+    expect(messageFolderSchema.safeParse('all').success).toBe(false);
+    expect(messageFolderSchema.safeParse(null).success).toBe(false);
+  });
+});
+
 describe('messageListResponseSchema', () => {
   it('accepts a response with items and a null cursor', () => {
     const result = messageListResponseSchema.parse({
@@ -1664,6 +1680,23 @@ describe('cursorPayloadSchema — payload contract (CAP-044 Slice 3 amendment)',
       });
       expect(result.surface).toBe(surface);
     }
+  });
+
+  it('accepts an optional endpoint scope for resource-specific pagination', () => {
+    const result = cursorPayloadSchema.parse({
+      createdAt: '2026-08-24 00:00:00',
+      id: '00000000-0000-4000-8000-000000000001',
+      surface: 'messages',
+      scope: 'folder:sent',
+    });
+    expect(result.scope).toBe('folder:sent');
+    expect(
+      cursorPayloadSchema.parse({
+        createdAt: '2026-08-24 00:00:00',
+        id: 'x',
+        surface: 'messages',
+      }).scope,
+    ).toBeUndefined();
   });
 
   it('rejects a payload missing any field', () => {

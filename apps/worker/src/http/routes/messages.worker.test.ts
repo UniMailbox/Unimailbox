@@ -169,6 +169,7 @@ interface InsertMessageOptions {
   readonly createdAt?: string;
   readonly subject?: string;
   readonly fromAddress?: string;
+  readonly folder?: 'inbox' | 'sent' | 'drafts' | 'archive' | 'trash';
   /** RFC 5322 Message-ID, stored verbatim (typically `<id@host>`). */
   readonly messageIdHeader?: string | null;
   /** RFC 5322 In-Reply-To, stored verbatim (typically `<id@host>`). */
@@ -194,6 +195,7 @@ async function insertMessage(
   const createdAt = opts.createdAt ?? new Date().toISOString();
   const subject = opts.subject ?? 'Test message';
   const fromAddress = opts.fromAddress ?? 'sender@example.com';
+  const folder = opts.folder ?? 'inbox';
 
   await env.DB.batch([
     env.DB.prepare(
@@ -216,8 +218,8 @@ async function insertMessage(
     ),
     env.DB.prepare(
       `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
-       VALUES (?, ?, ?, 0, 0, 'inbox', ?)`,
-    ).bind(mailboxMessageId, mailboxId, messageId, createdAt),
+       VALUES (?, ?, ?, 0, 0, ?, ?)`,
+    ).bind(mailboxMessageId, mailboxId, messageId, folder, createdAt),
     env.DB.prepare(
       `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
        VALUES (?, ?, 'recipient@example.com', 'Recipient', 'to', ?)`,
@@ -311,6 +313,107 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages', () => {
     expect(body.data.items[0].recipients.to).toHaveLength(1);
     expect(body.data.items[0].recipients.to[0].address).toBe('recipient@example.com');
     expect(body.data.nextCursor).toBeNull();
+  });
+
+  it('R-MESSAGE-004 R-API-005 filters by folder and binds cursors to that folder', async () => {
+    const ownerId = await createUserWithRole('member', 'folder-owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    await insertMessage(mailboxId, {
+      subject: 'inbox message',
+      folder: 'inbox',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    await insertMessage(mailboxId, {
+      subject: 'sent older',
+      folder: 'sent',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    await insertMessage(mailboxId, {
+      subject: 'sent newer',
+      folder: 'sent',
+      createdAt: '2026-01-03T00:00:00.000Z',
+    });
+    await insertMessage(mailboxId, {
+      subject: 'draft message',
+      folder: 'drafts',
+      createdAt: '2026-01-04T00:00:00.000Z',
+    });
+
+    const base = `http://localhost/api/v1/mailboxes/${mailboxId}/messages`;
+    const defaultResponse = await SELF.fetch(base, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(defaultResponse.status).toBe(200);
+    const defaultBody = await defaultResponse.json();
+    expect(defaultBody.data.items).toHaveLength(1);
+    expect(defaultBody.data.items[0].subject).toBe('inbox message');
+    expect(defaultBody.data.items[0].folder).toBe('inbox');
+
+    const sentPage1 = await SELF.fetch(`${base}?folder=sent&limit=1`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(sentPage1.status).toBe(200);
+    const sentBody1 = await sentPage1.json();
+    expect(sentBody1.data.items).toHaveLength(1);
+    expect(sentBody1.data.items[0].subject).toBe('sent newer');
+    expect(sentBody1.data.nextCursor).not.toBeNull();
+
+    const sentPage2 = await SELF.fetch(
+      `${base}?folder=sent&limit=1&cursor=${encodeURIComponent(sentBody1.data.nextCursor)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(sentPage2.status).toBe(200);
+    const sentBody2 = await sentPage2.json();
+    expect(sentBody2.data.items).toHaveLength(1);
+    expect(sentBody2.data.items[0].subject).toBe('sent older');
+
+    const crossedCursor = await SELF.fetch(
+      `${base}?folder=inbox&cursor=${encodeURIComponent(sentBody1.data.nextCursor)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(crossedCursor.status).toBe(400);
+    const crossedBody = await crossedCursor.json();
+    expect(crossedBody.error.code).toBe('INVALID_CURSOR');
+  });
+
+  it('R-API-002 rejects an empty or unknown folder without returning message data', async () => {
+    const ownerId = await createUserWithRole('member', 'folder-validation@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+
+    for (const folder of ['', 'all', 'INBOX']) {
+      const response = await SELF.fetch(
+        `http://localhost/api/v1/mailboxes/${mailboxId}/messages?folder=${encodeURIComponent(folder)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe('VALIDATION_ERROR');
+    }
+  });
+
+  it('R-API-005 rejects a scope-less messages cursor after the folder contract is enabled', async () => {
+    const ownerId = await createUserWithRole('member', 'folder-cursor-legacy@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    const { signCursor } = await import('../../platform/cursor');
+    const legacyCursor = await signCursor(
+      { createdAt: '2026-01-01 00:00:00', id: crypto.randomUUID(), surface: 'messages' },
+      env.CURSOR_SIGNING_KEY,
+    );
+
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/mailboxes/${mailboxId}/messages?cursor=${encodeURIComponent(legacyCursor)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.code).toBe('INVALID_CURSOR');
   });
 
   it('paginates across a page boundary using the cursor', async () => {
@@ -942,7 +1045,12 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages — CAP-043 cursor + soft-de
     const { signCursor } = await import('../../platform/cursor');
     const otherKey = 'attacker-supplied-key-different-from-env';
     const foreignCursor = await signCursor(
-      { createdAt: '2026-01-01 00:00:00', id: crypto.randomUUID(), surface: 'messages' },
+      {
+        createdAt: '2026-01-01 00:00:00',
+        id: crypto.randomUUID(),
+        surface: 'messages',
+        scope: 'folder:inbox',
+      },
       otherKey,
     );
 

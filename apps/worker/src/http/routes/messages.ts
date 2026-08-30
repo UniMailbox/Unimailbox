@@ -30,6 +30,7 @@
 // recorded decision (D-CAP-043-I). No route handler runs raw SQL (H6) —
 // the row lookups live in message-read-repository.
 
+import { messageFolderSchema } from '@unimailbox/contracts';
 import { Hono, type Context } from 'hono';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
@@ -214,6 +215,7 @@ export function messageRoutes(): Hono<AppEnv> {
    * Query:
    *   cursor — opaque HMAC-signed cursor returned by a prior page (optional)
    *   limit  — page size, default 50, clamped to 50
+   *   folder — one of inbox/sent/drafts/archive/trash, default inbox
    *
    * R-API-005: the cursor is signed with `env.CURSOR_SIGNING_KEY`
    * (D-CAP-043-D). A tampered cursor surfaces as `CursorInvalidError`
@@ -227,6 +229,15 @@ export function messageRoutes(): Hono<AppEnv> {
     const userId = await requireMailboxReadAccess(c, mailboxId);
 
     const cursor = c.req.query('cursor') || undefined;
+    const rawFolder = c.req.query('folder');
+    const folderResult = messageFolderSchema.safeParse(rawFolder ?? 'inbox');
+    if (!folderResult.success) {
+      throw new DomainError({
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid folder',
+        httpStatus: 400,
+      });
+    }
     const requestedLimit = parseInt(c.req.query('limit') ?? String(DEFAULT_LIMIT), 10);
     const limit =
       Number.isFinite(requestedLimit) && requestedLimit > 0
@@ -243,6 +254,7 @@ export function messageRoutes(): Hono<AppEnv> {
       result = await listMessagesByMailbox(c.env.DB, mailboxId, userId, {
         ...(cursor !== undefined && { cursor }),
         limit,
+        folder: folderResult.data,
         cursorSigningKey,
       });
     } catch (error) {

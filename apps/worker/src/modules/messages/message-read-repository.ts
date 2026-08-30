@@ -31,7 +31,11 @@
 // the priority order exists only there so the anchor and the candidate
 // rows can never drift apart.
 
-import type { MessageAttachmentMetadata } from '@unimailbox/contracts';
+import {
+  messageFolderSchema,
+  type MessageAttachmentMetadata,
+  type MessageFolder,
+} from '@unimailbox/contracts';
 import type { Database } from '../../platform/database';
 import { signCursor, verifyCursor, type CursorPayload } from '../../platform/cursor';
 import { sqliteTimestamp } from '../../platform/idempotency';
@@ -49,7 +53,7 @@ export interface MessageListItem {
   subject: string;
   isRead: 0 | 1;
   isStarred: 0 | 1;
-  folder: string;
+  folder: MessageFolder;
   createdAt: string;
   recipients: { to: RecipientInfo[]; cc: RecipientInfo[] };
 }
@@ -67,7 +71,7 @@ export interface MessageDetail {
   status: string;
   isRead: 0 | 1;
   isStarred: 0 | 1;
-  folder: string;
+  folder: MessageFolder;
   createdAt: string;
   recipients: { to: RecipientInfo[]; cc: RecipientInfo[] };
   attachments: MessageAttachmentMetadata[];
@@ -247,9 +251,10 @@ export async function listMessagesByMailbox(
   db: Database,
   mailboxId: string,
   userId: string,
-  opts: { cursor?: string; limit?: number; cursorSigningKey: string },
+  opts: { cursor?: string; limit?: number; cursorSigningKey: string; folder?: MessageFolder },
 ): Promise<ListMessagesResult> {
   const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+  const folder = opts.folder ?? 'inbox';
 
   // Verify the cursor BEFORE running the page query. verifyCursor
   // returns null on any failure (malformed token, signature mismatch,
@@ -266,6 +271,12 @@ export async function listMessagesByMailbox(
       throw new CursorInvalidError();
     }
     cursor = verified;
+    // CAP-059: every messages cursor minted by this slice carries the
+    // selected folder. Reject older scope-less tokens as well; accepting one
+    // would let a cursor silently skip rows when a caller switches views.
+    if (cursor.scope !== `folder:${folder}`) {
+      throw new CursorInvalidError();
+    }
   }
 
   // Page query: join mailbox_messages → messages, LEFT JOIN per-user state.
@@ -287,13 +298,23 @@ export async function listMessagesByMailbox(
               ON mus.mailbox_message_id = mm.id
              AND mus.user_id = ?
         WHERE mm.mailbox_id = ?
+          AND mm.folder = ?
           AND COALESCE(mus.is_deleted, 0) = 0
           AND (? IS NULL
                OR (m.created_at < ? OR (m.created_at = ? AND m.id < ?)))
      ORDER BY m.created_at DESC, m.id DESC
         LIMIT ?`,
     )
-    .bind(userId, mailboxId, cursorCreatedAt, cursorCreatedAt, cursorCreatedAt, cursorId, limit)
+    .bind(
+      userId,
+      mailboxId,
+      folder,
+      cursorCreatedAt,
+      cursorCreatedAt,
+      cursorCreatedAt,
+      cursorId,
+      limit,
+    )
     .all<MessageListRow>();
 
   const items: MessageListItem[] = (rows.results ?? []).map((row) => ({
@@ -303,7 +324,7 @@ export async function listMessagesByMailbox(
     subject: row.subject,
     isRead: stateFlag(row.user_is_read),
     isStarred: stateFlag(row.is_starred),
-    folder: row.folder,
+    folder: messageFolderSchema.parse(row.folder),
     createdAt: row.created_at,
     recipients: { to: [], cc: [] },
   }));
@@ -343,7 +364,7 @@ export async function listMessagesByMailbox(
     const last = items[items.length - 1];
     if (last) {
       nextCursor = await signCursor(
-        { createdAt: last.createdAt, id: last.id, surface: 'messages' },
+        { createdAt: last.createdAt, id: last.id, surface: 'messages', scope: `folder:${folder}` },
         opts.cursorSigningKey,
       );
     }
@@ -443,7 +464,7 @@ export async function getMessageDetail(
     status: row.status,
     isRead: stateFlag(row.user_is_read),
     isStarred: stateFlag(row.is_starred),
-    folder: row.folder,
+    folder: messageFolderSchema.parse(row.folder),
     createdAt: row.created_at,
     recipients: groupRecipients(recipientRows.results ?? []),
     attachments: (attachmentRows.results ?? []).map((attachment) => ({
@@ -577,7 +598,7 @@ export async function getMessageThread(
     subject: row.subject,
     isRead: stateFlag(row.user_is_read),
     isStarred: stateFlag(row.is_starred),
-    folder: row.folder,
+    folder: messageFolderSchema.parse(row.folder),
     createdAt: row.created_at,
     recipients: { to: [], cc: [] },
   }));

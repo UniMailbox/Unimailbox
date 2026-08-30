@@ -953,6 +953,15 @@ export type MessageRecipientInfo = z.infer<typeof messageRecipientSchema>;
 const messageStateFlagSchema = z.union([z.literal(0), z.literal(1)]);
 
 /**
+ * Closed mailbox folder vocabulary used by message-list filters and
+ * projections. The database column predates this contract and remains a
+ * TEXT compatibility column, but new API inputs and outputs must stay within
+ * the five user-visible views.
+ */
+export const messageFolderSchema = z.enum(['inbox', 'sent', 'drafts', 'archive', 'trash']);
+export type MessageFolder = z.infer<typeof messageFolderSchema>;
+
+/**
  * One row in the inbox list response (GET /api/v1/mailboxes/:mailboxId/messages).
  *
  * R-MESSAGE-005: isRead is the per-user value (0 or 1).
@@ -964,7 +973,7 @@ export const messageListItemSchema = z.object({
   subject: z.string(),
   isRead: messageStateFlagSchema,
   isStarred: messageStateFlagSchema,
-  folder: z.string(),
+  folder: messageFolderSchema,
   createdAt: z.string(),
   recipients: z.object({
     to: z.array(messageRecipientSchema),
@@ -1023,7 +1032,7 @@ export const messageDetailSchema = z.object({
   status: z.string(),
   isRead: messageStateFlagSchema,
   isStarred: messageStateFlagSchema,
-  folder: z.string(),
+  folder: messageFolderSchema,
   createdAt: z.string(),
   recipients: z.object({
     to: z.array(messageRecipientSchema),
