@@ -89,6 +89,25 @@ export function createApiClient(init: ApiClientInit): ApiClient {
 
       headers.set('Accept', 'application/json');
 
+      // D-CAP-042-auth-ct: when the body is an object, JSON-stringify it
+      // AND set Content-Type: application/json unless the caller already
+      // provided one. `fetch()` defaults the Content-Type for a string
+      // body to `text/plain;charset=UTF-8`, which Better Auth's
+      // `sign-in/email` (and any other strict-JSON route) rejects with
+      // 415 `UNSUPPORTED_MEDIA_TYPE`. Tolerated for years by every
+      // setup/admin/messages route because those handlers call
+      // `c.req.text()` and parse the JSON themselves — that luck ends
+      // the moment a route validates the header, which Better Auth
+      // does at its handler boundary. Setting the header here is
+      // idempotent: callers that already provided one keep their value.
+      if (
+        requestInit.body !== undefined &&
+        typeof requestInit.body !== 'string' &&
+        !headers.has('Content-Type')
+      ) {
+        headers.set('Content-Type', 'application/json');
+      }
+
       const requestBody =
         requestInit.body === undefined
           ? undefined

@@ -10,6 +10,25 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-31 — Frontend fix: apiClient now sets Content-Type: application/json for object bodies
+
+`apps/web/src/infrastructure/api/client.ts` was JSON-stringifying object bodies but never setting `Content-Type: application/json`. The browser's `fetch()` defaults the header for a string body to `text/plain;charset=UTF-8`, which Better Auth's `POST /api/v1/auth/better/sign-in/email` rejects with 415 `UNSUPPORTED_MEDIA_TYPE` (Better Auth strictly validates the header at its handler boundary; the rest of our worker routes tolerate `text/plain` because they `c.req.text()` and parse).
+
+Why it slipped through:
+- 468 worker-side tests all set `Content-Type: application/json` explicitly in their fixtures, so the server-side round-trip was always fine.
+- Every setup/admin/messages route tolerates `text/plain` because it reads the raw body and parses it.
+- Better Auth was the first strict-JSON handler to land in the codebase. CAP-042 Batch 5+ ships `/api/v1/auth/better/*` and the only callers (`useSignInMutation`) hadn't been manually exercised end-to-end through the real browser — the worker-pool tests for `better-auth.worker.test.ts` use a constructed `Request` with the right Content-Type.
+
+Fix (`apps/web/src/infrastructure/api/client.ts:90-115`): when `requestInit.body` is an object (not a string) AND the caller hasn't already set Content-Type, set `Content-Type: application/json`. The check is intentionally narrow — string bodies keep the caller's contract, body-less POSTs (e.g. `/api/v1/auth/better/sign-out`) get nothing.
+
+Test (`apps/web/src/infrastructure/api/client.test.ts`, +4 cases): "sets Content-Type: application/json for object bodies" (the regression — pins both the header and that the body is JSON-stringified), "does not set Content-Type when the caller already provided one" (idempotent — caller's value wins), "does not set Content-Type when the body is a string (caller owns the header)", "does not set Content-Type for body-less requests".
+
+**Files**: `apps/web/src/infrastructure/api/client.ts` (MODIFIED — add the header-set block at line 90-115), `apps/web/src/infrastructure/api/client.test.ts` (MODIFIED — +4 cases), `docs/rebuild/capability-ledger.md` (D-CAP-042-auth-ct row), `docs/rebuild/implementation-log.md` (this entry).
+
+**Gates**: doctor 14/14, lint clean, typecheck clean, unit 1091→1095 (+4 new tests, zero regressions), web 358→362 (+4 new tests). Worker-pool tests not re-run (web-only change; no worker-side surface touched).
+
+---
+
 ## 2026-08-31 — Tooling fix: `pnpm scaffold db:migrate --reset` silently dropped `--reset`
 
 Operator reported `db:migrate --reset` only verified and never wiped the local D1 persist dir. Root cause: `scripts/scaffold.ts:28-32` filtered `v !== '--reset'` on **both** the alias path (where the flag was prepended) and the explicit `db:migrate` path (where the operator typed it). The runner saw no args, skipped the `rmSync` block at `scripts/db-migrate.ts:50-55`, and just verified.

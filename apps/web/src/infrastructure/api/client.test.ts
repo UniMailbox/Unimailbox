@@ -124,6 +124,68 @@ describe('createApiClient', () => {
     expect(headers.has('Authorization')).toBe(false);
   });
 
+  // D-CAP-042-auth-ct: object bodies must hit the wire with
+  // Content-Type: application/json so Better Auth's sign-in/email
+  // (and any other strict-JSON route) doesn't reject with 415
+  // UNSUPPORTED_MEDIA_TYPE. `fetch()` defaults the Content-Type for a
+  // string body to `text/plain;charset=UTF-8`.
+  it('sets Content-Type: application/json for object bodies', async () => {
+    const client = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl,
+    });
+    await client.fetch('/api/v1/auth/better/sign-in/email', {
+      method: 'POST',
+      body: { email: 'a@b', password: 'secret' },
+    });
+    const headers = calls[0]?.init.headers as Headers;
+    expect(headers.get('Content-Type')).toBe('application/json');
+    // Body is JSON-stringified, not the raw object — fetch would
+    // otherwise turn it into "[object Object]".
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ email: 'a@b', password: 'secret' }));
+  });
+
+  it('does not set Content-Type when the caller already provided one', async () => {
+    const client = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl,
+    });
+    await client.fetch('/api/v1/auth/better/sign-in/email', {
+      method: 'POST',
+      body: { email: 'a@b', password: 'secret' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    const headers = calls[0]?.init.headers as Headers;
+    expect(headers.get('Content-Type')).toBe('application/x-www-form-urlencoded');
+  });
+
+  it('does not set Content-Type when the body is a string (caller owns the header)', async () => {
+    const client = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl,
+    });
+    await client.fetch('/api/v1/anything', {
+      method: 'POST',
+      body: 'raw-text-body',
+    });
+    const headers = calls[0]?.init.headers as Headers;
+    expect(headers.has('Content-Type')).toBe(false);
+  });
+
+  it('does not set Content-Type for body-less requests', async () => {
+    const client = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl,
+    });
+    await client.fetch('/api/v1/auth/better/sign-out', { method: 'POST' });
+    const headers = calls[0]?.init.headers as Headers;
+    expect(headers.has('Content-Type')).toBe(false);
+  });
+
   it('attaches x-request-id to every request (UUID-shaped)', async () => {
     const client = createApiClient({
       baseUrl: '',
