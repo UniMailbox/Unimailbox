@@ -12,7 +12,8 @@
 // with the same `beforeLoad` shape — so a future regression in the
 // router's cache-backed `beforeLoad` path will be caught here.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {
   createMemoryHistory,
   createRoute,
@@ -22,6 +23,7 @@ import {
   redirect,
 } from '@tanstack/react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { CURRENT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { jsonResponse, lastPathname, mountAppRouter, spyFetch } from '../test-utils';
 import { createAppRouter, validateComposeSearch, validateFolderSearch } from './router';
 import type { RouterContext } from './router';
@@ -29,6 +31,7 @@ import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 import { setupQueryKeys } from '../features/setup/setup-queries';
 import { createApiClient } from '../infrastructure/api/client';
 import { ApiClientProvider } from '../infrastructure/api/client-provider';
+import { clearSetupSession, setSetupSession, useSetupSession } from '../features/setup/setup-session-store';
 
 afterEach(() => {
   cleanup();
@@ -114,6 +117,230 @@ describe('router (D-CAP-041-9 closure)', () => {
     expect(lastPathname(history)).toBe('/mailbox');
     // No additional fetch — the cache was already warm.
     expect(calls.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CAP-041 preflight hotfix — AC-1 (active chip on first render) + AC-7
+// (Continue actually navigates). The previous `requireSetupStep` bypassed
+// React Query (called `fetchSetupStatus(apiClient)` directly), so the cache
+// was empty when `<SetupLayout>` mounted and every chip rendered as
+// `upcoming` on first paint. The fix routes `requireSetupStep` through
+// `queryClient.fetchQuery`, which populates it synchronously before the
+// layout mounts.
+//
+// These tests mount the production router (not a mirror tree) so the
+// beforeLoad + SetupLayout code paths are exercised exactly as the
+// operator sees them.
+// ---------------------------------------------------------------------------
+
+describe('router — CAP-041 preflight hotfix (AC-1 + AC-7)', () => {
+  // AC-1: loading /setup/preflight while installation_state.current_step
+  // is 'preflight' renders the preflight chip as the active step on the
+  // very first paint — `data-state="current"` AND `aria-current="step"`.
+  // The router's beforeLoad populates the cache via
+  // `queryClient.fetchQuery`, so the layout's `setupStatusQuery()`
+  // reads the cache synchronously.
+  it('AC-1 active chip is correct on first paint when cache is pre-populated', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      // Status endpoint is not actually called (cache is warm), but if
+      // the router does call it for any reason the body must agree with
+      // the cache entry below — same shape, same values.
+      fetchImpl: (async () =>
+        jsonResponse({
+          data: { status: 'setup', currentStep: 'preflight' },
+        })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    // Simulate the cache being populated by the router's beforeLoad —
+    // this is the shape `requireSetupStep` now produces via
+    // `queryClient.fetchQuery`.
+    queryClient.setQueryData(setupQueryKeys.status(), {
+      status: 'setup' as const,
+      currentStep: 'preflight' as const,
+    });
+    const history = createMemoryHistory({ initialEntries: ['/setup/preflight'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+    await router.load();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiClientProvider client={apiClient}>
+          <RouterProvider router={router} />
+        </ApiClientProvider>
+      </QueryClientProvider>,
+    );
+
+    // First paint — no waitFor. The chip must already be `current`.
+    const preflightChip = screen.getByTestId('step-preflight');
+    expect(preflightChip.getAttribute('data-state')).toBe('current');
+    expect(preflightChip.getAttribute('aria-current')).toBe('step');
+    // Claim is before preflight in the wizard order → it should be
+    // `complete` (not `upcoming`, which was the bug).
+    expect(screen.getByTestId('step-claim').getAttribute('data-state')).toBe('complete');
+    // Administrator is after preflight → it should be `upcoming`.
+    expect(screen.getByTestId('step-administrator').getAttribute('data-state')).toBe('upcoming');
+  });
+
+  // AC-1 control: regression guard for the cache-hydration chain. With a
+  // cold cache, `requireSetupStep` must populate the cache via
+  // `queryClient.fetchQuery` so the chip is correct on first paint —
+  // NOT after a useQuery refetch from the layout. A future refactor that
+  // bypasses `queryClient.fetchQuery` (e.g. reverting to a direct
+  // `fetchSetupStatus(context.apiClient)` call) would reintroduce the
+  // all-upcoming flash. We assert on first render WITHOUT `waitFor`
+  // because RTL's `render` is a synchronous commit — `waitFor` would
+  // mask the bug-class regression we are guarding against.
+  it('AC-1 control — cold cache is hydrated by requireSetupStep before first paint', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({
+          data: { status: 'setup', currentStep: 'preflight' },
+        })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    // Intentionally do NOT pre-seed the cache — this is the regression-
+    // guard shape. requireSetupStep (called from beforeLoad) is the
+    // only thing allowed to populate it.
+    const history = createMemoryHistory({ initialEntries: ['/setup/preflight'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+    await router.load();
+
+    expect(queryClient.getQueryData(setupQueryKeys.status())).toEqual({
+      status: 'setup',
+      currentStep: 'preflight',
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiClientProvider client={apiClient}>
+          <RouterProvider router={router} />
+        </ApiClientProvider>
+      </QueryClientProvider>,
+    );
+
+    // First paint (no waitFor): the preflight chip is `current`, not
+    // `upcoming`. If a future refactor skips the fetchQuery hydration,
+    // this assertion fails on the first paint and the test reports the
+    // regression with file:line.
+    expect(screen.getByTestId('step-preflight').getAttribute('data-state')).toBe('current');
+    expect(screen.getByTestId('step-claim').getAttribute('data-state')).toBe('complete');
+    expect(screen.getByTestId('step-administrator').getAttribute('data-state')).toBe('upcoming');
+  });
+
+  // AC-7: after a successful preflight, navigating to /setup/administrator
+  // resolves without a redirect bounce. The previous bug: the Continue
+  // handler called `navigate({to:'/setup/administrator'})`, the route's
+  // beforeLoad → `requireSetupStep` saw `state.currentStep === 'preflight'`
+  // and `expectedIndex(2) > activeIndex(1)`, and threw a redirect back to
+  // /setup/preflight. With the hotfix, the server-side POST /preflight
+  // advances the state and the cache mirrors it, so the navigation
+  // resolves cleanly. We simulate the post-advance cache state directly
+  // (the actual preflight POST is exercised by the worker-pool tests in
+  // preflight.worker.test.ts AC-2/AC-3/AC-4/AC-5/AC-6).
+  it('AC-7 after a successful preflight Continue reaches /setup/administrator', async () => {
+    // Wire a setup session token so PreflightStep's POST /preflight
+    // (if it runs) carries an Authorization header — even though the
+    // hotfix path does not require the click to invoke POST again here
+    // (we simulate the post-advance state directly).
+    setSetupSession('test-session-token');
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => useSetupSession.getState().sessionToken,
+      // Mock the preflight endpoint so PreflightStep's `setupPreflightQuery`
+      // (which it runs on mount) returns all-green. The endpoint is
+      // /api/v1/setup/preflight, accessed as POST.
+      fetchImpl: (async (input, init) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.endsWith('/api/v1/setup/preflight') && init?.method === 'POST') {
+          return jsonResponse({
+            data: {
+              bindings: {
+                DB: true,
+                ATTACHMENTS: true,
+                SETUP_SESSION: true,
+                CACHE: true,
+                OUTBOUND: true,
+                INSTALLATION_TOKEN: true,
+                CREDENTIAL_ENCRYPTION_KEY: true,
+                BETTER_AUTH_SECRET: true,
+              },
+              schemaVersion: CURRENT_SCHEMA_VERSION,
+            },
+          });
+        }
+        if (url.endsWith('/api/v1/setup/status')) {
+          return jsonResponse({
+            data: { status: 'setup', currentStep: 'administrator' },
+          });
+        }
+        return jsonResponse({ data: null }, 404);
+      }) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    // Start at the preflight step with cache currentStep='preflight'.
+    queryClient.setQueryData(setupQueryKeys.status(), {
+      status: 'setup' as const,
+      currentStep: 'preflight' as const,
+    });
+    const history = createMemoryHistory({ initialEntries: ['/setup/preflight'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+    await router.load();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiClientProvider client={apiClient}>
+          <RouterProvider router={router} />
+        </ApiClientProvider>
+      </QueryClientProvider>,
+    );
+
+    // Wait for PreflightStep's setupPreflightQuery to settle so the
+    // Continue button is enabled (all bindings present AND schema OK).
+    const continueButton = await screen.findByRole('button', { name: /continue/i });
+    await waitFor(() => {
+      expect(continueButton).not.toBeDisabled();
+    });
+
+    // Simulate the server-side advance the worker test suite proves
+    // happens (AC-2): the POST /preflight updates installation_state
+    // AND mirrors it into the cache so the layout reflects the new
+    // current step on the next render. The router's `beforeLoad`
+    // re-runs on every navigation and would refetch, but updating the
+    // cache is what the production code path does after a successful
+    // mutation (via `queryClient.setQueryData(setupQueryKeys.status(), …)`
+    // or `queryClient.invalidateQueries`).
+    queryClient.setQueryData(setupQueryKeys.status(), {
+      status: 'setup' as const,
+      currentStep: 'administrator' as const,
+    });
+
+    const user = userEvent.setup();
+    await user.click(continueButton);
+
+    // The router must have resolved /setup/administrator, not bounced
+    // back to /setup/preflight. The chip indicator reflects the new
+    // current step on the next render: preflight → complete,
+    // administrator → current.
+    await waitFor(() => {
+      expect(history.location.pathname).toBe('/setup/administrator');
+    });
+    expect(screen.getByTestId('step-preflight').getAttribute('data-state')).toBe('complete');
+    expect(screen.getByTestId('step-administrator').getAttribute('data-state')).toBe('current');
+    // Claim, which is before preflight, stays complete.
+    expect(screen.getByTestId('step-claim').getAttribute('data-state')).toBe('complete');
+
+    clearSetupSession();
   });
 });
 

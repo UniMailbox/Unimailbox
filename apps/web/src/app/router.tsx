@@ -427,9 +427,20 @@ async function requireSetupStep(
   context: RouterContext,
   expectedStep: InstallationStep,
 ): Promise<void> {
+  // CAP-041 preflight hotfix: route the setup-status fetch through
+  // `context.queryClient.fetchQuery` so the cache is populated before
+  // `<SetupLayout>` mounts. The previous direct `fetchSetupStatus` call
+  // bypassed React Query, so the layout's `setupStatusQuery()` rendered
+  // every chip as `upcoming` on first paint — a flash of all-upcoming
+  // before the useQuery fetcher landed. Mirrors the same shape
+  // `requireCompletedSetup` (a few lines up) uses for the same reason.
   let state: InstallationStateInfo;
   try {
-    state = await fetchSetupStatus(context.apiClient);
+    state = await context.queryClient.fetchQuery({
+      queryKey: setupQueryKeys.status(),
+      queryFn: () => fetchSetupStatus(context.apiClient),
+      staleTime: 0,
+    });
   } catch (error) {
     if (error instanceof ApiError) {
       throw redirect({ to: '/setup/claim' });

@@ -91,6 +91,28 @@ export function prepareUpdateInstallationStep(
 }
 
 /**
+ * Returns a prepared UPDATE statement that ONLY fires when the row's
+ * `current_step` matches `fromStep`. Used by the CAP-041 preflight hotfix
+ * to make re-running preflight when the state already advanced a
+ * zero-row update with no audit row. Batch the returned statement with
+ * a conditional audit INSERT (e.g. `INSERT ... SELECT FROM
+ * installation_state WHERE id = 1 AND current_step = ?`) so both
+ * statements fire only on the same state predicate.
+ */
+export function prepareConditionalUpdateInstallationStep(
+  db: Database,
+  fromStep: InstallationStep,
+  toStep: InstallationStep,
+  timestamp: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      'UPDATE installation_state SET current_step = ?, updated_at = ? WHERE id = 1 AND current_step = ?',
+    )
+    .bind(toStep, timestamp, fromStep);
+}
+
+/**
  * Updates the current_step of the single installation_state row (id = 1).
  * Used after each setup wizard step to advance the installation progress.
  */

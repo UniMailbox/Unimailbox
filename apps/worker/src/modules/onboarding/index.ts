@@ -8,6 +8,7 @@
 export { getSetupStatus } from './setup-status';
 export { claimSetup } from './claim-setup';
 export { runPreflight } from './preflight';
+export type { PreflightBindings, PreflightResult } from './preflight';
 export { createAdministrator } from './create-administrator';
 export { createDomainStep } from './create-domain';
 export { getCloudflareDashboardLink } from './cloudflare-dashboard-link';

@@ -189,9 +189,18 @@ export function setupRoutes(): Hono<AppEnv> {
     );
     if (replay) return replay;
 
-    const result = await runPreflight(c.env.DB, c.env);
+    // CAP-041 preflight hotfix: thread the request-id the middleware
+    // stamped onto this /preflight request so the audit row inside
+    // runPreflight carries it (R-AUDIT-001 + D-CAP-046-A — same shape
+    // as /claim and /complete). The `advanced` flag is server-internal
+    // and intentionally NOT surfaced in the response envelope (would be
+    // a contract change to setupPreflightResponseSchema).
+    const { bindings, schemaVersion } = await runPreflight(
+      { db: c.env.DB, env: c.env, requestId: c.get('requestId') ?? null },
+      { clock: systemClock, ids: systemIds },
+    );
 
-    const successBody = JSON.stringify({ data: result });
+    const successBody = JSON.stringify({ data: { bindings, schemaVersion } });
     await writeIdempotencyRecord(c.env.DB, {
       id: systemIds.uuid(),
       actorId,

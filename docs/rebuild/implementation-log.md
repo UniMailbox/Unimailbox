@@ -10,6 +10,78 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-30 — CAP-041 preflight hotfix: state advance + cache hydration
+
+Two production bugs in the setup wizard at `/setup/preflight` reported during local testing,
+landed as a single fix commit on top of f1e23af:
+
+1. **Server: preflight never advanced `installation_state.current_step`.** The state machine had a
+   missing edge: `claimSetup` seeded `current_step='preflight'`, `runPreflight` was read-only, and
+   `createAdministrator` advanced to `'domain'`. No code path had ever advanced `preflight →
+   administrator`, so clicking Continue on `/setup/preflight` triggered
+   `administratorRoute.beforeLoad` → `requireSetupStep(context, 'administrator')` → saw
+   `expectedIndex(2) > activeIndex(1)` → `throw redirect({to:'/setup/preflight'})`. The wizard
+   bounced back. Fix: `runPreflight` now conditionally advances state when every binding is
+   present AND `schemaVersion === CURRENT_SCHEMA_VERSION` (worker
+   `apps/worker/src/modules/onboarding/preflight.ts`). The advance is folded into a single D1
+   batch with a `setup.preflight.complete` `audit_events` INSERT (R-WORKFLOW-002 + R-AUDIT-001);
+   the audit row uses `INSERT ... SELECT FROM installation_state WHERE id=1 AND
+   current_step='preflight'` so the SELECT and the conditional UPDATE share an identical predicate
+   — re-running preflight when state has already advanced is a zero-row no-op and never
+   double-counts audit_events. New helper
+   `prepareConditionalUpdateInstallationStep(db, fromStep, toStep, timestamp)` in
+   `apps/worker/src/modules/onboarding/installation-state-repository.ts`. `setupPreflightResponseSchema`
+   is untouched; the new `advanced` flag is server-internal and never leaks into the response
+   envelope.
+2. **Web: chip indicator flashed all-upcoming on first paint.** `requireSetupStep()` previously
+   called `fetchSetupStatus(context.apiClient)` directly, bypassing React Query. Layout's
+   `setupStatusQuery()` therefore saw an empty cache on first render and rendered every chip as
+   `upcoming` until the useQuery fetcher landed. Fix: `requireSetupStep` now uses
+   `context.queryClient.fetchQuery({ queryKey: setupQueryKeys.status(), queryFn: ...,
+   staleTime: 0 })`, mirroring `requireCompletedSetup` exactly. Cache is populated before
+   `<SetupLayout>` mounts; preflight chip renders `data-state="current"` and
+   `aria-current="step"` on first paint.
+
+Closed 5/7 ACs are pinned by named-by-rule-ID worker tests
+(`apps/worker/src/http/routes/preflight.worker.test.ts` describe block
+`CAP-041 hotfix — atomic preflight advance`): `R-WORKFLOW-002` (AC-2 all-green emits one audit
+row and advances state), `R-WORKFLOW-002` (AC-3 missing binding does not advance and does not
+write an audit row), `R-WORKFLOW-002` (AC-4 schema drift does not advance), `R-WORKFLOW-002`
+(AC-5 already-advanced is a safe no-op), `R-WORKFLOW-002 + idempotency seam` (AC-6 idempotent
+replay returns the identical body and does not write a second audit row). Web AC-1 + AC-7 are
+pinned by `apps/web/src/app/router.test.tsx` describe block `router — CAP-041 preflight hotfix
+(AC-1 + AC-7)`. `packages/contracts/src/admin/audit.ts` adds `'setup.preflight.complete'` to
+the closed `auditActionSchema` enum; the corresponding coverage test pins the new option.
+
+Reviews: code-reviewer ACCEPT-WITH-FOLLOWUPS, frontend-reviewer ACCEPT-WITH-FOLLOWUPS. No
+BLOCKER, no HIGH, no MEDIUM in the fix. Two MEDIUMs found in the diff are recorded as separate
+follow-ups: **F1** — `setupIndexRoute.beforeLoad` and `unknownSetupStepRoute.beforeLoad` still
+call `fetchSetupStatus(context.apiClient)` directly (router.tsx:411, router.tsx:530); benign in
+production (both routes' components are `() => null` and the user always lands on a static step
+route whose `requireSetupStep` populates the cache), but a future maintainer who imports
+`SetupLayout` into those routes would silently re-introduce the chip-flash bug. Consistency
+cleanup. **F2** — `apps/worker/src/modules/onboarding/{claim-setup.ts,complete-setup.ts,
+preflight.ts}` each inline an `audit_events` INSERT because `onboarding → admin` is a forbidden
+dependency edge; the canonical writer lives in `modules/admin/audit-event-repository.ts`. An ADR
++ a new `AuditEventWriter` seam in `packages/contracts` (mirroring CAP-040's outbound-mail
+seam) would let onboarding fold audit rows into batches without importing `modules/admin/*`.
+Both F1 and F2 are scoped out of this hotfix.
+
+A pre-existing local-infrastructure drift is also noted: `apps/worker/wrangler.test.jsonc`
+pins `INSTALLATION_TOKEN = "test-installation-token-local"` while every test fixture sends
+the literal `'test-installation-token'`, which 401s `POST /api/v1/setup/claim` and blocks ~178
+worker-pool tests that depend on a claimed session. The hotfix's test file works around the
+drift with a `beforeEach` override at `preflight.worker.test.ts:397` (mutating the test-pool
+env to match the committed wire shape). Restoring `wrangler.test.jsonc` to its committed value
+removes the need for the workaround and unblocks the 178 pre-existing failures. Tracked as a
+separate ledger task; out of CAP-041 scope.
+
+Local evidence: doctor 14/14, lint clean, typecheck clean, unit 1059/1059 (3 new CAP-041 web
+tests in `router.test.tsx`), 5 new CAP-041 worker tests in `preflight.worker.test.ts` pass;
+build clean. Web diff and worker diff are confined to the 9 files named in the commit.
+
+---
+
 ## 2026-08-30 — Setup wizard operator guidance added
 
 Each setup step now includes a consistent operator guide covering purpose, preparation, actions,

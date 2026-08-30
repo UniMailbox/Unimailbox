@@ -1415,7 +1415,8 @@ describe('toggleStarResponseSchema', () => {
 // draft-create slice adds `draft.created`; CAP-047 draft PATCH slice adds
 // `draft.updated`; CAP-047 draft send slice adds `draft.sent`; CAP-051
 // attachment cleanup adds `attachment.expired`; CAP-057 mailbox sharing adds
-// `mailbox.member_added` and `mailbox.member_removed`. The enum is closed by design — a value reaching
+// `mailbox.member_added` and `mailbox.member_removed`. CAP-041 preflight
+// hotfix adds `setup.preflight.complete`. The enum is closed by design — a value reaching
 // audit_events that is not in this list is a contract violation, so
 // coverage pins the exact option set.
 describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
@@ -1423,6 +1424,7 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
     expect([...auditActionSchema.options].sort()).toEqual(
       [
         'setup.claim',
+        'setup.preflight.complete',
         'setup.complete',
         'mailbox.create',
         'message.receive',

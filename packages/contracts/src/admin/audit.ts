@@ -59,6 +59,12 @@ export interface D1StatementLike {
 export const auditActionSchema = z.enum([
   // CAP-026 / CAP-027 setup + admin
   'setup.claim',
+  // CAP-041 preflight hotfix: emitted when POST /api/v1/setup/preflight
+  // observes all bindings present and a matching schema version. The
+  // action is the audit-trail evidence for the preflight → administrator
+  // transition (R-WORKFLOW-002 + R-AUDIT-001); already-advanced callers
+  // see a zero-row update and no audit row.
+  'setup.preflight.complete',
   'setup.complete',
   // CAP-026 mailbox / message
   'mailbox.create',

@@ -11,7 +11,7 @@
 // - Schema version from d1_migrations table
 
 import { describe, expect, it, beforeEach } from 'vitest';
-import { SELF } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate } from '@unimailbox/test-kit';
 import { CURRENT_SCHEMA_VERSION } from '@unimailbox/contracts';
 
@@ -345,6 +345,271 @@ describe('POST /api/v1/setup/preflight', () => {
       // Should return the same bindings and schema version
       expect(body2.data.bindings).toEqual(body1.data.bindings);
       expect(body2.data.schemaVersion).toBe(body1.data.schemaVersion);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // CAP-041 preflight hotfix — atomic advance (R-WORKFLOW-002 + R-AUDIT-001).
+  // ---------------------------------------------------------------------------
+  //
+  // Each test starts from a clean DB + claimed session so installation_state
+  // exists at current_step='preflight' (the value claimSetup seeds). The
+  // tests then exercise each branch of the all-green / not-all-green matrix
+  // and assert on both the DB row state and the audit_events count.
+
+  /**
+   * Returns the current_step of the single installation_state row, or null
+   * if the row does not exist (the route only runs after /claim, which
+   * always seeds the row, so callers should not see null).
+   */
+  async function currentInstallationStep(): Promise<string | null> {
+    const row = await env.DB
+      .prepare('SELECT current_step FROM installation_state WHERE id = 1')
+      .first<{ current_step: string }>();
+    return row?.current_step ?? null;
+  }
+
+  /**
+   * Counts audit_events rows whose action matches the filter. Used to prove
+   * R-AUDIT-001 (the advance emits exactly one row when it advances; zero
+   * rows when it does not).
+   */
+  async function countAuditEvents(action: string): Promise<number> {
+    const row = await env.DB
+      .prepare('SELECT COUNT(*) AS n FROM audit_events WHERE action = ?')
+      .bind(action)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
+  describe('CAP-041 hotfix — atomic preflight advance', () => {
+    beforeEach(async () => {
+      await resetAndMigrate();
+      // Mirror the test pool's INSTALLATION_TOKEN to the value /claim
+      // expects. The test pool's wrangler.test.jsonc currently pins a
+      // `-local` suffixed value that does NOT match the literal in
+      // `claimSession()` below; without this override every /claim call
+      // returns 401 SETUP_CLAIM_INVALID_TOKEN and the suite is blocked
+      // on a pre-existing infrastructure mismatch (the original commit
+      // used `test-installation-token` and every call site was written
+      // against that value). Reverting wrangler.test.jsonc to its
+      // committed value would remove the need for this line.
+      (env as { INSTALLATION_TOKEN?: string }).INSTALLATION_TOKEN = 'test-installation-token';
+      sessionToken = await claimSession();
+    });
+
+    // AC-2: All bindings present AND schema matches → 200, state advances
+    // preflight → administrator, exactly one `setup.preflight.complete`
+    // audit row carrying the requestId the middleware stamped on the
+    // /preflight request (R-WORKFLOW-002 + R-AUDIT-001).
+    it('AC-2 all-green advance emits one audit row and advances state', async () => {
+      expect(await currentInstallationStep()).toBe('preflight');
+
+      const before = await countAuditEvents('setup.preflight.complete');
+
+      const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-preflight-ac2-key',
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.bindings).toMatchObject({
+        DB: true,
+        INSTALLATION_TOKEN: true,
+        BETTER_AUTH_SECRET: true,
+      });
+      expect(body.data.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+      // The `advanced` flag is server-internal and must NOT leak into the
+      // response envelope (setupPreflightResponseSchema is a fixed contract).
+      expect(body.data).not.toHaveProperty('advanced');
+
+      expect(await currentInstallationStep()).toBe('administrator');
+
+      const after = await countAuditEvents('setup.preflight.complete');
+      expect(after - before).toBe(1);
+
+      // R-AUDIT-001: the audit row carries the requestId the middleware
+      // stamped on the HTTP request so logs/traces can correlate the
+      // advance with the originating call.
+      const audit = await env.DB
+        .prepare(
+          `SELECT actor_user_id, action, resource_type, request_id
+             FROM audit_events WHERE action = 'setup.preflight.complete'`,
+        )
+        .first<{
+          actor_user_id: string | null;
+          action: string;
+          resource_type: string;
+          request_id: string | null;
+        }>();
+      expect(audit).not.toBeNull();
+      expect(audit?.actor_user_id).toBeNull();
+      expect(audit?.action).toBe('setup.preflight.complete');
+      expect(audit?.resource_type).toBe('system');
+      expect(audit?.request_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+    });
+
+    // AC-3: Missing binding (BETTER_AUTH_SECRET cleared) → 200 with
+    // bindings.<name>=false, current_step unchanged, ZERO new audit rows.
+    it('AC-3 missing binding does not advance and does not write an audit row', async () => {
+      // Remove BETTER_AUTH_SECRET from the test pool so checkSecret() fails.
+      const originalSecret = env.BETTER_AUTH_SECRET;
+      // Setting to undefined makes !!env.BETTER_AUTH_SECRET evaluate to false
+      // and makes readSecret() throw — both prongs of the binding check
+      // should report missing.
+      (env as { BETTER_AUTH_SECRET?: string }).BETTER_AUTH_SECRET = undefined;
+      try {
+        expect(await currentInstallationStep()).toBe('preflight');
+        const before = await countAuditEvents('setup.preflight.complete');
+
+        const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${sessionToken}`,
+            'Idempotency-Key': 'test-preflight-ac3-key',
+          },
+        });
+
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.data.bindings.BETTER_AUTH_SECRET).toBe(false);
+        // Object-store bindings are still present — only the secret fails.
+        expect(body.data.bindings.DB).toBe(true);
+
+        expect(await currentInstallationStep()).toBe('preflight');
+        const after = await countAuditEvents('setup.preflight.complete');
+        expect(after - before).toBe(0);
+      } finally {
+        (env as { BETTER_AUTH_SECRET?: string }).BETTER_AUTH_SECRET = originalSecret;
+      }
+    });
+
+    // AC-4: Schema drift — top d1_migrations row rewritten to a
+    // non-matching value → 200, current_step unchanged, no audit row.
+    it('AC-4 schema drift does not advance and does not write an audit row', async () => {
+      // Replace the top migration row with a name whose prefix does NOT
+      // match CURRENT_SCHEMA_VERSION. The preflight's d1_migrations read
+      // is `ORDER BY id DESC LIMIT 1`, so UPDATE the highest-id row in
+      // place — preserves the desc-order invariant without resorting to
+      // DELETE + re-INSERT.
+      await env.DB
+        .prepare(
+          `UPDATE d1_migrations
+             SET name = '0099_drift.sql'
+             WHERE id = (SELECT id FROM d1_migrations ORDER BY id DESC LIMIT 1)`,
+        )
+        .run();
+
+      expect(await currentInstallationStep()).toBe('preflight');
+      const before = await countAuditEvents('setup.preflight.complete');
+
+      const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-preflight-ac4-key',
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.schemaVersion).not.toBe(CURRENT_SCHEMA_VERSION);
+      expect(body.data.bindings.DB).toBe(true);
+
+      expect(await currentInstallationStep()).toBe('preflight');
+      const after = await countAuditEvents('setup.preflight.complete');
+      expect(after - before).toBe(0);
+    });
+
+    // AC-5: Re-running preflight when current_step is already
+    // 'administrator' is a no-op. Conditional UPDATE matches zero rows
+    // so no audit row is written. We simulate the post-advance state
+    // by updating installation_state directly (mirrors what an operator
+    // sees after a successful preflight that advanced, before they
+    // ever navigate to /setup/administrator). UPDATE — not the
+    // test-kit's `seedInstallationState` INSERT — because claimSession()
+    // above already seeded the row at 'preflight' (UNIQUE PK on id=1).
+    it('AC-5 re-applying preflight when already advanced is a no-op', async () => {
+      await env.DB
+        .prepare(
+          `UPDATE installation_state
+             SET current_step = ?, updated_at = ?
+             WHERE id = 1`,
+        )
+        .bind('administrator', '2026-01-01 00:00:00')
+        .run();
+
+      expect(await currentInstallationStep()).toBe('administrator');
+      const before = await countAuditEvents('setup.preflight.complete');
+
+      const response = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': 'test-preflight-ac5-key',
+        },
+      });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.bindings.DB).toBe(true);
+      expect(body.data.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+
+      expect(await currentInstallationStep()).toBe('administrator');
+      const after = await countAuditEvents('setup.preflight.complete');
+      expect(after - before).toBe(0);
+    });
+
+    // AC-6: Idempotency replay (same key + same body) returns the
+    // stored response WITHOUT re-running the use case, so no second
+    // audit_events row is written. The audit-count-delta check alone
+    // is insufficient — a re-run that hits the conditional predicate
+    // (state already `administrator`) would also produce zero new
+    // audit rows. We assert response body equality to prove the
+    // idempotency layer replayed the cached response rather than
+    // re-running the use case.
+    it('AC-6 idempotent replay does not write a second audit row and returns the identical body', async () => {
+      const idempotencyKey = 'test-preflight-ac6-key';
+      expect(await currentInstallationStep()).toBe('preflight');
+
+      const response1 = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+      expect(response1.status).toBe(200);
+      const body1 = await response1.json();
+      const afterFirst = await countAuditEvents('setup.preflight.complete');
+      expect(afterFirst).toBe(1);
+      expect(await currentInstallationStep()).toBe('administrator');
+
+      // Same key + same body → replay (no use-case re-execution).
+      const response2 = await SELF.fetch('http://localhost/api/v1/setup/preflight', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+      });
+      expect(response2.status).toBe(200);
+      const body2 = await response2.json();
+
+      // Body equality (R-INBOUND-004 / Idempotency seam): the second
+      // call returns the exact stored response. If usePreflight ran
+      // again, `clock.now()` would move forward and the audit row's
+      // `created_at` would shift; body equality proves the replay.
+      expect(body2).toEqual(body1);
+
+      const afterSecond = await countAuditEvents('setup.preflight.complete');
+      expect(afterSecond).toBe(afterFirst);
     });
   });
 });
