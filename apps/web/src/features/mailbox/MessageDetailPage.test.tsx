@@ -66,7 +66,7 @@ const DETAIL = {
   fromAddress: 'sender@example.com',
   fromName: 'Sender Name',
   subject: 'Quarterly report',
-  htmlBody: '<p>html is out of scope</p>',
+  htmlBody: '',
   textBody: 'The plain-text report body.',
   messageIdHeader: '<reply-1@example.com>',
   inReplyToHeader: '<root@example.com>',
@@ -335,6 +335,30 @@ function detailBody(overrides: Partial<typeof DETAIL> = {}): typeof DETAIL {
 }
 
 describe('MessageDetailPage', () => {
+  it('R-API-001/R-API-002 renders non-empty htmlBody in the sanitized HTML surface', async () => {
+    await renderDetailPage({
+      routes: [
+        sessionRoute({ session: SESSION }),
+        detailRoute(() =>
+          jsonResponse({
+            data: detailBody({
+              htmlBody: '<p>Rendered HTML body</p>',
+              textBody: 'Plain-text fallback that must not render here.',
+              isRead: 1,
+            }),
+          }),
+        ),
+        threadRoute(),
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-html-body')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('message-html-body')).toHaveTextContent('Rendered HTML body');
+    expect(screen.queryByTestId('message-body')).not.toBeInTheDocument();
+  });
+
   it('R-ATTACHMENT-001/R-ATTACHMENT-006 integrates ordered attachment controls into detail', async () => {
     await renderDetailPage({
       routes: [

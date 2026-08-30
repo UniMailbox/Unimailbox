@@ -7,14 +7,7 @@
 
 import type { ReactElement } from 'react';
 import type { MessageDetail } from '@unimailbox/contracts';
-
-const INLINE_RASTER_MEDIA_TYPES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'image/avif',
-]);
+import { attachmentDownloadHref, isPreviewableInlineRaster } from './message-attachment-media';
 
 export interface MessageAttachmentsProps {
   readonly mailboxId: string;
@@ -41,7 +34,7 @@ export function MessageAttachments({
               <span>{formatAttachmentSize(attachment.sizeBytes)}</span>
               <span>{attachment.disposition}</span>
             </div>
-            {isInlineRaster(attachment.disposition, attachment.contentType) ? (
+            {isPreviewableInlineRaster(attachment) ? (
               <img
                 src={attachmentDownloadHref(mailboxId, attachment.id)}
                 alt={attachment.filename}
@@ -60,22 +53,6 @@ export function MessageAttachments({
       </ul>
     </section>
   );
-}
-
-function isInlineRaster(
-  disposition: NonNullable<MessageDetail['attachments']>[number]['disposition'],
-  contentType: string,
-): boolean {
-  if (disposition !== 'inline') {
-    return false;
-  }
-
-  const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase();
-  return mediaType !== undefined && INLINE_RASTER_MEDIA_TYPES.has(mediaType);
-}
-
-function attachmentDownloadHref(mailboxId: string, attachmentId: string): string {
-  return `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/attachments/${encodeURIComponent(attachmentId)}/download`;
 }
 
 function formatAttachmentSize(sizeBytes: number): string {

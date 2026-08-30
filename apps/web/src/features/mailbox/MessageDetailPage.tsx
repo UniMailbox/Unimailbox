@@ -2,8 +2,7 @@
 //
 // CAP-043 Slice 2 (AC 11 + AC 12). The single-message view at
 // /mailbox/:mailboxId/messages/:messageId:
-//   - subject / from / to / cc / date / text body (`textBody` — HTML
-//     rendering is explicitly out of scope for this slice);
+//   - subject / from / to / cc / date / sanitized HTML or text body;
 //   - headers section collapsed by default (`<details>`);
 //   - MessageThreadPanel listing the thread's messages oldest-first
 //     with the active message highlighted and clickable;
@@ -31,6 +30,7 @@ import {
 } from './mailbox-queries';
 import { MessageDetailSkeleton } from './MessageDetailSkeleton';
 import { MessageAttachments } from './MessageAttachments';
+import { SanitizedMessageHtml } from './SanitizedMessageHtml';
 import { MessageThreadPanel } from './MessageThreadPanel';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Card } from '../../components/ui/Card';
@@ -148,9 +148,17 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
           <p data-testid="message-date">{detail.createdAt}</p>
         </div>
 
-        <pre className="message-detail-body" data-testid="message-body">
-          {detail.textBody}
-        </pre>
+        {detail.htmlBody.trim().length > 0 ? (
+          <SanitizedMessageHtml
+            htmlBody={detail.htmlBody}
+            mailboxId={mailboxId}
+            attachments={detail.attachments}
+          />
+        ) : (
+          <pre className="message-detail-body" data-testid="message-body">
+            {detail.textBody}
+          </pre>
+        )}
 
         <MessageAttachments mailboxId={mailboxId} attachments={detail.attachments} />
 
