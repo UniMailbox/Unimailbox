@@ -50,8 +50,10 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 import {
   installationStepSchema,
+  messageFolderSchema,
   type InstallationStateInfo,
   type InstallationStep,
+  type MessageFolder,
 } from '@unimailbox/contracts';
 import type { ReactElement } from 'react';
 import { ApiError } from '../infrastructure/api/errors';
@@ -209,6 +211,7 @@ const mailboxRoute = createRoute({
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox/$mailboxId',
+  validateSearch: validateFolderSearch,
   beforeLoad: async ({ context }) => {
     const descriptor = await context.queryClient.ensureQueryData({
       queryKey: authQueryKeys.session(),
@@ -223,7 +226,8 @@ const inboxRoute = createRoute({
     // a TanStack Router hook that resolves to the matched route's
     // declared schema (`$mailboxId` → `mailboxId: string`).
     const params = useParams({ strict: false });
-    return <InboxListPage mailboxId={params.mailboxId} />;
+    const search = inboxRoute.useSearch();
+    return <InboxListPage mailboxId={params.mailboxId} folder={search.folder} />;
   },
 });
 
@@ -264,6 +268,18 @@ export function validateComposeSearch(search: Record<string, unknown>): { replyT
   }
   const trimmed = replyTo.trim();
   return trimmed !== '' ? { replyTo: trimmed } : {};
+}
+
+/**
+ * CAP-060: mailbox folder navigation is a closed search parameter. TanStack
+ * Router can receive arrays or other values from repeated/malformed query
+ * parameters, so only an exact contract value is allowed to reach the page.
+ * Invalid, empty, and missing values deliberately fall back to inbox, the
+ * API's default view, rather than creating an unbounded client cache key.
+ */
+export function validateFolderSearch(search: Record<string, unknown>): { folder: MessageFolder } {
+  const parsed = messageFolderSchema.safeParse(search['folder']);
+  return { folder: parsed.success ? parsed.data : 'inbox' };
 }
 
 // CAP-044 Slice 1 (AC 1 + AC 5): the composer at

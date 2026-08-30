@@ -647,6 +647,39 @@ body {
   color: hsl(var(--unimailbox-muted-foreground));
 }
 
+/* ---- Folder views (CAP-060) ----
+ * Native links keep folder changes addressable/bookmarkable and let the
+ * router own validation. The selected link is a visual cue only; the API
+ * remains authoritative for the actual folder contents.
+ */
+.mailbox-folder-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid hsl(var(--unimailbox-border));
+  padding-bottom: 0.5rem;
+}
+
+.mailbox-folder-link {
+  color: hsl(var(--unimailbox-muted-foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--unimailbox-radius);
+}
+
+.mailbox-folder-link:hover,
+.mailbox-folder-link[aria-current='page'] {
+  color: hsl(var(--unimailbox-primary));
+  background-color: hsl(var(--unimailbox-muted));
+}
+
+.mailbox-folder-link:focus-visible {
+  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline-offset: 2px;
+}
+
 .mailbox-loading {
   margin: 0;
   padding: 2rem 0;

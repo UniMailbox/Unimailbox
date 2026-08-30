@@ -16,7 +16,7 @@
 // the subject, so a screen-reader roster of row actions distinguishes
 // which message "Delete" targets.
 import { useState, type ReactElement } from 'react';
-import type { MessageListItem } from '@unimailbox/contracts';
+import type { MessageFolder, MessageListItem } from '@unimailbox/contracts';
 import { Button } from '../../components/ui/Button';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { useDeleteMessageMutation } from './mailbox-queries';
@@ -24,11 +24,13 @@ import { ApiError } from '../../infrastructure/api/errors';
 
 export interface DeleteMessageButtonProps {
   readonly mailboxId: string;
+  readonly folder?: MessageFolder;
   readonly message: MessageListItem;
 }
 
 export function DeleteMessageButton({
   mailboxId,
+  folder = 'inbox',
   message,
 }: DeleteMessageButtonProps): ReactElement {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -73,7 +75,7 @@ export function DeleteMessageButton({
           // purely the dialog's UI state.
           setErrorMessage(null);
           deleteMessage.mutate(
-            { mailboxId, messageId: message.id },
+            { mailboxId, messageId: message.id, folder },
             {
               onSuccess: () => {
                 setConfirmOpen(false);

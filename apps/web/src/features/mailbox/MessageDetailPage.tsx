@@ -85,7 +85,7 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
       return;
     }
     markedMessageRef.current = detail.id;
-    markMessageRead({ mailboxId, messageId: detail.id });
+    markMessageRead({ mailboxId, messageId: detail.id, folder: detail.folder });
   }, [detailQuery.data, mailboxId, markMessageRead]);
 
   if (detailQuery.isLoading && detailQuery.data === undefined) {

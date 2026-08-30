@@ -14,7 +14,7 @@
 //     compose, inReplyTo/references present on a reply prefill — parsed
 //     through composeResponseSchema's 202 shape); submit disabled while
 //     pending; success resets the form, shows the returned messageId,
-//     and invalidates ['mailbox','messages',mailboxId]; failure keeps
+//     and invalidates the user-scoped mailbox messages family; failure keeps
 //     the form's values, renders the stable error code inline, and a
 //     retry is a SECOND POST with a DISTINCT Idempotency-Key (never an
 //     automatic replay).
@@ -534,7 +534,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: mailboxQueryKeys.messages(MAILBOX_ID, SESSION.userId),
+        queryKey: mailboxQueryKeys.messagesFamily(MAILBOX_ID, SESSION.userId),
       });
     });
     // The confirmation carries the messageId parsed from the 202 body.

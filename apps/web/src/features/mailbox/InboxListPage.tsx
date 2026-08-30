@@ -2,8 +2,8 @@
 //
 // CAP-043 Slice 1 (AC 8). The paginated inbox view for a single mailbox.
 // Built on TanStack Query's `useInfiniteQuery` keyed on
-// `['mailbox', userId, 'messages', mailboxId]` (D-CAP-041-1 / CAP-058
-// cache pattern).
+// `['mailbox', userId, 'messages', mailboxId, folder]` (D-CAP-041-1 /
+// CAP-058 / CAP-060 cache pattern).
 //
 // State surface (data-first since the CAP-044 Slice 3 fix pass (g) —
 // the D-CAP-044-L fold-in; the admin pages' contract):
@@ -34,7 +34,7 @@
 import type { ReactElement } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { MessageListItem } from '@unimailbox/contracts';
+import type { MessageFolder, MessageListItem } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
@@ -55,9 +55,10 @@ import { DeleteMessageButton } from './DeleteMessageButton';
 
 export interface InboxListPageProps {
   readonly mailboxId: string;
+  readonly folder?: MessageFolder;
 }
 
-export function InboxListPage({ mailboxId }: InboxListPageProps): ReactElement {
+export function InboxListPage({ mailboxId, folder = 'inbox' }: InboxListPageProps): ReactElement {
   const sessionQuery = authSessionQuery();
 
   if (sessionQuery.data === undefined) {
@@ -72,16 +73,30 @@ export function InboxListPage({ mailboxId }: InboxListPageProps): ReactElement {
     return <Unauthorized variant="expired" />;
   }
 
-  return <InboxListContent mailboxId={mailboxId} />;
+  return <InboxListContent mailboxId={mailboxId} folder={folder} />;
 }
 
 interface InboxListContentProps {
   readonly mailboxId: string;
+  readonly folder: MessageFolder;
 }
 
-function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
+const FOLDER_OPTIONS: ReadonlyArray<{ readonly value: MessageFolder; readonly label: string }> = [
+  { value: 'inbox', label: 'Inbox' },
+  { value: 'sent', label: 'Sent' },
+  { value: 'drafts', label: 'Drafts' },
+  { value: 'archive', label: 'Archive' },
+  { value: 'trash', label: 'Trash' },
+];
+
+function folderLabel(folder: MessageFolder): string {
+  return FOLDER_OPTIONS.find((option) => option.value === folder)?.label ?? 'Inbox';
+}
+
+function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactElement {
   const sessionQuery = authSessionQuery();
-  const query = mailboxMessagesInfiniteQuery(mailboxId);
+  const query = mailboxMessagesInfiniteQuery(mailboxId, folder);
+  const currentFolderLabel = folderLabel(folder);
 
   // fe-LOW (Slice 1 review, deferred to Slice 2): the card title shows
   // the mailbox ADDRESS, not the raw UUID. The mailbox list is already
@@ -113,7 +128,9 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
   // CURSOR_SIGNING_KEY rotation fails forever under Retry.
   // `resetQueries` drops the accumulated chain and refetches page 1.
   const startOver = (): void => {
-    void queryClient.resetQueries({ queryKey: mailboxQueryKeys.messages(mailboxId, userId) });
+    void queryClient.resetQueries({
+      queryKey: mailboxQueryKeys.messages(mailboxId, userId, folder),
+    });
   };
 
   // isPending, not isLoading (fix (b) applied to this file by follow-
@@ -133,7 +150,10 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
     // generic code via the `apiError` narrowing above.
     return (
       <main className="auth-page" data-testid="inbox-error">
-        <Card title="Could not load inbox" description="The inbox list is unavailable.">
+        <Card
+          title={`Could not load ${currentFolderLabel.toLowerCase()}`}
+          description={`The ${currentFolderLabel.toLowerCase()} list is unavailable.`}
+        >
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
@@ -157,7 +177,7 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
   return (
     <main className="mailbox-shell" data-testid="inbox-list-page">
       <header className="mailbox-header">
-        <h1 className="mailbox-title">Inbox</h1>
+        <h1 className="mailbox-title">{currentFolderLabel}</h1>
         <div className="mailbox-header-meta">
           <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
           {/* CAP-044 Slice 3 (D-CAP-044-K): the admin link, rendered only
@@ -166,6 +186,21 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
           <LogoutButton />
         </div>
       </header>
+      <nav className="mailbox-folder-nav" aria-label="Mailbox folders" data-testid="folder-nav">
+        {FOLDER_OPTIONS.map((option) => (
+          <Link
+            key={option.value}
+            to="/mailbox/$mailboxId"
+            params={{ mailboxId }}
+            search={{ folder: option.value }}
+            className="mailbox-folder-link"
+            aria-current={option.value === folder ? 'page' : undefined}
+            data-testid={`folder-link-${option.value}`}
+          >
+            {option.label}
+          </Link>
+        ))}
+      </nav>
       {/* CAP-044 Slice 1 / AC 1: the compose entry point for the active
           mailbox. No `search` prop — TanStack navigates with an empty
           search, so this always opens a BLANK composer. */}
@@ -210,12 +245,12 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
           </div>
         ) : null}
         {items.length === 0 ? (
-          <InboxEmpty />
+          <InboxEmpty folderLabel={currentFolderLabel} />
         ) : (
           <>
             <ul className="inbox-list" data-testid="inbox-list">
               {items.map((item) => (
-                <InboxListRow key={item.id} mailboxId={mailboxId} message={item} />
+                <InboxListRow key={item.id} mailboxId={mailboxId} folder={folder} message={item} />
               ))}
             </ul>
             {query.hasNextPage ? (
@@ -242,10 +277,11 @@ function InboxListContent({ mailboxId }: InboxListContentProps): ReactElement {
 
 interface InboxListRowProps {
   readonly mailboxId: string;
+  readonly folder: MessageFolder;
   readonly message: MessageListItem;
 }
 
-function InboxListRow({ mailboxId, message }: InboxListRowProps): ReactElement {
+function InboxListRow({ mailboxId, folder, message }: InboxListRowProps): ReactElement {
   const isUnread = message.isRead === 0;
   return (
     <li
@@ -275,8 +311,8 @@ function InboxListRow({ mailboxId, message }: InboxListRowProps): ReactElement {
           {/* CAP-058 / AC 13 + AC 16: the per-user star glyph is the toggle
               itself; the cached isStarred drives its filled/outline state
               and the optimistic flip happens in the mutation. */}
-          <StarButton mailboxId={mailboxId} message={message} />
-          <DeleteMessageButton mailboxId={mailboxId} message={message} />
+          <StarButton mailboxId={mailboxId} folder={folder} message={message} />
+          <DeleteMessageButton mailboxId={mailboxId} folder={folder} message={message} />
         </div>
       </div>
     </li>

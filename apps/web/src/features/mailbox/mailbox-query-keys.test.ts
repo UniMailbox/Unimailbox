@@ -19,6 +19,17 @@ describe('mailboxQueryKeys — CAP-058 per-user cache isolation', () => {
     );
   });
 
+  it('keeps each folder view in its own user-scoped list cache', () => {
+    const inboxKey = mailboxQueryKeys.messages('mailbox-1', 'user-a', 'inbox');
+    const sentKey = mailboxQueryKeys.messages('mailbox-1', 'user-a', 'sent');
+    const otherUserSentKey = mailboxQueryKeys.messages('mailbox-1', 'user-b', 'sent');
+
+    expect(inboxKey).not.toEqual(sentKey);
+    expect(sentKey).not.toEqual(otherUserSentKey);
+    expect(inboxKey.slice(0, -1)).toEqual(sentKey.slice(0, -1));
+    expect(mailboxQueryKeys.messagesFamily('mailbox-1', 'user-a')).toEqual(inboxKey.slice(0, -1));
+  });
+
   it('keeps authenticated targets separate from the loading/anonymous namespace', () => {
     const userId = 'user-a';
     expect(mailboxQueryKeys.messages('mailbox-1', userId)).not.toEqual(

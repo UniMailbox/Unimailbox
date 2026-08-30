@@ -44,6 +44,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiClientProvider } from '../../infrastructure/api/client-provider';
 import { createApiClient } from '../../infrastructure/api/client';
+import type { MessageFolder } from '@unimailbox/contracts';
 import {
   Outlet,
   RouterProvider,
@@ -125,6 +126,8 @@ interface RenderInboxOptions {
    * false: member 403, no link.
    */
   readonly adminProbe?: boolean;
+  /** CAP-060: selected folder in the mailbox route/query. */
+  readonly folder?: MessageFolder;
 }
 
 /**
@@ -137,12 +140,13 @@ interface RenderInboxOptions {
 function mountInboxRouter(
   apiClient: ReturnType<typeof createApiClient>,
   queryClient: QueryClient,
+  folder: MessageFolder = 'inbox',
 ): void {
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
   const inboxRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/mailbox/$mailboxId',
-    component: () => <InboxListPage mailboxId={MAILBOX_ID} />,
+    component: () => <InboxListPage mailboxId={MAILBOX_ID} folder={folder} />,
   });
   const composeRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -234,7 +238,7 @@ function renderInbox(options: RenderInboxOptions): {
         : null;
     queryClient.setQueryData(mailboxQueryKeys.list(userId), [...options.mailboxList]);
   }
-  mountInboxRouter(apiClient, queryClient);
+  mountInboxRouter(apiClient, queryClient, options.folder);
   return { fetchCalls: calls };
 }
 
@@ -299,6 +303,50 @@ describe('InboxListPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
     });
+  });
+
+  it('CAP-060 R-MESSAGE-001/R-API-001: renders the selected folder and requests its server filter', async () => {
+    const { fetchCalls } = renderInbox({
+      folder: 'sent',
+      resolvers: [
+        () =>
+          jsonResponse({
+            data: {
+              items: [
+                {
+                  id: '00000000-0000-4000-8000-000000000099',
+                  fromAddress: 'sender@example.test',
+                  fromName: 'Sender',
+                  subject: 'Sent message',
+                  isRead: 1,
+                  isStarred: 0,
+                  folder: 'sent',
+                  createdAt: '2026-01-03T00:00:00Z',
+                  recipients: { to: [], cc: [] },
+                },
+              ],
+              nextCursor: null,
+            },
+          }),
+      ],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Sent message')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('heading', { name: 'Sent' })).toBeInTheDocument();
+    for (const folder of ['inbox', 'sent', 'drafts', 'archive', 'trash']) {
+      expect(screen.getByTestId(`folder-link-${folder}`)).toBeInTheDocument();
+    }
+    expect(screen.getByTestId('folder-link-sent')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('folder-link-inbox')).not.toHaveAttribute('aria-current');
+    expect(
+      fetchCalls.some(
+        (call) =>
+          call.method === 'GET' &&
+          call.url === `/api/v1/mailboxes/${MAILBOX_ID}/messages?folder=sent`,
+      ),
+    ).toBe(true);
   });
 
   it('renders the error state with retry on a fetch failure', async () => {

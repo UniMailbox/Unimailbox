@@ -10,16 +10,21 @@
 // `aria-pressed` exposes the toggle state to assistive tech; the label
 // names the action in the direction the click will go.
 import type { ReactElement } from 'react';
-import type { MessageListItem } from '@unimailbox/contracts';
+import type { MessageFolder, MessageListItem } from '@unimailbox/contracts';
 import { Button } from '../../components/ui/Button';
 import { useToggleMessageStarMutation } from './mailbox-queries';
 
 export interface StarButtonProps {
   readonly mailboxId: string;
+  readonly folder?: MessageFolder;
   readonly message: MessageListItem;
 }
 
-export function StarButton({ mailboxId, message }: StarButtonProps): ReactElement {
+export function StarButton({
+  mailboxId,
+  folder = 'inbox',
+  message,
+}: StarButtonProps): ReactElement {
   const toggleStar = useToggleMessageStarMutation();
   const isStarred = message.isStarred === 1;
   return (
@@ -32,7 +37,7 @@ export function StarButton({ mailboxId, message }: StarButtonProps): ReactElemen
       aria-label={isStarred ? 'Unstar message' : 'Star message'}
       disabled={toggleStar.isPending}
       onClick={() => {
-        toggleStar.mutate({ mailboxId, messageId: message.id });
+        toggleStar.mutate({ mailboxId, messageId: message.id, folder });
       }}
     >
       {isStarred ? '★' : '☆'}

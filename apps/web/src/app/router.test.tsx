@@ -16,7 +16,7 @@ import { cleanup } from '@testing-library/react';
 import { createRoute, type RootRoute, type AnyRoute, redirect } from '@tanstack/react-router';
 import { jsonResponse, lastPathname, mountAppRouter, spyFetch } from '../test-utils';
 import type { RouterContext } from './router';
-import { validateComposeSearch } from './router';
+import { validateComposeSearch, validateFolderSearch } from './router';
 import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 
 afterEach(() => {
@@ -317,5 +317,24 @@ describe('validateComposeSearch (CAP-044 Slice 1)', () => {
     expect(validateComposeSearch({ replyTo: { id: 'm-1' } })).toEqual({});
     expect(validateComposeSearch({ replyTo: null })).toEqual({});
     expect(validateComposeSearch({ replyTo: true })).toEqual({});
+  });
+});
+
+describe('validateFolderSearch (CAP-060)', () => {
+  it('keeps each supported folder value', () => {
+    expect(validateFolderSearch({ folder: 'inbox' })).toEqual({ folder: 'inbox' });
+    expect(validateFolderSearch({ folder: 'sent' })).toEqual({ folder: 'sent' });
+    expect(validateFolderSearch({ folder: 'drafts' })).toEqual({ folder: 'drafts' });
+    expect(validateFolderSearch({ folder: 'archive' })).toEqual({ folder: 'archive' });
+    expect(validateFolderSearch({ folder: 'trash' })).toEqual({ folder: 'trash' });
+  });
+
+  it('falls back to inbox for missing, empty, repeated, and unsupported values', () => {
+    expect(validateFolderSearch({})).toEqual({ folder: 'inbox' });
+    expect(validateFolderSearch({ folder: '' })).toEqual({ folder: 'inbox' });
+    expect(validateFolderSearch({ folder: ['sent', 'trash'] })).toEqual({ folder: 'inbox' });
+    expect(validateFolderSearch({ folder: 'Sent' })).toEqual({ folder: 'inbox' });
+    expect(validateFolderSearch({ folder: 'outbox' })).toEqual({ folder: 'inbox' });
+    expect(validateFolderSearch({ folder: null })).toEqual({ folder: 'inbox' });
   });
 });

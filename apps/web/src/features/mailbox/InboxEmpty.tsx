@@ -6,10 +6,23 @@
 import type { ReactElement } from 'react';
 import { Card } from '../../components/ui/Card';
 
-export function InboxEmpty(): ReactElement {
+export interface InboxEmptyProps {
+  readonly folderLabel?: string;
+}
+
+export function InboxEmpty({ folderLabel = 'Inbox' }: InboxEmptyProps): ReactElement {
+  const folder = folderLabel.toLowerCase();
+  const isInbox = folderLabel === 'Inbox';
   return (
-    <Card title="Nothing here yet" description="When new mail arrives, it shows up here.">
-      <p data-testid="inbox-empty">No messages in this mailbox yet.</p>
+    <Card
+      title="Nothing here yet"
+      description={
+        isInbox ? 'When new mail arrives, it shows up here.' : `No messages are in ${folder}.`
+      }
+    >
+      <p data-testid="inbox-empty">
+        {isInbox ? 'No messages in this mailbox yet.' : `No messages in this ${folder} yet.`}
+      </p>
     </Card>
   );
 }
