@@ -45,6 +45,8 @@ import { adminRolePolicyRoutes } from './routes/admin-role-policies';
 import { adminWebhookRoutes } from './routes/admin-webhooks';
 import { adminAuditEventRoutes } from './routes/admin-audit-events';
 import { adminUserRoutes } from './routes/admin-users';
+import { adminDomainRoutes } from './routes/admin-domains';
+import { adminRoleRoutes } from './routes/admin-roles';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
@@ -112,6 +114,13 @@ export function buildRouter(): Hono<AppEnv> {
   // module's public listUsers (D-CAP-044-H). Same mount style as the
   // audit-event routes (/admin/users).
   apiV1.route('/', adminUserRoutes());
+
+  // CAP-066: managed-domain administration. Paths are fully qualified
+  // inside the sub-app (/admin/domains*) like the users/audit routes above.
+  apiV1.route('/', adminDomainRoutes());
+
+  // CAP-067: custom-role definitions and the closed permission catalog.
+  apiV1.route('/', adminRoleRoutes());
 
   // CAP-020: Mailbox routes.
   apiV1.route('/', mailboxRoutes());

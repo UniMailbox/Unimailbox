@@ -1,7 +1,16 @@
 // modules/tenancy — owner of managed_domains, mailboxes, mailbox_members.
 // Exports: domain repository, mailbox repository, assertCan authorizer.
 // The repositories are private (D-CAP-006-C).
-export { createDomain, prepareCreateDomain, getManagedDomain } from './domain-repository';
+export {
+  createDomain,
+  prepareCreateDomain,
+  getManagedDomain,
+  listManagedDomains,
+  findManagedDomainById,
+  countMailboxesForDomain,
+  prepareDeleteDomain,
+  prepareRequireManagedDomainDeleted,
+} from './domain-repository';
 export type { CreateDomainInput, ManagedDomainInfo } from './domain-repository';
 
 export {

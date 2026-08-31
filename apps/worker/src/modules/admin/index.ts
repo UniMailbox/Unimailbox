@@ -49,3 +49,32 @@ export {
 // BlocklistReader / RolePolicyReader read seams; only the writer is
 // wired through AppContext.
 export { createAuditEventWriter } from './audit-event-writer';
+
+// CAP-066: managed-domain administration use cases. The route owns only
+// transport/authentication concerns; this service owns the workflow's
+// tenancy, audit, and idempotency invariants.
+export {
+  listAdminManagedDomains,
+  createAdminManagedDomain,
+  verifyAdminManagedDomain,
+  deleteAdminManagedDomain,
+  type AdminDomainServiceDependencies,
+  type AdminDomainServiceResult,
+  type CreateAdminManagedDomainInput,
+  type VerifyAdminManagedDomainInput,
+  type DeleteAdminManagedDomainInput,
+} from './domain-administration-service';
+
+// CAP-067: custom-role definition and role-permission administration. User
+// assignment remains owned by the future user-management mutation surface.
+export {
+  listAdminRoles,
+  createAdminRole,
+  updateAdminRole,
+  deleteAdminRole,
+  type RoleAdministrationServiceDependencies,
+  type CreateAdminRoleInput,
+  type UpdateAdminRoleInput,
+  type DeleteAdminRoleInput,
+  type RoleAdministrationServiceResult,
+} from './role-administration-service';

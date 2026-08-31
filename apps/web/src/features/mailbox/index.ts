@@ -22,3 +22,5 @@ export { ComposeEmail } from './ComposeEmail';
 export type { ComposeEmailProps } from './ComposeEmail';
 export { DraftRecoveryPage } from './DraftRecoveryPage';
 export type { DraftRecoveryPageProps } from './DraftRecoveryPage';
+export { MailboxMembersPage } from './MailboxMembersPage';
+export type { MailboxMembersPageProps } from './MailboxMembersPage';

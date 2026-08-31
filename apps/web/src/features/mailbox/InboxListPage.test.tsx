@@ -158,6 +158,11 @@ function mountInboxRouter(
     path: '/mailbox/$mailboxId/draft/$draftId',
     component: () => <div data-testid="arrived-draft">draft</div>,
   });
+  const membersRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/mailbox/$mailboxId/members',
+    component: () => <div data-testid="arrived-members">members</div>,
+  });
   const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/login',
@@ -175,6 +180,7 @@ function mountInboxRouter(
       inboxRoute,
       composeRoute,
       draftRoute,
+      membersRoute,
       loginRoute,
       adminRoute,
     ]),
@@ -810,6 +816,19 @@ describe('InboxListPage', () => {
     expect(composeLink.getAttribute('href')).toBe(`/mailbox/${MAILBOX_ID}/compose`);
     expect(composeLink.getAttribute('href')).not.toContain('replyTo');
     expect(composeLink.textContent).toBe('Compose');
+  });
+
+  it('CAP-065: links to mailbox member management for this mailbox', async () => {
+    renderInbox({
+      resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
+      session: SESSION,
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
+    });
+    const membersLink = screen.getByTestId('inbox-members-link');
+    expect(membersLink.getAttribute('href')).toBe(`/mailbox/${MAILBOX_ID}/members`);
+    expect(membersLink.textContent).toBe('Members');
   });
 });
 

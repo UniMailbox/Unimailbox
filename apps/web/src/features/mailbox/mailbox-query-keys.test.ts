@@ -44,6 +44,9 @@ describe('mailboxQueryKeys — CAP-058 per-user cache isolation', () => {
     expect(mailboxQueryKeys.thread('mailbox-1', 'message-1', userId)).not.toEqual(
       mailboxQueryKeys.thread('mailbox-1', 'message-1'),
     );
+    expect(mailboxQueryKeys.members('mailbox-1', userId)).not.toEqual(
+      mailboxQueryKeys.members('mailbox-1'),
+    );
   });
 
   it('does not reuse one user cache entry when the authenticated user changes', () => {
@@ -64,5 +67,11 @@ describe('mailboxQueryKeys — CAP-058 per-user cache isolation', () => {
     expect(userAKey).not.toEqual(mailboxQueryKeys.draft('mailbox-1', 'draft-1', 'user-b'));
     expect(userAKey).not.toEqual(mailboxQueryKeys.draft('mailbox-2', 'draft-1', 'user-a'));
     expect(userAKey).not.toEqual(mailboxQueryKeys.draft('mailbox-1', 'draft-2', 'user-a'));
+  });
+
+  it('keeps member resources separate by authenticated user and mailbox', () => {
+    const userAMailboxOne = mailboxQueryKeys.members('mailbox-1', 'user-a');
+    expect(userAMailboxOne).not.toEqual(mailboxQueryKeys.members('mailbox-1', 'user-b'));
+    expect(userAMailboxOne).not.toEqual(mailboxQueryKeys.members('mailbox-2', 'user-a'));
   });
 });

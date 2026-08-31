@@ -31,7 +31,11 @@ import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 import { setupQueryKeys } from '../features/setup/setup-queries';
 import { createApiClient } from '../infrastructure/api/client';
 import { ApiClientProvider } from '../infrastructure/api/client-provider';
-import { clearSetupSession, setSetupSession, useSetupSession } from '../features/setup/setup-session-store';
+import {
+  clearSetupSession,
+  setSetupSession,
+  useSetupSession,
+} from '../features/setup/setup-session-store';
 
 afterEach(() => {
   cleanup();
@@ -357,7 +361,16 @@ describe('router — CAP-041 follow-up H1 (setup shim cache hydration)', () => {
   // the post-`router.load()` cache snapshot for the status key.
   async function loadSetupShimAndReadCache(
     initialPath: '/setup' | '/setup/not-a-real-step',
-    currentStep: 'claim' | 'preflight' | 'administrator' | 'domain' | 'cloudflare-verify' | 'inbound-smoke' | 'brevo' | 'outbound-smoke' | 'complete',
+    currentStep:
+      | 'claim'
+      | 'preflight'
+      | 'administrator'
+      | 'domain'
+      | 'cloudflare-verify'
+      | 'inbound-smoke'
+      | 'brevo'
+      | 'outbound-smoke'
+      | 'complete',
   ) {
     const apiClient = createApiClient({
       baseUrl: '',
@@ -545,6 +558,7 @@ describe('router — CAP-062 production draft route', () => {
     '/mailbox/00000000-0000-4000-8000-000000000001/messages/00000000-0000-4000-8000-000000000002',
     '/mailbox/00000000-0000-4000-8000-000000000001/compose',
     '/mailbox/00000000-0000-4000-8000-000000000001/draft/00000000-0000-4000-8000-000000000002',
+    '/mailbox/00000000-0000-4000-8000-000000000001/members',
     '/login',
     '/register',
     '/admin',
@@ -552,6 +566,8 @@ describe('router — CAP-062 production draft route', () => {
     '/admin/users',
     '/admin/connections',
     '/admin/webhook-events',
+    '/admin/domains',
+    '/admin/roles',
   ])('redirects direct application route %s into setup when incomplete', async (path) => {
     const apiClient = createApiClient({
       baseUrl: '',
@@ -594,6 +610,32 @@ describe('router — CAP-062 production draft route', () => {
     expect(history.location.pathname).toBe('/login');
   });
 
+  it('matches the real mailbox member route for an authenticated session', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    queryClient.setQueryData(authQueryKeys.session(), {
+      userId: 'user-members-route',
+      email: 'owner@example.test',
+      displayName: 'Owner',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+    const history = createMemoryHistory({
+      initialEntries: ['/mailbox/00000000-0000-4000-8000-000000000001/members'],
+    });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/mailbox/00000000-0000-4000-8000-000000000001/members');
+  });
+
   it('matches the real draft recovery route for an authenticated session', async () => {
     const apiClient = createApiClient({
       baseUrl: '',
@@ -632,6 +674,32 @@ describe('router — CAP-062 production draft route', () => {
 // a session"; the audit-events PAGE owns the 403 not-authorized surface
 // (covered in features/admin/AuditEventsPage.test.tsx).
 // ---------------------------------------------------------------------------
+describe('router — CAP-067 production role route', () => {
+  it('matches the real /admin/roles route for an authenticated session', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async () =>
+        jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    queryClient.setQueryData(authQueryKeys.session(), {
+      userId: 'role-route-admin',
+      email: 'admin@example.test',
+      displayName: 'Role admin',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+    const history = createMemoryHistory({ initialEntries: ['/admin/roles'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/admin/roles');
+  });
+});
+
 function buildAdminRouteTree(
   rootRoute: RootRoute<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -717,6 +785,34 @@ function buildAdminRouteTree(
     },
     component: () => <div data-testid="arrived-admin-webhook-events">webhook events</div>,
   });
+  const adminDomainsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/domains',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin-domains">domains</div>,
+  });
+  const adminRolesRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/roles',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin-roles">roles</div>,
+  });
   return rootRoute.addChildren([
     loginRoute,
     adminLandingRoute,
@@ -724,6 +820,8 @@ function buildAdminRouteTree(
     adminUsersRoute,
     adminConnectionsRoute,
     adminWebhookEventsRoute,
+    adminDomainsRoute,
+    adminRolesRoute,
   ]);
 }
 
@@ -768,18 +866,21 @@ describe('router — /admin guard (CAP-044 Slice 2 / AC 13)', () => {
 
   // CAP-044 Slice 3 (ACs 19–21): each new admin page route carries the
   // same session guard as its siblings.
-  it.each(['/admin/users', '/admin/connections', '/admin/webhook-events'])(
-    'redirects %s to /login when there is no session',
-    async (initial) => {
-      const { fetchImpl } = spyFetch([() => jsonResponse({ data: null })]);
-      const { history } = await mountAppRouter({
-        fetchImpl,
-        initialEntries: [initial],
-        buildRouteTree: buildAdminRouteTree,
-      });
-      expect(lastPathname(history)).toBe('/login');
-    },
-  );
+  it.each([
+    '/admin/users',
+    '/admin/connections',
+    '/admin/webhook-events',
+    '/admin/domains',
+    '/admin/roles',
+  ])('redirects %s to /login when there is no session', async (initial) => {
+    const { fetchImpl } = spyFetch([() => jsonResponse({ data: null })]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: [initial],
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/login');
+  });
 
   it('renders /admin/users when the cache is pre-seeded with a valid session', async () => {
     const { fetchImpl, calls } = spyFetch([]);
@@ -795,6 +896,40 @@ describe('router — /admin guard (CAP-044 Slice 2 / AC 13)', () => {
       buildRouteTree: buildAdminRouteTree,
     });
     expect(lastPathname(history)).toBe('/admin/users');
+    expect(calls.length).toBe(0);
+  });
+
+  it('renders /admin/domains when the cache is pre-seeded with a valid session', async () => {
+    const { fetchImpl, calls } = spyFetch([]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: ['/admin/domains'],
+      authSession: {
+        userId: 'u-admin',
+        email: 'admin@b.test',
+        displayName: 'Admin',
+        expiresAt: '2099-01-01T00:00:00Z',
+      },
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/admin/domains');
+    expect(calls.length).toBe(0);
+  });
+
+  it('renders /admin/roles when the cache is pre-seeded with a valid session', async () => {
+    const { fetchImpl, calls } = spyFetch([]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: ['/admin/roles'],
+      authSession: {
+        userId: 'u-admin',
+        email: 'admin@b.test',
+        displayName: 'Admin',
+        expiresAt: '2099-01-01T00:00:00Z',
+      },
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/admin/roles');
     expect(calls.length).toBe(0);
   });
 });

@@ -18,12 +18,12 @@
 // role="alertdialog" + aria-modal="true" + an accessible name (the `name`
 // prop — a string, so the name is stable, not derived from DOM content),
 // Escape cancels, and initial focus lands on the CANCEL button (the
-// non-destructive choice) via `autoFocus` — the dialog unmounts when
-// closed, so reopening re-runs it. A full focus trap is deferred (recorded
-// in the fix-pass deferral list). The error slot is a sibling of the main
-// Alert, never nested inside its `<p>` — a div/Alert cannot legally sit
-// inside a `<p>`, and the storage guard test would catch it.
-import type { ReactElement, ReactNode } from 'react';
+// non-destructive choice), Tab is trapped inside the panel, and focus is
+// restored to the trigger when the dialog closes. The error slot is a
+// sibling of the main Alert, never nested inside its `<p>` — a div/Alert
+// cannot legally sit inside a `<p>`, and the storage guard test would catch
+// it.
+import { useEffect, useRef, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
 import { Alert } from './Alert';
 import { Button } from './Button';
 
@@ -55,24 +55,68 @@ export function AlertDialog({
   onConfirm,
   onCancel,
 }: AlertDialogProps): ReactElement | null {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.querySelector<HTMLElement>('[data-testid="alert-dialog-cancel"]')?.focus();
+
+    return () => {
+      if (restoreFocusRef.current?.isConnected) {
+        restoreFocusRef.current.focus();
+      }
+      restoreFocusRef.current = null;
+    };
+  }, [open]);
+
   if (!open) {
     return null;
   }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    );
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (first === undefined || last === undefined) return;
+    const active = document.activeElement;
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div
+      ref={dialogRef}
       className="alert-dialog"
       data-testid="alert-dialog"
       role="alertdialog"
       aria-modal="true"
       aria-label={name}
-      onKeyDown={(event) => {
-        // H12: Escape cancels. The handler sits on the panel and relies
-        // on the key event bubbling from the focused control (initial
-        // focus is the cancel button), so no per-button wiring is needed.
-        if (event.key === 'Escape') {
-          onCancel();
-        }
-      }}
+      onKeyDown={handleKeyDown}
     >
       <Alert variant="danger" title={title}>
         {children}
@@ -83,16 +127,7 @@ export function AlertDialog({
         </Alert>
       ) : null}
       <div className="alert-dialog-actions">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onCancel}
-          // H12: the dialog opens focused on the non-destructive choice.
-          // The component returns null while closed, so this refires on
-          // every open without imperative focus management.
-          autoFocus
-          data-testid="alert-dialog-cancel"
-        >
+        <Button variant="secondary" size="sm" onClick={onCancel} data-testid="alert-dialog-cancel">
           {cancelLabel}
         </Button>
         <Button

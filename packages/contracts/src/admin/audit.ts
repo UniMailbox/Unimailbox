@@ -99,6 +99,14 @@ export const auditActionSchema = z.enum([
   // CAP-057 mailbox sharing transitions.
   'mailbox.member_added',
   'mailbox.member_removed',
+  // CAP-066 managed-domain administration.
+  'domain.created',
+  'domain.verified',
+  'domain.deleted',
+  // CAP-067 custom-role administration.
+  'role.created',
+  'role.updated',
+  'role.deleted',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

@@ -48,12 +48,17 @@ import {
 import {
   composeResponseSchema,
   draftDetailResponseSchema,
+  addMailboxMemberResponseSchema,
+  deleteMailboxMemberResponseSchema,
+  mailboxMemberListResponseSchema,
   mailboxListResponseSchema,
   messageDetailSchema,
   messageListResponseSchema,
   messageThreadResponseSchema,
   toggleStarResponseSchema,
   type MailboxListItem,
+  type MailboxMemberItem,
+  type AddMailboxMemberRequest,
   type MessageDetail,
   type MessageFolder,
   type MessageListResponse,
@@ -107,6 +112,8 @@ export const mailboxQueryKeys = {
     [...mailboxQueryKeys.all(userId), 'messages', mailboxId, 'thread', messageId] as const,
   draft: (mailboxId: string, draftId: string, userId?: string | null) =>
     [...mailboxQueryKeys.all(userId), 'drafts', mailboxId, draftId] as const,
+  members: (mailboxId: string, userId?: string | null) =>
+    [...mailboxQueryKeys.all(userId), 'members', mailboxId] as const,
 };
 
 /**
@@ -266,6 +273,144 @@ export function draftQuery(
     queryFn: () => fetchDraft(apiClient, mailboxId, draftId),
     enabled: userId !== null,
     staleTime: 0,
+  });
+}
+
+const mailboxMembersPath = (mailboxId: string): string =>
+  `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/members`;
+
+function invalidMailboxMembersResponse(): ApiError {
+  return new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+}
+
+/** Fetches the strict, credential-free member projection for one mailbox. */
+export async function fetchMailboxMembers(
+  apiClient: ApiClient,
+  mailboxId: string,
+): Promise<MailboxMemberItem[]> {
+  const response = await apiClient.fetch<unknown>(mailboxMembersPath(mailboxId));
+  try {
+    const envelope = response as { readonly data?: unknown };
+    return mailboxMemberListResponseSchema.parse(envelope.data).items;
+  } catch {
+    throw invalidMailboxMembersResponse();
+  }
+}
+
+/** User-scoped query for the explicit members of one mailbox. */
+export function mailboxMembersQuery(
+  mailboxId: string,
+): UseQueryResult<MailboxMemberItem[], ApiError> {
+  const apiClient = useApiClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
+  return useQuery({
+    queryKey: mailboxQueryKeys.members(mailboxId, userId),
+    queryFn: () => fetchMailboxMembers(apiClient, mailboxId),
+    enabled: userId !== null,
+    staleTime: 0,
+  });
+}
+
+export interface AddMailboxMemberInput extends AddMailboxMemberRequest {
+  readonly mailboxId: string;
+}
+
+/** Adds an existing active user to a mailbox and returns the safe member item. */
+export async function addMailboxMember(
+  apiClient: ApiClient,
+  input: AddMailboxMemberInput,
+): Promise<MailboxMemberItem> {
+  const response = await apiClient.fetch<unknown>(mailboxMembersPath(input.mailboxId), {
+    method: 'POST',
+    body: { email: input.email, role: input.role },
+  });
+  try {
+    const envelope = response as { readonly data?: unknown };
+    return addMailboxMemberResponseSchema.parse(envelope).data;
+  } catch {
+    throw invalidMailboxMembersResponse();
+  }
+}
+
+/** Adds a member and mirrors the server's safe response into the current list cache. */
+export function useAddMailboxMemberMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
+  return useMutation({
+    mutationFn: (input: AddMailboxMemberInput) => addMailboxMember(apiClient, input),
+    onMutate: async (input): Promise<void> => {
+      // Stop a stale list response from overwriting the server-confirmed
+      // member after the mutation updates this exact user/mailbox cache.
+      await queryClient.cancelQueries({
+        queryKey: mailboxQueryKeys.members(input.mailboxId, userId),
+        exact: true,
+      });
+    },
+    onSuccess: (member, input) => {
+      queryClient.setQueryData<MailboxMemberItem[]>(
+        mailboxQueryKeys.members(input.mailboxId, userId),
+        (existing) => {
+          const current = existing ?? [];
+          return [...current.filter((item) => item.userId !== member.userId), member];
+        },
+      );
+    },
+  });
+}
+
+export interface RemoveMailboxMemberInput {
+  readonly mailboxId: string;
+  readonly memberUserId: string;
+}
+
+/** Removes one explicit member and validates the returned resource identity. */
+export async function removeMailboxMember(
+  apiClient: ApiClient,
+  input: RemoveMailboxMemberInput,
+): Promise<void> {
+  const response = await apiClient.fetch<unknown>(
+    `${mailboxMembersPath(input.mailboxId)}/${encodeURIComponent(input.memberUserId)}`,
+    { method: 'DELETE' },
+  );
+  try {
+    const removed = deleteMailboxMemberResponseSchema.parse(response).data;
+    if (removed.userId !== input.memberUserId) {
+      throw invalidMailboxMembersResponse();
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw invalidMailboxMembersResponse();
+  }
+}
+
+/** Removes one member from the current user's mailbox cache after server success. */
+export function useRemoveMailboxMemberMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
+  return useMutation({
+    mutationFn: (input: RemoveMailboxMemberInput) => removeMailboxMember(apiClient, input),
+    onMutate: async (input): Promise<void> => {
+      // Stop a stale list response from resurrecting the member after the
+      // successful DELETE updates this exact user/mailbox cache.
+      await queryClient.cancelQueries({
+        queryKey: mailboxQueryKeys.members(input.mailboxId, userId),
+        exact: true,
+      });
+    },
+    onSuccess: (_result, input) => {
+      queryClient.setQueryData<MailboxMemberItem[]>(
+        mailboxQueryKeys.members(input.mailboxId, userId),
+        (existing) =>
+          existing === undefined
+            ? existing
+            : existing.filter((item) => item.userId !== input.memberUserId),
+      );
+    },
   });
 }
 

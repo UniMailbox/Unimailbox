@@ -10,6 +10,93 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-08-31 — CAP-064 existing-draft editor autosave and PATCH integration
+
+CAP-064 extends the existing authenticated draft-recovery route into a bounded
+editor for existing drafts. To/Cc/Bcc/Subject/plain-text Body are controlled
+inputs populated from the server-authoritative GET response; a dirty or
+server-changed CAP-061 local copy must be explicitly recovered before editing.
+
+Edits use a 500 ms debounce and a serialized per-draft queue. The browser
+stores only draft content and CAP-061 version metadata, sends the exact
+`updated_at` value in `If-Match`, and relies on the shared API client for fresh
+request-id and `Idempotency-Key` headers. Successful PATCH responses are parsed
+through `draftDetailResponseSchema`, checked against both route resource IDs,
+mirrored into the user-scoped query/cache, and advance the next concurrency
+token. A `412 STALE_IF_MATCH` preserves local edits, disables further editing,
+and requires a fresh GET before the user explicitly loads the newer server
+version. Cache-sync failures retry only the local sync operation.
+
+**Files**: `apps/web/src/features/mailbox/DraftRecoveryPage.tsx`,
+`DraftRecoveryPage.test.tsx`, and the CAP-064 PATCH fetcher/mutation in
+`mailbox-queries.ts`; no Worker, migration, contract, provider, secret,
+configuration, deployment, push, or remote changes.
+
+**Gates**: focused DraftRecoveryPage 21/21; unit 71 files, 1122/1122; Worker
+50 files, 886/886; doctor 14/14; lint, typecheck, format, build, and
+`git diff --check` clean. Independent final subagent review: `NO FINDINGS`.
+No browser live-login or preview verification was performed; those remain
+outside this local capability slice.
+
+---
+
+## 2026-08-31 — Brevo live-test follow-up and empty-attachment payload fix
+
+The Brevo request IP restriction was corrected on the provider side, so the
+existing test API token was retained. A direct `GET /v3/account` check returned
+HTTP 200. The setup route tests now use that live token for successful setup
+and a real invalid key for the 401 failure path; deterministic 403/429/5xx,
+network, redaction, and wire-shape cases remain in the adapter unit tests.
+
+The outbound smoke route tests also use live Brevo HTTP. They discover an
+authenticated sender domain and default the recipient to the Brevo account
+email, avoiding committed account-specific values. This produces a small,
+intentional number of real test emails when the route suite runs.
+
+The first live outbound request exposed a provider contract issue: the adapter
+always serialized `attachment: []`, which Brevo rejected with `400
+missing_parameter`. The adapter now omits `attachment` when there are no
+attachments; non-empty attachment serialization is unchanged. The local
+gitignored `.dev.vars` credential-encryption value was also corrected to a
+valid 32-byte hex key for the live setup/decrypt round-trip; the Brevo token
+was not replaced.
+
+**Gates**: Brevo account HTTP 200; adapter 10/10; setup route 19/19; outbound
+smoke route 12/12; full Worker 886/886; unit 1111/1111; Web 362/362; contracts
+383/383; doctor 14/14; lint, typecheck, format, build, and `git diff --check`
+clean. No deploy or push performed. Browser valid-login/cookie verification
+remains intentionally deferred to the operator.
+
+---
+
+## 2026-08-31 — Follow-up: Worker-first health check and local Better Auth cookie path
+
+The local runtime exposed two configuration gaps after the Better Auth origin fix:
+`GET /healthz` was being handled by Wrangler's SPA fallback and returned `index.html`,
+and Better Auth's local `baseURL` still pointed at the Worker port while the browser
+document was served by Vite on `:5173`.
+
+Fix:
+- `apps/worker/wrangler.jsonc`, `wrangler.dev.jsonc`, and `wrangler.test.jsonc` now
+  declare both `/api/*` and `/healthz` in `assets.run_worker_first`. The doctor
+  evaluator and synthetic tests reject either route being omitted. Production D1/KV
+  placeholder IDs were restored because `scripts/deploy.ts` resolves those exact
+  placeholders during provisioning.
+- `wrangler.dev.jsonc` now uses `BETTER_AUTH_URL=http://localhost:5173` and keeps
+  `http://localhost:8787` as an additional trusted origin. The local-only auth,
+  encryption, cursor, and installation values were replaced with non-production
+  values long enough for the Better Auth secret-strength check.
+- `apps/worker/package.json` keeps the explicit `wrangler.dev.jsonc` config for
+  `pnpm dev:worker`, so local startup cannot silently select the production config.
+
+Verification: the doctor/config subset is green (88 tests), `pnpm format:check` is
+green after formatting the previously reported 23 files, and the dev Worker was
+rechecked for route precedence. A valid-login browser session still needs an
+end-to-end observation before `D-CAP-042-auth-cookie` can be marked Verified; the
+full Worker pool also retains the documented 33 Brevo mock-interception failures.
+
+---
+
 ## 2026-08-31 — Worker fix: split Better Auth trustedOrigins from baseURL for local-dev SPA
 
 After the previous Content-Type fix made BA requests reach the handler, Better Auth rejected them with `INVALID_ORIGIN`. Root cause: the factory conflated two distinct concepts — `baseURL` (where BA itself is served) and `trustedOrigins` (which browser origins may call BA). In production these are the same (same-origin SPA + API). In local dev they differ: the Vite SPA (port 5173) and the Worker (port 8787) are different origins, and `vite.config.ts:21-26` proxies `/api/*` with `changeOrigin: false`, so the browser document origin (`http://localhost:5173`) reaches the Worker unchanged. The factory's `trustedOrigins: [config.betterAuthUrl]` only allowed `http://localhost:8787`, so the login form got `INVALID_ORIGIN`.
@@ -3367,3 +3454,73 @@ became the control-plane entry point.
 Verification: 24/24 PASS for the end-to-end harness; 20/20 PASS for the destructive-commands
 audit harness; 10/10 PASS for the role-detection harness. The Main Session can recover project
 state via the procedure in `CLAUDE.md` without spawning any subagent.
+
+## 2026-08-31 — CAP-065 Mailbox sharing and member-management UI
+
+Implemented the browser surface for the existing CAP-057 mailbox member API. Authenticated users
+can reach `/mailbox/:mailboxId/members` from the inbox, view the strict safe member projection,
+add an existing active user with a normalized email and closed role, and remove a member after
+explicit confirmation. The page preserves error data and form/dialog state for retry, scopes all
+member cache entries by user and mailbox, cancels stale refetches before mutations, normalizes
+network failures to `UNKNOWN`, announces success via a polite live region, and restores keyboard
+focus after dialog closure. Invitation delivery, role updates, Worker/migration/contract/provider
+changes, and deployment remain out of scope.
+
+Independent architecture, QA, security, code, and frontend reviews were completed. Initial code and
+frontend findings were fixed and accepted on re-review. Verification: focused Web 85/85, unit
+1142/1142, Worker 886/886, typecheck, lint, scaffold doctor 14/14, build, CAP-065 format check,
+and `git diff --check` passed. Build retained the existing bundle-size warning only. No deploy or
+push was performed. Cleanup: 0 promoted, 1 archived, 0 deleted.
+
+## 2026-08-31 — CAP-066 Domain administration
+
+Implemented the post-setup managed-domain administration slice. Authorized administrators can reach
+`/admin/domains`, list a strict safe projection, add normalized active domains, record an explicitly
+operator-confirmed Phase 1 verification action, and delete only domains that have no mailboxes. The
+Worker uses database-backed `domain.read`/`domain.manage` checks, stable error codes, strict UUID
+validation, request-hash idempotency, and an Administration-module use case for atomic
+domain/audit/idempotency batches. Same-key create
+and delete races replay the winner; the delete guard also fails safely when the target was the last
+domain row and distinguishes a missing domain from a mailbox-protected domain.
+
+The Web surface adds a user-scoped TanStack Query cache with cancellation signals, strict contract
+parsing, retryable errors, permission-revocation hiding, explicit delete confirmation, operator-only
+verification copy, and focus trapping/restoration. A successful delete moves focus to the remaining
+domain form after its trigger row is removed.
+
+Independent Worker/security/architecture and Web/QA/contracts reviews completed with no unresolved
+blocker, high, or medium findings after re-review. Verification: focused Worker 11/11, focused
+Web/admin/router 59/59, contracts 386/386, full unit 1159/1159, full Worker 897/897, scaffold
+doctor 14/14, typecheck, lint, format, `git diff --check`, and root build passed. Build retained
+the existing Vite bundle-size warning only. No deploy, commit, or push was performed. Cleanup:
+0 promoted, 1 archived, 0 deleted.
+
+## 2026-09-01 — CAP-067 Role administration
+
+Implemented the bounded post-setup role-definition surface. Administrators with `role.read` can
+inspect the seeded system roles and the exact closed permission catalog; administrators with
+`role.manage` can create, fully replace, and delete unassigned custom roles. System roles remain
+read-only, assigned custom roles fail closed with `ROLE_IN_USE`, and user-role assignment remains
+out of scope for the separate user-management capability.
+
+The Worker keeps role state, permission relations, idempotency records, and `role.created` /
+`role.updated` / `role.deleted` audit rows in one D1 batch. Names are normalized and protected by
+the existing case-insensitive uniqueness constraint. Every mutation requires request-hash checked
+idempotency; replay and conflict paths return the original response or the canonical stable error.
+The role and permission response contracts reject storage-only user assignments, unknown fields,
+incomplete catalogs, and duplicate permission keys.
+
+The Web adds `/admin/roles`, a session-guarded landing link, user-scoped query state, strict
+response parsing, custom-role create/edit/delete forms, system-role read-only rendering, explicit
+delete confirmation, validation/error/retry/empty states, query cancellation, and focus-safe
+mutation behavior. No Brevo token/provider, migration, deployment, or remote state was changed.
+
+Independent Web/QA review returned six MEDIUM findings; all were fixed and recorded in
+`work/archive/2026-08/CAP-067-role-administration/frontend-qa-review.md`. A separate architecture /
+security review was requested but did not return before shutdown; the main session's direct audit
+is recorded in the companion review note and found no unresolved BLOCKER/HIGH/MEDIUM issue.
+
+Verification: focused contracts/Web/router 446/446, focused role Worker 7/7, full unit 1174/1174,
+full Worker 904/904 against real D1/workerd, scaffold doctor 14/14, lint, typecheck, format,
+`git diff --check`, and root build passed. Build retained the existing Vite bundle-size warning
+only. No preview verification or deploy was performed.

@@ -8,8 +8,16 @@
  */
 import { z } from 'zod';
 import { attachmentContentTypeSchema, attachmentFilenameSchema } from './attachments';
+import { domainNameSchema } from './domain-name';
+import { uuidSchema } from './ids';
 
 export * from './attachments';
+export * from './admin/permissions';
+export * from './admin/roles';
+export { domainNameSchema } from './domain-name';
+export type { DomainName } from './domain-name';
+export { uuidSchema } from './ids';
+export type { Uuid } from './ids';
 
 // R-DATA-001 — email addresses are compared and stored case-insensitively.
 export const emailAddressSchema = z.string().trim().toLowerCase().email().max(254);
@@ -36,15 +44,6 @@ export const emailAddressSchema = z.string().trim().toLowerCase().email().max(25
  */
 export const MIN_EMAIL_PREFIX_LENGTH = 3;
 
-/**
- * Sample contract — a UUIDv4 string. The shape every other ID contract will
- * follow once CAP-004 lands the schema.
- *
- * Per ADR-005: all externally visible IDs are UUID v4 strings.
- */
-export const uuidSchema = z.string().uuid();
-
-export type Uuid = z.infer<typeof uuidSchema>;
 export type EmailAddress = z.infer<typeof emailAddressSchema>;
 
 // ---------------------------------------------------------------------------
@@ -625,38 +624,6 @@ export type SetupAdministratorRequest = z.infer<typeof setupAdministratorRequest
 // ---------------------------------------------------------------------------
 
 /**
- * Domain name schema — validated per R-DATA-001 (case-insensitive).
- *
- * Validates:
- * - Length: 4-253 chars (after trim/lowercase)
- * - Each label: 1-63 chars, starts/ends with alphanumeric, hyphens allowed internally
- * - At least one dot (subdomain.example or example.com)
- * - Only lowercase ASCII letters, digits, and hyphens
- *
- * Examples:
- * - ✓ example.com
- * - ✓ mail.example.com
- * - ✓ a-b.example.com
- * - ✗ example (no dot)
- * - ✗ -example.com (starts with hyphen)
- * - ✗ example-.com (ends with hyphen)
- * - ✗ Example.com (uppercase)
- * - ✗ a.b (too short — minimum 4 chars after normalization)
- */
-export const domainNameSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .min(4)
-  .max(253)
-  .regex(
-    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/,
-    'Invalid domain name',
-  );
-
-export type DomainName = z.infer<typeof domainNameSchema>;
-
-/**
  * Request body for POST /api/v1/setup/domain. The operator provides a domain
  * name to add to the managed domains list. The domain is created with status='active'.
  *
@@ -685,54 +652,6 @@ export const setupBrevoRequestSchema = z.object({
 });
 
 export type SetupBrevoRequest = z.infer<typeof setupBrevoRequestSchema>;
-
-// ---------------------------------------------------------------------------
-// Authorization — CAP-017
-// ---------------------------------------------------------------------------
-/**
- * PermissionKey — closed enum of all permission keys.
- * R-AUTHZ-001: Permissions are a closed set; adding a key is a deliberate change.
- * R-AUTHZ-002: Authorization checks hit the database per request; no cache older than 5 minutes.
- *
- * From .claude/rules/security.md §Authorization:
- * - message.read, message.send, message.delete
- * - mailbox.create, mailbox.manage, mailbox.share
- * - user.read, user.manage
- * - role.read, role.manage
- * - domain.read, domain.manage
- * - signature.read, signature.manage
- * - settings.read, settings.manage
- * - provider.sync
- * - webhook_event.read, webhook_event.delete
- * - analytics.read
- * - audit.read (D-CAP-044-D — added by CAP-044 Slice 2; distinct authority
- *   from user.read and webhook_event.read)
- */
-export const permissionKeySchema = z.enum([
-  'message.read',
-  'message.send',
-  'message.delete',
-  'mailbox.create',
-  'mailbox.manage',
-  'mailbox.share',
-  'user.read',
-  'user.manage',
-  'role.read',
-  'role.manage',
-  'domain.read',
-  'domain.manage',
-  'signature.read',
-  'signature.manage',
-  'settings.read',
-  'settings.manage',
-  'provider.sync',
-  'webhook_event.read',
-  'webhook_event.delete',
-  'analytics.read',
-  'audit.read',
-]);
-
-export type PermissionKey = z.infer<typeof permissionKeySchema>;
 
 // ---------------------------------------------------------------------------
 // Admin invite codes — CAP-018
@@ -1366,6 +1285,26 @@ export {
   type UserListResponse,
   type UserListQueryParams,
 } from './admin/users';
+
+// CAP-066: managed-domain administration wire contracts. The domain
+// response is a strict safe projection; outbound connection details never
+// cross this boundary.
+export {
+  managedDomainStatusSchema,
+  createManagedDomainRequestSchema,
+  managedDomainSchema,
+  managedDomainListResponseSchema,
+  verifyManagedDomainRequestSchema,
+  verifyManagedDomainResponseSchema,
+  deleteManagedDomainResponseSchema,
+  type ManagedDomainStatus,
+  type CreateManagedDomainRequest,
+  type ManagedDomain,
+  type ManagedDomainListResponse,
+  type VerifyManagedDomainRequest,
+  type VerifyManagedDomainResponse,
+  type DeleteManagedDomainResponse,
+} from './admin/domains';
 
 // CAP-044 Slice 3 amendment (cursor-payload promotion): the payload
 // schema + closed surface union moved here from the worker's

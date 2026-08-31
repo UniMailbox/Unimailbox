@@ -1416,8 +1416,9 @@ describe('toggleStarResponseSchema', () => {
 // `draft.updated`; CAP-047 draft send slice adds `draft.sent`; CAP-051
 // attachment cleanup adds `attachment.expired`; CAP-057 mailbox sharing adds
 // `mailbox.member_added` and `mailbox.member_removed`. CAP-041 preflight
-// hotfix adds `setup.preflight.complete`. The enum is closed by design — a value reaching
-// audit_events that is not in this list is a contract violation, so
+// hotfix adds `setup.preflight.complete`. CAP-067 role administration adds
+// `role.created`, `role.updated`, and `role.deleted`. The enum is closed by
+// design — a value reaching audit_events that is not in this list is a contract violation, so
 // coverage pins the exact option set.
 describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
   it('contains the exact expected option set, including the CAP-043 message actions', () => {
@@ -1432,6 +1433,9 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'webhook.delivered',
         'blocklist.create',
         'blocklist.delete',
+        'domain.created',
+        'domain.deleted',
+        'domain.verified',
         'role_policy.set',
         'webhook_delivery.reconcile',
         'webhook_secret.reveal',
@@ -1445,6 +1449,9 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'attachment.expired',
         'mailbox.member_added',
         'mailbox.member_removed',
+        'role.created',
+        'role.updated',
+        'role.deleted',
       ].sort(),
     );
   });

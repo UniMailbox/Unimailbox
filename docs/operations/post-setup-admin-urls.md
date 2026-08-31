@@ -40,8 +40,9 @@ because the routes themselves are only session-gated.
 | URL | Purpose | Permission | What you can do here today |
 |---|---|---|---|
 | `/mailbox` | The main mailbox shell — the app itself, not an admin page. | authenticated session | Read, send, and manage messages. |
-| `/admin` | Admin landing page. | authenticated session | A static index linking to the four pages below. No configuration happens here. |
+| `/admin` | Admin landing page. | authenticated session | A static index linking to the five pages below. No configuration happens here. |
 | `/admin/connections` | Provider connections (Brevo, Resend, Cloudflare Email). | `webhook_event.read`; the audited secret reveal needs `provider.sync` | Review each connection's provider, status, whether its webhook is configured, and its webhook URL. Reveal a webhook secret behind a confirm dialog — the value is shown **once** and the reveal is written to the audit trail. |
+| `/admin/domains` | Managed domains for mailbox addresses. | `domain.read`; add, verify, and delete need `domain.manage` | List safe domain projections, add a normalized active domain, record Phase 1 operator confirmation, and delete only domains with no mailboxes. Verify does not call Cloudflare or test delivery. |
 | `/admin/users` | User management. | `user.read` (mutations need `user.manage`) | Page through the user list. |
 | `/admin/audit-events` | Audit trail viewer. | `audit.read` | Filter audit events by actor, resource pair, and action, then page with "Load more". Your `setup.complete` row from the skip lands here. |
 | `/admin/webhook-events` | Webhook delivery log. | `webhook_event.read` | Review recent deliveries: connection, event type, message, status, timestamp. Metadata only — raw provider payloads are deliberately not shown. |
@@ -57,7 +58,7 @@ unconfigured, and the symptoms are the normal ones for an unconfigured system.
 
 | Skipped step | Consequence | Where to fix it today |
 |---|---|---|
-| Domain | No managed domain, so inbound mail has nowhere to route (`R-INBOUND-008`). | No admin page — see [D-CAP-063-B](#known-gaps). D1 access required. |
+| Domain | No managed domain, so inbound mail has nowhere to route (`R-INBOUND-008`). | `/admin/domains` — add a domain, then configure the Cloudflare routing step. |
 | Cloudflare Verify | Cloudflare Email Routing is not pointed at this deployment. | The Cloudflare dashboard directly. |
 | Inbound Smoke | The inbound path was never proven end-to-end. | Send a real message once a domain and routing exist. |
 | Brevo | No outbound provider is connected, so sends fail until one is (`R-OUTBOUND-004`). | `/admin/connections` shows connection state. Creating a connection is currently an API-level operation. |
@@ -65,14 +66,13 @@ unconfigured, and the symptoms are the normal ones for an unconfigured system.
 
 ## Known gaps
 
-These admin pages **do not exist yet**. CAP-063 deliberately did not add them; each is tracked as
-its own deferral in `docs/rebuild/capability-ledger.md` and needs its own capability. Until then,
-each area is reachable only through the API or direct D1 access.
+These admin pages remain incomplete. CAP-063 deliberately did not add them; each is tracked as
+its own deferral in `docs/rebuild/capability-ledger.md` and needs its own capability. Domain
+management was delivered by CAP-066 and is listed above.
 
 | ID | Missing page | Impact |
 |---|---|---|
 | `D-CAP-063-A` | Wizard re-entry after `status === 'complete'` | The setup gate hard-locks the wizard on completion. There is no UI path back in, even to fix a step you skipped. A deliberate "re-open setup" action with an audit row and a reason field would close this. |
-| `D-CAP-063-B` | Domain management | No UI to add, verify, or delete managed domains. Inbound mail cannot be received until domains exist. |
 | `D-CAP-063-C` | Role management | No UI to grant, revoke, or define roles beyond the seeded `administrator` and `member`. |
 | `D-CAP-063-D` | Signature management | The `signatures` table exists (CAP-007), but there is no admin page to author or edit signatures. |
 | `D-CAP-063-E` | General settings | System-wide knobs (environment, audit retention, and similar) have no UI. |

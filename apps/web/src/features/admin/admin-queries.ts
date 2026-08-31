@@ -36,9 +36,20 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import {
   auditEventListResponseSchema,
+  deleteManagedDomainResponseSchema,
+  managedDomainListResponseSchema,
+  managedDomainSchema,
+  verifyManagedDomainResponseSchema,
   userListResponseSchema,
+  type ManagedDomain,
   type AuditAction,
   type AuditEventListResponse,
+  roleListResponseSchema,
+  roleMutationResponseSchema,
+  deleteRoleResponseSchema,
+  type PermissionKey,
+  type Role,
+  type RoleListResponse,
   type UserListResponse,
 } from '@unimailbox/contracts';
 import { z } from 'zod';
@@ -105,8 +116,175 @@ export const adminQueryKeys = {
   users: (userId: string) => [...adminQueryKeys.all, 'users', userId] as const,
   connections: (userId: string) => [...adminQueryKeys.all, 'connections', userId] as const,
   webhookEvents: (userId: string) => [...adminQueryKeys.all, 'webhook-events', userId] as const,
+  domains: (userId: string) => [...adminQueryKeys.all, 'domains', userId] as const,
+  roles: (userId: string) => [...adminQueryKeys.all, 'roles', userId] as const,
   navProbe: (userId: string) => [...adminQueryKeys.all, 'nav-probe', userId] as const,
 };
+
+/** Builds the resource path for one managed-domain mutation. */
+export function managedDomainPath(domainId: string): string {
+  return `/api/v1/admin/domains/${encodeURIComponent(domainId)}`;
+}
+
+/** Builds the resource path for one role mutation. */
+export function rolePath(roleId: string): string {
+  return `/api/v1/admin/roles/${encodeURIComponent(roleId)}`;
+}
+
+/** Fetches the role definitions and the closed permission catalog. */
+export async function fetchAdminRoles(
+  apiClient: ApiClient,
+  signal?: AbortSignal,
+): Promise<RoleListResponse> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(
+    '/api/v1/admin/roles',
+    signal === undefined ? {} : { signal },
+  );
+  try {
+    return roleListResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export function adminRolesQuery() {
+  const apiClient = useApiClient();
+  const session = authSessionQuery().data;
+  return useQuery({
+    queryKey: adminQueryKeys.roles(session?.userId ?? 'anonymous'),
+    queryFn: ({ signal }) => fetchAdminRoles(apiClient, signal),
+    staleTime: 0,
+    enabled: session !== undefined && session !== null,
+  });
+}
+
+/** Creates a custom role and validates the safe returned projection. */
+type RoleMutationRequest = {
+  readonly name: string;
+  readonly description: string;
+  readonly permissionKeys: ReadonlyArray<PermissionKey>;
+};
+
+export async function createAdminRole(
+  apiClient: ApiClient,
+  request: RoleMutationRequest,
+): Promise<Role> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>('/api/v1/admin/roles', {
+    method: 'POST',
+    body: request,
+  });
+  try {
+    return roleMutationResponseSchema.parse(response).data;
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+/** Replaces a custom role definition and permission set. */
+export async function updateAdminRole(
+  apiClient: ApiClient,
+  roleId: string,
+  request: RoleMutationRequest,
+): Promise<Role> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(rolePath(roleId), {
+    method: 'PATCH',
+    body: request,
+  });
+  try {
+    return roleMutationResponseSchema.parse(response).data;
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+/** Deletes a custom role and validates the acknowledgement. */
+export async function deleteAdminRole(
+  apiClient: ApiClient,
+  roleId: string,
+): Promise<{ readonly id: string; readonly deleted: true }> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(rolePath(roleId), {
+    method: 'DELETE',
+  });
+  try {
+    return deleteRoleResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+/** Fetches and strictly parses the managed-domain list. */
+export async function fetchAdminDomains(
+  apiClient: ApiClient,
+  signal?: AbortSignal,
+): Promise<ManagedDomain[]> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(
+    '/api/v1/admin/domains',
+    signal === undefined ? {} : { signal },
+  );
+  try {
+    return managedDomainListResponseSchema.parse(response.data).items;
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export function adminDomainsQuery() {
+  const apiClient = useApiClient();
+  const session = authSessionQuery().data;
+  return useQuery({
+    queryKey: adminQueryKeys.domains(session?.userId ?? 'anonymous'),
+    queryFn: ({ signal }) => fetchAdminDomains(apiClient, signal),
+    staleTime: 0,
+    enabled: session !== undefined && session !== null,
+  });
+}
+
+/** Adds one normalized managed domain and validates the returned projection. */
+export async function createManagedDomain(
+  apiClient: ApiClient,
+  name: string,
+): Promise<ManagedDomain> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>('/api/v1/admin/domains', {
+    method: 'POST',
+    body: { name },
+  });
+  try {
+    return managedDomainSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+/** Performs the Phase 1 operator-confirmation verification action. */
+export async function verifyManagedDomain(
+  apiClient: ApiClient,
+  domainId: string,
+): Promise<{ readonly verified: true; readonly domain: string }> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(
+    `${managedDomainPath(domainId)}/verify`,
+    { method: 'POST', body: {} },
+  );
+  try {
+    return verifyManagedDomainResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+/** Deletes one managed domain and validates the delete acknowledgement. */
+export async function deleteManagedDomain(
+  apiClient: ApiClient,
+  domainId: string,
+): Promise<{ readonly id: string; readonly deleted: true }> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(managedDomainPath(domainId), {
+    method: 'DELETE',
+  });
+  try {
+    return deleteManagedDomainResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
 
 /**
  * Fetcher for one audit-events page. Parsed through the contracts schema.

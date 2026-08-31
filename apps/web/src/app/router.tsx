@@ -83,11 +83,14 @@ import { InboxListPage } from '../features/mailbox/InboxListPage';
 import { MessageDetailPage } from '../features/mailbox/MessageDetailPage';
 import { ComposeEmail } from '../features/mailbox/ComposeEmail';
 import { DraftRecoveryPage } from '../features/mailbox/DraftRecoveryPage';
+import { MailboxMembersPage } from '../features/mailbox/MailboxMembersPage';
 import { AdminLandingPage } from '../features/admin/AdminLandingPage';
 import { AuditEventsPage } from '../features/admin/AuditEventsPage';
 import { UsersPage } from '../features/admin/UsersPage';
 import { ConnectionsPage } from '../features/admin/ConnectionsPage';
 import { WebhookEventsPage } from '../features/admin/WebhookEventsPage';
+import { DomainsPage } from '../features/admin/DomainsPage';
+import { RolesPage } from '../features/admin/RolesPage';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -332,6 +335,19 @@ const draftRecoveryRoute = createRoute({
   },
 });
 
+// CAP-065 — mailbox member management. The route is authenticated like the
+// sibling mailbox surfaces; CAP-057's server-side owner/global-share check
+// remains the authorization authority for the member data and mutations.
+const mailboxMembersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mailbox/$mailboxId/members',
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
+  component: function MailboxMembersRoute(): ReactElement {
+    const params = useParams({ strict: false });
+    return <MailboxMembersPage mailboxId={params.mailboxId} />;
+  },
+});
+
 // CAP-044 Slice 2 (AC 13; CAP-033 absorbed, D-CAP-044-E): the /admin
 // section. Session-guarded exactly like /mailbox (D-CAP-041-1 cache
 // hydration + D-CAP-041-9 redirect). Authorization is NOT decided here —
@@ -381,6 +397,20 @@ const adminWebhookEventsRoute = createRoute({
   path: '/admin/webhook-events',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: WebhookEventsPage,
+});
+
+const adminDomainsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/domains',
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
+  component: DomainsPage,
+});
+
+const adminRolesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/roles',
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
+  component: RolesPage,
 });
 
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
@@ -586,11 +616,14 @@ const routeTree = rootRoute.addChildren([
   messageDetailRoute,
   composeRoute,
   draftRecoveryRoute,
+  mailboxMembersRoute,
   adminLandingRoute,
   adminAuditEventsRoute,
   adminUsersRoute,
   adminConnectionsRoute,
   adminWebhookEventsRoute,
+  adminDomainsRoute,
+  adminRolesRoute,
   setupChildren,
 ]);
 

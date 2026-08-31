@@ -38,6 +38,16 @@ export function AdminLandingPage(): ReactElement {
               Webhook events
             </Link>
           </li>
+          <li>
+            <Link to="/admin/domains" data-testid="admin-domains-link">
+              Domains
+            </Link>
+          </li>
+          <li>
+            <Link to="/admin/roles" data-testid="admin-roles-link">
+              Roles
+            </Link>
+          </li>
         </ul>
       </Card>
     </main>
