@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -61,8 +61,17 @@ const LOCAL_COPY = {
   htmlBody: '<p>Local HTML</p>',
 };
 
+interface RequestLog {
+  readonly url: string;
+  readonly init: RequestInit;
+}
+
+const requestLog: RequestLog[] = [];
+
 afterEach(async () => {
   cleanup();
+  requestLog.length = 0;
+  vi.useRealTimers();
   resetAuthSessionForTesting();
   await Dexie.delete(DRAFT_CACHE_DATABASE_NAME);
 });
@@ -71,13 +80,22 @@ function renderPage(
   options: {
     readonly session?: typeof SESSION | null;
     readonly draftResponse?: Response;
+    readonly draftResponses?: ReadonlyArray<Response>;
+    readonly patchResponse?: Response;
+    readonly patchResponseFactory?: (
+      body: Partial<typeof SERVER_DRAFT>,
+      attempt: number,
+    ) => Response | Promise<Response>;
   } = {},
 ): string[] {
   const session = options.session === undefined ? SESSION : options.session;
   const calls: string[] = [];
-  const fetchImpl = (async (input: RequestInfo | URL): Promise<Response> => {
+  let draftReadCount = 0;
+  let patchCount = 0;
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     calls.push(url);
+    requestLog.push({ url, init: init ?? {} });
     if (url.includes('/api/v1/auth/better/get-session')) {
       return session === null
         ? jsonResponse({ data: { user: null, session: null } })
@@ -89,7 +107,27 @@ function renderPage(
           });
     }
     if (url.startsWith(`/api/v1/drafts/${DRAFT_ID}?mailboxId=`)) {
-      return options.draftResponse ?? jsonResponse({ data: SERVER_DRAFT });
+      const response = options.draftResponses?.[draftReadCount] ?? options.draftResponse;
+      draftReadCount += 1;
+      return response ?? jsonResponse({ data: SERVER_DRAFT });
+    }
+    if (url === `/api/v1/drafts/${DRAFT_ID}` && init?.method === 'PATCH') {
+      const body = JSON.parse(String(init.body)) as Partial<typeof SERVER_DRAFT>;
+      if (options.patchResponseFactory !== undefined) {
+        const response = options.patchResponseFactory(body, patchCount);
+        patchCount += 1;
+        return await response;
+      }
+      return (
+        options.patchResponse ??
+        jsonResponse({
+          data: {
+            ...SERVER_DRAFT,
+            ...body,
+            updated_at: '2026-08-30T10:01:00.000Z',
+          },
+        })
+      );
     }
     return errorResponse('TEST_NO_ROUTE', `no route for ${url}`, 400);
   }) as unknown as typeof fetch;
@@ -130,8 +168,8 @@ describe('DraftRecoveryPage — CAP-062', () => {
     await waitFor(() => expect(screen.getByTestId('draft-recovery-page')).toBeInTheDocument());
 
     expect(calls).toContain(`/api/v1/drafts/${DRAFT_ID}?mailboxId=${MAILBOX_ID}`);
-    expect(screen.getByTestId('draft-subject')).toHaveTextContent('Server subject');
-    expect(screen.getByTestId('draft-text-body')).toHaveTextContent('Server text');
+    expect(screen.getByLabelText('Subject')).toHaveValue('Server subject');
+    expect(screen.getByLabelText('Body')).toHaveValue('Server text');
     expect(screen.queryByTestId('draft-local-ahead')).not.toBeInTheDocument();
     expect(screen.queryByTestId('recover-local')).not.toBeInTheDocument();
   });
@@ -140,24 +178,34 @@ describe('DraftRecoveryPage — CAP-062', () => {
     await seedLocalCopy();
     renderPage();
     await waitFor(() => expect(screen.getByTestId('draft-local-ahead')).toBeInTheDocument());
-    expect(screen.getByTestId('draft-subject')).toHaveTextContent('Server subject');
+    expect(screen.getByLabelText('Subject')).toHaveValue('Server subject');
 
     await userEvent.setup().click(screen.getByTestId('recover-local'));
-    expect(screen.getByTestId('draft-subject')).toHaveTextContent('Local subject');
-    expect(screen.getByTestId('draft-text-body')).toHaveTextContent('Local text');
+    expect(screen.getByLabelText('Subject')).toHaveValue('Local subject');
+    expect(screen.getByLabelText('Body')).toHaveValue('Local text');
   });
 
   it('R-MESSAGE-010 requires an explicit server choice when the base version changed', async () => {
     await seedLocalCopy('2026-08-30T09:00:00.000Z');
     renderPage();
     await waitFor(() => expect(screen.getByTestId('draft-server-changed')).toBeInTheDocument());
-    expect(screen.getByTestId('draft-subject')).toHaveTextContent('Server subject');
+    expect(screen.getByLabelText('Subject')).toHaveValue('Server subject');
 
     await userEvent.setup().click(screen.getByTestId('load-server'));
     await waitFor(() =>
       expect(screen.queryByTestId('draft-server-changed')).not.toBeInTheDocument(),
     );
-    expect(screen.getByTestId('draft-subject')).toHaveTextContent('Server subject');
+    expect(screen.getByLabelText('Subject')).toHaveValue('Server subject');
+  });
+
+  it('CAP-064 requires an explicit recovery decision before editing a dirty local copy', async () => {
+    await seedLocalCopy();
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('draft-local-ahead')).toBeInTheDocument());
+
+    expect(screen.getByLabelText('Subject')).toBeDisabled();
+    await userEvent.setup().click(screen.getByTestId('recover-local'));
+    expect(screen.getByLabelText('Subject')).toBeEnabled();
   });
 
   it('R-MESSAGE-010 removes only the selected user/mailbox/draft cache row', async () => {
@@ -240,6 +288,221 @@ describe('DraftRecoveryPage — CAP-062', () => {
   it('R-API-002 shows a loading state while the server draft request is pending', () => {
     renderPage();
     expect(screen.getByTestId('draft-recovery-loading')).toBeInTheDocument();
+  });
+
+  it('CAP-064 renders editable recipient, subject, and plain-text body controls', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    expect(screen.getByLabelText('To')).toHaveValue('to@example.test');
+    expect(screen.getByLabelText('Cc')).toHaveValue('');
+    expect(screen.getByLabelText('Bcc')).toHaveValue('');
+    expect(screen.getByLabelText('Subject')).toHaveValue('Server subject');
+    expect(screen.getByLabelText('Body')).toHaveValue('Server text');
+  });
+
+  it('R-API-004 debounces the latest edit into a PATCH with If-Match and a client idempotency key', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Changed subject' } });
+    expect(requestLog.filter((request) => request.init.method === 'PATCH')).toHaveLength(0);
+
+    await waitFor(
+      () => expect(requestLog.some((request) => request.init.method === 'PATCH')).toBe(true),
+      { timeout: 2000 },
+    );
+    const patch = requestLog.find((request) => request.init.method === 'PATCH');
+    expect(patch).toBeDefined();
+    expect(new Headers(patch?.init.headers).get('If-Match')).toBe(SERVER_UPDATED_AT);
+    expect(new Headers(patch?.init.headers).get('Idempotency-Key')).toBeTruthy();
+    expect(JSON.parse(String(patch?.init.body))).toEqual({
+      subject: 'Changed subject',
+      body_text: 'Server text',
+      body_html: '<p>Server HTML</p>',
+      to: ['to@example.test'],
+      cc: [],
+      bcc: [],
+    });
+  });
+
+  it('R-API-003 serializes same-draft saves and uses the first response as the next If-Match', async () => {
+    let resolveFirst: (response: Response) => void = () => undefined;
+    const firstResponse = new Promise<Response>((resolve) => {
+      resolveFirst = resolve;
+    });
+    renderPage({
+      patchResponseFactory: (body, attempt) => {
+        if (attempt === 0) return firstResponse;
+        return jsonResponse({
+          data: {
+            ...SERVER_DRAFT,
+            ...body,
+            updated_at: '2026-08-30T10:02:00.000Z',
+          },
+        });
+      },
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'First save' } });
+    await waitFor(
+      () => expect(requestLog.filter((request) => request.init.method === 'PATCH')).toHaveLength(1),
+      { timeout: 2000 },
+    );
+    fireEvent.change(screen.getByLabelText('Body'), { target: { value: 'Second save' } });
+    resolveFirst(
+      jsonResponse({
+        data: {
+          ...SERVER_DRAFT,
+          subject: 'First save',
+          updated_at: '2026-08-30T10:01:00.000Z',
+        },
+      }),
+    );
+
+    await waitFor(
+      () => expect(requestLog.filter((request) => request.init.method === 'PATCH')).toHaveLength(2),
+      { timeout: 2500 },
+    );
+    const secondPatch = requestLog.filter((request) => request.init.method === 'PATCH')[1];
+    expect(new Headers(secondPatch?.init.headers).get('If-Match')).toBe('2026-08-30T10:01:00.000Z');
+    expect(JSON.parse(String(secondPatch?.init.body))).toMatchObject({
+      subject: 'First save',
+      body_text: 'Second save',
+    });
+  });
+
+  it('R-SECRET-003 mirrors a successful PATCH into the current user draft cache without headers', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Body'), { target: { value: 'Updated body' } });
+
+    await waitFor(async () => {
+      await expect(
+        getDraftWorkingCopy(SESSION.userId, MAILBOX_ID, DRAFT_ID),
+      ).resolves.toMatchObject({
+        subject: 'Server subject',
+        textBody: 'Updated body',
+        dirty: false,
+        baseServerUpdatedAt: '2026-08-30T10:01:00.000Z',
+      });
+    });
+    expect(screen.getByTestId('draft-save-state')).toHaveTextContent('Saved');
+    const cached = await getDraftWorkingCopy(SESSION.userId, MAILBOX_ID, DRAFT_ID);
+    expect(cached).not.toHaveProperty('idempotencyKey');
+    expect(cached).not.toHaveProperty('authorization');
+  });
+
+  it('R-API-002 preserves values and exposes a retryable API error after autosave fails', async () => {
+    renderPage({
+      patchResponse: errorResponse('DRAFT_UPDATE_FAILED', 'Draft could not be saved', 400),
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Keep this value' } });
+
+    await waitFor(() => expect(screen.getByTestId('draft-save-error')).toBeInTheDocument());
+    expect(screen.getByLabelText('Subject')).toHaveValue('Keep this value');
+    expect(screen.getByTestId('error-code')).toHaveTextContent('DRAFT_UPDATE_FAILED');
+    expect(screen.getByRole('button', { name: 'Retry save' })).toBeInTheDocument();
+  });
+
+  it('R-API-002 retry reuses the current form values with a new PATCH attempt', async () => {
+    renderPage({
+      patchResponse: errorResponse('DRAFT_UPDATE_FAILED', 'Draft could not be saved', 400),
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Retry this value' } });
+    await waitFor(() => expect(screen.getByTestId('draft-save-error')).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry save' }));
+    await waitFor(
+      () => expect(requestLog.filter((request) => request.init.method === 'PATCH')).toHaveLength(2),
+      { timeout: 2000 },
+    );
+    expect(screen.getByLabelText('Subject')).toHaveValue('Retry this value');
+    const idempotencyKeys = requestLog
+      .filter((request) => request.init.method === 'PATCH')
+      .map((request) => new Headers(request.init.headers).get('Idempotency-Key'));
+    expect(new Set(idempotencyKeys).size).toBe(2);
+  });
+
+  it('R-API-003 renders an explicit stale-version conflict without overwriting local edits', async () => {
+    renderPage({
+      patchResponse: errorResponse('STALE_IF_MATCH', 'A newer server version exists', 412),
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Subject'), {
+      target: { value: 'Local conflict edit' },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('draft-save-conflict')).toBeInTheDocument());
+    expect(screen.getByLabelText('Subject')).toHaveValue('Local conflict edit');
+    expect(screen.getByTestId('draft-conflict-reload')).toBeInTheDocument();
+    expect(screen.getByTestId('error-code')).toHaveTextContent('STALE_IF_MATCH');
+  });
+
+  it('R-API-003 refreshes the latest server version before removing a conflicted local copy', async () => {
+    const freshServerDraft = {
+      ...SERVER_DRAFT,
+      subject: 'Fresh server subject',
+      updated_at: '2026-08-30T10:02:00.000Z',
+    };
+    renderPage({
+      draftResponses: [
+        jsonResponse({ data: SERVER_DRAFT }),
+        jsonResponse({ data: freshServerDraft }),
+      ],
+      patchResponse: errorResponse('STALE_IF_MATCH', 'A newer server version exists', 412),
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Keep conflict edit' } });
+    await waitFor(() => expect(screen.getByTestId('draft-save-conflict')).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId('draft-conflict-reload'));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Subject')).toHaveValue('Fresh server subject'),
+    );
+    await expect(getDraftWorkingCopy(SESSION.userId, MAILBOX_ID, DRAFT_ID)).resolves.toBeNull();
+    expect(
+      requestLog.filter(
+        (request) =>
+          request.init.method === 'GET' && request.url.startsWith(`/api/v1/drafts/${DRAFT_ID}?`),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('R-DATA-004 rejects a foreign resource in a successful PATCH response', async () => {
+    renderPage({
+      patchResponse: jsonResponse({
+        data: {
+          ...SERVER_DRAFT,
+          id: '00000000-0000-4000-8000-000000000099',
+        },
+      }),
+    });
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Foreign response' } });
+    await waitFor(() => expect(screen.getByTestId('draft-save-error')).toBeInTheDocument());
+    expect(screen.getByTestId('error-code')).toHaveTextContent('INVALID_RESPONSE');
+    expect(screen.getByLabelText('Subject')).toHaveValue('Foreign response');
+  });
+
+  it('CAP-064 cancels a pending debounce when the editor unmounts', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('draft-editor-form')).toBeInTheDocument());
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Unmounted edit' } });
+    cleanup();
+    await vi.advanceTimersByTimeAsync(500);
+    vi.useRealTimers();
+
+    expect(requestLog.filter((request) => request.init.method === 'PATCH')).toHaveLength(0);
   });
 
   it('R-AUTHZ-003 renders the expired-session state when the session disappears', async () => {

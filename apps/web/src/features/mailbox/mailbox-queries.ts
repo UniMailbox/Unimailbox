@@ -59,6 +59,7 @@ import {
   type MessageListResponse,
   type MessageThreadResponse,
   type DraftResponse,
+  type UpdateDraftRequest,
 } from '@unimailbox/contracts';
 import type { ApiClient } from '../../infrastructure/api/client';
 import { ApiError } from '../../infrastructure/api/errors';
@@ -265,6 +266,103 @@ export function draftQuery(
     queryFn: () => fetchDraft(apiClient, mailboxId, draftId),
     enabled: userId !== null,
     staleTime: 0,
+  });
+}
+
+/**
+ * CAP-064 — Draft editor PATCH fetcher.
+ *
+ * Fires `PATCH /api/v1/drafts/:draftId` with the strict
+ * `updateDraftSchema`-shaped body (`subject`, `body_text`, `body_html`,
+ * and `to` / `cc` / `bcc` recipient arrays) and an `If-Match: <updated_at>`
+ * header carrying the caller-supplied `ifMatch` token. The
+ * `Idempotency-Key` and `x-request-id` headers are minted by the shared
+ * `ApiClient` (D-CAP-041-1 / D-CAP-041-2); the fetcher never sets them.
+ *
+ * The response is parsed end-to-end with `draftDetailResponseSchema`
+ * (the wire envelope around the strict `draftResponseSchema`). A malformed
+ * 2xx body is normalised to the same `INVALID_RESPONSE` code the
+ * `useComposeMessageMutation` setter raises so the caller's
+ * `ApiError` surface stays stable (R-API-002). The full envelope is
+ * parsed in one step so a foreign `data` shape cannot cross the boundary
+ * (R-DATA-004).
+ *
+ * The mailbox id is part of the input only because the caller's draft
+ * cache key needs it (cache mirroring is the component's responsibility —
+ * see `DraftRecoveryPage`); the route resolves the draft's mailbox from
+ * its own server-side association (R-AUTHZ-004), never from this value.
+ */
+export async function fetchUpdateDraft(
+  apiClient: ApiClient,
+  input: UpdateDraftInput,
+): Promise<DraftResponse> {
+  const response = await apiClient.fetch<unknown>(
+    `/api/v1/drafts/${encodeURIComponent(input.draftId)}`,
+    {
+      method: 'PATCH',
+      // The wire names are `body_text` / `body_html`; the body's shape
+      // is locked by `updateDraftSchema` so a typo or an accidentally
+      // cleared `subject` cannot sneak past the parser.
+      body: input.body,
+      headers: { 'If-Match': input.ifMatch },
+    },
+  );
+  try {
+    const draft = draftDetailResponseSchema.parse(response).data;
+    if (draft.id !== input.draftId || draft.mailboxId !== input.mailboxId) {
+      throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+    }
+    return draft;
+  } catch {
+    // Same posture as `useComposeMessageMutation`: a 2xx body that
+    // doesn't match the envelope is a deterministic client-side error,
+    // not a raw ZodError leaking out of the network boundary.
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export interface UpdateDraftInput {
+  /** Draft id from the authenticated draft route (R-AUTHZ-004). */
+  readonly draftId: string;
+  /** Mailbox scoping from the page; used only for caller cache keying. */
+  readonly mailboxId: string;
+  /** Server's `updated_at` echoed back as the optimistic-concurrency token. */
+  readonly ifMatch: string;
+  /** Strict `updateDraftSchema`-shaped PATCH body. */
+  readonly body: UpdateDraftRequest;
+}
+
+/**
+ * CAP-064 — Draft editor PATCH mutation.
+ *
+ * Mirrors the response into the existing draft query cache (the same
+ * `mailboxQueryKeys.draft(mailboxId, draftId)` key `draftQuery` reads) so a
+ * successful autosave replaces the displayed server version without a
+ * refetch (D-CAP-041-1). On failure the query cache is left untouched; the
+ * `ApiError` propagates to the caller (the editor's `Saving` / `Saved` /
+ * conflict states). Errors log the typed code and message only —
+ * never the body, the recipients, or the response envelope (R-SECRET-003,
+ * R-API-002).
+ */
+export function useUpdateDraftMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  const sessionQuery = authSessionQuery();
+  const userId = sessionQuery.data?.userId ?? null;
+  return useMutation({
+    mutationFn: async (input: UpdateDraftInput): Promise<DraftResponse> => {
+      return fetchUpdateDraft(apiClient, input);
+    },
+    onSuccess: (draft, input) => {
+      // R-AUTHZ-004: the server only ever echoes the resource the caller
+      // is authorised to read; the cache write is keyed on the same
+      // path the query uses so the next render reads the saved shape
+      // verbatim.
+      queryClient.setQueryData<DraftResponse>(
+        mailboxQueryKeys.draft(input.mailboxId, input.draftId, userId),
+        draft,
+      );
+    },
   });
 }
 
