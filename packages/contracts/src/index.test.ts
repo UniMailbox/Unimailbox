@@ -1417,7 +1417,9 @@ describe('toggleStarResponseSchema', () => {
 // attachment cleanup adds `attachment.expired`; CAP-057 mailbox sharing adds
 // `mailbox.member_added` and `mailbox.member_removed`. CAP-041 preflight
 // hotfix adds `setup.preflight.complete`. CAP-067 role administration adds
-// `role.created`, `role.updated`, and `role.deleted`. The enum is closed by
+// `role.created`, `role.updated`, and `role.deleted`. CAP-068 signature
+// administration adds `signature.created`, `signature.updated`, and
+// `signature.deleted`. The enum is closed by
 // design — a value reaching audit_events that is not in this list is a contract violation, so
 // coverage pins the exact option set.
 describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
@@ -1452,6 +1454,9 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'role.created',
         'role.updated',
         'role.deleted',
+        'signature.created',
+        'signature.updated',
+        'signature.deleted',
       ].sort(),
     );
   });

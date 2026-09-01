@@ -6,7 +6,7 @@
 // R-DATA-001: managed_domains.name is case-insensitive (COLLATE NOCASE).
 // ManagedDomain invariant: name is UNIQUE. New domains start as 'active'.
 // R-MAILBOX-003: Owner is implicitly a member; no explicit row needed in mailbox_members.
-import { sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 export const managedDomains = sqliteTable(
   'managed_domains',
@@ -25,6 +25,29 @@ export const managedDomains = sqliteTable(
 
 export type ManagedDomain = typeof managedDomains.$inferSelect;
 export type NewManagedDomain = typeof managedDomains.$inferInsert;
+
+// domain_signatures — CAP-068. SQL is the deployable artifact;
+// `is_enabled` uses Drizzle's boolean mode only for typing.
+export const domainSignatures = sqliteTable(
+  'domain_signatures',
+  {
+    id: text('id').primaryKey(),
+    domainId: text('domain_id')
+      .notNull()
+      .references(() => managedDomains.id, { onDelete: 'cascade' }),
+    htmlContent: text('html_content').notNull(),
+    textContent: text('text_content').notNull(),
+    isEnabled: integer('is_enabled', { mode: 'boolean' }).notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    domainUnique: uniqueIndex('domain_signatures_domain_unique').on(table.domainId),
+  }),
+);
+
+export type DomainSignature = typeof domainSignatures.$inferSelect;
+export type NewDomainSignature = typeof domainSignatures.$inferInsert;
 
 // mailboxes — CAP-020
 export const mailboxes = sqliteTable(

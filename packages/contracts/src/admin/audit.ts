@@ -107,6 +107,10 @@ export const auditActionSchema = z.enum([
   'role.created',
   'role.updated',
   'role.deleted',
+  // CAP-068 domain-signature administration.
+  'signature.created',
+  'signature.updated',
+  'signature.deleted',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

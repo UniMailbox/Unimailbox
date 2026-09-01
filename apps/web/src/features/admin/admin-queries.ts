@@ -47,6 +47,12 @@ import {
   roleListResponseSchema,
   roleMutationResponseSchema,
   deleteRoleResponseSchema,
+  deleteSignatureResponseSchema,
+  signatureListResponseSchema,
+  signatureSchema,
+  type CreateSignatureRequest,
+  type Signature,
+  type UpdateSignatureRequest,
   type PermissionKey,
   type Role,
   type RoleListResponse,
@@ -118,6 +124,7 @@ export const adminQueryKeys = {
   webhookEvents: (userId: string) => [...adminQueryKeys.all, 'webhook-events', userId] as const,
   domains: (userId: string) => [...adminQueryKeys.all, 'domains', userId] as const,
   roles: (userId: string) => [...adminQueryKeys.all, 'roles', userId] as const,
+  signatures: (userId: string) => [...adminQueryKeys.all, 'signatures', userId] as const,
   navProbe: (userId: string) => [...adminQueryKeys.all, 'nav-probe', userId] as const,
 };
 
@@ -129,6 +136,11 @@ export function managedDomainPath(domainId: string): string {
 /** Builds the resource path for one role mutation. */
 export function rolePath(roleId: string): string {
   return `/api/v1/admin/roles/${encodeURIComponent(roleId)}`;
+}
+
+/** Builds the resource path for one domain signature mutation. */
+export function signaturePath(signatureId: string): string {
+  return `/api/v1/admin/signatures/${encodeURIComponent(signatureId)}`;
 }
 
 /** Fetches the role definitions and the closed permission catalog. */
@@ -237,6 +249,83 @@ export function adminDomainsQuery() {
     staleTime: 0,
     enabled: session !== undefined && session !== null,
   });
+}
+
+/** Fetches and strictly parses the per-domain signature list. */
+export async function fetchAdminSignatures(
+  apiClient: ApiClient,
+  signal?: AbortSignal,
+): Promise<Signature[]> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(
+    '/api/v1/admin/signatures',
+    signal === undefined ? {} : { signal },
+  );
+  try {
+    return signatureListResponseSchema.parse(response.data).items;
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export function adminSignaturesQuery() {
+  const apiClient = useApiClient();
+  const session = authSessionQuery().data;
+  return useQuery({
+    queryKey: adminQueryKeys.signatures(session?.userId ?? 'anonymous'),
+    queryFn: ({ signal }) => fetchAdminSignatures(apiClient, signal),
+    staleTime: 0,
+    enabled: session !== undefined && session !== null,
+  });
+}
+
+/** Creates one signature and validates the sanitized returned projection. */
+export async function createAdminSignature(
+  apiClient: ApiClient,
+  request: CreateSignatureRequest,
+): Promise<Signature> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>('/api/v1/admin/signatures', {
+    method: 'POST',
+    body: request,
+  });
+  try {
+    return signatureSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+/** Fully replaces one signature's content and enabled state. */
+export async function updateAdminSignature(
+  apiClient: ApiClient,
+  signatureId: string,
+  request: UpdateSignatureRequest,
+  ifMatch: string,
+): Promise<Signature> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(signaturePath(signatureId), {
+    method: 'PATCH',
+    headers: { 'If-Match': ifMatch },
+    body: request,
+  });
+  try {
+    return signatureSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+/** Deletes one signature and validates the acknowledgement. */
+export async function deleteAdminSignature(
+  apiClient: ApiClient,
+  signatureId: string,
+): Promise<{ readonly id: string; readonly deleted: true }> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(signaturePath(signatureId), {
+    method: 'DELETE',
+  });
+  try {
+    return deleteSignatureResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
 }
 
 /** Adds one normalized managed domain and validates the returned projection. */

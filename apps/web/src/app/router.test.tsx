@@ -568,6 +568,7 @@ describe('router — CAP-062 production draft route', () => {
     '/admin/webhook-events',
     '/admin/domains',
     '/admin/roles',
+    '/admin/signatures',
   ])('redirects direct application route %s into setup when incomplete', async (path) => {
     const apiClient = createApiClient({
       baseUrl: '',
@@ -813,6 +814,20 @@ function buildAdminRouteTree(
     },
     component: () => <div data-testid="arrived-admin-roles">roles</div>,
   });
+  const adminSignaturesRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/admin/signatures',
+    beforeLoad: async ({ context }) => {
+      const descriptor = await context.queryClient.ensureQueryData({
+        queryKey: authQueryKeys.session(),
+        queryFn: () => fetchAuthSession(context.apiClient),
+      });
+      if (descriptor === null) {
+        throw redirect({ to: '/login' });
+      }
+    },
+    component: () => <div data-testid="arrived-admin-signatures">signatures</div>,
+  });
   return rootRoute.addChildren([
     loginRoute,
     adminLandingRoute,
@@ -822,6 +837,7 @@ function buildAdminRouteTree(
     adminWebhookEventsRoute,
     adminDomainsRoute,
     adminRolesRoute,
+    adminSignaturesRoute,
   ]);
 }
 
@@ -872,6 +888,7 @@ describe('router — /admin guard (CAP-044 Slice 2 / AC 13)', () => {
     '/admin/webhook-events',
     '/admin/domains',
     '/admin/roles',
+    '/admin/signatures',
   ])('redirects %s to /login when there is no session', async (initial) => {
     const { fetchImpl } = spyFetch([() => jsonResponse({ data: null })]);
     const { history } = await mountAppRouter({
@@ -930,6 +947,23 @@ describe('router — /admin guard (CAP-044 Slice 2 / AC 13)', () => {
       buildRouteTree: buildAdminRouteTree,
     });
     expect(lastPathname(history)).toBe('/admin/roles');
+    expect(calls.length).toBe(0);
+  });
+
+  it('renders /admin/signatures when the cache is pre-seeded with a valid session', async () => {
+    const { fetchImpl, calls } = spyFetch([]);
+    const { history } = await mountAppRouter({
+      fetchImpl,
+      initialEntries: ['/admin/signatures'],
+      authSession: {
+        userId: 'u-admin',
+        email: 'admin@b.test',
+        displayName: 'Admin',
+        expiresAt: '2099-01-01T00:00:00Z',
+      },
+      buildRouteTree: buildAdminRouteTree,
+    });
+    expect(lastPathname(history)).toBe('/admin/signatures');
     expect(calls.length).toBe(0);
   });
 });

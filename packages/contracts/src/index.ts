@@ -563,10 +563,11 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * the idempotency_records.response_json CHECK raise (CAP-047 PATCH
  * slice), to `'0021'` for attachment_uploads (CAP-049), and to
  * `'0022'` for message_attachments (CAP-050 — one-consume-per-upload
- * via UNIQUE index + BEFORE INSERT trigger), and to `'0023'` for per-user
- * message star state (CAP-058).
+ * via UNIQUE index + BEFORE INSERT trigger), to `'0023'` for per-user message
+ * star state (CAP-058), and to `'0024'` for one sanitized signature per
+ * managed domain (CAP-068).
  */
-export const CURRENT_SCHEMA_VERSION = '0023' as const;
+export const CURRENT_SCHEMA_VERSION = '0024' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008
@@ -1305,6 +1306,21 @@ export {
   type VerifyManagedDomainResponse,
   type DeleteManagedDomainResponse,
 } from './admin/domains';
+
+// CAP-068: one sanitized signature per managed domain.
+export {
+  SIGNATURE_CONTENT_MAX_LENGTH,
+  createSignatureRequestSchema,
+  updateSignatureRequestSchema,
+  signatureSchema,
+  signatureListResponseSchema,
+  deleteSignatureResponseSchema,
+  type CreateSignatureRequest,
+  type UpdateSignatureRequest,
+  type Signature,
+  type SignatureListResponse,
+  type DeleteSignatureResponse,
+} from './admin/signatures';
 
 // CAP-044 Slice 3 amendment (cursor-payload promotion): the payload
 // schema + closed surface union moved here from the worker's

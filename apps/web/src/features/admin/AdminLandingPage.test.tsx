@@ -59,6 +59,11 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
       path: '/admin/roles',
       component: () => <div>roles</div>,
     });
+    const signaturesRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/admin/signatures',
+      component: () => <div>signatures</div>,
+    });
     const router = createRouter({
       routeTree: rootRoute.addChildren([
         adminRoute,
@@ -68,6 +73,7 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
         webhookEventsRoute,
         domainsRoute,
         rolesRoute,
+        signaturesRoute,
       ]),
       history: createMemoryHistory({ initialEntries: ['/admin'] }),
     });
@@ -90,6 +96,7 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
       { testid: 'admin-webhook-events-link', href: '/admin/webhook-events' },
       { testid: 'admin-domains-link', href: '/admin/domains' },
       { testid: 'admin-roles-link', href: '/admin/roles' },
+      { testid: 'admin-signatures-link', href: '/admin/signatures' },
     ];
     for (const link of expected) {
       const element = screen.getByTestId(link.testid);

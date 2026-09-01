@@ -63,6 +63,7 @@ import attachmentUploadsSql from '../../../migrations/0021_attachment_uploads.sq
 // safe under concurrent compose requests.
 import messageAttachmentsSql from '../../../migrations/0022_message_attachments.sql?raw';
 import messageUserStateStarSql from '../../../migrations/0023_message_user_state_star.sql?raw';
+import domainSignaturesSql from '../../../migrations/0024_domain_signatures.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -187,6 +188,11 @@ const MIGRATIONS = [
     name: '0023_message_user_state_star',
     fileName: '0023_message_user_state_star.sql',
     sql: messageUserStateStarSql,
+  },
+  {
+    name: '0024_domain_signatures',
+    fileName: '0024_domain_signatures.sql',
+    sql: domainSignaturesSql,
   },
 ] as const;
 

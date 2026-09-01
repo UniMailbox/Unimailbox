@@ -10,4 +10,5 @@
 // 0022 adds message_attachments consumed-relation rows for CAP-050
 // (one-consume-per-upload via UNIQUE index + BEFORE INSERT trigger).
 // 0023 moves message stars onto per-user message_user_state rows (CAP-058).
-export const CURRENT_SCHEMA_VERSION = '0023' as const;
+// 0024 adds one sanitized signature per managed domain (CAP-068).
+export const CURRENT_SCHEMA_VERSION = '0024' as const;

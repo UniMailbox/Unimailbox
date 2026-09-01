@@ -3524,3 +3524,37 @@ Verification: focused contracts/Web/router 446/446, focused role Worker 7/7, ful
 full Worker 904/904 against real D1/workerd, scaffold doctor 14/14, lint, typecheck, format,
 `git diff --check`, and root build passed. Build retained the existing Vite bundle-size warning
 only. No preview verification or deploy was performed.
+
+## 2026-09-01 — CAP-068 Signature administration
+
+Implemented the per-managed-domain signature administration slice. Administrators with
+`signature.read` can list a safe projection; administrators with `signature.manage` can create,
+edit, and delete the single signature owned by a managed domain. The migration and Drizzle schema
+keep HTML, plain text, enabled state, and timestamps as scalar relational columns with a unique
+domain foreign key and cascade delete.
+
+The Worker validates strict bounded requests, sanitizes HTML through an explicit formatting/link
+allowlist, rejects content that becomes empty after sanitization, and keeps each successful
+signature write, correlated audit event, and idempotency record in one D1 batch. Replays are
+byte-identical. PATCH carries the returned `updatedAt` as `If-Match`, uses a conditional update
+with a strictly advanced timestamp, and returns `412 STALE_IF_MATCH` for stale concurrent writes.
+The module exports `findEnabledSignature` for the later outbound composition slice; automatic
+compose/reply/provider injection remains intentionally out of scope.
+
+The Web adds the session-guarded `/admin/signatures` route, landing link, user-scoped query cache,
+strict response parsing, create/edit/delete forms, permission-denial hiding, retry/error/empty
+states, and source-only HTML handling with no browser preview or HTML rendering.
+
+A bounded independent subagent review found the concurrent-update race and a tenant-scope concern;
+the race was fixed with `If-Match`. The tenant concern does not apply to this single-installation
+global managed-domain model, whose server-side route authorization is permission-based and has no
+tenant column. A final post-fix subagent re-review was requested but timed out and is recorded as
+no conclusion in the archived review note. Main-session direct review and focused evidence were
+completed.
+
+Verification: focused contracts/Web/router 61/61 plus contracts 386/386, focused Worker 9/9,
+sanitizer 3/3, full unit 1189/1189, full Worker 913/913 against real D1/workerd and the live
+Brevo/outbound test token, `pnpm scaffold doctor` 14/14, lint, typecheck, format, `git diff --check`,
+and root build passed. Build retained the existing Vite bundle-size warning only. No preview
+verification, deploy, push, or provider/token change was performed. Cleanup: 0 promoted,
+1 archived, 0 deleted.

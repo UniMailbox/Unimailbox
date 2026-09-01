@@ -209,9 +209,8 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    // CAP-058: 0023 adds the typed per-user star column while retaining
-    // the legacy mailbox-level compatibility column.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0023');
+    // CAP-068: 0024 adds one sanitized signature per managed domain.
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0024');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {

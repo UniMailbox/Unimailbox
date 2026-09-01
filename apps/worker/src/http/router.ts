@@ -47,6 +47,7 @@ import { adminAuditEventRoutes } from './routes/admin-audit-events';
 import { adminUserRoutes } from './routes/admin-users';
 import { adminDomainRoutes } from './routes/admin-domains';
 import { adminRoleRoutes } from './routes/admin-roles';
+import { adminSignatureRoutes } from './routes/admin-signatures';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
@@ -121,6 +122,9 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-067: custom-role definitions and the closed permission catalog.
   apiV1.route('/', adminRoleRoutes());
+
+  // CAP-068: one sanitized signature per managed domain.
+  apiV1.route('/', adminSignatureRoutes());
 
   // CAP-020: Mailbox routes.
   apiV1.route('/', mailboxRoutes());

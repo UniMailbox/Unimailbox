@@ -48,6 +48,11 @@ export function AdminLandingPage(): ReactElement {
               Roles
             </Link>
           </li>
+          <li>
+            <Link to="/admin/signatures" data-testid="admin-signatures-link">
+              Signatures
+            </Link>
+          </li>
         </ul>
       </Card>
     </main>
