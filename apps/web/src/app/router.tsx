@@ -92,6 +92,7 @@ import { WebhookEventsPage } from '../features/admin/WebhookEventsPage';
 import { DomainsPage } from '../features/admin/DomainsPage';
 import { RolesPage } from '../features/admin/RolesPage';
 import { SignaturesPage } from '../features/admin/SignaturesPage';
+import { SettingsPage } from '../features/admin/SettingsPage';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -421,6 +422,13 @@ const adminSignaturesRoute = createRoute({
   component: SignaturesPage,
 });
 
+const adminSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/settings',
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
+  component: SettingsPage,
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -633,6 +641,7 @@ const routeTree = rootRoute.addChildren([
   adminDomainsRoute,
   adminRolesRoute,
   adminSignaturesRoute,
+  adminSettingsRoute,
   setupChildren,
 ]);
 

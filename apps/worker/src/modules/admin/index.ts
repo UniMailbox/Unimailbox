@@ -78,3 +78,22 @@ export {
   type DeleteAdminRoleInput,
   type RoleAdministrationServiceResult,
 } from './role-administration-service';
+
+// CAP-069: typed, allowlisted system-settings administration.
+export {
+  getAdminSystemSettings,
+  updateAdminSystemSettings,
+  type ReadAdminSystemSettingsInput,
+  type SettingsAdministrationServiceDependencies,
+  type SettingsAdministrationServiceResult,
+  type UpdateAdminSystemSettingsInput,
+} from './settings-administration-service';
+export {
+  readSystemSettings,
+  prepareCompareAndSetSettingsRevision,
+  prepareUpsertSystemSettings,
+  SYSTEM_SETTING_STORAGE_KEYS,
+  SYSTEM_SETTINGS_DEFAULT_UPDATED_AT,
+  SYSTEM_SETTINGS_REVISION_KEY,
+  type SystemSettingsSnapshot,
+} from './settings-repository';

@@ -64,6 +64,11 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
       path: '/admin/signatures',
       component: () => <div>signatures</div>,
     });
+    const settingsRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/admin/settings',
+      component: () => <div>settings</div>,
+    });
     const router = createRouter({
       routeTree: rootRoute.addChildren([
         adminRoute,
@@ -74,6 +79,7 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
         domainsRoute,
         rolesRoute,
         signaturesRoute,
+        settingsRoute,
       ]),
       history: createMemoryHistory({ initialEntries: ['/admin'] }),
     });
@@ -97,6 +103,7 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
       { testid: 'admin-domains-link', href: '/admin/domains' },
       { testid: 'admin-roles-link', href: '/admin/roles' },
       { testid: 'admin-signatures-link', href: '/admin/signatures' },
+      { testid: 'admin-settings-link', href: '/admin/settings' },
     ];
     for (const link of expected) {
       const element = screen.getByTestId(link.testid);

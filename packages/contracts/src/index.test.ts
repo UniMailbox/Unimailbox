@@ -1419,7 +1419,8 @@ describe('toggleStarResponseSchema', () => {
 // hotfix adds `setup.preflight.complete`. CAP-067 role administration adds
 // `role.created`, `role.updated`, and `role.deleted`. CAP-068 signature
 // administration adds `signature.created`, `signature.updated`, and
-// `signature.deleted`. The enum is closed by
+// `signature.deleted`. CAP-069 general settings administration adds
+// `settings.updated`. The enum is closed by
 // design — a value reaching audit_events that is not in this list is a contract violation, so
 // coverage pins the exact option set.
 describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
@@ -1457,6 +1458,7 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'signature.created',
         'signature.updated',
         'signature.deleted',
+        'settings.updated',
       ].sort(),
     );
   });

@@ -50,9 +50,12 @@ import {
   deleteSignatureResponseSchema,
   signatureListResponseSchema,
   signatureSchema,
+  systemSettingsResponseSchema,
   type CreateSignatureRequest,
   type Signature,
   type UpdateSignatureRequest,
+  type SystemSettingsResponse,
+  type UpdateSystemSettingsRequest,
   type PermissionKey,
   type Role,
   type RoleListResponse,
@@ -125,6 +128,7 @@ export const adminQueryKeys = {
   domains: (userId: string) => [...adminQueryKeys.all, 'domains', userId] as const,
   roles: (userId: string) => [...adminQueryKeys.all, 'roles', userId] as const,
   signatures: (userId: string) => [...adminQueryKeys.all, 'signatures', userId] as const,
+  settings: (userId: string) => [...adminQueryKeys.all, 'settings', userId] as const,
   navProbe: (userId: string) => [...adminQueryKeys.all, 'nav-probe', userId] as const,
 };
 
@@ -276,6 +280,51 @@ export function adminSignaturesQuery() {
     staleTime: 0,
     enabled: session !== undefined && session !== null,
   });
+}
+
+/** Fetches the safe, typed global settings projection. */
+export async function fetchAdminSettings(
+  apiClient: ApiClient,
+  signal?: AbortSignal,
+): Promise<SystemSettingsResponse> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(
+    '/api/v1/admin/settings',
+    signal === undefined ? {} : { signal },
+  );
+  try {
+    return systemSettingsResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export function adminSettingsQuery() {
+  const apiClient = useApiClient();
+  const session = authSessionQuery().data;
+  return useQuery({
+    queryKey: adminQueryKeys.settings(session?.userId ?? 'anonymous'),
+    queryFn: ({ signal }) => fetchAdminSettings(apiClient, signal),
+    staleTime: 0,
+    enabled: session !== undefined && session !== null,
+  });
+}
+
+/** Replaces the typed system-settings projection and validates the response. */
+export async function updateAdminSettings(
+  apiClient: ApiClient,
+  request: UpdateSystemSettingsRequest,
+  ifMatch: string,
+): Promise<SystemSettingsResponse> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>('/api/v1/admin/settings', {
+    method: 'PATCH',
+    headers: { 'If-Match': ifMatch },
+    body: request,
+  });
+  try {
+    return systemSettingsResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
 }
 
 /** Creates one signature and validates the sanitized returned projection. */

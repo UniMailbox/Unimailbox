@@ -111,6 +111,8 @@ export const auditActionSchema = z.enum([
   'signature.created',
   'signature.updated',
   'signature.deleted',
+  // CAP-069 general system-settings administration.
+  'settings.updated',
 ]);
 
 export type AuditAction = z.infer<typeof auditActionSchema>;

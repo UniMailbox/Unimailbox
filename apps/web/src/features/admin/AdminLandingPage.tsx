@@ -53,6 +53,11 @@ export function AdminLandingPage(): ReactElement {
               Signatures
             </Link>
           </li>
+          <li>
+            <Link to="/admin/settings" data-testid="admin-settings-link">
+              General settings
+            </Link>
+          </li>
         </ul>
       </Card>
     </main>

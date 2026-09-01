@@ -564,10 +564,10 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * slice), to `'0021'` for attachment_uploads (CAP-049), and to
  * `'0022'` for message_attachments (CAP-050 — one-consume-per-upload
  * via UNIQUE index + BEFORE INSERT trigger), to `'0023'` for per-user message
- * star state (CAP-058), and to `'0024'` for one sanitized signature per
- * managed domain (CAP-068).
+ * star state (CAP-058), to `'0024'` for one sanitized signature per managed
+ * domain (CAP-068), and to `'0025'` for the CAP-069 settings revision seed.
  */
-export const CURRENT_SCHEMA_VERSION = '0024' as const;
+export const CURRENT_SCHEMA_VERSION = '0025' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008
@@ -1321,6 +1321,19 @@ export {
   type SignatureListResponse,
   type DeleteSignatureResponse,
 } from './admin/signatures';
+
+// CAP-069: typed, allowlisted system-settings administration. Secrets and
+// blocklists deliberately have separate ownership and never cross this shape.
+export {
+  SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES,
+  DEFAULT_SYSTEM_SETTINGS,
+  systemSettingsSchema,
+  updateSystemSettingsRequestSchema,
+  systemSettingsResponseSchema,
+  type SystemSettings,
+  type UpdateSystemSettingsRequest,
+  type SystemSettingsResponse,
+} from './admin/settings';
 
 // CAP-044 Slice 3 amendment (cursor-payload promotion): the payload
 // schema + closed surface union moved here from the worker's

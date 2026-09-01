@@ -11,4 +11,5 @@
 // (one-consume-per-upload via UNIQUE index + BEFORE INSERT trigger).
 // 0023 moves message stars onto per-user message_user_state rows (CAP-058).
 // 0024 adds one sanitized signature per managed domain (CAP-068).
-export const CURRENT_SCHEMA_VERSION = '0024' as const;
+// 0025 seeds the internal system-settings revision row for CAP-069.
+export const CURRENT_SCHEMA_VERSION = '0025' as const;

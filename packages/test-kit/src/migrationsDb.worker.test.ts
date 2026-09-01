@@ -209,8 +209,8 @@ describe('migrationsDb (worker pool)', () => {
       .bind('0014_better_auth_substrate.sql')
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
-    // CAP-068: 0024 adds one sanitized signature per managed domain.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0024');
+    // CAP-069: 0025 seeds the internal system-settings revision row.
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0025');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {
@@ -316,6 +316,43 @@ describe('migrationsDb (worker pool)', () => {
       .bind(mailboxMessageId)
       .first<{ count: number }>();
     expect(duplicateCount?.count).toBe(2);
+  });
+
+  it('R-SETTINGS-009: 0025 seeds one repeat-safe internal settings revision row', async () => {
+    const db = await migrationsDb();
+    const revision = await db
+      .prepare(`SELECT key, value, updated_at FROM system_settings WHERE key = 'settings_revision'`)
+      .first<{ key: string; value: string; updated_at: string }>();
+    expect(revision).toEqual({
+      key: 'settings_revision',
+      value: '1',
+      updated_at: '1970-01-01 00:00:00',
+    });
+    const tracked = await db
+      .prepare(`SELECT COUNT(*) AS count FROM d1_migrations WHERE name = ?`)
+      .bind('0025_system_settings_revision.sql')
+      .first<{ count: number }>();
+    expect(tracked?.count).toBe(1);
+    await migrationsDb();
+    const repeated = await db
+      .prepare(`SELECT COUNT(*) AS count FROM system_settings WHERE key = 'settings_revision'`)
+      .first<{ count: number }>();
+    expect(repeated?.count).toBe(1);
+  });
+
+  it('R-SETTINGS-009: 0025 normalizes a pre-existing internal revision row', async () => {
+    const db = await migrationsDb({ through: '0024_domain_signatures' });
+    await db
+      .prepare(
+        `INSERT INTO system_settings (key, value, updated_at, created_at)
+         VALUES ('settings_revision', 'legacy', 'not-a-timestamp', 'not-a-timestamp')`,
+      )
+      .run();
+    await migrationsDb();
+    const revision = await db
+      .prepare(`SELECT value, updated_at FROM system_settings WHERE key = 'settings_revision'`)
+      .first<{ value: string; updated_at: string }>();
+    expect(revision).toEqual({ value: '1', updated_at: '1970-01-01 00:00:00' });
   });
 
   it('CAP-044: upgrading an existing administrator grants audit.read', async () => {
