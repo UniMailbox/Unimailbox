@@ -58,11 +58,13 @@ export {
   createAdminManagedDomain,
   verifyAdminManagedDomain,
   deleteAdminManagedDomain,
+  updateAdminManagedDomainOutboundConnection,
   type AdminDomainServiceDependencies,
   type AdminDomainServiceResult,
   type CreateAdminManagedDomainInput,
   type VerifyAdminManagedDomainInput,
   type DeleteAdminManagedDomainInput,
+  type UpdateAdminManagedDomainOutboundConnectionInput,
 } from './domain-administration-service';
 
 // CAP-067: custom-role definition and role-permission administration. User
@@ -97,3 +99,5 @@ export {
   SYSTEM_SETTINGS_REVISION_KEY,
   type SystemSettingsSnapshot,
 } from './settings-repository';
+
+export { readAdminOverview } from './overview-repository';

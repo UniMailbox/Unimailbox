@@ -139,7 +139,7 @@ function renderAuditEvents(options: RenderOptions): {
   const { fetchImpl: sequentialFetch, calls } = spyFetch(options.resolvers);
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       calls.push({ url, method: 'GET' });
       return authSessionResolver();
     }
@@ -247,6 +247,9 @@ describe('AuditEventsPage (CAP-044 Slice 2 / AC 14)', () => {
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Actor user id'), actor);
+    await user.click(screen.getByRole('combobox', { name: 'Action' }));
+    await user.click(screen.getByRole('option', { name: 'settings.updated' }));
+    expect(auditGetCount(fetchCalls)).toBe(1);
     await user.click(screen.getByTestId('audit-apply-filters'));
     await waitFor(() => {
       expect(auditGetCount(fetchCalls)).toBe(2);
@@ -255,6 +258,7 @@ describe('AuditEventsPage (CAP-044 Slice 2 / AC 14)', () => {
       (call) => call.url.includes(`${AUDIT_URL}?`) && call.url.includes(`actorUserId=${actor}`),
     );
     expect(filteredCall).toBeDefined();
+    expect(filteredCall?.url).toContain('action=settings.updated');
     // The filtered response replaced the rows.
     await waitFor(() => {
       expect(screen.getAllByTestId('audit-event-row')).toHaveLength(1);

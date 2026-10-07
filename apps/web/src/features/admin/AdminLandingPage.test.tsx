@@ -7,6 +7,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiClientProvider } from '../../infrastructure/api/client-provider';
+import { createApiClient } from '../../infrastructure/api/client';
 import {
   Outlet,
   RouterProvider,
@@ -83,9 +85,52 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
       ]),
       history: createMemoryHistory({ initialEntries: ['/admin'] }),
     });
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => null,
+      fetchImpl: (async (input) => {
+        const url = String(input);
+        if (url.includes('/auth/me')) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                user: { id: 'u-admin', email: 'admin@example.com', name: 'Admin' },
+                session: { userId: 'u-admin', expiresAt: '2099-01-01T00:00:00Z' },
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (url.includes('/admin/overview')) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                scope: { domainId: null, domainName: null },
+                stats: {
+                  totalMessages: 0,
+                  unreadMessages: 0,
+                  receivedMessages: 0,
+                  sentMessages: 0,
+                  draftMessages: 0,
+                  mailboxCount: 0,
+                  domainCount: 0,
+                },
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return new Response(JSON.stringify({ data: { items: [] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch,
+    });
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <RouterProvider router={router} />
+        <ApiClientProvider client={apiClient}>
+          <RouterProvider router={router} />
+        </ApiClientProvider>
       </QueryClientProvider>,
     );
 

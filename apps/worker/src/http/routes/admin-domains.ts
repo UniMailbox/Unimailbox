@@ -5,6 +5,7 @@
 import { Hono, type Context } from 'hono';
 import {
   createManagedDomainRequestSchema,
+  updateManagedDomainOutboundConnectionRequestSchema,
   uuidSchema,
   verifyManagedDomainRequestSchema,
 } from '@unimailbox/contracts';
@@ -13,6 +14,7 @@ import {
   deleteAdminManagedDomain,
   listAdminManagedDomains,
   verifyAdminManagedDomain,
+  updateAdminManagedDomainOutboundConnection,
 } from '../../modules/admin';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
@@ -46,6 +48,36 @@ export function adminDomainRoutes(): Hono<AppEnv> {
         {
           actorUserId: userId,
           name: body.name,
+          requestId: c.get('requestId') ?? null,
+          idempotencyKey,
+          requestHash: await sha256Hex(rawBody),
+        },
+      );
+      return jsonResult(result.responseJson, result.status);
+    },
+  );
+
+  routes.patch(
+    '/admin/domains/:id/outbound-connection',
+    requirePermission('domain.manage'),
+    requireIdempotencyKey,
+    async (c) => {
+      const actorUserId = requireUserId(c);
+      const domainId = requireDomainId(c);
+      const idempotencyKey = requireKey(c);
+      const expectedUpdatedAt = requireIfMatch(c);
+      const rawBody = await c.req.text();
+      const body = parseJsonBody(rawBody, updateManagedDomainOutboundConnectionRequestSchema, {
+        event: 'admin.domain.outbound_connection.invalid_json',
+        actorUserId,
+      });
+      const result = await updateAdminManagedDomainOutboundConnection(
+        { db: c.env.DB },
+        {
+          actorUserId,
+          domainId,
+          connectionId: body.connectionId,
+          expectedUpdatedAt,
           requestId: c.get('requestId') ?? null,
           idempotencyKey,
           requestHash: await sha256Hex(rawBody),
@@ -142,6 +174,28 @@ function requireDomainId(c: Context<AppEnv>): string {
     });
   }
   return id;
+}
+
+const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+function requireIfMatch(c: Context<AppEnv>): string {
+  const value = c.req.header('If-Match');
+  if (value === undefined) {
+    throw new DomainError({
+      code: 'IF_MATCH_REQUIRED',
+      message: 'If-Match header required',
+      httpStatus: 400,
+    });
+  }
+  const trimmed = value.trim();
+  if (!TIMESTAMP_PATTERN.test(trimmed)) {
+    throw new DomainError({
+      code: 'IF_MATCH_INVALID',
+      message: 'If-Match header must match YYYY-MM-DD HH:MM:SS exactly',
+      httpStatus: 400,
+    });
+  }
+  return trimmed;
 }
 
 function jsonResult(responseJson: string, status: 200 | 201): Response {

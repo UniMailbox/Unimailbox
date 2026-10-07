@@ -8,6 +8,24 @@
 
 import type { D1Database } from '@cloudflare/workers-types';
 
+export interface ProviderConnectionBindingInfo {
+  readonly id: string;
+  readonly providerKey: string;
+  readonly status: 'active' | 'disabled' | 'invalid';
+}
+
+/** Reads the minimal connection projection needed for domain binding. */
+export async function findProviderConnectionForBinding(
+  db: D1Database,
+  connectionId: string,
+): Promise<ProviderConnectionBindingInfo | null> {
+  const row = await db
+    .prepare('SELECT id, provider_key, status FROM provider_connections WHERE id = ? LIMIT 1')
+    .bind(connectionId)
+    .first<{ id: string; provider_key: string; status: ProviderConnectionBindingInfo['status'] }>();
+  return row === null ? null : { id: row.id, providerKey: row.provider_key, status: row.status };
+}
+
 export interface CreateConnectionInput {
   id: string;
   providerKey: string;

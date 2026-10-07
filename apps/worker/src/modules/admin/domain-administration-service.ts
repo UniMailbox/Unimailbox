@@ -26,8 +26,11 @@ import {
   prepareCreateDomain,
   prepareDeleteDomain,
   prepareRequireManagedDomainDeleted,
+  prepareRequireManagedDomainUpdated,
+  prepareUpdateDomainOutboundConnection,
   type ManagedDomainInfo,
 } from '../tenancy';
+import { findProviderConnectionForBinding } from '../outbound-mail';
 
 const CREATE_OPERATION = 'POST /api/v1/admin/domains';
 
@@ -61,6 +64,16 @@ export interface DeleteAdminManagedDomainInput {
   readonly requestHash: string;
 }
 
+export interface UpdateAdminManagedDomainOutboundConnectionInput {
+  readonly actorUserId: string;
+  readonly domainId: string;
+  readonly connectionId: string | null;
+  readonly expectedUpdatedAt: string;
+  readonly requestId: string | null;
+  readonly idempotencyKey: string;
+  readonly requestHash: string;
+}
+
 export interface AdminDomainServiceResult {
   readonly status: 200 | 201;
   readonly responseJson: string;
@@ -71,6 +84,135 @@ export interface AdminDomainServiceResult {
 export async function listAdminManagedDomains(db: Database): Promise<ManagedDomain[]> {
   const domains = await listManagedDomains(db);
   return domains.map(toManagedDomain);
+}
+
+/**
+ * Assigns or clears the outbound provider connection for an active domain.
+ * The D1 batch contains the binding, idempotency evidence, and audit event;
+ * a compare-and-set guard prevents stale admin tabs from overwriting a newer
+ * assignment.
+ */
+export async function updateAdminManagedDomainOutboundConnection(
+  dependencies: AdminDomainServiceDependencies,
+  input: UpdateAdminManagedDomainOutboundConnectionInput,
+): Promise<AdminDomainServiceResult> {
+  const { db } = dependencies;
+  const ids = dependencies.ids ?? systemIds;
+  const clock = dependencies.clock ?? systemClock;
+  const operation = outboundConnectionOperation(input.domainId);
+  const replay = await replayIfPresent(
+    db,
+    input.actorUserId,
+    operation,
+    input.idempotencyKey,
+    input.requestHash,
+  );
+  if (replay) return replay;
+
+  const domain = await findManagedDomainById(db, input.domainId);
+  if (!domain) domainNotFound(input.domainId);
+  if (domain.status !== 'active') {
+    throw new DomainError({
+      code: 'DOMAIN_NOT_ACTIVE',
+      message: `Managed domain is not active: ${domain.name}`,
+      httpStatus: 409,
+    });
+  }
+  if (domain.updatedAt !== input.expectedUpdatedAt) {
+    throw new DomainError({
+      code: 'STALE_IF_MATCH',
+      message: 'Domain changed since it was loaded',
+      httpStatus: 412,
+    });
+  }
+
+  if (input.connectionId !== null) {
+    const connection = await findProviderConnectionForBinding(db, input.connectionId);
+    if (!connection) {
+      throw new DomainError({
+        code: 'PROVIDER_CONNECTION_NOT_FOUND',
+        message: 'Provider connection not found',
+        httpStatus: 404,
+      });
+    }
+    if (connection.status !== 'active') {
+      throw new DomainError({
+        code: 'PROVIDER_CONNECTION_NOT_ACTIVE',
+        message: 'Only an active provider connection can be assigned',
+        httpStatus: 409,
+      });
+    }
+  }
+
+  const updatedAt = nextDomainTimestamp(clock, domain.updatedAt);
+  const updated: ManagedDomain = {
+    id: domain.id,
+    name: domain.name,
+    status: domain.status,
+    outboundConnectionId: input.connectionId,
+    createdAt: domain.createdAt,
+    updatedAt,
+  };
+  const responseJson = JSON.stringify({ data: updated });
+  try {
+    await db.batch([
+      prepareCreateIdempotencyRecord(db, {
+        id: ids.uuid(),
+        actorId: input.actorUserId,
+        operation,
+        idempotencyKey: input.idempotencyKey,
+        requestHash: input.requestHash,
+        responseStatus: 200,
+        responseJson,
+        createdAt: updatedAt,
+      }),
+      prepareUpdateDomainOutboundConnection(db, {
+        domainId: input.domainId,
+        connectionId: input.connectionId,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        updatedAt,
+      }),
+      prepareRequireManagedDomainUpdated(db),
+      prepareCreateAuditEvent(db, {
+        id: ids.uuid(),
+        actorUserId: input.actorUserId,
+        action: 'domain.outbound_connection.updated',
+        resourceType: 'managed_domain',
+        resourceId: input.domainId,
+        requestId: input.requestId,
+        metadata: JSON.stringify({ connectionId: input.connectionId }),
+        createdAt: updatedAt,
+      }),
+    ]);
+  } catch (error) {
+    if (isIdempotencyUniqueViolation(error)) {
+      return replayAfterRace(
+        db,
+        input.actorUserId,
+        operation,
+        input.idempotencyKey,
+        input.requestHash,
+      );
+    }
+    if (isDomainRevisionConflict(error)) {
+      const replay = await replayIfPresent(
+        db,
+        input.actorUserId,
+        operation,
+        input.idempotencyKey,
+        input.requestHash,
+      );
+      if (replay) return replay;
+      throw new DomainError({
+        code: 'STALE_IF_MATCH',
+        message: 'Domain changed while this update was being saved',
+        httpStatus: 412,
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  return { status: 200, responseJson, replayed: false };
 }
 
 /** Adds a domain and atomically records its audit/idempotency evidence. */
@@ -96,6 +238,7 @@ export async function createAdminManagedDomain(
     id,
     name: input.name,
     status: 'active',
+    outboundConnectionId: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -355,6 +498,24 @@ function deleteOperation(domainId: string): string {
   return `DELETE /api/v1/admin/domains/${domainId}`;
 }
 
+function outboundConnectionOperation(domainId: string): string {
+  return `PATCH /api/v1/admin/domains/${domainId}/outbound-connection`;
+}
+
+function nextDomainTimestamp(clock: Clock, currentUpdatedAt: string): string {
+  const candidate = sqliteTimestamp(clock.now());
+  const currentMillis = Date.parse(`${currentUpdatedAt.replace(' ', 'T')}Z`);
+  const candidateMillis = Date.parse(`${candidate.replace(' ', 'T')}Z`);
+  if (Number.isFinite(currentMillis) && candidateMillis <= currentMillis) {
+    return sqliteTimestamp(new Date(currentMillis + 1000));
+  }
+  return candidate;
+}
+
+function isDomainRevisionConflict(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('CHECK constraint failed');
+}
+
 function domainNotFound(domainId: string, cause?: unknown): never {
   throw new DomainError({
     code: 'DOMAIN_NOT_FOUND',
@@ -369,6 +530,7 @@ function toManagedDomain(domain: ManagedDomainInfo): ManagedDomain {
     id: domain.id,
     name: domain.name,
     status: domain.status,
+    outboundConnectionId: domain.outboundConnectionId,
     createdAt: domain.createdAt,
     updatedAt: domain.updatedAt,
   };

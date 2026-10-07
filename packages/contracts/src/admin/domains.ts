@@ -1,6 +1,6 @@
 // packages/contracts/src/admin/domains.ts — CAP-066 managed-domain admin API.
-// The response deliberately excludes outbound_connection_id and all future
-// provider credential material from the admin browser surface.
+// The response exposes only the selected provider connection id; provider
+// credentials and connection secrets never cross this boundary.
 
 import { z } from 'zod';
 import { domainNameSchema } from '../domain-name';
@@ -18,6 +18,17 @@ export const createManagedDomainRequestSchema = z
 
 export type CreateManagedDomainRequest = z.infer<typeof createManagedDomainRequestSchema>;
 
+/** Select or clear the provider connection used for outbound delivery. */
+export const updateManagedDomainOutboundConnectionRequestSchema = z
+  .object({
+    connectionId: uuidSchema.nullable(),
+  })
+  .strict();
+
+export type UpdateManagedDomainOutboundConnectionRequest = z.infer<
+  typeof updateManagedDomainOutboundConnectionRequestSchema
+>;
+
 /** The verification action has no caller-supplied fields. */
 export const verifyManagedDomainRequestSchema = z.object({}).strict();
 
@@ -28,6 +39,7 @@ export const managedDomainSchema = z
     id: uuidSchema,
     name: domainNameSchema,
     status: managedDomainStatusSchema,
+    outboundConnectionId: uuidSchema.nullable(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
   })
@@ -51,6 +63,10 @@ export const verifyManagedDomainResponseSchema = z
   .strict();
 
 export type VerifyManagedDomainResponse = z.infer<typeof verifyManagedDomainResponseSchema>;
+
+export const updateManagedDomainOutboundConnectionResponseSchema = managedDomainSchema;
+
+export type UpdateManagedDomainOutboundConnectionResponse = ManagedDomain;
 
 export const deleteManagedDomainResponseSchema = z
   .object({

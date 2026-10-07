@@ -1,3 +1,10 @@
+import { ConfigurationSection } from '../../components/ui/ConfigurationSection';
+import { Input } from '../../components/ui/Input';
+import { Label } from '../../components/ui/shadcn/label';
+import { Switch } from '../../components/ui/shadcn/switch';
+import { Checkbox } from '../../components/ui/shadcn/checkbox';
+import { SelectField } from '../../components/ui/SelectField';
+import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — general settings administration (CAP-069).
 //
 // This page renders the strict server projection as ordinary controls. It
@@ -7,7 +14,11 @@
 
 import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { updateSystemSettingsRequestSchema, type SystemSettings } from '@unimailbox/contracts';
+import {
+  SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES,
+  updateSystemSettingsRequestSchema,
+  type SystemSettings,
+} from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
@@ -15,6 +26,7 @@ import { useApiClient } from '../../infrastructure/api/client-provider';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import { adminQueryKeys, adminSettingsQuery, updateAdminSettings } from './admin-queries';
 
 export function SettingsPage(): ReactElement {
@@ -115,9 +127,10 @@ function SettingsContent(): ReactElement {
   if (!hasData && queryError !== null) {
     return (
       <main className="admin-page" data-testid="admin-error">
-        <header className="admin-header">
-          <h1>General settings</h1>
-        </header>
+        <PageHeader
+          title="General settings"
+          description="Configure preferences for this deployment."
+        />
         <Card title="Could not load settings" description="General settings are unavailable.">
           <ErrorPanel
             message={queryError.message}
@@ -146,95 +159,92 @@ function SettingsContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-settings-page">
-      <header className="admin-header">
-        <h1>General settings</h1>
-      </header>
-      <Card
-        title="Deployment settings"
-        description="Manage the typed system policy stored for this UniMailbox deployment."
-      >
-        <p data-testid="settings-policy-note">
-          These values are stored deployment policy. Runtime enforcement and retention cleanup are
-          adopted by their owning capabilities; this page does not expose provider credentials.
+      <PageHeader
+        title="General settings"
+        description="Configure preferences for this deployment."
+      />
+      <div className="settings-metadata" data-testid="settings-runtime-info">
+        <span>
+          Environment: <strong>{query.data.environment}</strong>
+        </span>
+        <span>
+          Last saved:{' '}
+          {query.data.updatedAt.startsWith('1970-01-01') ? (
+            'Not saved yet'
+          ) : (
+            <LocalDateTime value={query.data.updatedAt} />
+          )}
+        </span>
+      </div>
+      <p className="configuration-note" data-testid="settings-policy-note">
+        Stored policy. Some values are not yet enforced by runtime services.
+      </p>
+      {!canManage ? (
+        <p role="status" data-testid="settings-read-only-note">
+          Read-only access. Ask an administrator to make changes.
         </p>
-        <dl className="admin-settings-runtime" data-testid="settings-runtime-info">
-          <div>
-            <dt>Environment</dt>
-            <dd>{query.data.environment}</dd>
-          </div>
-          <div>
-            <dt>Last saved</dt>
-            <dd>{query.data.updatedAt}</dd>
-          </div>
-        </dl>
-        {!canManage ? (
-          <p role="status" data-testid="settings-read-only-note">
-            You have read access only. Ask an administrator to change these values.
-          </p>
-        ) : null}
-        <form onSubmit={submit} className="admin-form" noValidate data-testid="settings-form">
-          <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
-            <legend>General</legend>
-            <label htmlFor="settings-site-title">Site title</label>
-            <input
+      ) : null}
+      <form onSubmit={submit} className="settings-form" noValidate data-testid="settings-form">
+        <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
+          <ConfigurationSection title="General" description="Name and account access.">
+            <Input
               id="settings-site-title"
+              label="Site title"
               type="text"
               value={form.siteTitle}
               onChange={(event) => setForm({ ...form, siteTitle: event.target.value })}
               maxLength={100}
             />
-            <label className="admin-checkbox-label">
-              <input
-                type="checkbox"
-                checked={form.registrationEnabled}
-                onChange={(event) =>
-                  setForm({ ...form, registrationEnabled: event.target.checked })
-                }
-              />
-              Allow public registration
-            </label>
-          </fieldset>
-
-          <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
-            <legend>Mail flow policy</legend>
-            <label className="admin-checkbox-label">
-              <input
-                type="checkbox"
+            <div className="configuration-toggle">
+              <Label htmlFor="settings-registration">
+                Public registration disabled{' '}
+                <span className="configuration-help">Accounts are created by administrators.</span>
+              </Label>
+              <Checkbox id="settings-registration" checked={false} disabled />
+            </div>
+          </ConfigurationSection>
+          <ConfigurationSection title="Mail flow" description="Receiving and sending preferences.">
+            <div className="configuration-toggle">
+              <Label htmlFor="settings-inbound">Inbound mail enabled</Label>
+              <Switch
+                id="settings-inbound"
                 checked={form.inboundEnabled}
-                onChange={(event) => setForm({ ...form, inboundEnabled: event.target.checked })}
+                disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
+                onCheckedChange={(checked) => setForm({ ...form, inboundEnabled: checked })}
               />
-              Inbound mail enabled
-            </label>
-            <label className="admin-checkbox-label">
-              <input
-                type="checkbox"
+            </div>
+            <div className="configuration-toggle">
+              <Label htmlFor="settings-outbound">Outbound mail enabled</Label>
+              <Switch
+                id="settings-outbound"
                 checked={form.outboundEnabled}
-                onChange={(event) => setForm({ ...form, outboundEnabled: event.target.checked })}
+                disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
+                onCheckedChange={(checked) => setForm({ ...form, outboundEnabled: checked })}
               />
-              Outbound mail enabled
-            </label>
-            <label htmlFor="settings-unknown-recipient">Unknown recipient policy</label>
-            <select
-              id="settings-unknown-recipient"
-              value={form.unknownRecipientPolicy}
-              onChange={(event) =>
-                setForm({
-                  ...form,
-                  unknownRecipientPolicy: event.target
-                    .value as SystemSettings['unknownRecipientPolicy'],
-                })
-              }
-            >
-              <option value="reject">Reject unknown recipients</option>
-              <option value="store">Store unknown recipients</option>
-            </select>
-          </fieldset>
-
-          <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
-            <legend>Limits</legend>
-            <label htmlFor="settings-max-mailboxes">Maximum mailboxes per user</label>
-            <input
+            </div>
+            <div className="wizard-field">
+              <Label htmlFor="settings-unknown-recipient">Unknown recipient policy</Label>
+              <SelectField
+                id="settings-unknown-recipient"
+                value={form.unknownRecipientPolicy}
+                disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
+                onValueChange={(value) =>
+                  setForm({
+                    ...form,
+                    unknownRecipientPolicy: value as SystemSettings['unknownRecipientPolicy'],
+                  })
+                }
+                options={[
+                  { value: 'reject', label: 'Reject unknown recipients' },
+                  { value: 'store', label: 'Store unknown recipients' },
+                ]}
+              />
+            </div>
+          </ConfigurationSection>
+          <ConfigurationSection title="Limits" description="Mailbox and attachment limits.">
+            <Input
               id="settings-max-mailboxes"
+              label="Maximum mailboxes per user"
               type="number"
               min={1}
               max={100}
@@ -243,9 +253,9 @@ function SettingsContent(): ReactElement {
                 setForm({ ...form, maxMailboxesPerUser: Number(event.target.value) })
               }
             />
-            <label htmlFor="settings-max-attachments">Maximum attachments per message</label>
-            <input
+            <Input
               id="settings-max-attachments"
+              label="Maximum attachments per message"
               type="number"
               min={1}
               max={10}
@@ -254,25 +264,69 @@ function SettingsContent(): ReactElement {
                 setForm({ ...form, maxAttachmentsPerMessage: Number(event.target.value) })
               }
             />
-            <label htmlFor="settings-max-attachment-bytes">Maximum attachment size in bytes</label>
-            <input
-              id="settings-max-attachment-bytes"
-              type="number"
-              min={1}
-              max={64 * 1024 * 1024}
-              value={form.maxAttachmentBytes}
-              onChange={(event) =>
-                setForm({ ...form, maxAttachmentBytes: Number(event.target.value) })
-              }
-            />
-          </fieldset>
-
-          <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
-            <legend>Retention policy</legend>
-            <p>Stored policy for the future Phase 4 maintenance jobs.</p>
-            <label htmlFor="settings-audit-retention">Audit retention in days</label>
-            <input
+            {(() => {
+              const attachment = attachmentSizeParts(form.maxAttachmentBytes);
+              const factor = attachment.unit === 'MB' ? 1024 * 1024 : 1024;
+              return (
+                <div className="settings-attachment-size" data-testid="settings-attachment-size">
+                  <Input
+                    id="settings-max-attachment-value"
+                    label="Maximum attachment size"
+                    help="Limit applies to each message attachment."
+                    type="number"
+                    min={1}
+                    max={Math.floor(SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES / factor)}
+                    step={1}
+                    value={attachment.value}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setForm({
+                        ...form,
+                        maxAttachmentBytes: Number.isFinite(value)
+                          ? Math.min(value * factor, SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES)
+                          : form.maxAttachmentBytes,
+                      });
+                    }}
+                  />
+                  <div className="settings-attachment-unit">
+                    <label className="input-label" htmlFor="settings-max-attachment-unit">
+                      Unit
+                    </label>
+                    <SelectField
+                      id="settings-max-attachment-unit"
+                      label="Attachment size unit"
+                      value={attachment.unit}
+                      onValueChange={(unit) => {
+                        const nextFactor = unit === 'MB' ? 1024 * 1024 : 1024;
+                        const nextValue = Math.max(
+                          1,
+                          Math.round(form.maxAttachmentBytes / nextFactor),
+                        );
+                        setForm({
+                          ...form,
+                          maxAttachmentBytes: Math.min(
+                            nextValue * nextFactor,
+                            SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES,
+                          ),
+                        });
+                      }}
+                      options={[
+                        { value: 'KB', label: 'KB' },
+                        { value: 'MB', label: 'MB' },
+                      ]}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+          </ConfigurationSection>
+          <ConfigurationSection
+            title="Retention"
+            description="Stored policy. Automatic cleanup is not active yet."
+          >
+            <Input
               id="settings-audit-retention"
+              label="Audit retention in days"
               type="number"
               min={1}
               max={3650}
@@ -281,9 +335,9 @@ function SettingsContent(): ReactElement {
                 setForm({ ...form, auditRetentionDays: Number(event.target.value) })
               }
             />
-            <label htmlFor="settings-idempotency-retention">Idempotency retention in hours</label>
-            <input
+            <Input
               id="settings-idempotency-retention"
+              label="Idempotency retention in hours"
               type="number"
               min={1}
               max={168}
@@ -292,14 +346,16 @@ function SettingsContent(): ReactElement {
                 setForm({ ...form, idempotencyRetentionHours: Number(event.target.value) })
               }
             />
-          </fieldset>
-
-          {formError !== null ? (
-            <div className="admin-error-banner" role="alert" data-testid="settings-form-error">
-              {formError.message} ({formError.code})
-            </div>
-          ) : null}
-          {canManage ? (
+          </ConfigurationSection>
+        </fieldset>
+        {formError !== null ? (
+          <div className="admin-error-banner" role="alert" data-testid="settings-form-error">
+            {formError.message} ({formError.code})
+          </div>
+        ) : null}
+        {canManage ? (
+          <div className="configuration-save-bar">
+            <span className="configuration-help">Changes apply after saving.</span>
             <Button type="submit" disabled={updateMutation.isPending || isRefreshingAfterConflict}>
               {isRefreshingAfterConflict
                 ? 'Refreshing…'
@@ -307,42 +363,54 @@ function SettingsContent(): ReactElement {
                   ? 'Saving…'
                   : 'Save settings'}
             </Button>
-          ) : null}
-        </form>
-        {isRefreshingAfterConflict ? (
-          <p role="status" data-testid="settings-refreshing">
-            Settings changed elsewhere. Loading the latest values…
-            {refreshError !== null || queryError !== null ? (
-              <Button type="button" variant="secondary" onClick={refreshAfterConflict}>
-                Retry loading latest settings
-              </Button>
-            ) : null}
-          </p>
-        ) : null}
-        {notice !== null ? (
-          <p className="admin-success" role="status" data-testid="settings-success">
-            {notice}
-          </p>
-        ) : null}
-        {queryError !== null ? (
-          <div className="admin-error-banner" role="alert" data-testid="settings-query-error">
-            Could not refresh settings: {queryError.message} ({queryError.code})
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={
-                isRefreshingAfterConflict ? refreshAfterConflict : () => void query.refetch()
-              }
-            >
-              Retry
-            </Button>
           </div>
         ) : null}
-      </Card>
+      </form>
+      {isRefreshingAfterConflict ? (
+        <p role="status" data-testid="settings-refreshing">
+          Settings changed elsewhere. Loading the latest values…
+          {refreshError !== null || queryError !== null ? (
+            <Button type="button" variant="secondary" onClick={refreshAfterConflict}>
+              Retry loading latest settings
+            </Button>
+          ) : null}
+        </p>
+      ) : null}
+      {notice !== null ? (
+        <p className="admin-success" role="status" data-testid="settings-success">
+          {notice}
+        </p>
+      ) : null}
+      {queryError !== null ? (
+        <div className="admin-error-banner" role="alert" data-testid="settings-query-error">
+          Could not refresh settings: {queryError.message} ({queryError.code})
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={isRefreshingAfterConflict ? refreshAfterConflict : () => void query.refetch()}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : null}
     </main>
   );
 }
 
 function normalizeApiError(error: unknown): ApiError {
   return error instanceof ApiError ? error : new ApiError('INTERNAL', 'Something went wrong.', 500);
+}
+
+function attachmentSizeParts(bytes: number): {
+  readonly value: number;
+  readonly unit: 'KB' | 'MB';
+} {
+  const megabyte = 1024 * 1024;
+  if (bytes === 0) {
+    return { value: 0, unit: 'MB' };
+  }
+  if (bytes >= megabyte && bytes % megabyte === 0) {
+    return { value: bytes / megabyte, unit: 'MB' };
+  }
+  return { value: Math.max(1, Math.round(bytes / 1024)), unit: 'KB' };
 }

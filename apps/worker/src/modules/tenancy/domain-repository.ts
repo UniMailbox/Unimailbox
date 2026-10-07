@@ -21,6 +21,7 @@ export interface ManagedDomainInfo {
   readonly id: string;
   readonly name: string;
   readonly status: ManagedDomainStatus;
+  readonly outboundConnectionId: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -78,7 +79,7 @@ export async function createDomain(db: Database, input: CreateDomainInput): Prom
 export async function getManagedDomain(db: Database): Promise<ManagedDomainInfo | null> {
   const result = await db
     .prepare(
-      'SELECT id, name, status, created_at, updated_at FROM managed_domains ORDER BY created_at ASC, id ASC LIMIT 1',
+      'SELECT id, name, status, outbound_connection_id, created_at, updated_at FROM managed_domains ORDER BY created_at ASC, id ASC LIMIT 1',
     )
     .first<ManagedDomainStorageRow>();
   return result === null ? null : mapManagedDomain(result);
@@ -88,7 +89,7 @@ export async function getManagedDomain(db: Database): Promise<ManagedDomainInfo 
 export async function listManagedDomains(db: Database): Promise<ManagedDomainInfo[]> {
   const result = await db
     .prepare(
-      'SELECT id, name, status, created_at, updated_at FROM managed_domains ORDER BY created_at DESC, id DESC',
+      'SELECT id, name, status, outbound_connection_id, created_at, updated_at FROM managed_domains ORDER BY created_at DESC, id DESC',
     )
     .all<ManagedDomainStorageRow>();
   return (result.results ?? []).map(mapManagedDomain);
@@ -101,11 +102,45 @@ export async function findManagedDomainById(
 ): Promise<ManagedDomainInfo | null> {
   const result = await db
     .prepare(
-      'SELECT id, name, status, created_at, updated_at FROM managed_domains WHERE id = ? LIMIT 1',
+      'SELECT id, name, status, outbound_connection_id, created_at, updated_at FROM managed_domains WHERE id = ? LIMIT 1',
     )
     .bind(id)
     .first<ManagedDomainStorageRow>();
   return result === null ? null : mapManagedDomain(result);
+}
+
+/**
+ * Builds the optimistic-concurrency update for a domain's outbound binding.
+ * The sentinel guard is appended in the same D1 batch by the use case so a
+ * stale If-Match cannot commit an idempotency or audit row.
+ */
+export function prepareUpdateDomainOutboundConnection(
+  db: Database,
+  input: {
+    readonly domainId: string;
+    readonly connectionId: string | null;
+    readonly expectedUpdatedAt: string;
+    readonly updatedAt: string;
+  },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE managed_domains
+          SET outbound_connection_id = ?, updated_at = ?
+        WHERE id = ? AND status = 'active' AND updated_at = ?`,
+    )
+    .bind(input.connectionId, input.updatedAt, input.domainId, input.expectedUpdatedAt);
+}
+
+/** Fails the surrounding batch when the compare-and-set update changed no row. */
+export function prepareRequireManagedDomainUpdated(db: Database): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO managed_domains
+       (id, name, status, outbound_connection_id, created_at, updated_at)
+     SELECT '__managed_domain_update_guard__', '__managed_domain_update_guard__', 'invalid', NULL,
+            datetime('now'), datetime('now')
+     WHERE changes() = 0`,
+  );
 }
 
 /** Returns the number of mailboxes that would be orphaned by a domain delete. */
@@ -153,6 +188,7 @@ interface ManagedDomainStorageRow {
   readonly id: string;
   readonly name: string;
   readonly status: ManagedDomainStatus;
+  readonly outbound_connection_id: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -162,6 +198,7 @@ function mapManagedDomain(row: ManagedDomainStorageRow): ManagedDomainInfo {
     id: row.id,
     name: row.name,
     status: row.status,
+    outboundConnectionId: row.outbound_connection_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

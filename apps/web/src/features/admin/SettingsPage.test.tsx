@@ -54,7 +54,7 @@ function mountPage(handler: (url: string, init?: RequestInit) => Response | Prom
       method: init?.method ?? 'GET',
       ...(typeof init?.body === 'string' ? { body: init.body } : {}),
     });
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       return jsonResponse({
         data: {
           user: { id: SESSION.userId, email: SESSION.email, name: SESSION.displayName },
@@ -106,6 +106,69 @@ describe('SettingsPage (CAP-069)', () => {
     expect(JSON.parse(patch?.body ?? '')).toMatchObject({ siteTitle: 'Operations' });
   });
 
+  it('edits the attachment limit as a value and unit, defaulting to 100 MB', async () => {
+    const { calls } = mountPage((_url, init) =>
+      jsonResponse({ data: settings((init?.method ?? 'GET') === 'PATCH' ? {} : {}) }),
+    );
+    await waitFor(() => expect(screen.getByTestId('admin-settings-page')).toBeInTheDocument());
+    expect(screen.getByLabelText('Maximum attachment size')).toHaveValue(100);
+    expect(screen.getByRole('combobox', { name: 'Attachment size unit' })).toHaveTextContent('MB');
+
+    const user = userEvent.setup();
+    await user.clear(screen.getByLabelText('Maximum attachment size'));
+    await user.type(screen.getByLabelText('Maximum attachment size'), '50');
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(screen.getByTestId('settings-success')).toBeInTheDocument());
+    expect(JSON.parse(calls.find((call) => call.method === 'PATCH')?.body ?? '')).toMatchObject({
+      maxAttachmentBytes: 50 * 1024 * 1024,
+    });
+  });
+
+  it('submits switch and select values using the existing settings contract', async () => {
+    const { calls } = mountPage((_url, init) =>
+      jsonResponse({
+        data: settings(
+          (init?.method ?? 'GET') === 'PATCH'
+            ? { inboundEnabled: false, unknownRecipientPolicy: 'store' }
+            : {},
+        ),
+      }),
+    );
+    expect(await screen.findByTestId('admin-settings-page')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('switch', { name: 'Inbound mail enabled' }));
+    await user.click(screen.getByRole('combobox', { name: 'Unknown recipient policy' }));
+    await user.click(screen.getByRole('option', { name: 'Store unknown recipients' }));
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(await screen.findByTestId('settings-success')).toBeInTheDocument();
+    expect(JSON.parse(calls.find((call) => call.method === 'PATCH')?.body ?? '')).toMatchObject({
+      inboundEnabled: false,
+      unknownRecipientPolicy: 'store',
+    });
+  });
+
+  it('shows an unsaved status instead of presenting the default epoch as a save date', async () => {
+    mountPage(() =>
+      jsonResponse({ data: settings({}, { updatedAt: '1970-01-01T00:00:00.000Z' }) }),
+    );
+    expect(await screen.findByTestId('settings-runtime-info')).toHaveTextContent('Not saved yet');
+    expect(screen.queryByText(/Jan 1, 1970/)).not.toBeInTheDocument();
+  });
+
+  it('keeps public registration visibly disabled', async () => {
+    mountPage((url, init) =>
+      (init?.method ?? 'GET') === 'GET'
+        ? jsonResponse({ data: settings({ registrationEnabled: true }) })
+        : jsonResponse({ data: settings() }),
+    );
+    await waitFor(() => expect(screen.getByTestId('admin-settings-page')).toBeInTheDocument());
+    const registration = screen.getByRole('checkbox', {
+      name: /public registration disabled/i,
+    });
+    expect(registration).toBeDisabled();
+    expect(registration).not.toBeChecked();
+  });
+
   it('R-SETTINGS-007 renders a reader as read-only', async () => {
     mountPage((url, init) =>
       (init?.method ?? 'GET') === 'GET'
@@ -114,6 +177,8 @@ describe('SettingsPage (CAP-069)', () => {
     );
     await waitFor(() => expect(screen.getByTestId('settings-read-only-note')).toBeInTheDocument());
     expect(screen.getByLabelText('Site title')).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Inbound mail enabled' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Unknown recipient policy' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save settings' })).not.toBeInTheDocument();
   });
 

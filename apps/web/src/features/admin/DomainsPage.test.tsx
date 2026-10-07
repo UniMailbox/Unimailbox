@@ -35,13 +35,17 @@ function domainRow(n: number, overrides: Record<string, unknown> = {}): Record<s
     id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
     name: `domain-${n}.example.com`,
     status: 'active',
+    outboundConnectionId: null,
     createdAt: '2026-08-31 00:00:00',
     updatedAt: '2026-08-31 00:00:00',
     ...overrides,
   };
 }
 
-function mountDomainsPage(resolvers: Array<(call: { url: string; method: string }) => Response>): {
+function mountDomainsPage(
+  resolvers: Array<(call: { url: string; method: string }) => Response>,
+  connections: ReadonlyArray<Record<string, unknown>> = [],
+): {
   calls: Array<{ url: string; method: string; body?: string }>;
   queryClient: QueryClient;
 } {
@@ -49,7 +53,7 @@ function mountDomainsPage(resolvers: Array<(call: { url: string; method: string 
   const callsWithBodies: Array<{ url: string; method: string; body?: string }> = [];
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       return jsonResponse({
         data: {
           user: { id: SESSION.userId, email: SESSION.email, name: SESSION.displayName },
@@ -57,7 +61,9 @@ function mountDomainsPage(resolvers: Array<(call: { url: string; method: string 
         },
       });
     }
-    const response = await sequentialFetch(input, init);
+    const response = url.includes('/api/v1/admin/connections')
+      ? jsonResponse({ data: { items: connections } })
+      : await sequentialFetch(input, init);
     callsWithBodies.push({
       url,
       method: init?.method ?? 'GET',
@@ -102,7 +108,9 @@ describe('DomainsPage (CAP-066)', () => {
     ]);
     await waitFor(() => expect(screen.getByTestId('admin-domains-list')).toBeInTheDocument());
     expect(screen.getByText('domain-1.example.com')).toBeInTheDocument();
-    expect(screen.queryByText(/outbound/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Outbound connection for domain-1.example.com'),
+    ).toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Domain name'), '  NEW.EXAMPLE.COM ');
@@ -120,7 +128,48 @@ describe('DomainsPage (CAP-066)', () => {
     ]);
     await waitFor(() => expect(screen.getByTestId('admin-not-authorized')).toBeInTheDocument());
     expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(calls.filter((call) => call.method === 'GET')).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.method === 'GET' && call.url.endsWith('/api/v1/admin/domains')),
+    ).toHaveLength(1);
+  });
+
+  it('binds an active outbound connection and refreshes the selected domain', async () => {
+    const domain = domainRow(1);
+    const connection = {
+      id: '00000000-0000-4000-8000-000000000010',
+      providerKey: 'brevo',
+      label: 'Primary Brevo',
+      status: 'active',
+      webhookConfigured: false,
+      webhookUrl: null,
+      createdAt: '2026-08-31T00:00:00Z',
+      updatedAt: '2026-08-31T00:00:00Z',
+    };
+    const updated = {
+      ...domain,
+      outboundConnectionId: connection.id,
+      updatedAt: '2026-08-31 00:00:01',
+    };
+    const { calls } = mountDomainsPage(
+      [() => jsonResponse({ data: { items: [domain] } }), () => jsonResponse({ data: updated })],
+      [connection],
+    );
+    await waitFor(() => expect(screen.getByTestId('admin-domain-row')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    const select = screen.getByLabelText('Outbound connection for domain-1.example.com');
+    await user.click(select);
+    await user.click(screen.getByRole('option', { name: 'Primary Brevo (brevo)' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('domain-success')).toHaveTextContent(
+        'Outbound connection updated for domain-1.example.com.',
+      );
+    });
+    expect(select).toHaveTextContent('Primary Brevo (brevo)');
+    const patch = calls.find((call) => call.method === 'PATCH');
+    expect(patch).toBeDefined();
+    expect(JSON.parse(patch?.body ?? '')).toEqual({ connectionId: connection.id });
   });
 
   it('hides cached rows when a refresh shows that domain.read was revoked', async () => {

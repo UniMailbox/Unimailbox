@@ -14,6 +14,7 @@ const domain = {
   id: DOMAIN_ID,
   name: 'example.com',
   status: 'active',
+  outboundConnectionId: null,
   createdAt: '2026-08-31 00:00:00',
   updatedAt: '2026-08-31 00:00:00',
 };
@@ -32,7 +33,7 @@ describe('managed domain contracts (CAP-066)', () => {
   it('accepts only the safe managed-domain projection', () => {
     expect(managedDomainSchema.parse(domain)).toEqual(domain);
     expect(
-      managedDomainSchema.safeParse({ ...domain, outboundConnectionId: 'secret-adjacent' }).success,
+      managedDomainSchema.safeParse({ ...domain, credential: 'secret-adjacent' }).success,
     ).toBe(false);
     expect(managedDomainListResponseSchema.parse({ items: [domain] })).toEqual({
       items: [domain],

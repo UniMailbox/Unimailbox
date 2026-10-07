@@ -10,6 +10,8 @@ export {
   countMailboxesForDomain,
   prepareDeleteDomain,
   prepareRequireManagedDomainDeleted,
+  prepareUpdateDomainOutboundConnection,
+  prepareRequireManagedDomainUpdated,
 } from './domain-repository';
 export type { CreateDomainInput, ManagedDomainInfo } from './domain-repository';
 

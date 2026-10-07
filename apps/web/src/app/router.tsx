@@ -93,6 +93,7 @@ import { DomainsPage } from '../features/admin/DomainsPage';
 import { RolesPage } from '../features/admin/RolesPage';
 import { SignaturesPage } from '../features/admin/SignaturesPage';
 import { SettingsPage } from '../features/admin/SettingsPage';
+import { AdminLayout } from '../components/layouts/AdminLayout';
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -358,11 +359,17 @@ const mailboxMembersRoute = createRoute({
 // permission server-side and renders the not-authorized state for
 // members. The nav-signal gap is reported to the orchestrator; widening
 // the session endpoint is not this slice's call.
+function AdminRoute({ children }: { readonly children: ReactElement }): ReactElement {
+  return <AdminLayout>{children}</AdminLayout>;
+}
+
 const adminLandingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: AdminLandingPage,
+  component: function AdminLandingRoute(): ReactElement {
+    return <AdminRoute><AdminLandingPage /></AdminRoute>;
+  },
 });
 
 // CAP-044 Slice 2 (AC 13): the audit-trail viewer. Same session guard;
@@ -372,7 +379,9 @@ const adminAuditEventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/audit-events',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: AuditEventsPage,
+  component: function AuditEventsRoute(): ReactElement {
+    return <AdminRoute><AuditEventsPage /></AdminRoute>;
+  },
 });
 
 // CAP-044 Slice 3 (AC 19–21): the users / connections / webhook-events
@@ -384,49 +393,63 @@ const adminUsersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/users',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: UsersPage,
+  component: function UsersRoute(): ReactElement {
+    return <AdminRoute><UsersPage /></AdminRoute>;
+  },
 });
 
 const adminConnectionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/connections',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: ConnectionsPage,
+  component: function ConnectionsRoute(): ReactElement {
+    return <AdminRoute><ConnectionsPage /></AdminRoute>;
+  },
 });
 
 const adminWebhookEventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/webhook-events',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: WebhookEventsPage,
+  component: function WebhookEventsRoute(): ReactElement {
+    return <AdminRoute><WebhookEventsPage /></AdminRoute>;
+  },
 });
 
 const adminDomainsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/domains',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: DomainsPage,
+  component: function DomainsRoute(): ReactElement {
+    return <AdminRoute><DomainsPage /></AdminRoute>;
+  },
 });
 
 const adminRolesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/roles',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: RolesPage,
+  component: function RolesRoute(): ReactElement {
+    return <AdminRoute><RolesPage /></AdminRoute>;
+  },
 });
 
 const adminSignaturesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/signatures',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: SignaturesPage,
+  component: function SignaturesRoute(): ReactElement {
+    return <AdminRoute><SignaturesPage /></AdminRoute>;
+  },
 });
 
 const adminSettingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/settings',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: SettingsPage,
+  component: function SettingsRoute(): ReactElement {
+    return <AdminRoute><SettingsPage /></AdminRoute>;
+  },
 });
 
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the

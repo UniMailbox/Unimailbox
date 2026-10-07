@@ -7,7 +7,8 @@
 
 import { z } from 'zod';
 
-export const SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024;
+/** Attachment size is stored as bytes on the wire, while the admin UI edits it as value + unit. */
+export const SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
 const siteTitleSchema = z.string().trim().min(1).max(100);
 const retentionDaysSchema = z.number().int().min(1).max(3650);

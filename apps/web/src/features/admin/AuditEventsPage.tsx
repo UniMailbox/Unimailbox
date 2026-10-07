@@ -1,3 +1,4 @@
+import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — AuditEventsPage.
 //
 // CAP-044 Slice 2 (AC 13; CAP-033 absorbed, D-CAP-044-E). The audit-trail
@@ -45,6 +46,8 @@ import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
+import { SelectField } from '../../components/ui/SelectField';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import {
   auditEventsInfiniteQuery,
   adminQueryKeys,
@@ -140,60 +143,58 @@ function AuditEventsContent(): ReactElement {
   }
 
   const filterForm = (
-    <Card title="Filters" description="Actor, resource, or action — combinable.">
-      <form onSubmit={applyFilters} data-testid="audit-filters">
-        <Input
-          id="audit-filter-actor"
-          label="Actor user id"
-          placeholder="uuid"
-          value={actorUserId}
-          onChange={(e) => setActorUserId(e.target.value)}
+    <form
+      onSubmit={applyFilters}
+      data-testid="audit-filters"
+      className="audit-table-list-header"
+      aria-label="Audit event filters"
+    >
+      <Input
+        id="audit-filter-actor"
+        label="Actor user id"
+        placeholder="uuid"
+        value={actorUserId}
+        onChange={(e) => setActorUserId(e.target.value)}
+      />
+      <Input
+        id="audit-filter-resource-type"
+        label="Resource type"
+        placeholder="message"
+        value={resourceType}
+        onChange={(e) => setResourceType(e.target.value)}
+      />
+      <Input
+        id="audit-filter-resource-id"
+        label="Resource id"
+        placeholder="resource id"
+        value={resourceId}
+        onChange={(e) => setResourceId(e.target.value)}
+      />
+      <div className="wizard-field">
+        <label className="input-label" htmlFor="audit-filter-action">
+          Action
+        </label>
+        <SelectField
+          id="audit-filter-action"
+          value={action}
+          onValueChange={setAction}
+          options={[
+            { value: '', label: 'Any action' },
+            ...auditActionSchema.options.map((value) => ({ value, label: value })),
+          ]}
         />
-        <Input
-          id="audit-filter-resource-type"
-          label="Resource type"
-          placeholder="message"
-          value={resourceType}
-          onChange={(e) => setResourceType(e.target.value)}
-        />
-        <Input
-          id="audit-filter-resource-id"
-          label="Resource id"
-          placeholder="resource id"
-          value={resourceId}
-          onChange={(e) => setResourceId(e.target.value)}
-        />
-        <div className="wizard-field">
-          <label className="input-label" htmlFor="audit-filter-action">
-            Action
-          </label>
-          <select
-            id="audit-filter-action"
-            className="input"
-            data-testid="audit-action-select"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-          >
-            <option value="">(any action)</option>
-            {auditActionSchema.options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </div>
-        {pairError !== null ? (
-          <p className="input-error" role="alert" data-testid="audit-filter-error">
-            {pairError}
-          </p>
-        ) : null}
-        <div className="wizard-actions">
-          <Button type="submit" variant="primary" data-testid="audit-apply-filters">
-            Apply
-          </Button>
-        </div>
-      </form>
-    </Card>
+      </div>
+      {pairError !== null ? (
+        <p className="input-error admin-filter-wide" role="alert" data-testid="audit-filter-error">
+          {pairError}
+        </p>
+      ) : null}
+      <div className="admin-filter-wide">
+        <Button type="submit" variant="primary" data-testid="audit-apply-filters">
+          Apply
+        </Button>
+      </div>
+    </form>
   );
 
   if (!hasData && apiError !== null && apiError.code === 'PERMISSION_DENIED') {
@@ -223,11 +224,9 @@ function AuditEventsContent(): ReactElement {
     // request forever.
     return (
       <main className="admin-page" data-testid="admin-error">
-        <header className="admin-header">
-          <h1>Audit events</h1>
-        </header>
-        {filterForm}
+        <PageHeader title="Audit events" description="Review administrative activity." />
         <Card title="Could not load audit events" description="The audit trail is unavailable.">
+          {filterForm}
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
@@ -250,11 +249,9 @@ function AuditEventsContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="audit-events-page">
-      <header className="admin-header">
-        <h1>Audit events</h1>
-      </header>
-      {filterForm}
+      <PageHeader title="Audit events" description="Review administrative activity." />
       <Card title="Audit trail" description="Newest first.">
+        {filterForm}
         {apiError !== null ? (
           // Fix (e): errors with data on screen render as a banner ABOVE
           // the list; the loaded rows below are never wiped by a failed
@@ -320,7 +317,7 @@ function AuditEventRow({ item }: { readonly item: AuditEventItem }): ReactElemen
     <li className="audit-event-row" data-testid="audit-event-row" data-event-id={item.id}>
       <div className="audit-event-row-meta">
         <span className="audit-event-row-action">{item.action}</span>
-        <span className="audit-event-row-date">{item.createdAt}</span>
+        <LocalDateTime className="audit-event-row-date" value={item.createdAt} />
       </div>
       <div className="audit-event-row-detail">
         <span>actor: {item.actorUserId ?? 'system'}</span>

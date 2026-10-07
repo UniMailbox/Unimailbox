@@ -25,20 +25,16 @@
 //     one `GET /api/v1/admin/audit-events?limit=1`; 200 → the AppNav
 //     "Admin" link renders, 403/error → nothing.
 //
-// D-CAP-044-D authorization note: the auth session descriptor carries NO
-// role/permission signal (see features/auth/auth-queries.ts — Better Auth
-// get-session returns user + session only), so the client cannot pre-hide
-// the admin surface. Authorization is enforced SERVER-side
-// (requirePermission('audit.read')); a member who navigates here receives
-// 403 PERMISSION_DENIED, which the page renders as a not-authorized state
-// (AC 14) rather than a crash. The nav-signal gap is reported to the
-// orchestrator — widening the session endpoint is not this slice's call.
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+// Current /auth/me responses include a D1-derived canAccessAdmin UI hint.
+// The legacy audit probe below remains for descriptors without that field.
+// Every admin API still enforces its specific permission server-side.
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   auditEventListResponseSchema,
   deleteManagedDomainResponseSchema,
   managedDomainListResponseSchema,
   managedDomainSchema,
+  updateManagedDomainOutboundConnectionResponseSchema,
   verifyManagedDomainResponseSchema,
   userListResponseSchema,
   type ManagedDomain,
@@ -51,6 +47,8 @@ import {
   signatureListResponseSchema,
   signatureSchema,
   systemSettingsResponseSchema,
+  adminOverviewResponseSchema,
+  type AdminOverviewResponse,
   type CreateSignatureRequest,
   type Signature,
   type UpdateSignatureRequest,
@@ -129,6 +127,8 @@ export const adminQueryKeys = {
   roles: (userId: string) => [...adminQueryKeys.all, 'roles', userId] as const,
   signatures: (userId: string) => [...adminQueryKeys.all, 'signatures', userId] as const,
   settings: (userId: string) => [...adminQueryKeys.all, 'settings', userId] as const,
+  overview: (userId: string, domainId?: string) =>
+    [...adminQueryKeys.all, 'overview', userId, domainId ?? 'all'] as const,
   navProbe: (userId: string) => [...adminQueryKeys.all, 'nav-probe', userId] as const,
 };
 
@@ -251,6 +251,36 @@ export function adminDomainsQuery() {
     queryKey: adminQueryKeys.domains(session?.userId ?? 'anonymous'),
     queryFn: ({ signal }) => fetchAdminDomains(apiClient, signal),
     staleTime: 0,
+    enabled: session !== undefined && session !== null,
+  });
+}
+
+export async function fetchAdminOverview(
+  apiClient: ApiClient,
+  domainId?: string,
+  signal?: AbortSignal,
+): Promise<AdminOverviewResponse> {
+  const path = domainId
+    ? `/api/v1/admin/overview?domainId=${encodeURIComponent(domainId)}`
+    : '/api/v1/admin/overview';
+  const response = await apiClient.fetch<{ readonly data: unknown }>(
+    path,
+    signal === undefined ? {} : { signal },
+  );
+  try {
+    return adminOverviewResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export function adminOverviewQuery(domainId?: string) {
+  const apiClient = useApiClient();
+  const session = authSessionQuery().data;
+  return useQuery({
+    queryKey: adminQueryKeys.overview(session?.userId ?? 'anonymous', domainId),
+    queryFn: ({ signal }) => fetchAdminOverview(apiClient, domainId, signal),
+    staleTime: 30_000,
     enabled: session !== undefined && session !== null,
   });
 }
@@ -409,6 +439,28 @@ export async function verifyManagedDomain(
   }
 }
 
+/** Assigns or clears a domain's outbound provider connection. */
+export async function updateManagedDomainOutboundConnection(
+  apiClient: ApiClient,
+  domainId: string,
+  connectionId: string | null,
+  ifMatch: string,
+): Promise<ManagedDomain> {
+  const response = await apiClient.fetch<{ readonly data: unknown }>(
+    `${managedDomainPath(domainId)}/outbound-connection`,
+    {
+      method: 'PATCH',
+      headers: { 'If-Match': ifMatch },
+      body: { connectionId },
+    },
+  );
+  try {
+    return updateManagedDomainOutboundConnectionResponseSchema.parse(response.data);
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
 /** Deletes one managed domain and validates the delete acknowledgement. */
 export async function deleteManagedDomain(
   apiClient: ApiClient,
@@ -531,6 +583,138 @@ export function usersInfiniteQuery() {
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     staleTime: 0,
     enabled: session !== undefined && session !== null,
+  });
+}
+
+const adminCreatedUserResponseSchema = z.object({
+  data: z.object({
+    user: z.object({ id: z.string(), email: z.string(), displayName: z.string().nullable() }),
+    initialPassword: z.string().min(1),
+    initialPasswordExpiresAt: z.string().min(1),
+  }),
+});
+
+const adminResetPasswordResponseSchema = z.object({
+  data: z.object({
+    userId: z.string(),
+    initialPassword: z.string().min(1),
+    initialPasswordExpiresAt: z.string().min(1),
+  }),
+});
+
+const adminUserStatusResponseSchema = z.object({
+  data: z.object({ userId: z.string(), status: z.enum(['active', 'banned', 'deleted']) }),
+});
+
+export interface AdminCreatedUser {
+  readonly id: string;
+  readonly email: string;
+  readonly displayName: string | null;
+  readonly initialPassword: string;
+  readonly initialPasswordExpiresAt: string;
+}
+
+export async function createAdminUser(
+  apiClient: ApiClient,
+  request: { readonly email: string; readonly displayName?: string },
+): Promise<AdminCreatedUser> {
+  const response = await apiClient.fetch<unknown>('/api/v1/admin/users', {
+    method: 'POST',
+    body: request,
+  });
+  try {
+    const parsed = adminCreatedUserResponseSchema.parse(response).data;
+    return {
+      ...parsed.user,
+      initialPassword: parsed.initialPassword,
+      initialPasswordExpiresAt: parsed.initialPasswordExpiresAt,
+    };
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export async function resetAdminUserPassword(
+  apiClient: ApiClient,
+  userId: string,
+): Promise<{ readonly initialPassword: string; readonly initialPasswordExpiresAt: string }> {
+  const response = await apiClient.fetch<unknown>(
+    `/api/v1/admin/users/${encodeURIComponent(userId)}/password-reset`,
+    { method: 'POST', body: {} },
+  );
+  try {
+    const parsed = adminResetPasswordResponseSchema.parse(response).data;
+    return {
+      initialPassword: parsed.initialPassword,
+      initialPasswordExpiresAt: parsed.initialPasswordExpiresAt,
+    };
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export async function updateAdminUserStatus(
+  apiClient: ApiClient,
+  userId: string,
+  status: 'active' | 'banned' | 'deleted',
+): Promise<'active' | 'banned' | 'deleted'> {
+  const response = await apiClient.fetch<unknown>(
+    `/api/v1/admin/users/${encodeURIComponent(userId)}/status`,
+    { method: 'PATCH', body: { status } },
+  );
+  try {
+    return adminUserStatusResponseSchema.parse(response).data.status;
+  } catch {
+    throw new ApiError('INVALID_RESPONSE', 'Unexpected response from the server.', 0);
+  }
+}
+
+export function useCreateAdminUserMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  const session = authSessionQuery().data;
+  return useMutation({
+    mutationFn: (request: { readonly email: string; readonly displayName?: string }) =>
+      createAdminUser(apiClient, request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: adminQueryKeys.users(session?.userId ?? 'anonymous'),
+      });
+    },
+  });
+}
+
+export function useResetAdminUserPasswordMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  const session = authSessionQuery().data;
+  return useMutation({
+    mutationFn: (userId: string) => resetAdminUserPassword(apiClient, userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: adminQueryKeys.users(session?.userId ?? 'anonymous'),
+      });
+    },
+  });
+}
+
+export function useUpdateAdminUserStatusMutation() {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  const session = authSessionQuery().data;
+  return useMutation({
+    mutationFn: ({
+      userId,
+      status,
+    }: {
+      readonly userId: string;
+      readonly status: 'active' | 'banned' | 'deleted';
+    }) => updateAdminUserStatus(apiClient, userId, status),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: adminQueryKeys.users(session?.userId ?? 'anonymous'),
+      });
+    },
   });
 }
 

@@ -66,6 +66,10 @@ export const auditActionSchema = z.enum([
   // see a zero-row update and no audit row.
   'setup.preflight.complete',
   'setup.complete',
+  // CAP-A1 admin-managed identity lifecycle.
+  'user.created',
+  'user.password_reset',
+  'user.status_changed',
   // CAP-026 mailbox / message
   'mailbox.create',
   'message.receive',
@@ -103,6 +107,7 @@ export const auditActionSchema = z.enum([
   'domain.created',
   'domain.verified',
   'domain.deleted',
+  'domain.outbound_connection.updated',
   // CAP-067 custom-role administration.
   'role.created',
   'role.updated',

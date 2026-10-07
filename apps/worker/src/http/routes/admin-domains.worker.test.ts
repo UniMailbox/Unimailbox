@@ -64,7 +64,16 @@ async function createUser(role: 'administrator' | 'member', email: string): Prom
 
 async function createToken(userId: string): Promise<string> {
   const token = crypto.randomUUID();
-  await env.CACHE.put(`auth:${token}`, JSON.stringify({ userId }), { expirationTtl: 900 });
+  const sessionId = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(sessionId, userId, crypto.randomUUID(), 2_000_000_000, new Date().toISOString())
+    .run();
+  await env.CACHE.put(`auth:${token}`, JSON.stringify({ userId, sessionId }), {
+    expirationTtl: 900,
+  });
   return token;
 }
 
@@ -78,6 +87,33 @@ async function setupMember(): Promise<string> {
   await resetAndMigrate();
   await completeSetup();
   return createToken(await createUser('member', `member-${crypto.randomUUID()}@example.com`));
+}
+
+async function seedProviderConnection(
+  status: 'active' | 'disabled' | 'invalid' = 'active',
+): Promise<string> {
+  const connectionId = crypto.randomUUID();
+  const credentialId = crypto.randomUUID();
+  const now = '2026-08-31 00:00:00';
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
+       VALUES (?, ?, 1, ?, ?, ?, ?, ?)`,
+    ).bind(
+      credentialId,
+      `credential-${connectionId}`,
+      new Uint8Array(16),
+      new Uint8Array(12),
+      new Uint8Array(16),
+      now,
+      now,
+    ),
+    env.DB.prepare(
+      `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
+       VALUES (?, 'brevo', ?, ?, ?, ?, ?)`,
+    ).bind(connectionId, `Brevo ${connectionId}`, credentialId, status, now, now),
+  ]);
+  return connectionId;
 }
 
 function authHeaders(token: string, idempotencyKey?: string): HeadersInit {
@@ -112,11 +148,12 @@ describe('GET /api/v1/admin/domains', () => {
         id: DOMAIN_ID,
         name: 'example.com',
         status: 'active',
+        outboundConnectionId: 'connection-secret-adjacent',
         createdAt: '2026-08-31 00:00:00',
         updatedAt: '2026-08-31 00:00:00',
       },
     ]);
-    expect(JSON.stringify(body)).not.toContain('outboundConnectionId');
+    expect(JSON.stringify(body)).not.toContain('credential');
   });
 
   it('returns 401 anonymously and 403 to a member', async () => {
@@ -127,6 +164,114 @@ describe('GET /api/v1/admin/domains', () => {
 
     const memberToken = await setupMember();
     const member = await SELF.fetch(BASE, { headers: authHeaders(memberToken) });
+    expect(member.status).toBe(403);
+    expect((await member.json()).error.code).toBe('PERMISSION_DENIED');
+  });
+});
+
+describe('PATCH /api/v1/admin/domains/:id/outbound-connection', () => {
+  it('binds an active connection, audits it, and replays the same response', async () => {
+    const adminToken = await setupAdmin();
+    const connectionId = await seedProviderConnection();
+    await env.DB.prepare(
+      `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
+       VALUES (?, 'example.com', 'active', NULL, ?, ?)`,
+    )
+      .bind(DOMAIN_ID, '2026-08-31 00:00:00', '2026-08-31 00:00:00')
+      .run();
+
+    const key = `domain-bind-${crypto.randomUUID()}`;
+    const request = {
+      method: 'PATCH',
+      body: JSON.stringify({ connectionId }),
+      headers: {
+        ...authHeaders(adminToken, key),
+        'Content-Type': 'application/json',
+        'If-Match': '2026-08-31 00:00:00',
+      },
+    } as const;
+    const first = await SELF.fetch(`${BASE}/${DOMAIN_ID}/outbound-connection`, request);
+    expect(first.status).toBe(200);
+    const firstText = await first.text();
+    expect(JSON.parse(firstText).data).toMatchObject({
+      id: DOMAIN_ID,
+      outboundConnectionId: connectionId,
+    });
+    const replay = await SELF.fetch(`${BASE}/${DOMAIN_ID}/outbound-connection`, request);
+    expect(replay.status).toBe(200);
+    expect(await replay.text()).toBe(firstText);
+    expect(
+      await env.DB.prepare('SELECT outbound_connection_id FROM managed_domains WHERE id = ?')
+        .bind(DOMAIN_ID)
+        .first(),
+    ).toEqual({ outbound_connection_id: connectionId });
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM audit_events WHERE action = 'domain.outbound_connection.updated'`,
+      ).first(),
+    ).toEqual({ count: 1 });
+  });
+
+  it('rejects missing, inactive, unknown, stale, and unauthorized assignments', async () => {
+    const adminToken = await setupAdmin();
+    const memberToken = await createToken(
+      await createUser('member', `member-${crypto.randomUUID()}@example.com`),
+    );
+    const disabledConnectionId = await seedProviderConnection('disabled');
+    await env.DB.prepare(
+      `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
+       VALUES (?, 'example.com', 'active', NULL, ?, ?)`,
+    )
+      .bind(DOMAIN_ID, '2026-08-31 00:00:00', '2026-08-31 00:00:00')
+      .run();
+    const path = `${BASE}/${DOMAIN_ID}/outbound-connection`;
+    const body = JSON.stringify({ connectionId: disabledConnectionId });
+    const baseHeaders = {
+      ...authHeaders(adminToken, 'domain-bind-invalid'),
+      'Content-Type': 'application/json',
+    };
+
+    const missingIfMatch = await SELF.fetch(path, {
+      method: 'PATCH',
+      body,
+      headers: baseHeaders,
+    });
+    expect(missingIfMatch.status).toBe(400);
+    expect((await missingIfMatch.json()).error.code).toBe('IF_MATCH_REQUIRED');
+
+    const disabled = await SELF.fetch(path, {
+      method: 'PATCH',
+      body,
+      headers: {
+        ...baseHeaders,
+        'Idempotency-Key': 'domain-bind-disabled',
+        'If-Match': '2026-08-31 00:00:00',
+      },
+    });
+    expect(disabled.status).toBe(409);
+    expect((await disabled.json()).error.code).toBe('PROVIDER_CONNECTION_NOT_ACTIVE');
+
+    const stale = await SELF.fetch(path, {
+      method: 'PATCH',
+      body: JSON.stringify({ connectionId: null }),
+      headers: {
+        ...baseHeaders,
+        'Idempotency-Key': 'domain-bind-stale',
+        'If-Match': '2020-01-01 00:00:00',
+      },
+    });
+    expect(stale.status).toBe(412);
+    expect((await stale.json()).error.code).toBe('STALE_IF_MATCH');
+
+    const member = await SELF.fetch(path, {
+      method: 'PATCH',
+      body: JSON.stringify({ connectionId: null }),
+      headers: {
+        ...authHeaders(memberToken, 'domain-bind-member'),
+        'Content-Type': 'application/json',
+        'If-Match': '2026-08-31 00:00:00',
+      },
+    });
     expect(member.status).toBe(403);
     expect((await member.json()).error.code).toBe('PERMISSION_DENIED');
   });

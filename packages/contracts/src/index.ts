@@ -1293,17 +1293,21 @@ export {
 export {
   managedDomainStatusSchema,
   createManagedDomainRequestSchema,
+  updateManagedDomainOutboundConnectionRequestSchema,
   managedDomainSchema,
   managedDomainListResponseSchema,
   verifyManagedDomainRequestSchema,
   verifyManagedDomainResponseSchema,
+  updateManagedDomainOutboundConnectionResponseSchema,
   deleteManagedDomainResponseSchema,
   type ManagedDomainStatus,
   type CreateManagedDomainRequest,
+  type UpdateManagedDomainOutboundConnectionRequest,
   type ManagedDomain,
   type ManagedDomainListResponse,
   type VerifyManagedDomainRequest,
   type VerifyManagedDomainResponse,
+  type UpdateManagedDomainOutboundConnectionResponse,
   type DeleteManagedDomainResponse,
 } from './admin/domains';
 
@@ -1334,6 +1338,15 @@ export {
   type UpdateSystemSettingsRequest,
   type SystemSettingsResponse,
 } from './admin/settings';
+
+export {
+  adminOverviewQuerySchema,
+  adminOverviewResponseSchema,
+  adminOverviewStatsSchema,
+  type AdminOverviewQuery,
+  type AdminOverviewResponse,
+  type AdminOverviewStats,
+} from './admin/overview';
 
 // CAP-044 Slice 3 amendment (cursor-payload promotion): the payload
 // schema + closed surface union moved here from the worker's

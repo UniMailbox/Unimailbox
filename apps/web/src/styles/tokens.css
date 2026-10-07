@@ -47,8 +47,8 @@
   --unimailbox-radius: 0.5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+.dark {
+  & {
     --unimailbox-background: 222.2 84% 4.9%;
     --unimailbox-foreground: 210 40% 98%;
     --unimailbox-card: 222.2 84% 4.9%;
@@ -76,8 +76,8 @@
 }
 
 body {
-  background-color: hsl(var(--unimailbox-background));
-  color: hsl(var(--unimailbox-foreground));
+  background-color: var(--background);
+  color: var(--foreground);
   font-family:
     ui-sans-serif,
     system-ui,
@@ -96,10 +96,10 @@ body {
   max-width: 640px;
   margin: 4rem auto;
   padding: 1.5rem 2rem;
-  border: 1px solid hsl(var(--unimailbox-border));
+  border: 1px solid var(--border);
   border-radius: var(--unimailbox-radius);
-  background-color: hsl(var(--unimailbox-card));
-  color: hsl(var(--unimailbox-card-foreground));
+  background-color: var(--card);
+  color: var(--card-foreground);
 }
 
 .unimailbox-stub h1 {
@@ -110,93 +110,13 @@ body {
 
 .unimailbox-stub p {
   margin: 0;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
   line-height: 1.6;
-}
-
-/* ---- Button primitive (shadcn/ui-style) ----
- * Visual states for the CAP-001 Button primitive. The component renders
- * only `className="btn"`; everything else (hover, focus, disabled, active)
- * is token-driven so future callers do not need to think about it.
- */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background-color: hsl(var(--unimailbox-primary));
-  color: hsl(var(--unimailbox-primary-foreground));
-  border: 1px solid transparent;
-  border-radius: var(--unimailbox-radius);
-  padding: 0.5rem 1rem;
-  font-weight: 500;
-  font-family: inherit;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
-  cursor: pointer;
-  user-select: none;
-  transition:
-    background-color 120ms ease,
-    opacity 120ms ease;
-}
-
-.btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-ring));
-  outline-offset: 2px;
-}
-
-.btn:active:not(:disabled) {
-  opacity: 0.8;
-}
-
-.btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.btn-secondary {
-  background-color: hsl(var(--unimailbox-background));
-  color: hsl(var(--unimailbox-foreground));
-  border-color: hsl(var(--unimailbox-border));
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background-color: hsl(var(--unimailbox-muted));
-}
-
-.btn-ghost {
-  background-color: transparent;
-  color: hsl(var(--unimailbox-foreground));
-  border-color: transparent;
-}
-
-.btn-ghost:hover:not(:disabled) {
-  background-color: hsl(var(--unimailbox-muted));
-}
-
-.btn-danger {
-  background-color: hsl(var(--unimailbox-danger));
-  color: hsl(var(--unimailbox-danger-foreground));
-}
-
-.btn-sm {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.8125rem;
-  line-height: 1.125rem;
-}
-
-.btn-md {
-  padding: 0.5rem 1rem;
-  font-size: 0.875rem;
-  line-height: 1.25rem;
 }
 
 /* ---- 404 / error recovery ---- */
 .unimailbox-stub a {
-  color: hsl(var(--unimailbox-primary));
+  color: var(--primary);
   text-decoration: underline;
 }
 
@@ -212,17 +132,17 @@ body {
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-family: inherit;
-  color: hsl(var(--unimailbox-foreground));
-  background-color: hsl(var(--unimailbox-background));
-  border: 1px solid hsl(var(--unimailbox-input));
+  color: var(--foreground);
+  background-color: var(--background);
+  border: 1px solid var(--input);
   border-radius: var(--unimailbox-radius);
   transition: border-color 120ms ease;
 }
 
 .input:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline: 2px solid var(--ring);
   outline-offset: 1px;
-  border-color: hsl(var(--unimailbox-ring));
+  border-color: var(--ring);
 }
 
 .input[aria-invalid='true'] {
@@ -243,7 +163,7 @@ body {
   font-size: 0.875rem;
   font-weight: 500;
   margin-bottom: 0.25rem;
-  color: hsl(var(--unimailbox-foreground));
+  color: var(--foreground);
 }
 
 .input-error {
@@ -257,31 +177,7 @@ body {
   display: block;
   margin-top: 0.25rem;
   font-size: 0.8125rem;
-  color: hsl(var(--unimailbox-muted-foreground));
-}
-
-/* ---- Card primitive (CAP-041) ----
- * Section wrapper for each step body. The optional title / description
- * are passed as children so the primitive stays presentational.
- */
-.card {
-  padding: 1.5rem;
-  border: 1px solid hsl(var(--unimailbox-border));
-  border-radius: var(--unimailbox-radius);
-  background-color: hsl(var(--unimailbox-card));
-  color: hsl(var(--unimailbox-card-foreground));
-}
-
-.card-title {
-  margin: 0 0 0.5rem;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-
-.card-description {
-  margin: 0 0 1rem;
-  color: hsl(var(--unimailbox-muted-foreground));
-  line-height: 1.5;
+  color: var(--muted-foreground);
 }
 
 /* ---- Setup guidance (operator runbook) ---- */
@@ -291,12 +187,8 @@ body {
   border: 1px solid hsl(var(--unimailbox-info));
   border-left-width: 3px;
   border-radius: var(--unimailbox-radius);
-  background: linear-gradient(
-    135deg,
-    hsl(var(--unimailbox-info-soft)),
-    hsl(var(--unimailbox-card))
-  );
-  color: hsl(var(--unimailbox-foreground));
+  background: linear-gradient(135deg, hsl(var(--unimailbox-info-soft)), var(--card));
+  color: var(--foreground);
 }
 
 .setup-guidance-header {
@@ -337,7 +229,7 @@ body {
 .setup-guidance-section p,
 .setup-guidance-section ol {
   margin: 0;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.8125rem;
   line-height: 1.5;
 }
@@ -353,8 +245,8 @@ body {
 .setup-guidance-note {
   margin: 0.875rem 0 0;
   padding-top: 0.75rem;
-  border-top: 1px solid hsl(var(--unimailbox-border));
-  color: hsl(var(--unimailbox-muted-foreground));
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
   font-size: 0.8125rem;
   line-height: 1.5;
 }
@@ -370,8 +262,8 @@ body {
   display: inline-block;
   width: 1rem;
   height: 1rem;
-  border: 2px solid hsl(var(--unimailbox-muted));
-  border-top-color: hsl(var(--unimailbox-primary));
+  border: 2px solid var(--muted);
+  border-top-color: var(--primary);
   border-radius: 50%;
   animation: unimailbox-spin 0.8s linear infinite;
 }
@@ -392,10 +284,10 @@ body {
   flex-direction: column;
   gap: 0.25rem;
   padding: 0.75rem 1rem;
-  border: 1px solid hsl(var(--unimailbox-border));
+  border: 1px solid var(--border);
   border-radius: var(--unimailbox-radius);
-  background-color: hsl(var(--unimailbox-muted));
-  color: hsl(var(--unimailbox-foreground));
+  background-color: var(--muted);
+  color: var(--foreground);
   font-size: 0.875rem;
   line-height: 1.4;
 }
@@ -451,8 +343,8 @@ body {
   right: 1.5rem;
   z-index: 1000;
   padding: 0.75rem 1rem;
-  background-color: hsl(var(--unimailbox-foreground));
-  color: hsl(var(--unimailbox-background));
+  background-color: var(--foreground);
+  color: var(--background);
   border-radius: var(--unimailbox-radius);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
   font-size: 0.875rem;
@@ -496,7 +388,7 @@ body {
 .wizard-subtitle {
   margin: 0;
   font-size: 0.875rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .wizard-steps {
@@ -514,8 +406,8 @@ body {
   gap: 0.5rem;
   padding: 0.25rem 0.625rem;
   border-radius: 999px;
-  background-color: hsl(var(--unimailbox-muted));
-  color: hsl(var(--unimailbox-muted-foreground));
+  background-color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 0.75rem;
   font-weight: 500;
   border: 1px solid transparent;
@@ -528,9 +420,9 @@ body {
 }
 
 .wizard-step[data-state='current'] {
-  background-color: hsl(var(--unimailbox-primary));
-  color: hsl(var(--unimailbox-primary-foreground));
-  border-color: hsl(var(--unimailbox-primary));
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
 }
 
 .wizard-step[data-state='upcoming'] {
@@ -578,7 +470,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 0.5rem 0.75rem;
-  background-color: hsl(var(--unimailbox-muted));
+  background-color: var(--muted);
   border-radius: var(--unimailbox-radius);
   font-size: 0.875rem;
 }
@@ -654,7 +546,7 @@ body {
 .mailbox-list-row-skeleton,
 .message-detail-skeleton-header,
 .message-detail-skeleton-body {
-  background-color: hsl(var(--unimailbox-muted));
+  background-color: var(--muted);
   border-radius: var(--unimailbox-radius);
   animation: unimailbox-pulse 1.6s ease-in-out infinite;
 }
@@ -716,7 +608,7 @@ body {
 .mailbox-subtitle {
   margin: 0;
   font-size: 0.875rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .mailbox-header-meta {
@@ -725,7 +617,7 @@ body {
   align-items: center;
   gap: 0.75rem;
   font-size: 0.875rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 /* ---- Folder views (CAP-060) ----
@@ -737,12 +629,12 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  border-bottom: 1px solid hsl(var(--unimailbox-border));
+  border-bottom: 1px solid var(--border);
   padding-bottom: 0.5rem;
 }
 
 .mailbox-folder-link {
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.875rem;
   font-weight: 500;
   text-decoration: none;
@@ -752,12 +644,12 @@ body {
 
 .mailbox-folder-link:hover,
 .mailbox-folder-link[aria-current='page'] {
-  color: hsl(var(--unimailbox-primary));
-  background-color: hsl(var(--unimailbox-muted));
+  color: var(--primary);
+  background-color: var(--muted);
 }
 
 .mailbox-folder-link:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
@@ -782,7 +674,7 @@ body {
   align-items: center;
   gap: 0.5rem 1rem;
   padding: 0.75rem 0.5rem;
-  border-bottom: 1px solid hsl(var(--unimailbox-border));
+  border-bottom: 1px solid var(--border);
 }
 
 .mailbox-member-row:last-child {
@@ -806,10 +698,10 @@ body {
   display: inline-flex;
   align-items: center;
   padding: 0.125rem 0.5rem;
-  border: 1px solid hsl(var(--unimailbox-border));
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background-color: hsl(var(--unimailbox-muted));
-  color: hsl(var(--unimailbox-muted-foreground));
+  background-color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -822,7 +714,7 @@ body {
   gap: 0.25rem 1rem;
   flex: 1 1 18rem;
   font-size: 0.8125rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .mailbox-member-row-actions {
@@ -852,7 +744,7 @@ body {
   margin: 0;
   padding: 2rem 0;
   text-align: center;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 /* ---- App nav (CAP-044 Slice 3, D-CAP-044-K) ----
@@ -865,7 +757,7 @@ body {
 }
 
 .app-nav a {
-  color: hsl(var(--unimailbox-primary));
+  color: var(--primary);
   font-size: 0.875rem;
   font-weight: 500;
   text-decoration: none;
@@ -873,11 +765,11 @@ body {
 }
 
 .app-nav a:hover {
-  border-bottom-color: hsl(var(--unimailbox-primary));
+  border-bottom-color: var(--primary);
 }
 
 .app-nav a:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -892,7 +784,7 @@ body {
 }
 
 .mailbox-list-row {
-  border-bottom: 1px solid hsl(var(--unimailbox-border));
+  border-bottom: 1px solid var(--border);
 }
 
 .mailbox-list-row:last-child {
@@ -912,18 +804,18 @@ body {
   border-radius: var(--unimailbox-radius);
   font-family: inherit;
   font-size: 0.9375rem;
-  color: hsl(var(--unimailbox-foreground));
+  color: var(--foreground);
   text-align: left;
   cursor: pointer;
   transition: background-color 120ms ease;
 }
 
 .mailbox-list-row-button:hover {
-  background-color: hsl(var(--unimailbox-muted));
+  background-color: var(--muted);
 }
 
 .mailbox-list-row-button:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
 
@@ -933,7 +825,7 @@ body {
 }
 
 .mailbox-list-row-display-name {
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
   font-size: 0.8125rem;
 }
 
@@ -957,7 +849,7 @@ body {
  * not at all.) */
 .inbox-list-row {
   padding: 0.75rem 0.5rem;
-  border-bottom: 1px solid hsl(var(--unimailbox-border));
+  border-bottom: 1px solid var(--border);
 }
 
 .inbox-list-row:last-child {
@@ -970,7 +862,7 @@ body {
  * stays: hiding it (the old `border-bottom-color: transparent`) would
  * erase the boundary below an unread row. */
 .inbox-list-row-unread {
-  background-color: hsl(var(--unimailbox-muted));
+  background-color: var(--muted);
   border-radius: var(--unimailbox-radius);
 }
 
@@ -979,6 +871,10 @@ body {
   font-weight: 500;
   margin-bottom: 0.25rem;
   overflow-wrap: anywhere;
+}
+
+.inbox-list-row-subject > a {
+  display: block;
 }
 
 .inbox-list-row-unread .inbox-list-row-subject {
@@ -991,7 +887,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8125rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .inbox-list-row-from {
@@ -1080,9 +976,9 @@ body {
 
 .message-detail-headers {
   padding: 0.75rem 1rem;
-  border: 1px solid hsl(var(--unimailbox-border));
+  border: 1px solid var(--border);
   border-radius: var(--unimailbox-radius);
-  background-color: hsl(var(--unimailbox-muted));
+  background-color: var(--muted);
   margin: 0 0 1rem;
 }
 
@@ -1091,7 +987,7 @@ body {
   flex-wrap: wrap;
   gap: 0.5rem 1rem;
   font-size: 0.8125rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .message-detail-body {
@@ -1105,9 +1001,9 @@ body {
 /* ---- Message thread panel (CAP-043 Slice 2 / AC 22) ---- */
 .message-thread-panel {
   padding: 1rem;
-  border: 1px solid hsl(var(--unimailbox-border));
+  border: 1px solid var(--border);
   border-radius: var(--unimailbox-radius);
-  background-color: hsl(var(--unimailbox-card));
+  background-color: var(--card);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -1140,22 +1036,22 @@ body {
   font-family: inherit;
   text-align: left;
   cursor: pointer;
-  color: hsl(var(--unimailbox-foreground));
+  color: var(--foreground);
   transition: background-color 120ms ease;
 }
 
 .message-thread-item-button:hover {
-  background-color: hsl(var(--unimailbox-muted));
+  background-color: var(--muted);
 }
 
 .message-thread-item-button:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
 
 .message-thread-item-active .message-thread-item-button {
-  background-color: hsl(var(--unimailbox-muted));
-  border-color: hsl(var(--unimailbox-primary));
+  background-color: var(--muted);
+  border-color: var(--primary);
 }
 
 .message-thread-item-subject {
@@ -1165,7 +1061,7 @@ body {
 
 .message-thread-item-meta {
   font-size: 0.75rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 .message-thread-loading {
@@ -1173,7 +1069,7 @@ body {
   padding: 0.5rem 0;
   text-align: center;
   font-size: 0.875rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 /* ---- Composer (CAP-044 Slice 1 / AC 22) ----
@@ -1194,22 +1090,6 @@ body {
   background-color: hsl(var(--unimailbox-success-soft));
   color: hsl(var(--unimailbox-success));
   font-size: 0.875rem;
-}
-
-/* ---- Alert dialog (CAP-043 Slice 3 / AC 22) ----
- * Inline confirmation panel (not a modal): a bordered block that opens
- * in place below its trigger. The inner Alert supplies the danger
- * palette; this positions the actions row.
- */
-.alert-dialog {
-  margin-top: 0.5rem;
-}
-
-.alert-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
 }
 
 /* ---- Admin section (CAP-044 Slice 2 + 3 / ACs 13–22) ---- */
@@ -1245,13 +1125,13 @@ body {
 }
 
 .admin-index a {
-  color: hsl(var(--unimailbox-primary));
+  color: var(--primary);
   font-size: 0.9375rem;
   text-decoration: underline;
 }
 
 .admin-index a:focus-visible {
-  outline: 2px solid hsl(var(--unimailbox-ring));
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -1286,7 +1166,6 @@ body {
 
 /* ---- Audit trail rows (CAP-044 Slice 2) ---- */
 .audit-event-list,
-.admin-user-list,
 .admin-connection-list,
 .admin-webhook-event-list {
   list-style: none;
@@ -1297,22 +1176,19 @@ body {
 }
 
 .audit-event-row,
-.admin-user-row,
 .admin-connection-row,
 .admin-webhook-event-row {
   padding: 0.75rem 0.5rem;
-  border-bottom: 1px solid hsl(var(--unimailbox-border));
+  border-bottom: 1px solid var(--border);
 }
 
 .audit-event-row:last-child,
-.admin-user-row:last-child,
 .admin-connection-row:last-child,
 .admin-webhook-event-row:last-child {
   border-bottom: none;
 }
 
 .audit-event-row-meta,
-.admin-user-row-meta,
 .admin-connection-row-meta,
 .admin-webhook-event-row-meta {
   display: flex;
@@ -1331,20 +1207,19 @@ body {
 .audit-event-row-date,
 .admin-webhook-event-row-date {
   font-size: 0.75rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
   margin-left: auto;
 }
 
 .audit-event-row-detail,
-.admin-user-row-detail,
 .admin-connection-row-detail,
 .admin-webhook-event-row-detail {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 1rem;
   font-size: 0.8125rem;
-  color: hsl(var(--unimailbox-muted-foreground));
+  color: var(--muted-foreground);
 }
 
 /* ---- Status pills (CAP-044 Slice 3 / AC 22) ----
@@ -1360,9 +1235,9 @@ body {
   align-items: center;
   padding: 0.125rem 0.5rem;
   border-radius: 999px;
-  border: 1px solid hsl(var(--unimailbox-border));
-  background-color: hsl(var(--unimailbox-muted));
-  color: hsl(var(--unimailbox-muted-foreground));
+  border: 1px solid var(--border);
+  background-color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -1400,9 +1275,9 @@ body {
 }
 
 .admin-connection-status-disabled {
-  border-color: hsl(var(--unimailbox-border));
-  background-color: hsl(var(--unimailbox-muted));
-  color: hsl(var(--unimailbox-muted-foreground));
+  border-color: var(--border);
+  background-color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .admin-connection-status-invalid {
@@ -1423,6 +1298,12 @@ body {
 .admin-user-row-email {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.875rem;
+}
+
+.admin-user-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
 }
 
 /* ---- Connections rows + one-time secret reveal (AC 20) ---- */
@@ -1468,7 +1349,7 @@ body {
 .admin-secret-reveal-value {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.875rem;
-  color: hsl(var(--unimailbox-foreground));
+  color: var(--foreground);
   overflow-wrap: anywhere;
   word-break: break-all;
 }
