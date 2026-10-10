@@ -54,7 +54,7 @@ None.
 
 ### L2 — `migrations/drizzle/meta/_journal.json` is empty and checked in
 
-- **Where:** `/Users/john/Workspace/x/Unimailbox/migrations/drizzle/meta/_journal.json` — `{"version":"7","dialect":"sqlite","entries":[]}`.
+- **Where:** `migrations/drizzle/meta/_journal.json` — `{"version":"7","dialect":"sqlite","entries":[]}`.
 - **Violates:** None; `.gitignore` does not exclude it.
 - **Risk:** The empty journal is the output of `drizzle-kit`'s config smoke (`pnpm exec drizzle-kit check`). Future runs of `drizzle-kit generate` will rewrite this file and any subsequent `drizzle-kit introspect` may regenerate sibling files in `migrations/drizzle/meta/`. Each `drizzle-kit` version skew (a common occurrence) tends to write a slightly different `_journal.json` (added keys, reordered entries), so the empty journal today will become a noisy working tree the moment the next capability pulls a newer drizzle-kit. The on-disk hand-written `0001_initial.sql` is the authoritative artifact per `data-model.md` §Migration authority; the drizzle dir is decoration.
 - **Fix:** Either gitignore `migrations/drizzle/` (preferred — it is regenerated, not edited) or accept the noise and document the policy in `0001_initial.md` §Companion files.

@@ -1,5 +1,10 @@
 # Skill: Test Business Loop
 
+Use within the current user-authorized scope and the host's available tools.
+Delegation is optional and requires authorization; without an independent agent,
+record a self-check rather than claiming independent review. Current ledger state
+and accepted decisions supersede historical phase sequencing.
+
 Procedure for verifying that a capability or a phase actually delivers the *business* loop end to
 end — not just that the unit and unit tests are green. The unit suite can pass while a real user is
 still unable to do the thing the capability was meant to enable. This skill is the answer to that

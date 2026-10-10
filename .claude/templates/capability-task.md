@@ -48,7 +48,7 @@ Layers this touches, in dependency order:
 - [ ] tests — `<paths>`
 
 New module dependency edges introduced: `<none>` / `<a → b>` — each must appear in the dependency
-table in `.claude/rules/architecture.md`, or be approved by the orchestrator first.
+table in `docs/rebuild/05-target-architecture/module-boundaries.md`, or be approved by the orchestrator first.
 
 ## Delivery path
 

@@ -1,7 +1,8 @@
 # Agent Collaboration Rules
 
-How multiple agents work on this repository without corrupting each other's work or the project's
-memory.
+Optional collaboration conventions when delegation is authorized and the host
+provides suitable agent tools. A single session may implement and validate directly;
+these rules do not require spawning agents or override user/host instructions.
 
 ## The premise
 
@@ -10,16 +11,16 @@ Anything a future agent needs must be in the repository before your turn ends.
 
 ## Main Agent (orchestrator)
 
-Owns coordination and acceptance, not implementation volume. Responsibilities:
+Owns implementation, coordination and acceptance. When delegation is used:
 
 - Determine current phase and next capability from `docs/rebuild/capability-ledger.md`.
 - Reconcile the ledger's active CAP with `work/active/`, Git status, and the actual code path before
   selecting more work. Fix state drift before implementation.
 - Write the capability contract at `work/active/CAP-NNN-slug/task.md` before delegating.
 - Assign file ownership and scoped reading lists.
-- Delegate implementation and **independent** review.
-- Run quality gates; accept or reject subagent output.
-- Update the ledger and implementation log; clean up `work/active/`; commit.
+- Delegate scoped work only when authorized. Delegated reviewers are independent of the implementation.
+- Validate relevant evidence and quality gates; accept or reject subagent output.
+- Update the ledger/log and clean up active work. Commit/publish within the user's authorized scope.
 
 The orchestrator is the final owner of repository hygiene. See `CLAUDE.md` §Execution model.
 
@@ -50,8 +51,9 @@ Every capability's `task.md` declares which files each agent owns.
 
 ## Review independence
 
-**A reviewer must not have written the code it reviews.** A fresh subagent, given the task contract
-and the diff, is the whole point — an agent reviewing itself reproduces its own blind spots.
+**A delegated reviewer must not have written the code it reviews.** Give it the task
+contract and stable diff. Without an independent reviewer, perform a self-check
+and report that limitation; do not label it independent review.
 
 Reviewers challenge; they do not summarize. A review that restates the diff has failed. Every
 finding needs a concrete failure scenario: inputs or state → wrong behaviour.
@@ -67,7 +69,8 @@ Severity, and what it means:
 
 ## Handoff format
 
-Every agent's final message is structured. No prose-only reports.
+Delegated agents use structured handoffs so the caller can validate their work.
+The main session's user-facing answer follows the user/host communication rules.
 
 ```
 Task:      CAP-NNN — <what was asked>
@@ -89,8 +92,9 @@ list exact changed paths — the orchestrator stages by that list.
 - Two reviewers disagree → the orchestrator decides and records the reasoning. If it constrains
   future work, it becomes an ADR.
 - Subagent output contradicts a rule → the rule wins. Reject the output.
-- A rule contradicts `docs/rebuild/` → `docs/rebuild/` wins for design questions; `.claude/rules/`
-  wins for agent behaviour. Flag the contradiction; do not paper over it.
+- User and host instructions take precedence. For repository sources, current
+  accepted decisions supersede historical proposals. Resolve design contradictions
+  in their owning document and agent conventions in `.claude/rules/`.
 - A rule appears wrong → produce a proposal, do not edit it (see below).
 
 ## Result validation
@@ -98,7 +102,8 @@ list exact changed paths — the orchestrator stages by that list.
 The orchestrator does not take a subagent's word for anything checkable:
 
 - Claimed files changed → verify with `git status`/`git diff`.
-- Claimed tests pass → run them.
+- Claimed tests pass → inspect the recorded command, source revision and results.
+  Re-run when evidence is absent, stale, affected by changes or leaves a material gap.
 - Claimed acceptance criteria met → check against `task.md`.
 - Claimed feature or phase complete → trace the browser/API/entrypoint/configuration path that makes
   it usable. An exported handler without a trigger and a built asset without serving configuration

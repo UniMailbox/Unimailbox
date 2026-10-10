@@ -2,9 +2,15 @@
 
 ## Status
 
-Accepted for CAP-042 with the Slice 0 decisions recorded in
-`work/active/CAP-042-better-auth-shell/spike-evidence.md`. Registration cutover remains gated by
-the named failure-injection Workers tests.
+Superseded for runtime authentication by the accepted October 4 integration
+decisions in [document 12](../12-cloud-mail-agentic-inbox-integration-plan.md).
+Application-owned D1 sessions and Bearer tokens now authorize requests; Better
+Auth endpoints and Cloudflare Access are not runtime login options. The original
+proposal below remains as migration-compatibility and decision history.
+
+Originally accepted for CAP-042 with Slice 0 evidence now archived at
+`work/archive/2026-08/CAP-042/spike-evidence.md`. The cutover gates below belong
+to that superseded proposal.
 
 ## Context
 

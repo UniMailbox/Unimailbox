@@ -1,10 +1,14 @@
 # API Design
 
-See `../G-target-architecture.md §G.9` for the full route table. This document captures the rules.
+This document captures current conventions. The route inventory in
+`../G-target-architecture.md §G.9` is the initial design; the deployed router and
+`http/routes/*` determine available endpoints.
 
 ## Base path
 
-All routes are prefixed with `/api/v1`.
+Application APIs use `/api/v1`; browser routes, assets, `/healthz` and `/readyz`
+are separate. Incomplete installation redirects non-exempt paths to `/setup`;
+`/healthz`, `/setup/*` and `/api/v1/setup/*` are exempt.
 
 ## HTTP methods
 
@@ -12,7 +16,7 @@ All routes are prefixed with `/api/v1`.
 - `POST` — create or perform action.
 - `PATCH` — partial update.
 - `DELETE` — delete.
-- `PUT` — replace (only for `If-Match` optimistic concurrency on drafts).
+- `PUT` — replace a resource as defined by its route. Draft writes use `If-Match`.
 
 ## Path conventions
 
@@ -29,7 +33,7 @@ POST /api/v1/mailboxes/:id/members          # add member
 PATCH /api/v1/mailboxes/:id/members/:userId # change role
 DELETE /api/v1/mailboxes/:id/members/:userId # remove member
 
-POST /api/v1/messages/send                  # send a message (action)
+POST /api/v1/mailboxes/:mailboxId/messages/send # send a message (action)
 GET  /api/v1/messages/:id                   # read one message
 PATCH /api/v1/messages/:id/read             # mark read
 PATCH /api/v1/messages/:id/star             # toggle star
@@ -41,9 +45,9 @@ DELETE /api/v1/messages/:id                 # delete
 | Header | When | Purpose |
 |---|---|---|
 | `Authorization: Bearer <accessToken>` | All non-public routes | Authentication |
-| `Idempotency-Key: <uuid>` | All mutating routes | Replay safety |
+| `Idempotency-Key: <key>` | Application mutations; provider webhooks use provider identity | Replay safety; 8–128 characters from `[A-Za-z0-9_-]` |
 | `If-Match: <updatedAt>` | Draft update + draft send | Optimistic concurrency |
-| `Accept-Language: en \| zh-CN` | Application requests | Client locale hint; errors are translated by code in the frontend |
+| Locale | Web preference `en` or `zh-CN` | Frontend translates stable error codes; the API does not require `Accept-Language` negotiation |
 
 ## Response envelope
 
@@ -103,7 +107,9 @@ Cursor-based:
 }
 ```
 
-Cursor encodes `(created_at, id)` and is HMAC-signed.
+Cursors are opaque and signed, with the resource's ordering fields and filter
+scope. Message lists use their creation ordering; scheduled sends use scheduled
+time. Do not assume one tuple for every resource or accept unsigned client cursors.
 
 ## Webhooks
 
@@ -112,7 +118,9 @@ POST /api/v1/webhooks/:providerKey/:connectionId
 ```
 
 - `connectionId` is opaque; selects the encrypted verification secret.
-- Provider signature verification runs **before** JSON parse.
+- Provider authentication runs **before** JSON parse. Brevo supports its configured
+  Bearer webhook secret and the retained raw-body HMAC verification path; do not
+  require a provider to emit a signature header it does not supply.
 - Webhook responses: 200 on success/replay, 401 on bad signature, 503 on lock contention.
 
 ## Setup routes (gated until `installation_state.status='complete'`)
@@ -133,7 +141,7 @@ POST  /api/v1/setup/complete
 
 Setup routes require a short-lived KV setup session after `/setup/claim`.
 
-## Repair routes (gated behind authenticated admin)
+## Historical repair proposal
 
 Same path prefix `/api/v1/setup/*` but gated by:
 1. Authentication (must be logged in).
@@ -141,3 +149,11 @@ Same path prefix `/api/v1/setup/*` but gated by:
 3. `installation_state.installationVersion` indicates an upgrade is pending.
 
 After repair step completes, repair session is destroyed.
+
+## Body limits and binary responses
+
+Ordinary JSON routes have a 1 MiB cap. Raw attachment/editor/avatar routes and
+provider webhooks are mounted as sibling applications. Editor upload limits come
+from the system policy; avatar and legacy upload routes have their own fixed
+limits. See [editor storage](../16-email-editor-storage.md). Binary downloads,
+redirects and health endpoints do not use the JSON data envelope.

@@ -68,7 +68,7 @@ Receipts and screenshots live under `.tmp/scheduled-send-20261009/`:
 `cron-receipts.json` and `release-gate-final.log`. These are synthetic mail
 fixtures; receipts intentionally exclude credentials and raw bearer links.
 The prepared publication manifest is
-`.tmp/releases/6f215b03c5ff77ef28410254e9701d67/staging/1791528756248-5174dbd67d70/release.json`.
+`.tmp/releases/<account>/staging/<release>/release.json`.
 A multi-day real-time recovery wait was not run; that path uses the controlled
 clock with binding-backed tests.
 

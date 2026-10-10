@@ -73,3 +73,6 @@ cannot remove copies held by forks or other checkouts.
 Claude hook logs are local private scratch. Current hooks omit raw shell commands;
 older logs may contain command arguments. Review or dispose of those privately.
 No test, CI pass or scan establishes production cutover or data-import acceptance.
+
+The latest review scope and results are recorded in
+[repository QA](../qa/repository-hygiene-2026-10-10.md).

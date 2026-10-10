@@ -1,101 +1,68 @@
-# Module Boundaries
+# Module boundaries
 
-## Public surface per module
+This is the current module boundary policy. `apps/worker/src/app-context.ts`
+wires dependencies with `buildAppContext(env)`; HTTP, email, Queue and scheduled
+entrypoints use that composition. Modules expose public functions and types via
+`index.ts`; the initial class-based `application/domain/infrastructure` layout
+was a design sketch, not a required directory structure.
 
-Every module exposes a single `index.ts` that re-exports the module's public types and use cases. Internal layout is private.
+## Dependency table
 
-```typescript
-// modules/messages/index.ts
-export { SendMessage } from './application/send-message'
-export { ListInbox, ListSent, ListDrafts, ListStarred, ListTrash, ListArchive } from './application/list-messages'
-export { ReadMessage } from './application/read-message'
-export { MarkRead, MarkUnread } from './application/mark-read'
-export { DeleteMessage } from './application/delete-message'
-export type { Message, MessageId, MessageStatus, MailboxMessage, MessageRecipient, MessageUserState } from './domain/types'
-export { MessageRepository } from './infrastructure/message-repository'
-export { MailboxMessageRepository } from './infrastructure/mailbox-message-repository'
-```
+Every module may use platform helpers and shared contracts. The table lists
+additional permitted dependencies; a permitted edge need not be used today.
 
-No internal file is reachable from outside the module.
+| Module | Additional dependencies |
+| --- | --- |
+| identity | None |
+| onboarding | identity, tenancy, admin, outbound-mail (setup orchestration) |
+| tenancy | identity |
+| messages | tenancy |
+| inbound-mail | tenancy, messages, email-core; admin read contracts wired through AppContext |
+| outbound-mail | tenancy, messages, editor-assets, provider integrations, email-core; audit writer contract |
+| provider-sync | messages, provider integrations |
+| attachments | messages, tenancy |
+| editor-assets | None |
+| signatures | tenancy, editor-assets |
+| admin | identity, tenancy, messages, outbound-mail |
+| installation | identity, tenancy, admin |
+| maintenance | messages, tenancy, attachments |
 
-## Cross-module allowed calls
+No cycles. Inbound policy readers and outbound audit writers are contracts,
+implemented by admin and wired at the composition root; these do not permit
+direct `modules/admin/*` imports. Admin's outbound connection management is a
+public outbound-mail dependency, so the reverse direct import is forbidden.
 
-| From | To | Allowed? | How |
-|---|---|:---:|---|
-| `http/routes/*` | `modules/*/application/*` | ✓ | direct import |
-| `modules/messages` | `modules/tenancy` | ✓ | interface from `contracts/` |
-| `modules/outbound` | `modules/messages` | ✓ | use case interface |
-| `modules/outbound` | `modules/tenancy` | ✓ | use case interface |
-| `modules/inbound` | `modules/tenancy` | ✓ | use case interface |
-| `modules/inbound` | `modules/messages` | ✓ | use case interface |
-| `modules/messages` | `modules/inbound` | ✗ | reverse direction |
-| `modules/messages` | `modules/outbound` | ✗ | reverse direction |
-| `modules/admin` | `modules/messages` | ✓ | read-only via query |
-| `modules/*` | `integrations/*` | ✓ | via `ProviderRegistry` interface |
-| `integrations/*` | `modules/*` | ✗ | reverse direction |
+## Public surface and transport
 
-## Composition root
+- Routes and other modules import `modules/<name>` through its public index,
+  never another module's private file or a hypothetical `application/*` path.
+- A route handles transport validation, authentication and permission checks.
+  The use case enforces mailbox ownership and business state, then batches
+  related persistence, idempotency and audit writes.
+- Shared API schemas and integration seams come from `packages/contracts`.
+  Do not expose Drizzle row types as cross-module domain contracts.
+- Provider adapters implement the neutral registry interfaces. Provider SDKs
+  belong in integrations; integration code never imports application modules.
 
-```typescript
-// src/app-context.ts
-export function buildAppContext(env: Env, ctx: ExecutionContext): AppContext {
-  // ...
-  return {
-    // Platform
-    db, objectStore, cache, clock, ids, logger,
-    // Identity
-    users: new UserRepository(db),
-    sessions: new SessionRepository(db, cache),
-    // Tenancy
-    mailboxes: new MailboxRepository(db),
-    domains: new DomainRepository(db),
-    signatures: new SignatureRepository(db),
-    // Messages
-    messages: new MessageRepository(db),
-    mailboxMessages: new MailboxMessageRepository(db),
-    messageUserState: new MessageUserStateRepository(db),
-    // Attachments
-    attachments: new AttachmentRepository(db, objectStore),
-    uploads: new AttachmentUploadRepository(db),
-    // Outbound
-    outboundJobs: new OutboundJobRepository(db),
-    providerConnections: new ProviderConnectionRepository(db),
-    credentials: new EncryptedCredentialStore(env, db, cache),
-    webhookDeliveries: new WebhookDeliveryRepository(db),
-    providerMessageState: new ProviderMessageStateRepository(db),
-    // Admin
-    installation: new InstallationRepository(db, cache),
-    keys: new RegistrationKeyRepository(db),
-    roles: new RoleRepository(db),
-    permissions: new PermissionRepository(db),
-    audit: new AuditRepository(db),
-    settings: new SystemSettingsRepository(db),
-    maintenance: new MaintenanceRepository(db),
-    // Integrations
-    providers: buildProviderRegistry(),
-  }
-}
-```
+The current ESLint rules enforce major layer directions and Hono restrictions.
+The full pairwise dependency policy also requires code review.
 
-## Module dependency table
+## Persistence authority
 
-| Module | Depends on |
-|---|---|
-| `identity` | `platform/*`, `contracts/*` |
-| `onboarding` | `identity`, `platform/*`, `contracts/*` |
-| `tenancy` | `identity`, `platform/*`, `contracts/*` |
-| `messages` | `tenancy`, `platform/*`, `contracts/*` |
-| `inbound-mail` | `tenancy`, `messages`, `platform/*`, `contracts/*`, `email-core/*` |
-| `outbound-mail` | `tenancy`, `messages`, `editor-assets`, `integrations/providers/*`, `platform/*`, `contracts/*`, `email-core/*` |
-| `provider-sync` | `messages`, `integrations/providers/*`, `platform/*`, `contracts/*` |
-| `attachments` | `messages`, `tenancy`, `platform/*`, `contracts/*` |
-| `editor-assets` | `platform/*`, `contracts/*` |
-| `signatures` | `tenancy`, `editor-assets`, `platform/*`, `contracts/*` |
-| `admin` | `identity`, `tenancy`, `messages`, `outbound-mail`, `platform/*`, `contracts/*` |
-| `installation` | `identity`, `tenancy`, `admin`, `platform/*`, `contracts/*` |
-| `maintenance` | `messages`, `tenancy`, `attachments`, `platform/*`, `contracts/*` |
+| Area | Authority |
+| --- | --- |
+| Users, sessions and personal preferences | identity, D1; private avatar bytes in R2 |
+| Installation lifecycle and setup | onboarding/installation orchestration, D1 + short-lived setup KV |
+| Domains, mailboxes, members | tenancy, D1 |
+| Messages, recipients, mailbox views, user state and drafts | messages, D1 |
+| Attachment uploads and downloads | attachments with message metadata in D1 and bytes in R2 |
+| Editor assets and durable usages | editor-assets, D1 + R2 |
+| Domain signatures | signatures, D1, with editor-asset usage references |
+| Jobs, provider connections, encrypted credentials and webhook state | outbound-mail, D1 |
+| Roles, permissions, settings, audit, blocklists and role policies | admin, D1 |
+| Idempotency infrastructure | platform helpers; business modules batch their records with writes |
 
-**No cycles.** Each module's dependencies are unidirectional.
-## Editor assets (2026-10-07)
-
-`editor-assets` owns editor_assets/editor_asset_usages metadata and resource publication. It depends on platform/contracts; signatures and compose use its public prepareEditorAssetUsages function to batch durable references with the owning resource. Streaming R2 writes stay in platform/editor-upload-store; transport authorization stays at the existing mailbox/domain route boundaries. See [email editor storage](../16-email-editor-storage.md).
+Resource cleanup goes through these ownership boundaries. Published editor
+usages protect historical mail; private incoming attachments retain mailbox
+authorization. See [editor storage](../16-email-editor-storage.md) and
+[storage decision](../14-durable-object-mailbox-adr.md).

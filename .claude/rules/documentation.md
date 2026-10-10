@@ -15,7 +15,9 @@ Every artifact an agent produces is exactly one of these. If you cannot classify
 ## Homes
 
 - **`docs/rebuild/`** — the design specification. Already exists, already organised. **Do not move,
-  rename, or restructure it.** When implementation contradicts it, edit the relevant file in place.
+  rename, or restructure it without a requested documentation reorganization.**
+  Prefer updating in place and preserve links. Mark superseded plans and dated
+  evidence explicitly; current status lives only in the ledger's Current state.
 - **`docs/`** (outside `rebuild/`) — create a subdirectory only when there is real content for it
   (e.g. `docs/operations/` when the first runbook exists). Do not create empty directories.
 - **`work/active/CAP-NNN-slug/`** — the shared workspace for a capability in flight. See `work/README.md`.

@@ -2,16 +2,21 @@
 
 A business rule is a **constraint** that the system enforces, expressed without reference to a specific implementation. Each rule has a category (data, state, authorization, workflow) and a category label.
 
+Current decisions supersede original proposals as noted below. This catalog is
+requirements, not an assertion that every rule has staging or production proof.
+Current implementation status lives in the ledger; route/contract source provides
+exact validation and transport behavior.
+
 ## R-AUTH — Authentication & identity
 
 | ID | Rule |
 |---|---|
-| R-AUTH-001 | A user must authenticate with a verified email + password to access any non-public route |
+| R-AUTH-001 | An active, admin-created account authenticates with email/password and a valid D1 session; protected requests use a session-bound Bearer token. Public registration is disabled. |
 | R-AUTH-002 | A user with status `banned` or `deleted` cannot log in |
 | R-AUTH-003 | A user may have at most 10 active sessions; oldest is evicted |
 | R-AUTH-004 | Refresh tokens are rotated on every successful refresh |
 | R-AUTH-005 | All sessions are revoked when the password is changed or reset |
-| R-AUTH-006 | OAuth login does not require a password; OAuth users must explicitly set a password to use password login |
+| R-AUTH-006 | Deferred original OAuth proposal; no OAuth or Cloudflare Access login is enabled in the current runtime. |
 | R-AUTH-007 | Passwords must be at least 6 and at most 30 characters |
 | R-AUTH-008 | Email prefix must be at least `minEmailPrefix` characters |
 | R-AUTH-009 | Email addresses are case-insensitive everywhere |
@@ -85,14 +90,22 @@ A business rule is a **constraint** that the system enforces, expressed without 
 | ID | Rule |
 |---|---|
 | R-ATTACHMENT-001 | An attachment belongs to one message |
-| R-ATTACHMENT-002 | Maximum 10 attachments per message |
-| R-ATTACHMENT-003 | Maximum 64 MiB per attachment |
-| R-ATTACHMENT-004 | An attachment's bytes live in R2 under `attachments/{uuid}.{ext}` |
+| R-ATTACHMENT-002 | Legacy MIME attachment count follows the system setting (maximum 10); editor resource references have their own quota. |
+| R-ATTACHMENT-003 | Editor files follow system maxAttachmentBytes (default/maximum 100 MiB); raster images use the smaller of that value and 5 MiB. Legacy binary uploads retain their route-specific cap. |
+| R-ATTACHMENT-004 | Attachment bytes live in R2; object keys are opaque and depend on inbound, legacy upload or editor-asset ownership, not one fixed path template. |
 | R-ATTACHMENT-005 | A direct upload requires an `attachment_uploads` row in `uploaded` status |
 | R-ATTACHMENT-006 | An upload is consumed (marked `consumed`) atomically when the message is created |
 | R-ATTACHMENT-007 | Expired unused uploads are deleted by a scheduled job |
-| R-ATTACHMENT-008 | Inline images (CID) are rewritten to R2 URLs for non-CF providers |
+| R-ATTACHMENT-008 | Incoming CID images use authenticated mailbox access to stored R2 bytes; outgoing editor images use per-file recipient capability URLs. |
 | R-ATTACHMENT-009 | Maximum 50 inline images per message |
+
+### Hosted attachment delivery
+
+When the encoded email estimate exceeds 10,000,000 bytes, every attachment uses
+R2 download links in the final attachment list after the signature. Editor files
+are hosted even below this threshold. Private incoming attachments retain their
+mailbox authorization. See [editor storage](../16-email-editor-storage.md) for
+estimation, MIME overhead, durable usages and lifecycle details.
 
 ## R-AUTHZ — Authorization
 
@@ -110,8 +123,8 @@ A business rule is a **constraint** that the system enforces, expressed without 
 |---|---|
 | R-SECRET-001 | Provider API keys live in `encrypted_credentials`, encrypted with AES-GCM |
 | R-SECRET-002 | Encryption keys are stored in Cloudflare Secrets Store, never in `wrangler.toml` |
-| R-SECRET-003 | Secrets are never logged, never returned in API responses, never exposed to the client. Narrow exception (defined 2026-08-24, resolving D-CAP-040-B): a one-value, admin-initiated reveal of a provider **webhook signing secret** via `POST /api/v1/admin/connections/:id/webhook-secret/reveal` is permitted, because the operator must paste the secret into the provider's own dashboard to configure the webhook. Controls are mandatory: gated on `provider.sync` permission, response is one-time display semantics, a `webhook_secret.reveal` audit row records actor + connection (never the value), and the secret is never logged. Rotation-only disclosure remains the norm for every other secret; no list endpoint may include a secret value. |
-| R-SECRET-004 | Webhook signing secrets may be rotated; old + new are accepted during a 7-day window |
+| R-SECRET-003 | Secrets are never logged or included in read/list APIs. Initial account passwords are shown only by authorized create/reset responses, and session issuance returns authentication tokens through its defined contract. Narrow provider-secret exception (defined 2026-08-24, resolving D-CAP-040-B): a one-value, admin-initiated reveal of a provider **webhook signing secret** via `POST /api/v1/admin/connections/:id/webhook-secret/reveal` is permitted, because the operator must paste the secret into the provider's own dashboard to configure the webhook. Controls are mandatory: gated on `provider.sync` permission, response is one-time display semantics, a `webhook_secret.reveal` audit row records actor + connection (never the value), and the secret is never logged. Rotation-only disclosure remains the norm for every other secret; no list endpoint may include a secret value. |
+| R-SECRET-004 | Deferred rotation requirement: accept old + new during a seven-day window only after a tested overlap path is implemented; current verification uses the configured secret. |
 
 ## R-AUDIT — Audit
 
@@ -148,10 +161,10 @@ A business rule is a **constraint** that the system enforces, expressed without 
 
 | ID | Rule |
 |---|---|
-| R-API-001 | All responses follow `{ data: T }` on success or `{ error: { code, message, requestId } }` on failure |
+| R-API-001 | Application JSON responses use `{ data: T }` or `{ error: { code, message, requestId } }`; binary downloads, redirects and health endpoints use their defined transport contracts. |
 | R-API-002 | Domain error codes are stable across releases |
 | R-API-003 | HTTP status codes are real (400, 401, 403, 404, 409, 413, 429, 502, 503) |
 | R-API-004 | Mutating endpoints accept `Idempotency-Key`; replays return the stored response |
-| R-API-005 | Pagination uses opaque cursors that encode `(created_at, id)` and are signed |
-| R-API-006 | All request bodies are validated by zod schemas before use-case entry |
-| R-API-007 | Provider webhooks verify signatures before parsing payload |
+| R-API-005 | Pagination uses opaque signed cursors carrying the resource-specific ordering and filter scope; message and scheduled-send ordering differ. |
+| R-API-006 | JSON request bodies and binary-upload metadata are validated at route entry; raw bytes also undergo bounded length/type validation before use. |
+| R-API-007 | Provider webhooks verify the adapter-defined authentication (Bearer secret or retained raw-body HMAC for Brevo) before parsing payload. |

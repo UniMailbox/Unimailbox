@@ -106,7 +106,7 @@ Lines 60-64 of the same file document the interface-only constraint
 `app-context.ts`). Bundled with M1 as the same documentation update at
 capability close.
 
-**Where:** `/Users/john/Workspace/x/Unimailbox/.claude/rules/architecture.md:48`
+**Where:** `.claude/rules/architecture.md:48`
 
 > `| inbound-mail | tenancy, messages, email-core/* |`
 
@@ -153,7 +153,7 @@ matches) and for `@unimailbox/contracts/admin` (matches exist on
 **Status:** RESOLVED — `.claude/rules/architecture.md:103` now lists
 `admin | …, audit_events, maintenance_jobs, blocklist_entries, role_policies`.
 
-**Where:** `/Users/john/Workspace/x/Unimailbox/.claude/rules/architecture.md:97`
+**Where:** `.claude/rules/architecture.md:97`
 
 > `| admin | roles, permissions, role_permissions, user_roles, system_settings, audit_events, maintenance_jobs |`
 
@@ -181,7 +181,7 @@ and `migrations/0010_blocklist_and_role_policies.sql`.
 
 ### M2 — Drizzle row-type aliases collide with contracts interface names
 
-**Where:** `/Users/john/Workspace/x/Unimailbox/apps/worker/src/database/schema/admin.ts:153-156`
+**Where:** `apps/worker/src/database/schema/admin.ts:153-156`
 
 ```ts
 export type BlocklistEntryRow       = typeof blocklistEntries.$inferSelect;
@@ -233,7 +233,7 @@ The `_Drizzle` suffix matches the Drizzle-typing-only convention from
 `migrations/0010_blocklist_and_role_policies.sql:16`; CAP-036 row added to the
 capability ledger.
 
-**Where:** `/Users/john/Workspace/x/Unimailbox/migrations/0010_blocklist_and_role_policies.sql:12-17`
+**Where:** `migrations/0010_blocklist_and_role_policies.sql:12-17`
 
 ```
 -- R-DATA-005 relaxation: ban_email_patterns_json and
@@ -276,7 +276,7 @@ for `CAP-NNN JSON-AUDIT` across the repo (zero matches).
 
 ### L1 — Per-recipient `getUserRoleIds` loop in the entrypoint (future scaling)
 
-**Where:** `/Users/john/Workspace/x/Unimailbox/apps/worker/src/entrypoints/inbound-email.ts:88-97`
+**Where:** `apps/worker/src/entrypoints/inbound-email.ts:88-97`
 
 ```ts
 const ownerRoleIds = new Set<string>();
@@ -367,17 +367,17 @@ way to tell this work happened unless those follow-ups land.
 
 ## Files referenced
 
-- `/Users/john/Workspace/x/Unimailbox/.claude/rules/architecture.md:40-100`
-- `/Users/john/Workspace/x/Unimailbox/work/active/D-CAP-021-blocklist-and-role-policies/task.md`
-- `/Users/john/Workspace/x/Unimailbox/migrations/0010_blocklist_and_role_policies.sql:12-46`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/database/schema/admin.ts:119-156`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/inbound-mail/policy-evaluator.ts`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/inbound-mail/pattern-matchers.ts`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/inbound-mail/index.ts`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/entrypoints/inbound-email.ts:84-105`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/app-context.ts:56-57`
-- `/Users/john/Workspace/x/Unimailbox/packages/contracts/src/admin/blocklist.ts`
-- `/Users/john/Workspace/x/Unimailbox/packages/contracts/src/admin/role-policy.ts`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/http/routes/admin-blocklist.ts`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/http/routes/admin-role-policies.ts`
-- `/Users/john/Workspace/x/Unimailbox/apps/worker/src/entrypoints/inbound-email.worker.test.ts:361-513`
+- `.claude/rules/architecture.md:40-100`
+- `work/active/D-CAP-021-blocklist-and-role-policies/task.md`
+- `migrations/0010_blocklist_and_role_policies.sql:12-46`
+- `apps/worker/src/database/schema/admin.ts:119-156`
+- `apps/worker/src/modules/inbound-mail/policy-evaluator.ts`
+- `apps/worker/src/modules/inbound-mail/pattern-matchers.ts`
+- `apps/worker/src/modules/inbound-mail/index.ts`
+- `apps/worker/src/entrypoints/inbound-email.ts:84-105`
+- `apps/worker/src/app-context.ts:56-57`
+- `packages/contracts/src/admin/blocklist.ts`
+- `packages/contracts/src/admin/role-policy.ts`
+- `apps/worker/src/http/routes/admin-blocklist.ts`
+- `apps/worker/src/http/routes/admin-role-policies.ts`
+- `apps/worker/src/entrypoints/inbound-email.worker.test.ts:361-513`

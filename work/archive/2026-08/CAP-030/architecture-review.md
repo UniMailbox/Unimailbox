@@ -122,24 +122,24 @@ Status:    COMPLETE (architecture review — investigation only, no code changed
 Changes:   None. Read-only review against every file in task.md's reading list.
 
 Files:
-- /Users/john/Workspace/x/Unimailbox/work/active/CAP-030-lifecycle-direction/task.md
-- /Users/john/Workspace/x/Unimailbox/packages/contracts/src/index.ts
-- /Users/john/Workspace/x/Unimailbox/packages/contracts/src/index.test.ts
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/messages/message-repository.ts
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/messages/message-repository.worker.test.ts
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/outbound-mail/job-repository.ts
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/outbound-mail/job-repository.worker.test.ts
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/outbound-mail/process-outbound-job.ts (read-only)
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/outbound-mail/webhook-processor.ts (read-only)
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/http/routes/compose.ts
-- /Users/john/Workspace/x/Unimailbox/apps/worker/src/http/routes/webhooks.worker.test.ts
-- /Users/john/Workspace/x/Unimailbox/migrations/0006_messages.sql (read-only)
-- /Users/john/Workspace/x/Unimailbox/migrations/0007_outbound_jobs.sql (read-only)
-- /Users/john/Workspace/x/Unimailbox/.claude/rules/architecture.md (referenced)
-- /Users/john/Workspace/x/Unimailbox/.claude/rules/coding.md (referenced)
-- /Users/john/Workspace/x/Unimailbox/.claude/rules/testing.md (referenced)
-- /Users/john/Workspace/x/Unimailbox/.claude/rules/security.md (referenced)
-- /Users/john/Workspace/x/Unimailbox/docs/rebuild/02-business-discovery/business-rules.md (referenced)
+- work/active/CAP-030-lifecycle-direction/task.md
+- packages/contracts/src/index.ts
+- packages/contracts/src/index.test.ts
+- apps/worker/src/modules/messages/message-repository.ts
+- apps/worker/src/modules/messages/message-repository.worker.test.ts
+- apps/worker/src/modules/outbound-mail/job-repository.ts
+- apps/worker/src/modules/outbound-mail/job-repository.worker.test.ts
+- apps/worker/src/modules/outbound-mail/process-outbound-job.ts (read-only)
+- apps/worker/src/modules/outbound-mail/webhook-processor.ts (read-only)
+- apps/worker/src/http/routes/compose.ts
+- apps/worker/src/http/routes/webhooks.worker.test.ts
+- migrations/0006_messages.sql (read-only)
+- migrations/0007_outbound_jobs.sql (read-only)
+- .claude/rules/architecture.md (referenced)
+- .claude/rules/coding.md (referenced)
+- .claude/rules/testing.md (referenced)
+- .claude/rules/security.md (referenced)
+- docs/rebuild/02-business-discovery/business-rules.md (referenced)
 
 Tests:     Did not run tests — reviewer is read-only by charter. The implementer's
           quality-gate run (`pnpm scaffold doctor && pnpm lint && pnpm typecheck &&
@@ -179,4 +179,4 @@ Next:      - Orchestrator: clear CAP-030 once the four parallel reviewers land
             were removed per R-MESSAGE-012, not as cleanup, so a future reader
             of the diff knows the deletion is principled.
 
-Review report file: /Users/john/Workspace/x/Unimailbox/work/reviews/CAP-030-architecture-review.md
+Review report file: work/reviews/CAP-030-architecture-review.md

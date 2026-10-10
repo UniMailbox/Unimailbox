@@ -217,7 +217,7 @@ Test: `scripts/scaffold.test.ts` (NEW, 9 tests, 100 passing). Cases pin: `db:mig
 
 **Files**: `scripts/scaffold.ts` (MODIFIED — extract `forwardDbMigrateArgs`, gate dispatcher body behind `import.meta.url` check, restrict `--reset` dedup to alias path), `scripts/scaffold.test.ts` (NEW, 9 tests), `docs/rebuild/capability-ledger.md` (D-CAP-041-H4 row), `docs/rebuild/implementation-log.md` (this entry).
 
-**Gates** (orchestrator-run): doctor 14/14, lint clean, typecheck clean, unit 1082→1091 (+9 new scaffold tests, zero regressions), web/worker pools not re-run (tooling fix, no app-code change). Live-dispatcher smoke test: `Removed /Users/john/Workspace/x/Unimailbox/apps/worker/.wrangler/state` printed and migrations re-applied from 0001.
+**Gates** (orchestrator-run): doctor 14/14, lint clean, typecheck clean, unit 1082→1091 (+9 new scaffold tests, zero regressions), web/worker pools not re-run (tooling fix, no app-code change). Live-dispatcher smoke test: `Removed apps/worker/.wrangler/state` printed and migrations re-applied from 0001.
 
 ---
 
@@ -4104,3 +4104,25 @@ to the reviewed rebuilt source. Update README and the deployment runbook to
 reflect observed staging acceptance, current UI provenance, the 15-minute
 Operations cadence and manual deployment boundary. GitHub verification runs on
 the published source; existing staging resources and production data are unchanged.
+
+
+## 2026-10-10 — Repository consistency and public-information hygiene
+
+Align README, agent conventions, current ledger and execution plan with the
+implemented self-hosted identity, current shadcn reference, system attachment
+policy and dated staging evidence. Label superseded recovery/auth/UI proposals;
+correct module dependency contradictions, upload/idempotency/API exceptions,
+password work-factor guidance and unimplemented rotation guarantees. Replace
+personal absolute paths and broken public documentation links.
+
+Fix Claude hook command logging so credentials in allowed or rejected commands
+are never persisted or echoed; keep hook logs private. Quote hook paths for
+checkouts with spaces, ignore local secret/Claude files, and add checksum-pinned,
+redacted Gitleaks CI with exact synthetic-value/path exceptions. Negative checks
+confirm new credentials in fixture paths are rejected.
+
+Local full verification passed: doctor 14/14, generated bindings, lint, typecheck,
+build and 2217 tests. Current files and all reachable history passed reviewed
+secret scanning; known private deployment credentials did not appear in Git.
+See [repository QA](../qa/repository-hygiene-2026-10-10.md) for scope and limits.
+Shared Git history, live Cloudflare resources and production data are preserved.
