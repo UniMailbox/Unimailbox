@@ -1,3 +1,19 @@
 packages:
-  - apps/*
-  - packages/*
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 11 ignores postinstall scripts by default. Approve the ones we need
+# so the install actually completes a usable tree. esbuild + workerd are
+# required by the Cloudflare Vitest plugin; sharp is not used but appears in our
+# transitive graph via vite.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false
+  msw: false # Browser service-worker generation is unnecessary for Workers tests.
+
+minimumReleaseAgeExclude:
+  - '@cloudflare/vitest-plugin@1.3.7'
+  - miniflare@5.20261006.0-alpha
+  - wrangler@4.148.0
+  - '@cloudflare/workers-types@5.20261008.1'

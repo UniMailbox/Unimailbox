@@ -1,0 +1,43 @@
+/*
+ * Theme palette adapted from marmelab/shadcn-admin-kit src/index.css
+ * commit 78e32b93174937f0871877b3ddaf2ddd4d71ea16.
+ * Copyright (c) 2025 marmelab. MIT License; see
+ * docs/rebuild/licenses/shadcn-admin-kit-MIT.txt.
+ *
+ * Scoped to the admin and mailbox shells so setup/auth screens retain their
+ * existing tokens while the kit's palette is adopted in both workspaces.
+ */
+.app-layout {
+  --kit-background: oklch(1 0 0);
+  --kit-foreground: oklch(0.145 0 0);
+  --kit-card: oklch(1 0 0);
+  --kit-primary: oklch(0.205 0 0);
+  --kit-primary-foreground: oklch(0.985 0 0);
+  --kit-muted: oklch(0.97 0 0);
+  --kit-muted-foreground: oklch(0.556 0 0);
+  --kit-border: oklch(0.922 0 0);
+  --kit-ring: oklch(0.708 0 0);
+  --kit-sidebar: oklch(0.985 0 0);
+  --kit-sidebar-foreground: oklch(0.145 0 0);
+  --kit-sidebar-accent: oklch(0.97 0 0);
+  --kit-sidebar-border: oklch(0.922 0 0);
+  --kit-radius: 0.625rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-layout {
+    --kit-background: oklch(0.145 0 0);
+    --kit-foreground: oklch(0.985 0 0);
+    --kit-card: oklch(0.205 0 0);
+    --kit-primary: oklch(0.922 0 0);
+    --kit-primary-foreground: oklch(0.205 0 0);
+    --kit-muted: oklch(0.269 0 0);
+    --kit-muted-foreground: oklch(0.708 0 0);
+    --kit-border: oklch(1 0 0 / 10%);
+    --kit-ring: oklch(0.556 0 0);
+    --kit-sidebar: oklch(0.205 0 0);
+    --kit-sidebar-foreground: oklch(0.985 0 0);
+    --kit-sidebar-accent: oklch(0.269 0 0);
+    --kit-sidebar-border: oklch(1 0 0 / 10%);
+  }
+}

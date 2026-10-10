@@ -1,112 +1,66 @@
+// Composition root — the only place wiring happens.
+// CAP-001 stub: returns named collaborators so use cases cannot reach back
+// into the raw Cloudflare `Env` (per ADR-007 + .claude/rules/security.md
+// §Secrets). Real repository / service wiring lands with the modules that
+// own them.
+import type { Cache, SetupSessionStore } from './platform/cache';
+import type { PlatformConfig } from './platform/config';
+import type { Database } from './platform/database';
+import type { Env } from './platform/env';
+import type { ObjectStore } from './platform/object-store';
+import { getCache, getSetupSessionStore } from './platform/cache';
+import { loadConfig } from './platform/config';
+import { getDatabase } from './platform/database';
+import { getObjectStore } from './platform/object-store';
+import { systemClock, type Clock } from './platform/clock';
+import { systemIds, type IdGenerator } from './platform/ids';
+import { logger, type LogFields, type LogContext } from './platform/logger';
+import type { AuditEventWriter, BlocklistReader, RolePolicyReader } from '@unimailbox/contracts';
 import {
-  BREVO_PROVIDER_KEY,
-  RESEND_PROVIDER_KEY,
-  type ProviderKey,
-  type ProviderPlugin,
-} from "@unimailbox/contracts";
-import { createBrevoProviderPlugin } from "./integrations/brevo";
-import { createResendProviderPlugin } from "./integrations/resend";
-import { ProviderRegistry } from "./integrations/providers";
-import type { HttpAppContext } from "./http/router";
-import { TokenService } from "./modules/identity";
-import { IdentityApplicationService } from "./modules/identity/application";
-import { InstallationService } from "./modules/installation";
-import { D1InstallationRepository } from "./modules/installation/infrastructure/d1-installation.repository";
-import { HealthService } from "./modules/maintenance";
-import { MailboxApplicationService } from "./modules/mailboxes";
-import { CursorCodec } from "./modules/messages/cursor";
-import { MessageApplicationService } from "./modules/messages";
-import { DraftApplicationService } from "./modules/messages/drafts";
-import { AttachmentApplicationService } from "./modules/attachments";
-import { UploadTokenCodec } from "./modules/attachments/upload-token";
-import { WebhookApplicationService } from "./modules/provider-sync/webhook";
-import { AdminApplicationService } from "./modules/administration";
-import { CloudflareSettingsService } from "./modules/administration/cloudflare-settings";
-import { InfrastructureSettingsService } from "./modules/administration/infrastructure-settings";
-import { resolveRuntimeConfig, type Env } from "./platform/config";
-import { CredentialCipher } from "./platform/crypto";
-import { StructuredLogger } from "./platform/logger";
-import {
-  createAttachmentStore,
-  detectStorageBackend,
-  type AttachmentStore,
-  type StorageBackend,
-} from "./platform/attachment-store";
+  createAuditEventWriter,
+  createBlocklistReader,
+  createRolePolicyReader,
+} from './modules/admin';
 
-export interface AppContext extends HttpAppContext {
-  env: Env;
-  providers: ProviderRegistry;
-  credentials: CredentialCipher;
-  attachmentStore: AttachmentStore;
-  storageBackend: StorageBackend;
+export interface AppContext {
+  readonly db: Database;
+  readonly cache: Cache;
+  readonly setupSessionStore: SetupSessionStore;
+  readonly objectStore: ObjectStore;
+  readonly config: PlatformConfig;
+  readonly clock: Clock;
+  readonly ids: IdGenerator;
+  readonly logger: {
+    readonly debug: (fields: LogFields, context?: LogContext) => void;
+    readonly info: (fields: LogFields, context?: LogContext) => void;
+    readonly warn: (fields: LogFields, context?: LogContext) => void;
+    readonly error: (fields: LogFields, context?: LogContext) => void;
+  };
+  // D-CAP-021 / CAP-035: cross-module readers for inbound-mail.
+  // Wired through app-context (composition root) — see ADR-002 for the
+  // outbound-provider-registry equivalent.
+  readonly blocklistReader: BlocklistReader;
+  readonly rolePolicyReader: RolePolicyReader;
+  // CAP-040 / D-CAP-029-A: cross-module writer so the webhook route can
+  // fold its audit row into the same D1 batch as the messages UPDATE and
+  // webhook_deliveries INSERT (no unaudited transitions). Mirrors the
+  // BlocklistReader / RolePolicyReader seams.
+  readonly auditEventWriter: AuditEventWriter;
 }
 
-export async function createAppContext(
-  env: Env,
-  _executionContext?: ExecutionContext,
-): Promise<AppContext> {
-  const runtime = await resolveRuntimeConfig(env);
-  const installation = new InstallationService(
-    new D1InstallationRepository(env.DB),
-  );
-  const attachmentStore = createAttachmentStore(env);
-  const storageBackend = detectStorageBackend(env).backend;
-  const health = new HealthService(env, storageBackend);
-  const tokens = new TokenService(runtime.AUTH_SIGNING_KEY);
-  const identity = new IdentityApplicationService(env, tokens);
-  const mailboxes = new MailboxApplicationService(env);
-  const partialContext = {
-    env,
-    providers: new ProviderRegistry(
-      new Map<ProviderKey, ProviderPlugin>([
-        [BREVO_PROVIDER_KEY, createBrevoProviderPlugin()],
-        [RESEND_PROVIDER_KEY, createResendProviderPlugin()],
-      ]),
-    ),
-    credentials: new CredentialCipher(runtime.CREDENTIAL_ENCRYPTION_KEY),
-    logger: new StructuredLogger(),
-    attachmentStore,
-    storageBackend,
-  };
-  const cursors = new CursorCodec(runtime.AUTH_SIGNING_KEY);
-  const messages = new MessageApplicationService(
-    partialContext,
-    mailboxes,
-    cursors,
-  );
-  const attachments = new AttachmentApplicationService(
-    env,
-    new UploadTokenCodec(runtime.AUTH_SIGNING_KEY),
-    attachmentStore,
-  );
-  const drafts = new DraftApplicationService(partialContext, mailboxes);
-  const webhooks = new WebhookApplicationService(partialContext);
-  const admin = new AdminApplicationService(partialContext, cursors);
+export function buildAppContext(env: Env): AppContext {
+  const db = getDatabase(env);
   return {
-    ...partialContext,
-    installation,
-    health,
-    settings: new CloudflareSettingsService(
-      env.KV,
-      env.DB,
-      partialContext.credentials,
-      partialContext.providers,
-      {
-        clientId: env.CLOUDFLARE_OAUTH_CLIENT_ID,
-        clientSecret: env.CLOUDFLARE_OAUTH_CLIENT_SECRET,
-        scopes: env.CLOUDFLARE_OAUTH_SCOPES,
-      },
-    ),
-    infrastructure: new InfrastructureSettingsService(env, health),
-    auth: {
-      verifyAccessToken: (token) => identity.verifyAccessToken(token),
-    },
-    identity,
-    mailboxes,
-    messages,
-    attachments,
-    drafts,
-    webhooks,
-    admin,
+    db,
+    cache: getCache(env),
+    setupSessionStore: getSetupSessionStore(env),
+    objectStore: getObjectStore(env),
+    config: loadConfig(env),
+    clock: systemClock,
+    ids: systemIds,
+    logger,
+    blocklistReader: createBlocklistReader(db),
+    rolePolicyReader: createRolePolicyReader(db),
+    auditEventWriter: createAuditEventWriter(db),
   };
 }

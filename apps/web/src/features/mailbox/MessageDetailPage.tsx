@@ -1,0 +1,264 @@
+import { Skeleton } from '../../components/ui/shadcn/skeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { useInAppShell } from '../../components/layouts/AppShell';
+// apps/web — MessageDetailPage.
+//
+// CAP-043 Slice 2 (AC 11 + AC 12). The single-message view at
+// /mailbox/:mailboxId/messages/:messageId:
+//   - subject / from / to / cc / date / sanitized HTML or text body;
+//   - headers section collapsed by default (`<details>`);
+//   - MessageThreadPanel listing the thread's messages oldest-first
+//     with the active message highlighted and clickable;
+//   - auto mark-read on mount: when the message is unread for the
+//     calling user, `PATCH .../read` fires exactly once per mount
+//     (R-MESSAGE-005) and flips the inbox list cache entry for this
+//     message to read (targeted setQueryData, not an invalidation).
+//
+// State surface (mirrors InboxListPage):
+//   - Loading — <MessageDetailSkeleton /> while the detail is in-flight.
+//   - Error — <ErrorPanel /> with retry (detail query failure).
+//   - Unauthorized — descriptor `null` after the router guard renders
+//     <Unauthorized variant="expired" /> (D-CAP-041-9 fallback).
+//   - Data — the message detail + thread panel. A thread-query failure
+//     does not take the page down; it surfaces an inline retry panel
+//     beside the message body.
+import { useEffect, useRef, type ReactElement } from 'react';
+import { Link } from '@tanstack/react-router';
+import { authSessionQuery } from '../auth/auth-queries';
+import { Unauthorized } from '../auth/Unauthorized';
+import {
+  messageDetailQuery,
+  messageThreadQuery,
+  useMarkMessageReadMutation,
+} from './mailbox-queries';
+import { MessageDetailSkeleton } from './MessageDetailSkeleton';
+import { MessageAttachments } from './MessageAttachments';
+import { SanitizedMessageHtml } from './SanitizedMessageHtml';
+import { MessageThreadPanel } from './MessageThreadPanel';
+import { useInlineAttachmentUrls } from './use-inline-attachment-urls';
+import { ErrorPanel } from '../../components/ui/ErrorPanel';
+import { Card } from '../../components/ui/Card';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
+import { LogoutButton } from '../auth/LogoutButton';
+import type { MessageRecipientInfo } from '@unimailbox/contracts';
+
+export interface MessageDetailPageProps {
+  readonly mailboxId: string;
+  readonly messageId: string;
+}
+
+export function MessageDetailPage({ mailboxId, messageId }: MessageDetailPageProps): ReactElement {
+  const sessionQuery = authSessionQuery();
+
+  if (sessionQuery.data === undefined) {
+    return <MessageDetailSkeleton />;
+  }
+  // D-CAP-041-9 fallback: a `null` descriptor after the router guard
+  // renders the expired-session surface — the Sign-in CTA inside
+  // <Unauthorized /> is the recovery path (same as InboxListPage).
+  if (sessionQuery.data === null) {
+    return <Unauthorized variant="expired" />;
+  }
+
+  return <MessageDetailContent mailboxId={mailboxId} messageId={messageId} />;
+}
+
+interface MessageDetailContentProps {
+  readonly mailboxId: string;
+  readonly messageId: string;
+}
+
+function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProps): ReactElement {
+  const t = useT();
+  const inShell = useInAppShell();
+  const sessionQuery = authSessionQuery();
+  const detailQuery = messageDetailQuery(mailboxId, messageId);
+  const threadQuery = messageThreadQuery(mailboxId, messageId);
+  const inlineImageUrls = useInlineAttachmentUrls(mailboxId, detailQuery.data?.attachments);
+  const { mutate: markMessageRead } = useMarkMessageReadMutation();
+
+  // AC 12 / R-MESSAGE-005: fire mark-read ONCE per message open. The
+  // ref guard holds the message id that was already marked on this
+  // component instance, so re-renders (query cache updates, thread
+  // arrival) and param changes to a sibling message each behave
+  // correctly: the former does not re-fire, the latter fires once for
+  // the new id. D-CAP-041-2: ApiClient mints the fresh Idempotency-Key.
+  const markedMessageRef = useRef<string | null>(null);
+  useEffect(() => {
+    const detail = detailQuery.data;
+    if (detail === undefined || detail.isRead === 1) {
+      return;
+    }
+    if (markedMessageRef.current === detail.id) {
+      return;
+    }
+    markedMessageRef.current = detail.id;
+    markMessageRead({ mailboxId, messageId: detail.id, folder: detail.folder });
+  }, [detailQuery.data, mailboxId, markMessageRead]);
+
+  if (detailQuery.isPending && detailQuery.data === undefined) {
+    return <MessageDetailSkeleton />;
+  }
+
+  if (detailQuery.error !== null && detailQuery.data === undefined) {
+    // messageDetailQuery declares its error type as ApiError (unlike the
+    // inbox infinite query, whose error type is un-inferable), so no
+    // instanceof narrowing is needed here.
+    return (
+      <main className="mailbox-shell" data-testid="message-detail-error">
+        <Card title={t('Could not load message')} description={t('The message is unavailable.')}>
+          <ErrorPanel
+            message={detailQuery.error.message}
+            code={detailQuery.error.code}
+            onRetry={() => {
+              void detailQuery.refetch();
+            }}
+            retryLabel={t('Retry')}
+            testId="message-detail-error-panel"
+          />
+        </Card>
+      </main>
+    );
+  }
+
+  const detail = detailQuery.data;
+  if (detail === undefined) {
+    // Unreachable while loading/error branches sit above; keeps the
+    // narrowing below total without a non-null assertion.
+    return <MessageDetailSkeleton />;
+  }
+
+  return (
+    <main className="mailbox-shell" data-testid="message-detail-page">
+      <header className="mailbox-header">
+        <h1 className="mailbox-title">{t('Message')}</h1>
+        <div className="mailbox-header-meta">
+          <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
+          {!inShell ? <LogoutButton /> : null}
+        </div>
+      </header>
+
+      <p className="message-detail-back">
+        <Link to="/mailbox/$mailboxId" params={{ mailboxId }}>
+          {t('Back to inbox')}
+        </Link>
+      </p>
+
+      {/* G10 (fe L2): the Card carries only the subject — the from
+          address renders exactly once, in the message-from meta row. */}
+      <Card title={detail.subject}>
+        {detailQuery.error !== null ? (
+          <ErrorPanel
+            message={detailQuery.error.message}
+            code={detailQuery.error.code}
+            onRetry={() => void detailQuery.refetch()}
+            testId="message-detail-refresh-error"
+          />
+        ) : null}
+        <div className="message-detail-meta">
+          <p data-testid="message-from">{formatFrom(detail.fromAddress, detail.fromName)}</p>
+          <p data-testid="message-to">
+            {t('To: ')}
+            {formatRecipients(detail.recipients.to)}
+          </p>
+          {detail.recipients.cc.length > 0 ? (
+            <p data-testid="message-cc">
+              {t('Cc: ')}
+              {formatRecipients(detail.recipients.cc)}
+            </p>
+          ) : null}
+          <p data-testid="message-date">
+            <LocalDateTime value={detail.createdAt} />
+          </p>
+        </div>
+
+        {detail.htmlBody.trim().length > 0 ? (
+          <SanitizedMessageHtml
+            htmlBody={detail.htmlBody}
+            attachments={detail.attachments}
+            inlineImageUrls={inlineImageUrls}
+          />
+        ) : (
+          <pre className="message-detail-body" data-testid="message-body">
+            {detail.textBody}
+          </pre>
+        )}
+
+        <MessageAttachments
+          mailboxId={mailboxId}
+          attachments={detail.attachments}
+          inlineImageUrls={inlineImageUrls}
+        />
+
+        {/* Headers collapsed by default (AC 11). RFC 5322 threading
+            headers shown verbatim — the raw values are what the thread
+            root resolution (D-CAP-043-C) is computed from. */}
+        <details className="message-detail-headers" data-testid="message-headers">
+          <summary>{t('Headers')}</summary>
+          <dl>
+            <dt>{t('Message-ID')}</dt>
+            <dd data-testid="message-header-message-id">{detail.messageIdHeader ?? '—'}</dd>
+            <dt>{t('In-Reply-To')}</dt>
+            <dd data-testid="message-header-in-reply-to">{detail.inReplyToHeader ?? '—'}</dd>
+            <dt>{t('References')}</dt>
+            <dd data-testid="message-header-references">{detail.referencesHeader}</dd>
+          </dl>
+        </details>
+
+        {/* CAP-044 Slice 1 / AC 5: Reply opens the composer pre-filled
+            from THIS message (D-CAP-044-C computes the threading
+            headers client-side from the detail data). */}
+        <div className="message-detail-actions">
+          <Link
+            to="/mailbox/$mailboxId/compose"
+            params={{ mailboxId }}
+            search={{ replyTo: messageId }}
+            className="btn btn-secondary btn-md"
+            data-testid="message-reply-link"
+          >
+            {t('Reply')}
+          </Link>
+        </div>
+
+        {threadQuery.data !== undefined ? (
+          <MessageThreadPanel
+            mailboxId={mailboxId}
+            items={threadQuery.data.items}
+            activeMessageId={messageId}
+          />
+        ) : threadQuery.error !== null ? (
+          <div data-testid="message-thread-error">
+            <ErrorPanel
+              message="The thread could not be loaded."
+              code={threadQuery.error.code}
+              onRetry={() => {
+                void threadQuery.refetch();
+              }}
+              retryLabel={t('Retry')}
+              testId="message-thread-error-panel"
+            />
+          </div>
+        ) : (
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label={t('Loading thread…')}
+            className="space-y-3"
+            data-testid="message-thread-loading"
+          >
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-16 w-full" />
+          </div>
+        )}
+      </Card>
+    </main>
+  );
+}
+
+function formatFrom(address: string, name: string): string {
+  return name !== '' ? `${name} <${address}>` : address;
+}
+
+function formatRecipients(recipients: ReadonlyArray<MessageRecipientInfo>): string {
+  return recipients.map((r) => formatFrom(r.address, r.displayName)).join(', ');
+}

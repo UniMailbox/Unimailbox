@@ -1,0 +1,23 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import './shadcn-theme.css';
+@import './tokens.css' layer(legacy);
+@import './product.css';
+@custom-variant dark (&:is(.dark *));
+@source '../';
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+  }
+}

@@ -1,0 +1,171 @@
+{
+  "repository": "https://github.com/satnaing/shadcn-admin",
+  "commit": "e16c87f213a5ba5e45964e9b67c792105ec74d26",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2024 Sat Naing",
+  "files": [
+    {
+      "local": "apps/web/src/components/ui/shadcn/alert-dialog.tsx",
+      "upstream": "src/components/ui/alert-dialog.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/alert.tsx",
+      "upstream": "src/components/ui/alert.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/avatar.tsx",
+      "upstream": "src/components/ui/avatar.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/badge.tsx",
+      "upstream": "src/components/ui/badge.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/button.tsx",
+      "upstream": "src/components/ui/button.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/card.tsx",
+      "upstream": "src/components/ui/card.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/dropdown-menu.tsx",
+      "upstream": "src/components/ui/dropdown-menu.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/input.tsx",
+      "upstream": "src/components/ui/input.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/label.tsx",
+      "upstream": "src/components/ui/label.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/separator.tsx",
+      "upstream": "src/components/ui/separator.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/sheet.tsx",
+      "upstream": "src/components/ui/sheet.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/sidebar.tsx",
+      "upstream": "src/components/ui/sidebar.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/skeleton.tsx",
+      "upstream": "src/components/ui/skeleton.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/table.tsx",
+      "upstream": "src/components/ui/table.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/textarea.tsx",
+      "upstream": "src/components/ui/textarea.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/tooltip.tsx",
+      "upstream": "src/components/ui/tooltip.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports, strict optional props and project formatting; upstream behavior and utility classes retained."
+    },
+    {
+      "local": "apps/web/src/hooks/use-mobile.tsx",
+      "upstream": "src/hooks/use-mobile.tsx",
+      "decision": "adopt"
+    },
+    {
+      "local": "apps/web/src/styles/shadcn-theme.css",
+      "upstream": "src/styles/theme.css",
+      "decision": "adopt"
+    },
+    {
+      "local": "apps/web/src/components/layouts/AppShell.tsx",
+      "upstream": [
+        "src/components/layout/authenticated-layout.tsx",
+        "src/components/layout/app-sidebar.tsx",
+        "src/components/layout/nav-group.tsx",
+        "src/components/layout/nav-user.tsx",
+        "src/components/layout/header.tsx"
+      ],
+      "decision": "adapt",
+      "changes": "Real routes, mailbox query, session identity, permission-aware AppNav; no demo menu entries."
+    },
+    {
+      "local": "apps/web/src/components/layouts/AuthLayout.tsx",
+      "upstream": "src/features/auth/sign-in/sign-in-2.tsx",
+      "decision": "adapt",
+      "changes": "Split layout with actual product capabilities; omit demo dashboard screenshot, public signup and unsupported legal links."
+    },
+    {
+      "local": "apps/web/src/components/ThemeSwitch.tsx",
+      "upstream": [
+        "src/components/theme-switch.tsx",
+        "src/context/theme-provider.tsx"
+      ],
+      "decision": "adapt",
+      "changes": "Validated local preference, initial theme before render and live OS change listener."
+    },
+    {
+      "local": "apps/web/src/components/ui/Input.tsx",
+      "upstream": "src/components/password-input.tsx",
+      "decision": "adapt",
+      "changes": "Password toggle integrated in existing labeled RHF-compatible Input; aria-pressed and right padding."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/select.tsx",
+      "upstream": "src/components/ui/select.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports and project formatting; actual upstream primitive retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/switch.tsx",
+      "upstream": "src/components/ui/switch.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports and project formatting; actual upstream primitive retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/checkbox.tsx",
+      "upstream": "src/components/ui/checkbox.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports and project formatting; actual upstream primitive retained."
+    },
+    {
+      "local": "apps/web/src/components/ui/shadcn/dialog.tsx",
+      "upstream": "src/components/ui/dialog.tsx",
+      "decision": "adapt",
+      "changes": "Relative imports and project formatting; actual upstream primitive retained."
+    }
+  ]
+}

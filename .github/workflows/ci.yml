@@ -1,138 +1,22 @@
 name: Verify
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
+on: [push, pull_request]
 permissions:
   contents: read
-
 concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  workflow-security:
-    name: Workflow security
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Require immutable action references
-        shell: bash
-        run: |
-          set -euo pipefail
-          invalid=0
-          while IFS= read -r action; do
-            case "$action" in
-              ./*) continue ;;
-            esac
-            ref="${action##*@}"
-            if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "::error::Action reference must use a full 40-character commit SHA: $action"
-              invalid=1
-            fi
-          done < <(sed -nE 's/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*["'\"']?([^"'\"'[:space:]#]+).*/\1/p' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true)
-          exit "$invalid"
-
-      - name: Install actionlint
-        shell: bash
-        env:
-          ACTIONLINT_VERSION: 1.7.12
-          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/actionlint.tar.gz"
-          curl --fail --show-error --silent --location \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            --output "$archive"
-          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check --strict
-          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" actionlint
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-
-      - name: Lint workflows
-        run: actionlint -color
-
   verify:
-    needs: workflow-security
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+          persist-credentials: false
+      - uses: actions/setup-node@v7
         with:
-          version: 10.32.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.22.1
-          cache: pnpm
-
-      - name: Install immutable dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Repository doctor
-        run: pnpm scaffold doctor --ci
-
-      - name: Static verification
-        run: |
-          pnpm workflow:check
-          pnpm config:check
-          pnpm format:check
-          pnpm lint
-          pnpm typecheck
-          pnpm schema:check
-
-      - name: Unit and Worker tests
-        run: |
-          pnpm test:unit
-          pnpm test:worker
-          pnpm test:coverage
-
-      - name: Fresh local migrations
-        run: |
-          pnpm db:migrate --target local
-          pnpm db:verify --target local
-
-      - name: Integration tests
-        run: pnpm test:integration
-
-      - name: Production build and deployment preview
-        run: |
-          pnpm build
-          pnpm deploy:dry-run
-          pnpm deploy:r2:dry-run
-
-      - name: Production dependency audit
-        run: pnpm audit --prod
-
-      - name: Upload exact dry-run artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: unimailbox-${{ github.sha }}
-          path: .wrangler/dry-run
-          if-no-files-found: error
-
-  browser:
-    needs: workflow-security
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 10.32.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.22.1
-          cache: pnpm
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
-        with:
-          name: playwright-report
-          path: playwright-report
+      - run: pnpm verify

@@ -1,0 +1,3 @@
+# CAP-001 — placeholder. CAP-004 writes the first D1 migration.
+# See docs/rebuild/05-target-architecture/data-model.md §Migration authority
+# for the file shape (NNNN_*.sql + NNNN_*.verify.sql + NNNN_*.md).

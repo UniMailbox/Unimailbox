@@ -1,0 +1,78 @@
+// Local/test topology mirrors deployment configs. Select an explicit environment for releases.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unimailbox-worker-test",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "observability": {
+    "enabled": false,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "unimailbox-db",
+      "database_id": "test",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "test-attachments",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SETUP_SESSION",
+      "id": "test-setup-session",
+    },
+    {
+      "binding": "CACHE",
+      "id": "test-cache",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "test-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "test-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "test-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "test-outbound-dlq",
+      },
+    ],
+  },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "BETTER_AUTH_URL": "http://localhost",
+    "AUTH_PROVIDER": "dual",
+    "INSTALLATION_TOKEN": "test-installation-token",
+    "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "BETTER_AUTH_SECRET": "test-better-auth-secret-do-not-use-elsewhere-32bytes",
+    "CURSOR_SIGNING_KEY": "test-cursor-signing-key-do-not-use-elsewhere-32bytes",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
+  },
+}

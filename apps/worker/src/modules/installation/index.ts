@@ -1,13 +1,4 @@
-import type { InstallationStatus } from "@unimailbox/contracts";
-
-export interface InstallationRepository {
-  getStatus(): Promise<InstallationStatus>;
-}
-
-export class InstallationService {
-  constructor(private readonly installation: InstallationRepository) {}
-
-  getStatus(): Promise<InstallationStatus> {
-    return this.installation.getStatus();
-  }
-}
+// modules/installation — CAP-001 stub.
+// Depends on: identity, tenancy, admin.
+// Real first-run orchestration lands with CAP-005+.
+export {};

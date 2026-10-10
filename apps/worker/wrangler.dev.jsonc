@@ -1,0 +1,73 @@
+// Local/test topology mirrors deployment configs. Select an explicit environment for releases.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unimailbox-worker-dev",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "unimailbox-db",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "unimailbox-attachments",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SETUP_SESSION",
+    },
+    {
+      "binding": "CACHE",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "unimailbox-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "unimailbox-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "unimailbox-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "unimailbox-outbound-dlq",
+      },
+    ],
+  },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "INSTALLATION_TOKEN": "local-installation-token-for-unimailbox-dev-only",
+    "CREDENTIAL_ENCRYPTION_KEY": "7f3c9a1e5d8b2c6f0a4e9d7b1c8f5a2e6d0b3f9c4a7e1d8b5c2f6a0e9d3b7c1",
+    "CURSOR_SIGNING_KEY": "2c8f5a1e7d3b9c0f6a4e1d8b5c2f7a0e9d6b3c1f8a5e2d7b4c0f6a9e3d1b8c5",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
+  },
+}

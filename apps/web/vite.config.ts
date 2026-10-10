@@ -1,52 +1,42 @@
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-import { sentryVitePlugin } from "@sentry/vite-plugin";
-import { fileURLToPath, URL } from "node:url";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { resolveWorkerProxyTarget } from './src/vite-proxy';
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
-  const uploadSourceMaps = Boolean(
-    env.SENTRY_AUTH_TOKEN && env.SENTRY_ORG && env.SENTRY_PROJECT,
-  );
+  // `loadEnv(..., '')` includes VITE_* values from .env.local as well as
+  // shell-provided values; the shell takes precedence for one-off ports.
+  const env = loadEnv(mode, process.cwd(), '');
+  const workerTarget = resolveWorkerProxyTarget(process.env.VITE_WORKER_URL ?? env.VITE_WORKER_URL);
 
   return {
-    plugins: [
-      react(),
-      tailwindcss(),
-      ...(uploadSourceMaps
-        ? [
-            sentryVitePlugin({
-              authToken: env.SENTRY_AUTH_TOKEN,
-              org: env.SENTRY_ORG,
-              project: env.SENTRY_PROJECT,
-              release: env.SENTRY_RELEASE
-                ? { name: env.SENTRY_RELEASE }
-                : undefined,
-              sourcemaps: { filesToDeleteAfterUpload: ["dist/**/*.map"] },
-            }),
-          ]
-        : []),
-    ],
-    resolve: {
-      alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-    },
+    plugins: [react(), tailwindcss()],
     build: {
-      outDir: "dist",
-      sourcemap: uploadSourceMaps ? "hidden" : false,
-    },
-    server: {
-      proxy: {
-        // Must match `dev.port` in the root wrangler.jsonc. The same-origin
-        // assumption matters: the refresh cookie (HttpOnly, SameSite=Strict)
-        // only travels because both halves of the proxy agree on the origin.
-        "/api": "http://127.0.0.1:8787",
-        "/health": "http://127.0.0.1:8787",
+      outDir: 'dist',
+      sourcemap: false,
+      target: 'es2022',
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react';
+            return undefined;
+          },
+        },
       },
     },
-    test: {
-      environment: "jsdom",
-      setupFiles: ["./src/test/setup.ts"],
+    server: {
+      port: 5173,
+      strictPort: false,
+      proxy: {
+        '/api': {
+          target: workerTarget,
+          changeOrigin: false,
+        },
+      },
+    },
+    preview: {
+      port: 4173,
+      strictPort: false,
     },
   };
 });

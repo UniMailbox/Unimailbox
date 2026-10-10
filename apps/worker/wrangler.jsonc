@@ -1,0 +1,90 @@
+// Local/test topology mirrors deployment configs. Select an explicit environment for releases.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unimailbox-worker",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "unimailbox-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "unimailbox-attachments",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SETUP_SESSION",
+      "id": "REPLACE_WITH_KV_SETUP_SESSION_ID",
+    },
+    {
+      "binding": "CACHE",
+      "id": "REPLACE_WITH_KV_CACHE_ID",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "unimailbox-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "unimailbox-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "unimailbox-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "unimailbox-outbound-dlq",
+      },
+    ],
+  },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "secrets_store_secrets": [
+    {
+      "binding": "INSTALLATION_TOKEN",
+      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
+      "secret_name": "INSTALLATION_TOKEN",
+    },
+    {
+      "binding": "CREDENTIAL_ENCRYPTION_KEY",
+      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
+      "secret_name": "CREDENTIAL_ENCRYPTION_KEY",
+    },
+    {
+      "binding": "CURSOR_SIGNING_KEY",
+      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
+      "secret_name": "CURSOR_SIGNING_KEY",
+    },
+  ],
+  "vars": {
+    "ENVIRONMENT": "local",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
+  },
+}

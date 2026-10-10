@@ -1,51 +1,42 @@
-export type LogValue = string | number | boolean | null | undefined;
-export type LogFields = Record<string, LogValue>;
+// platform/logger — structured JSON logger.
+// CAP-001 minimal implementation; CAP-016 will harden (correlation IDs,
+// redaction, log levels from env). Native console wrapped — pino/consola
+// are deliberately deferred per task.md §Decisions.
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-export interface Logger {
-  info(event: string, fields?: LogFields): void;
-  warn(event: string, fields?: LogFields): void;
-  error(event: string, fields?: LogFields): void;
+export interface LogContext {
+  readonly [key: string]: unknown;
 }
 
-const forbiddenKeys = /body|content|credential|password|secret|token|bytes/iu;
-
-function safeFields(fields: LogFields = {}): LogFields {
-  return Object.fromEntries(
-    Object.entries(fields).map(([key, value]) => [
-      key,
-      forbiddenKeys.test(key) ? "[REDACTED]" : value,
-    ]),
-  );
+export interface LogFields {
+  readonly event: string;
+  readonly requestId?: string;
+  readonly actorUserId?: string;
+  readonly durationMs?: number;
+  readonly level?: LogLevel;
 }
 
-export class StructuredLogger implements Logger {
-  constructor(private readonly base: LogFields = {}) {}
-
-  info(event: string, fields?: LogFields): void {
-    this.write("info", event, fields);
-  }
-
-  warn(event: string, fields?: LogFields): void {
-    this.write("warn", event, fields);
-  }
-
-  error(event: string, fields?: LogFields): void {
-    this.write("error", event, fields);
-  }
-
-  private write(
-    level: "info" | "warn" | "error",
-    event: string,
-    fields?: LogFields,
-  ): void {
-    console.log(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level,
-        event,
-        ...safeFields(this.base),
-        ...safeFields(fields),
-      }),
-    );
+function emit(level: LogLevel, fields: LogFields, context?: LogContext): void {
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    ...fields,
+    ...(context ?? {}),
+  });
+  if (level === 'error') {
+    console.error(line);
+  } else if (level === 'warn') {
+    console.warn(line);
+  } else {
+    // CAP-001: keep info/debug on stdout to match the legacy log topology.
+    // eslint-disable-next-line no-console -- this IS the logger
+    console.info(line);
   }
 }
+
+export const logger = {
+  debug: (fields: LogFields, context?: LogContext): void => emit('debug', fields, context),
+  info: (fields: LogFields, context?: LogContext): void => emit('info', fields, context),
+  warn: (fields: LogFields, context?: LogContext): void => emit('warn', fields, context),
+  error: (fields: LogFields, context?: LogContext): void => emit('error', fields, context),
+} as const;

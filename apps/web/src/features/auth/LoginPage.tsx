@@ -1,99 +1,132 @@
-import { ArrowRight, LockKeyhole, Radio } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { LoginSchema } from "@unimailbox/contracts";
-import { useTranslation } from "react-i18next";
-import { FieldError, FormRoot, useAppForm } from "../../lib/form/app-form";
-import { PasswordInput } from "../../components/ui/password-input";
-import { loginMutationOptions } from "./api";
-import { safeLoginTarget } from "../../app/router";
-import { ErrorState } from "../../components/Status";
+import { useT } from '../../infrastructure/i18n/locale';
+import { AuthLayout } from '../../components/layouts/AuthLayout';
+// apps/web — LoginPage.
+//
+// Posts to the application-owned /api/v1/auth/login endpoint and keeps the
+// short-lived access token in the in-memory auth store. Errors are surfaced as
+// the existing ErrorPanel primitive
+// (R-API-002 — machine code sub-line). The form is parsed by a local
+// zod schema (loginSchema) that reuses the contracts `emailAddressSchema`
+// — no second contract model for the input shape.
+import { useNavigate } from '@tanstack/react-router';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useState, type ReactElement } from 'react';
+import { z } from 'zod';
+import { emailAddressSchema } from '@unimailbox/contracts';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { Card } from '../../components/ui/Card';
+import { ErrorPanel } from '../../components/ui/ErrorPanel';
+import { ApiError } from '../../infrastructure/api/errors';
+import { useSignInMutation } from './auth-queries';
 
-export function LoginPage() {
-  const queryClient = useQueryClient();
+/**
+ * Local form schema. R-AUTH-007's reconciled password bounds
+ * (6..30 characters) are enforced server-side; the client-side rule
+ * mirrors that bound so a too-short or too-long password is rejected
+ * with a real validation error rather than round-tripping to the
+ * server. The contracts `emailAddressSchema` is the canonical email
+ * normaliser.
+ */
+const loginSchema = z.object({
+  email: emailAddressSchema,
+  password: z.string().min(6, 'PASSWORD_LENGTH').max(30, 'PASSWORD_LENGTH'),
+});
+
+type LoginFormFields = z.infer<typeof loginSchema>;
+
+export function LoginPage(): ReactElement {
+  const t = useT();
   const navigate = useNavigate();
-  const search = useSearch({ strict: false }) as { next?: string };
-  const { t } = useTranslation("auth");
-  const login = useMutation(loginMutationOptions(queryClient));
-  const form = useAppForm({
-    defaultValues: { email: "", password: "" },
-    validators: { onSubmit: LoginSchema },
-    onSubmit: async ({ value }) => {
-      await login.mutateAsync(value);
-      await navigate({ to: safeLoginTarget(search.next), replace: true });
-    },
+  const signInMutation = useSignInMutation();
+  const [submitError, setSubmitError] = useState<{
+    readonly message: string;
+    readonly code: string;
+    readonly status: number | null;
+  } | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginFormFields>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
   });
 
+  const onSubmit = handleSubmit(async (values) => {
+    setSubmitError(null);
+    try {
+      const descriptor = await signInMutation.mutateAsync({
+        email: values.email,
+        password: values.password,
+      });
+      await navigate({ to: descriptor.mustChangePassword ? '/change-password' : '/mailbox' });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setSubmitError({
+          message: error.message,
+          code: error.code,
+          status: error.status,
+        });
+        return;
+      }
+      setSubmitError({
+        message: 'Unexpected error',
+        code: 'UNEXPECTED_ERROR',
+        status: null,
+      });
+    }
+  });
+
+  const submitting = isSubmitting || signInMutation.isPending;
+  const isUnauthorized = submitError?.status === 401;
+
   return (
-    <main className="auth-page">
-      <section className="auth-signal" aria-hidden="true">
-        <div className="signal-grid" />
-        <div className="signal-copy">
-          <Radio />
-          <p>{t("login.status")}</p>
-          <strong>{t("login.awaitingOperator")}</strong>
-        </div>
-      </section>
-      <section className="auth-panel">
-        <Link className="wordmark" to="/login">
-          <span>CM</span> UniMailbox
-        </Link>
-        <div className="auth-form-wrap">
-          <div className="section-kicker">{t("login.kicker")}</div>
-          <h1>{t("login.title")}</h1>
-          <p className="lede">{t("login.description")}</p>
-          <FormRoot className="form-stack" form={form}>
-            <form.AppField name="email">
-              {(field) => (
-                <label className="field">
-                  <span>{t("login.email")}</span>
-                  <input
-                    autoComplete="email"
-                    dir="ltr"
-                    inputMode="email"
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    placeholder={t("login.emailPlaceholder")}
-                    type="email"
-                    value={field.state.value}
-                  />
-                  <FieldError label={t("login.email")} />
-                </label>
-              )}
-            </form.AppField>
-            <form.AppField name="password">
-              {(field) => (
-                <label className="field">
-                  <span>{t("login.password")}</span>
-                  <PasswordInput
-                    ariaLabel={t("login.password")}
-                    autoComplete="current-password"
-                    onBlur={field.handleBlur}
-                    onChange={(value) => field.handleChange(value)}
-                    value={field.state.value}
-                  />
-                  <FieldError label={t("login.password")} />
-                </label>
-              )}
-            </form.AppField>
-            {login.error ? <ErrorState error={login.error} /> : null}
-            <form.Subscribe selector={(state) => state.isSubmitting}>
-              {(isSubmitting) => (
-                <button
-                  className="button primary auth-submit"
-                  disabled={isSubmitting}
-                  type="submit"
-                >
-                  <LockKeyhole aria-hidden="true" />
-                  {isSubmitting ? t("login.submitting") : t("login.submit")}
-                  <ArrowRight aria-hidden="true" className="directional-icon" />
-                </button>
-              )}
-            </form.Subscribe>
-          </FormRoot>
-        </div>
-        <footer>{t("login.footer")}</footer>
-      </section>
-    </main>
+    <AuthLayout>
+      <main className="auth-page" data-testid="login-page">
+        <Card title={t('Sign in')}>
+          <form onSubmit={onSubmit} noValidate>
+            <Input
+              id="login-email"
+              type="email"
+              autoComplete="username"
+              label={t('Email')}
+              error={errors.email?.message}
+              {...register('email')}
+            />
+            <Input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              label={t('Password')}
+              error={errors.password?.message}
+              {...register('password')}
+            />
+            {submitError !== null ? (
+              <ErrorPanel
+                message={submitError.message}
+                code={submitError.code}
+                retryLabel={isUnauthorized ? t('Try again') : t('Retry')}
+                onRetry={() => void onSubmit()}
+                testId={isUnauthorized ? 'login-unauthorized' : 'login-error'}
+              />
+            ) : null}
+            <div className="wizard-actions">
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={submitting}
+                loading={submitting}
+                data-testid="login-submit"
+              >
+                {t('Sign in')}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      </main>
+    </AuthLayout>
   );
 }

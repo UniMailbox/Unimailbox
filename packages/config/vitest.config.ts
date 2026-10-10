@@ -1,8 +1,11 @@
-import { defineConfig } from "vitest/config";
+// packages/config — unit tests only (typed config shapes).
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    environment: "node",
-    include: ["test/**/*.test.ts"],
+    name: 'config',
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
+    exclude: ['**/node_modules/**', 'dist/**'],
   },
 });
