@@ -1,7 +1,7 @@
 // apps/web — LogoutButton tests.
 //
 // CAP-042 (Batch 5) AC 20. The logout button posts to
-// /api/v1/auth/better/sign-out, clears the in-memory session descriptor,
+// /api/v1/auth/logout, clears the in-memory session descriptor,
 // removes the cache entry, and navigates to /login.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, screen, waitFor } from '@testing-library/react';
@@ -54,7 +54,7 @@ describe('LogoutButton', () => {
     await waitFor(() => {
       expect(lastPathname(history)).toBe('/login');
     });
-    const signOutCall = calls.find((c) => c.url === '/api/v1/auth/better/sign-out');
+    const signOutCall = calls.find((c) => c.url === '/api/v1/auth/logout');
     expect(signOutCall?.method).toBe('POST');
     expect(useAuthSession.getState().session).toBeNull();
     // The cache entry was removed so a subsequent /mailbox navigation

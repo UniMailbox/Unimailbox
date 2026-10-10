@@ -12,6 +12,8 @@ import { domainNameSchema } from './domain-name';
 import { uuidSchema } from './ids';
 
 export * from './attachments';
+export * from './editor-assets';
+export * from './email-size';
 export * from './admin/permissions';
 export * from './admin/roles';
 export { domainNameSchema } from './domain-name';
@@ -121,6 +123,27 @@ export interface OutboundProviderAdapter {
   readonly key: ProviderKey;
   validateConnection(ctx: ProviderRuntimeContext): Promise<void>;
   send(ctx: ProviderRuntimeContext, msg: SendProviderMessage): Promise<ProviderSendResult>;
+}
+
+/** Verified, provider-neutral delivery event. Times are UTC epoch milliseconds. */
+export interface ProviderWebhookEvent {
+  readonly eventType: string;
+  readonly providerMessageId: string | null;
+  readonly status: MessageStatus | null;
+  readonly eventTimeMs: number;
+  readonly eventTimeSource: 'provider' | 'server';
+  /** Exact UTF-8 payload text, decoded only after raw-byte authentication. */
+  readonly rawPayload: string;
+}
+
+export interface WebhookProviderAdapter {
+  readonly key: ProviderKey;
+  verifyAndParse(input: {
+    readonly rawBody: Uint8Array;
+    readonly signatureHeader: string | null;
+    readonly secret: string;
+    readonly receivedAtMs: number;
+  }): Promise<ProviderWebhookEvent>;
 }
 
 // ---------------------------------------------------------------------------
@@ -565,9 +588,11 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * `'0022'` for message_attachments (CAP-050 — one-consume-per-upload
  * via UNIQUE index + BEFORE INSERT trigger), to `'0023'` for per-user message
  * star state (CAP-058), to `'0024'` for one sanitized signature per managed
- * domain (CAP-068), and to `'0025'` for the CAP-069 settings revision seed.
+ * domain (CAP-068), to `'0026'` for the CAP-A1 admin user lifecycle, and to
+ * `'0027'` for provider-neutral webhook event projections, and `'0028'` for
+ * received MIME attachment metadata.
  */
-export const CURRENT_SCHEMA_VERSION = '0025' as const;
+export const CURRENT_SCHEMA_VERSION = '0033' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008
@@ -733,6 +758,28 @@ export const refreshRequestSchema = z.object({
 
 export type RefreshRequest = z.infer<typeof refreshRequestSchema>;
 
+/** Password change required after an admin-created or reset account sign-in. */
+export const changePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(72),
+  newPassword: z.string().min(6).max(30),
+});
+
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
+
+/** Admin-created accounts receive a generated initial password exactly once. */
+export const adminCreateUserRequestSchema = z.object({
+  email: emailAddressSchema,
+  displayName: z.string().max(100).optional(),
+});
+
+export type AdminCreateUserRequest = z.infer<typeof adminCreateUserRequestSchema>;
+
+export const adminUserStatusRequestSchema = z.object({
+  status: z.enum(['active', 'banned', 'deleted']),
+});
+
+export type AdminUserStatusRequest = z.infer<typeof adminUserStatusRequestSchema>;
+
 // ---------------------------------------------------------------------------
 // Mailboxes — CAP-020
 // ---------------------------------------------------------------------------
@@ -878,7 +925,14 @@ const messageStateFlagSchema = z.union([z.literal(0), z.literal(1)]);
  * TEXT compatibility column, but new API inputs and outputs must stay within
  * the five user-visible views.
  */
-export const messageFolderSchema = z.enum(['inbox', 'sent', 'drafts', 'archive', 'trash']);
+export const messageFolderSchema = z.enum([
+  'inbox',
+  'sent',
+  'drafts',
+  'scheduled',
+  'archive',
+  'trash',
+]);
 export type MessageFolder = z.infer<typeof messageFolderSchema>;
 
 /**
@@ -925,7 +979,7 @@ export const messageAttachmentMetadataSchema = z
     id: uuidSchema,
     filename: attachmentFilenameSchema,
     contentType: attachmentContentTypeSchema,
-    sizeBytes: z.number().int().positive(),
+    sizeBytes: z.number().int().nonnegative(),
     disposition: z.enum(['attachment', 'inline']),
     contentId: z.string().nullable(),
   })
@@ -1042,6 +1096,7 @@ export const composeRequestSchema = z
   .object({
     to: z.array(composeRecipientSchema).min(1),
     cc: z.array(composeRecipientSchema).default([]),
+    bcc: z.array(composeRecipientSchema).max(50).default([]),
     subject: z.string().max(998).default(''),
     htmlBody: z.string().max(1_000_000).default(''),
     textBody: z.string().max(1_000_000).default(''),
@@ -1054,6 +1109,7 @@ export const composeRequestSchema = z
     // authorization and collapses every unavailable upload (missing,
     // foreign, expired, already-consumed, KV-missing) into one stable
     // safe error so ownership/lifecycle details never leak.
+    scheduledAt: z.string().datetime({ offset: true }).optional(),
     attachmentUploadIds: z.array(uuidSchema).max(10).default([]),
   })
   .superRefine((value, ctx) => {
@@ -1096,6 +1152,7 @@ export const composeResponseSchema = z.object({
   data: z.object({
     messageId: uuidSchema,
     status: z.literal('queued'),
+    scheduledAt: z.string().datetime().optional(),
   }),
 });
 
@@ -1288,8 +1345,8 @@ export {
 } from './admin/users';
 
 // CAP-066: managed-domain administration wire contracts. The domain
-// response is a strict safe projection; outbound connection details never
-// cross this boundary.
+// response is a strict safe projection; only the selected connection id
+// crosses this boundary, never provider credentials or webhook secrets.
 export {
   managedDomainStatusSchema,
   createManagedDomainRequestSchema,
@@ -1359,3 +1416,26 @@ export {
   type CursorSurface,
   type CursorPayload,
 } from './cursor';
+
+export * from './personal-settings';
+export * from './errors';
+
+// Durable scheduled-send management uses a snapshot token to avoid stale writes.
+export const scheduledSendItemSchema = messageListItemSchema.extend({
+  scheduledAt: z.string().datetime(),
+  revision: z.number().int().nonnegative(),
+});
+export const scheduledSendListSchema = z.object({
+  items: z.array(scheduledSendItemSchema),
+  nextCursor: z.string().nullable(),
+});
+export const changeScheduledSendSchema = z
+  .object({
+    scheduledAt: z.string().datetime({ offset: true }),
+    expectedRevision: z.number().int().nonnegative(),
+  })
+  .strict();
+export const cancelScheduledSendSchema = z
+  .object({ expectedRevision: z.number().int().nonnegative() })
+  .strict();
+export type ScheduledSendItem = z.infer<typeof scheduledSendItemSchema>;

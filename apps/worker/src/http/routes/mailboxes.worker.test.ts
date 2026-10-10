@@ -116,7 +116,7 @@ async function createSession(userId: string): Promise<string> {
     ).bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString()),
   ]);
 
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 15 * 60,
   });
 
@@ -751,7 +751,7 @@ describe('GET /api/v1/mailboxes', () => {
     expect(body.error.code).toBe('PERMISSION_DENIED');
   });
 
-  it('returns empty list when user owns no mailboxes', async () => {
+  it('returns empty list when user has no owned or shared mailboxes', async () => {
     const userId = await createUserWithRole('member');
     const accessToken = await createSession(userId);
 
@@ -768,7 +768,7 @@ describe('GET /api/v1/mailboxes', () => {
     expect(body.data.items).toEqual([]);
   });
 
-  it('returns only owned mailboxes', async () => {
+  it('returns only mailboxes owned by or shared with the user', async () => {
     const user1Id = await createUserWithRole('member');
     const user2Id = await createUserWithRole('administrator');
     const user1Token = await createSession(user1Id);
@@ -828,6 +828,49 @@ describe('GET /api/v1/mailboxes', () => {
     expect(body.data.items).toHaveLength(1);
     expect(body.data.items[0]).toHaveProperty('localPart', 'user1');
     expect(body.data.items[0]).toHaveProperty('ownerUserId', user1Id);
+  });
+
+  it('lists a shared mailbox only after an explicit grant, even for an administrator', async () => {
+    const ownerId = await createUserWithRole('member');
+    const adminId = await createUserWithRole('administrator');
+    const adminToken = await createSession(adminId);
+    const domainId = crypto.randomUUID();
+    const mailboxId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
+         VALUES (?, 'shared.example', 'active', NULL, ?, ?)`,
+      ).bind(domainId, now, now),
+      env.DB.prepare(
+        `INSERT INTO mailboxes (id, domain_id, owner_user_id, local_part, display_name, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'shared', 'Shared', 'active', ?, ?)`,
+      ).bind(mailboxId, domainId, ownerId, now, now),
+    ]);
+
+    const beforeGrant = await SELF.fetch('http://localhost/api/v1/mailboxes', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(beforeGrant.status).toBe(200);
+    expect((await beforeGrant.json()).data.items).toEqual([]);
+
+    await env.DB.prepare(
+      `INSERT INTO mailbox_members (mailbox_id, user_id, role, created_at)
+       VALUES (?, ?, 'viewer', ?)`,
+    )
+      .bind(mailboxId, adminId, now)
+      .run();
+    const afterGrant = await SELF.fetch('http://localhost/api/v1/mailboxes', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(afterGrant.status).toBe(200);
+    expect((await afterGrant.json()).data.items).toEqual([
+      expect.objectContaining({
+        id: mailboxId,
+        address: 'shared@shared.example',
+        ownerUserId: ownerId,
+      }),
+    ]);
   });
 
   it('returns mailboxes with full address', async () => {

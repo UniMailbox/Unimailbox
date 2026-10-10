@@ -9,11 +9,19 @@
 
 import { beforeEach, expect, it, vi, afterEach } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
-import { parseProviderKey } from '@unimailbox/contracts';
+import {
+  parseProviderKey,
+  estimateEmailBytes,
+  OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES,
+} from '@unimailbox/contracts';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
-import type { OutboundProviderAdapter } from '@unimailbox/contracts';
+import type {
+  OutboundProviderAdapter,
+  SendProviderMessage,
+  EditorAssetDescriptor,
+} from '@unimailbox/contracts';
 import { hashPassword, importEncryptionKey, encrypt } from '../../platform/crypto';
-import { getAttachmentByteStore } from '../../platform/cache';
+import { getAttachmentByteStore, getAttachmentObjectStore } from '../../platform/cache';
 import { processOutboundJob } from '../../modules/outbound-mail';
 import { brevoAdapter } from '../../integrations/providers/brevo';
 
@@ -140,7 +148,9 @@ async function createSession(userId: string): Promise<string> {
   )
     .bind(sessionId, userId, refreshTokenHash, Math.floor(Date.now() / 1000) + 86_400, now())
     .run();
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), { expirationTtl: 900 });
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
+    expirationTtl: 900,
+  });
   return accessToken;
 }
 
@@ -191,6 +201,11 @@ async function createActiveProviderConnection(): Promise<string> {
       `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
        VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
     ).bind(connectionId, credentialId, t, t),
+    env.DB.prepare(
+      `UPDATE managed_domains
+          SET outbound_connection_id = ?, updated_at = ?
+        WHERE id = (SELECT id FROM managed_domains ORDER BY created_at ASC, id ASC LIMIT 1)`,
+    ).bind(connectionId, t),
   ]);
   return connectionId;
 }
@@ -451,6 +466,11 @@ it('R-ATTACHMENT-005 + R-ATTACHMENT-006 + R-OUTBOUND-006 + R-AUDIT-001: a single
   // KV bytes still present (CAP-051 owns cleanup, not CAP-050).
   const kvBytes = await env.CACHE.get(`attachment:${upload.uploadId}`);
   expect(kvBytes).not.toBeNull();
+  const persistent = await env.ATTACHMENTS.get(`attachment:${upload.uploadId}`);
+  expect(persistent).not.toBeNull();
+  expect(
+    Array.from(new Uint8Array((await persistent?.arrayBuffer()) ?? new ArrayBuffer(0))),
+  ).toEqual(Array.from(UPLOAD_BYTES_A));
 });
 
 // ---------------------------------------------------------------------------
@@ -1428,4 +1448,208 @@ it('R-ATTACHMENT-006: two message_attachments INSERTs with the same upload_id in
   // The two messages we created above still exist — D1 only rolled
   // back the failed batch, not the earlier (succeeded) batch.
   expect(await rowCount('messages')).toBe(2);
+});
+
+it('R-OUTBOUND-006: over 10 MB converts every legacy attachment, including tiny files, to a final R2 list and replays without duplication', async () => {
+  const ownerId = await createUserWithRole('member', 'owner@example.com');
+  const token = await createSession(ownerId);
+  const domainId = await createDomain();
+  const mailboxId = await createMailbox(domainId, ownerId, 'me');
+  await createActiveProviderConnection();
+  const sizes = [5 * 1024 * 1024, 3 * 1024 * 1024, 3];
+  const uploads = [];
+  for (const [index, size] of sizes.entries())
+    uploads.push(
+      await uploadAttachment(mailboxId, ownerId, new Uint8Array(size).fill(index + 1), {
+        filename: `file-${index}.bin`,
+      }),
+    );
+  const url = `https://example.com/api/v1/mailboxes/${mailboxId}/messages/send`;
+  const init = {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'large-mail-001',
+    },
+    body: JSON.stringify({
+      to: [{ address: 'to@example.com' }],
+      subject: 'Large mail',
+      htmlBody: '<p>Body</p>',
+      textBody: 'Body',
+      attachmentUploadIds: uploads.map((x) => x.uploadId),
+    }),
+  };
+  const response = await SELF.fetch(url, init);
+  expect(response.status, await response.clone().text()).toBe(202);
+  const result = await response.json<{ data: { messageId: string } }>();
+  const replay = await SELF.fetch(url, init);
+  expect(await replay.json()).toEqual(result);
+  expect(await rowCount('editor_assets')).toBe(3);
+  expect(await rowCount('editor_asset_usages')).toBe(3);
+  const message = await env.DB.prepare('SELECT html_body,text_body FROM messages WHERE id=?')
+    .bind(result.data.messageId)
+    .first<{ html_body: string; text_body: string }>();
+  if (!message) throw new Error('Missing stored message');
+  expect(message.html_body).toContain('附件列表（超大附件）');
+  const links = [...message.html_body.matchAll(/href="([^"]+)"/g)].map((x) => x[1] ?? '');
+  expect(links).toHaveLength(3);
+  for (const link of links) {
+    const download = await SELF.fetch(link);
+    expect(download.status).toBe(200);
+    expect(download.headers.get('Content-Disposition')).toContain('attachment;');
+    const bytes = new Uint8Array(await download.arrayBuffer());
+    expect(sizes).toContain(bytes.byteLength);
+    expect(bytes[0]).toBe(sizes.indexOf(bytes.byteLength) + 1);
+    expect(message?.text_body).toContain(link);
+  }
+  const sent: SendProviderMessage[] = [];
+  const job = JSON.parse(queueSendSpy.mock.calls[0]?.[0] as string) as { jobId: string };
+  await processOutboundJob(job.jobId, {
+    db: env.DB,
+    encryptionKey: ENCRYPTION_KEY,
+    attachmentByteStore: getAttachmentByteStore(env),
+    attachmentObjectStore: getAttachmentObjectStore(env),
+    adapter: {
+      key: parseProviderKey('brevo'),
+      validateConnection: async () => {},
+      send: async (_ctx, msg) => {
+        sent.push(msg);
+        return { providerMessageId: 'large-mail-id', acceptedAt: '2026-10-07T00:00:00Z' };
+      },
+    },
+  });
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.attachments).toEqual([]);
+  expect(queueSendSpy).toHaveBeenCalledTimes(1);
+});
+
+it('R-OUTBOUND-006: mixed editor and legacy attachments all move after the signature when their encoded total exceeds 10 MB', async () => {
+  const ownerId = await createUserWithRole('member', 'owner@example.com');
+  const token = await createSession(ownerId);
+  const domainId = await createDomain();
+  const mailboxId = await createMailbox(domainId, ownerId, 'me');
+  await createActiveProviderConnection();
+  await env.DB.prepare(
+    "INSERT INTO domain_signatures (id,domain_id,html_content,text_content,is_enabled) VALUES (?,?,'<p>Signature</p>','Signature',1)",
+  )
+    .bind(crypto.randomUUID(), domainId)
+    .run();
+  const editorResponse = await SELF.fetch(
+    `https://example.com/api/v1/mailboxes/${mailboxId}/editor-assets`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': crypto.randomUUID(),
+        'X-Filename': 'editor.bin',
+        'X-Asset-Kind': 'file',
+        'X-File-Size': String(8 * 1024 * 1024),
+        'Content-Type': 'application/octet-stream',
+      },
+      body: new Uint8Array(8 * 1024 * 1024),
+    },
+  );
+  expect(editorResponse.status).toBe(201);
+  const { data: file } = await editorResponse.json<{ data: EditorAssetDescriptor }>();
+  const legacy = await uploadAttachment(mailboxId, ownerId, new Uint8Array([1]), {
+    filename: 'tiny.bin',
+  });
+  const response = await SELF.fetch(
+    `https://example.com/api/v1/mailboxes/${mailboxId}/messages/send`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': crypto.randomUUID(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: [{ address: 'to@example.com' }],
+        subject: 'Mixed',
+        htmlBody: `<p><a href="${file.url}">editor.bin</a></p><p>Body</p>`,
+        textBody: `editor.bin\neditor.bin: ${file.url}\nBody`,
+        attachmentUploadIds: [legacy.uploadId],
+      }),
+    },
+  );
+  expect(response.status, await response.clone().text()).toBe(202);
+  const { data } = await response.json<{ data: { messageId: string } }>();
+  const message = await env.DB.prepare('SELECT html_body,text_body FROM messages WHERE id=?')
+    .bind(data.messageId)
+    .first<{ html_body: string; text_body: string }>();
+  if (!message) throw new Error('Missing stored message');
+  expect(message.html_body.indexOf(file.url)).toBeGreaterThan(
+    message.html_body.indexOf('Signature'),
+  );
+  expect(message.text_body.indexOf(file.url)).toBeGreaterThan(
+    message.text_body.indexOf('Signature'),
+  );
+  expect(message.html_body.split(file.url)).toHaveLength(2);
+  expect(message.html_body).toContain('tiny.bin');
+  expect(message.html_body).toContain('附件列表（超大附件）');
+});
+
+it('R-OUTBOUND-006: final attachment-list bytes are included at the 10 MB boundary', async () => {
+  const ownerId = await createUserWithRole('member', 'owner@example.com');
+  const token = await createSession(ownerId);
+  const domainId = await createDomain();
+  const mailboxId = await createMailbox(domainId, ownerId, 'me');
+  await createActiveProviderConnection();
+  const response = await SELF.fetch(
+    `https://example.com/api/v1/mailboxes/${mailboxId}/editor-assets`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': crypto.randomUUID(),
+        'X-Filename': 'tiny.bin',
+        'X-Asset-Kind': 'file',
+        'X-File-Size': '1',
+        'Content-Type': 'application/octet-stream',
+      },
+      body: new Uint8Array([1]),
+    },
+  );
+  expect(response.status).toBe(201);
+  const { data: file } = await response.json<{ data: EditorAssetDescriptor }>();
+  const html = `<p><a href="${file.url}">tiny.bin</a></p><p>End</p>`;
+  const text = `tiny.bin: ${file.url}\nEnd`;
+  const firstSize = 5 * 1024 * 1024;
+  const estimate = (secondSize: number) =>
+    estimateEmailBytes(html, text, 'Boundary', [firstSize, secondSize, 1]);
+  let secondSize = Math.floor(
+    (OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES - estimate(1)) / ((4 / 3) * 1.04),
+  );
+  while (estimate(secondSize) > OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES) secondSize--;
+  while (estimate(secondSize + 1) <= OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES) secondSize++;
+  expect(estimate(secondSize)).toBeLessThanOrEqual(OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES);
+  const first = await uploadAttachment(mailboxId, ownerId, new Uint8Array(firstSize), {
+    filename: 'first.bin',
+  });
+  const second = await uploadAttachment(mailboxId, ownerId, new Uint8Array(secondSize), {
+    filename: 'second.bin',
+  });
+  const sent = await SELF.fetch(`https://example.com/api/v1/mailboxes/${mailboxId}/messages/send`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': crypto.randomUUID(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to: [{ address: 'to@example.com' }],
+      subject: 'Boundary',
+      htmlBody: html,
+      textBody: text,
+      attachmentUploadIds: [first.uploadId, second.uploadId],
+    }),
+  });
+  expect(sent.status, await sent.clone().text()).toBe(202);
+  const { data } = await sent.json<{ data: { messageId: string } }>();
+  const message = await env.DB.prepare('SELECT html_body FROM messages WHERE id=?')
+    .bind(data.messageId)
+    .first<{ html_body: string }>();
+  expect(message?.html_body).toContain('附件列表（超大附件）');
+  expect(await rowCount('editor_assets')).toBe(3);
 });

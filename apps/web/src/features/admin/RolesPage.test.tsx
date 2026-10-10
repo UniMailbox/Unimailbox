@@ -76,7 +76,7 @@ function mountRolesPage(
   const calls: Array<{ url: string; method: string; body?: string }> = [];
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       return jsonResponse({
         data: {
           user: { id: SESSION.userId, email: SESSION.email, name: SESSION.displayName },
@@ -147,9 +147,10 @@ describe('RolesPage (CAP-067)', () => {
     expect(within(systemRole).queryByRole('button')).not.toBeInTheDocument();
 
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'New role' }));
     await user.type(screen.getByLabelText('Role name'), 'Sender');
     await user.type(screen.getByLabelText('Role description'), 'Can send');
-    await user.click(screen.getByLabelText('Send messages'));
+    await user.click(screen.getByRole('checkbox', { name: 'Send messages' }));
     await user.click(screen.getByRole('button', { name: 'Create role' }));
 
     await waitFor(() =>
@@ -180,15 +181,17 @@ describe('RolesPage (CAP-067)', () => {
     await waitFor(() => expect(screen.getByTestId(`role-form-${role.id}`)).toBeInTheDocument());
     const user = userEvent.setup();
     const form = screen.getByTestId(`role-form-${role.id}`);
+    await user.click(screen.getByRole('button', { name: 'Edit Support agent' }));
     const name = screen.getByLabelText('Edit Support agent role name');
     await user.clear(name);
     await user.type(name, 'Support v2');
-    await user.click(screen.getByLabelText('Edit Support agent: Send messages'));
+    await user.click(screen.getByRole('checkbox', { name: 'Edit Support agent: Send messages' }));
     await user.click(screen.getByRole('button', { name: 'Save Support agent' }));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Delete Support v2' })).toBeInTheDocument(),
     );
     expect(form).toBeInTheDocument();
+    expect(screen.getByTestId('role-success')).toHaveTextContent('Saved Support v2.');
 
     await user.click(screen.getByRole('button', { name: 'Delete Support v2' }));
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
@@ -202,6 +205,24 @@ describe('RolesPage (CAP-067)', () => {
     );
     expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
     expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
+    expect(screen.getByTestId('role-success')).toHaveTextContent('Deleted Support v2.');
+  });
+
+  it('keeps the list compact and cancels an editor without changing the role', async () => {
+    const { calls } = mountRolesPage([() => listResponse()]);
+    expect(await screen.findByTestId(`role-form-${customRole().id}`)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Edit Support agent role name')).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    const edit = screen.getByRole('button', { name: 'Edit Support agent' });
+    await user.click(edit);
+    await user.clear(screen.getByLabelText('Edit Support agent role name'));
+    await user.type(screen.getByLabelText('Edit Support agent role name'), 'Unsaved');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
+    expect(edit).toHaveFocus();
+    await user.click(edit);
+    expect(screen.getByLabelText('Edit Support agent role name')).toHaveValue('Support agent');
   });
 
   it('shows edit validation failures without sending a mutation', async () => {
@@ -209,6 +230,7 @@ describe('RolesPage (CAP-067)', () => {
     const { calls } = mountRolesPage([() => listResponse()]);
     await waitFor(() => expect(screen.getByTestId(`role-form-${role.id}`)).toBeInTheDocument());
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Edit Support agent' }));
     await user.clear(screen.getByLabelText('Edit Support agent role name'));
     await user.click(screen.getByRole('button', { name: 'Save Support agent' }));
     expect(screen.getByTestId(`role-update-error-${role.id}`)).toHaveTextContent(
@@ -235,6 +257,7 @@ describe('RolesPage (CAP-067)', () => {
     ]);
     await waitFor(() => expect(screen.getByTestId('admin-roles-page')).toBeInTheDocument());
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'New role' }));
     await user.type(screen.getByLabelText('Role name'), 'Sender');
     await user.type(screen.getByLabelText('Role description'), 'Can send');
     await user.click(screen.getByRole('button', { name: 'Create role' }));

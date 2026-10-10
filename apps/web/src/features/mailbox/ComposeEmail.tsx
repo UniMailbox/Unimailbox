@@ -1,41 +1,13 @@
-// apps/web — ComposeEmail (CAP-044 Slice 1 / AC 1–7).
-//
-// The composer at /mailbox/:mailboxId/compose. Plain-text only
-// (D-CAP-044-B): `textBody` is authored, `htmlBody` is always ''.
-// Send-only — no draft persistence (D-CAP-044-A).
-//
-// Form (React Hook Form + zod resolver, AC 2):
-//   - To — required, ≥1 valid email; comma-separated input becomes an
-//     array. Cc — optional, 0+ valid emails.
-//   - Subject — required, non-empty, ≤ 998 chars (RFC 5322 subject cap,
-//     same bound as composeRequestSchema).
-//   - Body — plain text, ≤ 1,000,000 chars, may be empty.
-//   - Every field carries a programmatic <label>; errors render through
-//     aria-describedby + role="alert" (the shared Input primitive does
-//     this for text fields; the body textarea mirrors it locally — a
-//     generic Textarea primitive waits for a second consumer).
-//   - `shouldFocusError` (RHF default, set explicitly) focuses the first
-//     erroring field on a submitted-but-invalid form.
-//
-// Emails are `.trim().toLowerCase()`d before submit (R-DATA-001) — the
-// same normalisation the contracts emailAddressSchema applies.
-//
-// Reply mode (AC 5 + AC 6): when `replyToMessageId` is set, the parent
-// detail is loaded through the existing `messageDetailQuery` and the
-// form is prefilled from `buildReplyContext` (D-CAP-044-C, pure). The
-// form mounts only after the parent resolves, so `defaultValues` are
-// stable; the `key` remounts it per parent id.
-//
-// Send lifecycle (AC 4): submit disabled while pending; on 202 the form
-// resets, a role="status" confirmation shows the returned messageId,
-// and the mailbox's messages queries are invalidated (in the mutation).
-// A captured reply context clears with the reset (fix d) so the blank
-// follow-up composer sends a fresh message. On error the form KEEPS its
-// values and the stable error code + message render inline; retry is
-// the user clicking Send again — a new `mutate` call with a fresh
-// Idempotency-Key, never an auto-replay.
+import { Clock } from 'lucide-react';
+import { ScheduleSendDialog } from './ScheduleSendDialog';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
+import { useT } from '../../infrastructure/i18n/locale';
+import { errorMessage } from '../../infrastructure/i18n/error-messages';
+import { useComposer } from './compose-window-context';
+import { useInAppShell } from '../../components/layouts/AppShell';
+import { RichTextEditor } from '../../components/editor/RichTextEditor';
+import { EDITOR_BODY_MAX_BYTES } from '@unimailbox/contracts';
 import { useState, type ReactElement } from 'react';
-import { Link } from '@tanstack/react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -48,7 +20,7 @@ import { messageDetailQuery, useComposeMessageMutation } from './mailbox-queries
 import { Card } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
-import { Spinner } from '../../components/ui/Spinner';
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { LogoutButton } from '../auth/LogoutButton';
 
@@ -67,7 +39,7 @@ function rejectInvalidEmailToken(value: string, ctx: z.RefinementCtx): void {
     if (!parsed.success) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `"${token}" is not a valid email address.`,
+        message: 'INVALID_EMAIL',
       });
       return;
     }
@@ -81,7 +53,7 @@ const toListSchema = z.string().superRefine((value, ctx) => {
   if (splitEmailList(value).length === 0) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'At least one email address is required.',
+      message: 'FIELD_REQUIRED',
     });
     return;
   }
@@ -90,17 +62,14 @@ const toListSchema = z.string().superRefine((value, ctx) => {
 
 const ccListSchema = z.string().superRefine(rejectInvalidEmailToken);
 
-const subjectSchema = z
-  .string()
-  .trim()
-  .min(1, 'Subject is required.')
-  .max(998, 'Subject must be at most 998 characters.');
+const subjectSchema = z.string().trim().min(1, 'FIELD_REQUIRED').max(998, 'SUBJECT_TOO_LONG');
 
-const bodySchema = z.string().max(1_000_000, 'Body must be at most 1,000,000 characters.');
+const bodySchema = z.string().max(1_000_000, 'BODY_TOO_LONG');
 
 const composeFormSchema = z.object({
   to: toListSchema,
   cc: ccListSchema,
+  bcc: ccListSchema,
   subject: subjectSchema,
   body: bodySchema,
 });
@@ -110,6 +79,7 @@ type ComposeFormFields = z.infer<typeof composeFormSchema>;
 const EMPTY_FORM_VALUES: ComposeFormFields = {
   to: '',
   cc: '',
+  bcc: '',
   subject: '',
   body: '',
 };
@@ -140,7 +110,7 @@ export function ComposeEmail({ mailboxId, replyToMessageId }: ComposeEmailProps)
 function ComposeSkeleton(): ReactElement {
   return (
     <main className="mailbox-shell" data-testid="compose-skeleton">
-      <p className="mailbox-loading">Loading…</p>
+      <ContentSkeleton variant="compose" />
     </main>
   );
 }
@@ -156,6 +126,7 @@ interface ReplyComposerProps {
  * so the RHF `defaultValues` never change under a mounted form.
  */
 function ReplyComposer({ mailboxId, parentMessageId }: ReplyComposerProps): ReactElement {
+  const t = useT();
   const parentQuery = messageDetailQuery(mailboxId, parentMessageId);
 
   // Fix pass (c): data-first ordering. `staleTime: 0` means mounting
@@ -178,6 +149,7 @@ function ReplyComposer({ mailboxId, parentMessageId }: ReplyComposerProps): Reac
         defaultValues={{
           to: prefill.to.join(', '),
           cc: '',
+          bcc: '',
           subject: prefill.subject,
           body: '',
         }}
@@ -193,14 +165,17 @@ function ReplyComposer({ mailboxId, parentMessageId }: ReplyComposerProps): Reac
   if (parentQuery.error !== null) {
     return (
       <main className="mailbox-shell" data-testid="compose-parent-error">
-        <Card title="Could not load the message" description="The reply cannot be pre-filled.">
+        <Card
+          title={t('Could not load the message')}
+          description={t('The reply cannot be pre-filled.')}
+        >
           <ErrorPanel
             message={parentQuery.error.message}
             code={parentQuery.error.code}
             onRetry={() => {
               void parentQuery.refetch();
             }}
-            retryLabel="Retry"
+            retryLabel={t('Retry')}
             testId="compose-parent-error-panel"
           />
         </Card>
@@ -220,8 +195,12 @@ interface ComposeFormProps {
 }
 
 function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProps): ReactElement {
-  const sessionQuery = authSessionQuery();
+  const t = useT();
+  const composer = useComposer();
+  const inShell = useInAppShell() || Boolean(composer);
   const composeMutation = useComposeMessageMutation();
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduledTime, setScheduledTime] = useState<string | null>(null);
   const [sentMessageId, setSentMessageId] = useState<string | null>(null);
   // Fix pass (d): the reply context is captured as STATE at mount, not
   // read live from the prop. After a successful send the form resets to
@@ -229,11 +208,16 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
   // from that blank form would silently carry the OLD inReplyTo /
   // references into an unrelated message.
   const [activeReplyContext, setActiveReplyContext] = useState(replyContext);
+  const [htmlBody, setHtmlBody] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [showCc, setShowCc] = useState(Boolean(defaultValues.cc));
+  const [showBcc, setShowBcc] = useState(Boolean(defaultValues.bcc));
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<ComposeFormFields>({
     resolver: zodResolver(composeFormSchema),
@@ -243,27 +227,33 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
     shouldFocusError: true,
   });
 
-  const onSubmit = handleSubmit((values) => {
+  const submit = (values: ComposeFormFields, scheduledAt?: string) => {
     // Fix pass (e): the click→re-render race and RHF's async resolver
     // window can admit a second submit before the disabled button
     // re-renders — two mutate calls would mint two fresh
     // Idempotency-Keys and duplicate the send. Bail while one is in
     // flight.
-    if (composeMutation.isPending) {
+    if (
+      composeMutation.isPending ||
+      uploading ||
+      new TextEncoder().encode(htmlBody).byteLength > EDITOR_BODY_MAX_BYTES
+    ) {
       return;
     }
     setSentMessageId(null);
     composeMutation.mutate(
       {
         mailboxId,
+        ...(scheduledAt ? { scheduledAt } : {}),
         // R-DATA-001: normalise before submit. The schema already
         // validated every token; tokens are trimmed by splitEmailList.
         to: splitEmailList(values.to).map((address) => address.toLowerCase()),
         cc: splitEmailList(values.cc).map((address) => address.toLowerCase()),
+        bcc: splitEmailList(values.bcc).map((address) => address.toLowerCase()),
         // z.string().trim() on the schema output gives the trimmed subject.
         subject: values.subject,
         textBody: values.body,
-        htmlBody: '',
+        htmlBody,
         ...(activeReplyContext !== undefined
           ? {
               inReplyTo: activeReplyContext.inReplyTo,
@@ -274,18 +264,22 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
       {
         onSuccess: (messageId) => {
           setSentMessageId(messageId);
+          setScheduledTime(scheduledAt ?? null);
           // AC 4: reset to a blank composer (fresh or reply alike — the
           // sent reply is gone; the confirmation carries the messageId).
           // Fix pass (d): the cleared reply context degrades the titles
           // to the Compose wording and drops the threading headers.
           setActiveReplyContext(undefined);
           reset(EMPTY_FORM_VALUES);
+          setHtmlBody('');
+          composer?.sent();
         },
       },
     );
-  });
+  };
+  const onSubmit = handleSubmit((values) => submit(values));
 
-  const pending = composeMutation.isPending;
+  const pending = composeMutation.isPending || uploading;
   // Every ApiClient rejection is an ApiError; anything else narrows to a
   // generic code (InboxListPage's F8 pattern).
   const mutationError = composeMutation.error;
@@ -298,29 +292,30 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
 
   return (
     <main className="mailbox-shell" data-testid="compose-page">
-      <header className="mailbox-header">
-        {/* Fix pass (d): the title follows the CLEARED context after a
-            reply send — the reset form is a fresh Compose, not a reply. */}
-        <h1 className="mailbox-title">{activeReplyContext !== undefined ? 'Reply' : 'Compose'}</h1>
-        <div className="mailbox-header-meta">
-          <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
+      {!inShell ? (
+        <header className="mailbox-header">
+          <h1 className="mailbox-title">{activeReplyContext ? t('Reply') : t('Compose')}</h1>
           <LogoutButton />
-        </div>
-      </header>
-
-      <p className="message-detail-back">
-        <Link to="/mailbox/$mailboxId" params={{ mailboxId }}>
-          Back to inbox
-        </Link>
-      </p>
-
+        </header>
+      ) : null}
       <Card
-        title={activeReplyContext !== undefined ? 'Reply to message' : 'New message'}
-        description="Plain-text message. Sending queues it for delivery."
+        title={activeReplyContext !== undefined ? t('Reply to message') : t('New message')}
+        description={t(
+          'Your signature is added automatically. Attachments over 10 MB are sent as download links.',
+        )}
       >
         {sentMessageId !== null ? (
           <p className="compose-confirmation" role="status" data-testid="compose-confirmation">
-            Message queued for sending (ID {sentMessageId}).
+            {scheduledTime ? (
+              <>
+                {t('Scheduled for')} <LocalDateTime value={scheduledTime} />
+              </>
+            ) : (
+              <>
+                {t('Message queued for sending (ID ')}
+                {sentMessageId}).
+              </>
+            )}
           </p>
         ) : null}
 
@@ -331,50 +326,82 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
           <Input
             id="compose-to"
             type="text"
-            label="To"
-            help="One or more email addresses, comma-separated."
+            label={t('To')}
+            placeholder={t('Recipients, separated by commas')}
+            className="pe-24"
+            endAdornment={
+              <>
+                {!showCc ? (
+                  <button
+                    type="button"
+                    className="compose-recipient-toggle"
+                    onClick={() => setShowCc(true)}
+                    aria-label={t('Add Cc')}
+                    aria-expanded={showCc}
+                  >
+                    {t('Cc')}
+                  </button>
+                ) : null}
+                {!showBcc ? (
+                  <button
+                    type="button"
+                    className="compose-recipient-toggle"
+                    onClick={() => setShowBcc(true)}
+                    aria-label={t('Add Bcc')}
+                    aria-expanded={showBcc}
+                  >
+                    {t('Bcc')}
+                  </button>
+                ) : null}
+              </>
+            }
             error={errors.to?.message}
             data-testid="compose-to"
             {...register('to')}
           />
-          <Input
-            id="compose-cc"
-            type="text"
-            label="Cc"
-            help="Optional. Comma-separated email addresses."
-            error={errors.cc?.message}
-            data-testid="compose-cc"
-            {...register('cc')}
-          />
+          {showCc ? (
+            <Input
+              id="compose-cc"
+              type="text"
+              label={t('Cc')}
+              placeholder={t('Cc recipients, separated by commas')}
+              error={errors.cc?.message}
+              data-testid="compose-cc"
+              {...register('cc')}
+            />
+          ) : null}
+          {showBcc ? (
+            <Input
+              id="compose-bcc"
+              type="text"
+              label={t('Bcc')}
+              placeholder={t('Blind recipients, separated by commas')}
+              error={errors.bcc?.message}
+              data-testid="compose-bcc"
+              {...register('bcc')}
+            />
+          ) : null}
           <Input
             id="compose-subject"
             type="text"
-            label="Subject"
+            label={t('Subject')}
             error={errors.subject?.message}
             data-testid="compose-subject"
             {...register('subject')}
           />
-          {/* No shared Textarea primitive exists; this mirrors Input's
-              label / aria-describedby / role="alert" wiring locally. */}
-          <div className="wizard-field">
-            <label className="input-label" htmlFor="compose-body">
-              Body
-            </label>
-            <textarea
-              id="compose-body"
-              className="input compose-body"
-              rows={12}
-              aria-invalid={errors.body !== undefined ? true : undefined}
-              aria-describedby={errors.body !== undefined ? 'compose-body-error' : undefined}
-              data-testid="compose-body"
-              {...register('body')}
-            />
-            {errors.body !== undefined ? (
-              <span id="compose-body-error" className="input-error" role="alert">
-                {errors.body.message}
-              </span>
-            ) : null}
-          </div>
+          <RichTextEditor
+            id="compose-body"
+            label={t('Body')}
+            value={htmlBody}
+            onChange={(html, text) => {
+              setHtmlBody(html);
+              setValue('body', text, { shouldDirty: true, shouldValidate: true });
+            }}
+            scope={{ mailboxId }}
+            disabled={composeMutation.isPending}
+            onBusyChange={setUploading}
+            error={errors.body?.message ? errorMessage(errors.body.message) : undefined}
+          />
 
           {/* AC 4: the stable error code + message render inline; no
               auto-retry — the user edits and clicks Send again. */}
@@ -390,15 +417,37 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
             <Button
               type="submit"
               variant="primary"
-              disabled={pending}
-              aria-busy={pending}
+              disabled={
+                pending || new TextEncoder().encode(htmlBody).byteLength > EDITOR_BODY_MAX_BYTES
+              }
+              loading={pending}
               data-testid="compose-submit"
             >
-              {pending ? <Spinner /> : 'Send'}
+              {t('Send')}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pending}
+              onClick={() => setScheduling(true)}
+              aria-label={t('Schedule send')}
+            >
+              <Clock className="size-4" />
+              {t('Schedule send')}
             </Button>
           </div>
         </form>
       </Card>
+      {scheduling ? (
+        <ScheduleSendDialog
+          open
+          onClose={() => setScheduling(false)}
+          onConfirm={(time) => {
+            setScheduling(false);
+            void handleSubmit((values) => submit(values, time))();
+          }}
+        />
+      ) : null}
     </main>
   );
 }

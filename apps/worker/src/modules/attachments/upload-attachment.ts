@@ -29,7 +29,6 @@ export interface UploadAttachmentInput {
   readonly actorUserId: string;
   readonly mailboxId: string;
   readonly idempotencyKey: string;
-  readonly isAdmin: boolean;
   readonly requestId: string | null;
   readonly metadata: AttachmentUploadMetadata;
   readonly bytes: ArrayBuffer;
@@ -95,7 +94,7 @@ export async function uploadAttachment(
   const ids = dependencies.ids ?? systemIds;
   const clock = dependencies.clock ?? systemClock;
 
-  await assertCan(db, input.actorUserId, input.mailboxId, 'send', input.isAdmin);
+  await assertCan(db, input.actorUserId, input.mailboxId, 'send');
 
   if (input.bytes.byteLength === 0) {
     throw new DomainError({

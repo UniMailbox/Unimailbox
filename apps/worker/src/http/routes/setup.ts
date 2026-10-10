@@ -26,6 +26,7 @@ import {
   getCloudflareDashboardLink,
   verifyCloudflareEmailRouting,
   startInboundSmokeTest,
+  readInboundSmokeTestStatus,
   checkInboundSmokeTest,
   setupBrevo,
   runOutboundSmokeTest,
@@ -488,6 +489,12 @@ export function setupRoutes(): Hono<AppEnv> {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
+  });
+
+  routes.get('/inbound-smoke-test/check', setupSession, async (c) => {
+    const result = await readInboundSmokeTestStatus(c.env.CACHE);
+    c.header('Cache-Control', 'no-store');
+    return c.json({ data: result });
   });
 
   // POST /inbound-smoke-test/check — session-protected endpoint that checks whether

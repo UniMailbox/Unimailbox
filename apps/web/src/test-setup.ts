@@ -10,3 +10,19 @@ import { cleanup } from '@testing-library/react';
 afterEach(() => {
   cleanup();
 });
+
+// happy-dom has no physical pointer capture or layout scrolling. Radix Select
+// uses these browser APIs; real interaction/layout is also checked in staging.
+for (const name of [
+  'hasPointerCapture',
+  'setPointerCapture',
+  'releasePointerCapture',
+  'scrollIntoView',
+] as const) {
+  if (!(name in HTMLElement.prototype)) {
+    Object.defineProperty(HTMLElement.prototype, name, {
+      configurable: true,
+      value: name === 'hasPointerCapture' ? () => false : () => undefined,
+    });
+  }
+}

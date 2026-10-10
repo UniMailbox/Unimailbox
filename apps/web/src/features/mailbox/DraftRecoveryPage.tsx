@@ -1,10 +1,22 @@
+import { Spinner } from '../../components/ui/Spinner';
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { Textarea } from '../../components/ui/shadcn/textarea';
 // apps/web — mailbox-scoped editor for an existing draft.
 //
 // The server response remains the initial authority. A local CAP-061 copy is
 // selected only after the user explicitly chooses recovery; edits then use a
 // short client-side debounce for both local durability and the existing
 // optimistic-concurrency PATCH route.
-import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from 'react';
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactElement,
+} from 'react';
+import { getRouterContext, Link } from '@tanstack/react-router';
 import {
   emailAddressSchema,
   type DraftResponse,
@@ -35,6 +47,24 @@ export interface DraftRecoveryPageProps {
 }
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
+
+function DraftBackLink({ mailboxId }: { readonly mailboxId: string }): ReactElement {
+  const t = useT();
+  const router = useContext(getRouterContext());
+  if (router === null) {
+    // The page is also mounted in focused unit tests without a RouterProvider.
+    // Keep the same URL as a plain anchor in that harness; production renders
+    // the router Link and therefore stays within the SPA.
+    return (
+      <a href={`/mailbox/${encodeURIComponent(mailboxId)}?folder=drafts`}>{t('Back to drafts')}</a>
+    );
+  }
+  return (
+    <Link to="/mailbox/$mailboxId" params={{ mailboxId }} search={{ folder: 'drafts' }}>
+      {t('Back to drafts')}
+    </Link>
+  );
+}
 
 interface DraftEditorContent {
   readonly subject: string;
@@ -126,6 +156,7 @@ function errorForUnknown(value: unknown, fallback: string): ApiError {
 }
 
 export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps): ReactElement {
+  const t = useT();
   const sessionQuery = authSessionQuery();
   const query = draftQuery(mailboxId, draftId);
   const updateMutation = useUpdateDraftMutation();
@@ -270,7 +301,7 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
   if (sessionQuery.data === undefined) {
     return (
       <main className="mailbox-shell" data-testid="draft-recovery-loading">
-        <p className="mailbox-loading">Loading draft…</p>
+        <ContentSkeleton variant="compose" />
       </main>
     );
   }
@@ -283,14 +314,17 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
   if (apiError !== null && query.data === undefined) {
     return (
       <main className="mailbox-shell" data-testid="draft-recovery-error">
-        <Card title="Could not load draft" description="The draft is unavailable right now.">
+        <Card
+          title={t('Could not load draft')}
+          description={t('The draft is unavailable right now.')}
+        >
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
             onRetry={() => {
               void query.refetch();
             }}
-            retryLabel="Retry"
+            retryLabel={t('Retry')}
             testId="draft-recovery-error-panel"
           />
         </Card>
@@ -303,7 +337,10 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
   ) {
     return (
       <main className="mailbox-shell" data-testid="draft-recovery-error">
-        <Card title="Could not load draft" description="The draft is unavailable right now.">
+        <Card
+          title={t('Could not load draft')}
+          description={t('The draft is unavailable right now.')}
+        >
           <ErrorPanel message="Draft not found" code="MESSAGE_NOT_FOUND" />
         </Card>
       </main>
@@ -312,14 +349,17 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
   if (query.data === undefined || localCopy === undefined || content === null) {
     return (
       <main className="mailbox-shell" data-testid="draft-recovery-loading">
-        <p className="mailbox-loading">Loading draft…</p>
+        <ContentSkeleton variant="compose" />
       </main>
     );
   }
   if (cacheError !== null) {
     return (
       <main className="mailbox-shell" data-testid="draft-recovery-error">
-        <Card title="Could not load local recovery" description="The server draft is unchanged.">
+        <Card
+          title={t('Could not load local recovery')}
+          description={t('The server draft is unchanged.')}
+        >
           <ErrorPanel
             message={cacheError.message}
             code="DRAFT_CACHE_ERROR"
@@ -327,7 +367,7 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
               setCacheError(null);
               setLocalCopy(null);
             }}
-            retryLabel="Use server draft"
+            retryLabel={t('Use server draft')}
             testId="draft-cache-error-panel"
           />
         </Card>
@@ -555,12 +595,12 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
   return (
     <main className="mailbox-shell" data-testid="draft-recovery-page">
       <p className="message-detail-back">
-        <a href={`/mailbox/${encodeURIComponent(mailboxId)}?folder=drafts`}>Back to drafts</a>
+        <DraftBackLink mailboxId={mailboxId} />
       </p>
-      <Card title="Draft" description="Changes are saved automatically to this draft.">
+      <Card title={t('Draft')} description={t('Changes are saved automatically to this draft.')}>
         {!hasEdited && recovery === 'local-ahead' ? (
           <div role="status" data-testid="draft-local-ahead">
-            <p>Unsaved changes are available on this device.</p>
+            <p>{t('Unsaved changes are available on this device.')}</p>
             <button
               type="button"
               onClick={() => {
@@ -572,18 +612,18 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
               }}
               data-testid="recover-local"
             >
-              Recover local copy
+              {t('Recover local copy')}
             </button>
             <button type="button" onClick={loadServer} data-testid="load-server">
-              Load server version
+              {t('Load server version')}
             </button>
           </div>
         ) : null}
         {!hasEdited && recovery === 'server-changed' ? (
           <div role="alert" data-testid="draft-server-changed">
-            <p>The server version of this draft has changed.</p>
+            <p>{t('The server version of this draft has changed.')}</p>
             <button type="button" onClick={loadServer} data-testid="load-server">
-              Load server version
+              {t('Load server version')}
             </button>
           </div>
         ) : null}
@@ -593,12 +633,18 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
           </p>
         ) : null}
         {saveState === 'saving' ? (
-          <p role="status" data-testid="draft-save-state">
-            Saving…
+          <p
+            role="status"
+            aria-busy="true"
+            className="flex items-center gap-2"
+            data-testid="draft-save-state"
+          >
+            <Spinner decorative />
+            {t('Saving…')}
           </p>
         ) : saveState === 'saved' ? (
           <p role="status" data-testid="draft-save-state">
-            Saved
+            {t('Saved')}
           </p>
         ) : null}
         {saveError !== null ? (
@@ -606,20 +652,20 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
             message={saveError.message}
             code={saveError.code}
             {...(saveState === 'error' ? { onRetry: retrySave } : {})}
-            retryLabel="Retry save"
+            retryLabel={t('Retry save')}
             testId="draft-save-error"
           />
         ) : null}
         {saveState === 'conflict' ? (
           <div role="alert" data-testid="draft-save-conflict">
-            <p>A newer server version exists. Reload it before continuing.</p>
+            <p>{t('A newer server version exists. Reload it before continuing.')}</p>
             <Button
               type="button"
               variant="secondary"
               onClick={loadServer}
               data-testid="draft-conflict-reload"
             >
-              Load newer server version
+              {t('Load newer server version')}
             </Button>
           </div>
         ) : null}
@@ -631,8 +677,8 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
           <Input
             id="draft-to"
             type="text"
-            label="To"
-            help="One or more email addresses, comma-separated."
+            label={t('To')}
+            help={t('One or more email addresses, comma-separated.')}
             value={content.to}
             onChange={updateField('to')}
             disabled={
@@ -646,8 +692,8 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
           <Input
             id="draft-cc"
             type="text"
-            label="Cc"
-            help="Optional. Comma-separated email addresses."
+            label={t('Cc')}
+            help={t('Optional. Comma-separated email addresses.')}
             value={content.cc}
             onChange={updateField('cc')}
             disabled={
@@ -661,8 +707,8 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
           <Input
             id="draft-bcc"
             type="text"
-            label="Bcc"
-            help="Optional. Comma-separated email addresses."
+            label={t('Bcc')}
+            help={t('Optional. Comma-separated email addresses.')}
             value={content.bcc}
             onChange={updateField('bcc')}
             disabled={
@@ -676,7 +722,7 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
           <Input
             id="draft-subject"
             type="text"
-            label="Subject"
+            label={t('Subject')}
             value={content.subject}
             onChange={updateField('subject')}
             disabled={
@@ -689,9 +735,9 @@ export function DraftRecoveryPage({ mailboxId, draftId }: DraftRecoveryPageProps
           />
           <div className="wizard-field">
             <label className="input-label" htmlFor="draft-body">
-              Body
+              {t('Body')}
             </label>
-            <textarea
+            <Textarea
               id="draft-body"
               className="input compose-body"
               rows={12}

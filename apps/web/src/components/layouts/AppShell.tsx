@@ -1,8 +1,15 @@
+import { InboxListSkeleton } from '../../features/mailbox/InboxListSkeleton';
+import { MailboxListSkeleton } from '../../features/mailbox/MailboxListSkeleton';
+import { MessageDetailSkeleton } from '../../features/mailbox/MessageDetailSkeleton';
+import { ContentSkeleton } from '../ui/ContentSkeleton';
+import { Skeleton } from '../ui/shadcn/skeleton';
+import { useT } from '../../infrastructure/i18n/locale';
 /* Layout adapted from satnaing/shadcn-admin authenticated-layout/app-sidebar/header/nav-group/nav-user.
  * e16c87f213a5ba5e45964e9b67c792105ec74d26; MIT, Copyright (c) 2024 Sat Naing. */
 import {
   Suspense,
   useEffect,
+  useState,
   createContext,
   useContext,
   type ReactElement,
@@ -17,6 +24,7 @@ import {
   FilePenLine,
   Globe,
   Inbox,
+  Clock,
   LayoutDashboard,
   Mail,
   Send,
@@ -32,17 +40,17 @@ import {
   Settings2,
 } from 'lucide-react';
 import { authSessionQuery } from '../../features/auth/auth-queries';
-import { LogoutButton } from '../../features/auth/LogoutButton';
+import { QuickSettings, UserAvatar } from '../../features/settings/QuickSettings';
+import { AppearanceControls } from '../../features/settings/AppearanceControls';
+import { usePersonalSettings } from '../../features/settings/personal-settings-context';
 import {
   rememberMailbox,
   selectDefaultMailbox,
 } from '../../infrastructure/preferences/default-mailbox';
 import { mailboxListQuery } from '../../features/mailbox/mailbox-queries';
 import { AppNav } from '../AppNav';
-import { ThemeSwitch } from '../ThemeSwitch';
+import { useComposer } from '../../features/mailbox/compose-window-context';
 import { Button } from '../ui/shadcn/button';
-import { Avatar, AvatarFallback } from '../ui/shadcn/avatar';
-import { Separator } from '../ui/shadcn/separator';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,7 +64,6 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
@@ -131,20 +138,36 @@ const folders = [
   { key: 'inbox', label: 'Inbox', icon: Inbox },
   { key: 'sent', label: 'Sent', icon: Send },
   { key: 'drafts', label: 'Drafts', icon: FilePenLine },
+  { key: 'scheduled', label: 'Scheduled', icon: Clock },
   { key: 'archive', label: 'Archive', icon: Archive },
   { key: 'trash', label: 'Trash', icon: Trash2 },
 ] as const;
-function Navigation({ admin }: { admin: boolean }): ReactElement {
+function Navigation({
+  admin,
+  openSettings,
+}: {
+  admin: boolean;
+  openSettings: () => void;
+}): ReactElement {
+  const t = useT();
   const { setOpenMobile, isMobile } = useSidebar();
   const pathname = useLocation({ select: (location) => location.pathname });
   const search = useLocation({ select: (location) => location.search as { folder?: string } });
   const mailboxId = pathname.startsWith('/mailbox/') ? pathname.split('/')[2] : undefined;
   const session = authSessionQuery().data;
   const mailboxes = mailboxListQuery();
+  const personal = usePersonalSettings();
   const activeMailboxes = mailboxes.data?.filter((item) => item.status === 'active') ?? [];
   const mailbox =
     activeMailboxes.find((item) => item.id === mailboxId) ??
-    (session ? selectDefaultMailbox(activeMailboxes, session) : undefined);
+    (session
+      ? selectDefaultMailbox(
+          activeMailboxes,
+          session,
+          personal.settings.preferences.defaultMailboxId,
+        )
+      : undefined);
+  const navigationMailboxId = mailboxId ?? mailbox?.id;
   useEffect(() => {
     if (
       session &&
@@ -153,6 +176,7 @@ function Navigation({ admin }: { admin: boolean }): ReactElement {
     )
       rememberMailbox(session.userId, mailboxId);
   }, [session, mailboxId, mailboxes.data]);
+  const composer = useComposer();
   const close = (): void => setOpenMobile(false);
   return (
     <Sidebar collapsible="icon" variant="inset">
@@ -161,7 +185,11 @@ function Navigation({ admin }: { admin: boolean }): ReactElement {
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton size="lg" tooltip="Switch mailbox" aria-label="Switch mailbox">
+                <SidebarMenuButton
+                  size="lg"
+                  tooltip={t('Switch mailbox')}
+                  aria-label={t('Switch mailbox')}
+                >
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                     <Mail className="size-5" />
                   </span>
@@ -170,7 +198,7 @@ function Navigation({ admin }: { admin: boolean }): ReactElement {
                       {mailbox?.displayName || mailbox?.localPart || 'Unimailbox'}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
-                      {mailbox?.address ?? 'All mailboxes'}
+                      {mailbox?.address ?? t('All mailboxes')}
                     </span>
                   </span>
                   <ChevronDown className="ms-auto size-4" />
@@ -181,7 +209,7 @@ function Navigation({ admin }: { admin: boolean }): ReactElement {
                 align="start"
                 className="w-72 max-w-[calc(100vw-2rem)]"
               >
-                <DropdownMenuLabel>Switch mailbox</DropdownMenuLabel>
+                <DropdownMenuLabel>{t('Switch mailbox')}</DropdownMenuLabel>
                 <div className="max-h-[50svh] overflow-y-auto">
                   {activeMailboxes.map((item) => (
                     <DropdownMenuItem asChild key={item.id}>
@@ -198,101 +226,105 @@ function Navigation({ admin }: { admin: boolean }): ReactElement {
                         <Mail className="size-4 shrink-0" />
                         <span className="min-w-0 flex-1 truncate">{item.address}</span>
                         {item.id === mailbox?.id ? (
-                          <Check className="size-4 shrink-0" aria-label="Current mailbox" />
+                          <Check className="size-4 shrink-0" aria-label={t('Current mailbox')} />
                         ) : null}
                       </Link>
                     </DropdownMenuItem>
                   ))}
                 </div>
-                {mailboxes.isPending ? <DropdownMenuLabel>Loading…</DropdownMenuLabel> : null}
+                {mailboxes.isPending ? (
+                  <div
+                    role="status"
+                    aria-label={t('Loading mailboxes')}
+                    aria-busy="true"
+                    className="space-y-2 p-2"
+                  >
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-full" />
+                  </div>
+                ) : null}
                 {mailboxes.isError ? (
                   <DropdownMenuItem
                     onSelect={() => {
                       void mailboxes.refetch();
                     }}
                   >
-                    Retry loading mailboxes
+                    {t('Retry loading mailboxes')}
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <Link to="/mailboxes" onClick={close}>
                     <Mail className="size-4" />
-                    All mailboxes
+                    {t('All mailboxes ')}
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
+        {mailbox ? (
+          <Button
+            className="sidebar-compose my-2 justify-start gap-3"
+            size="lg"
+            onClick={() => {
+              composer?.open({ mailboxId: mailbox.id });
+              close();
+            }}
+            aria-label={t('Compose')}
+            title={t('Compose')}
+          >
+            <Plus className="size-5 shrink-0" />
+            <span className="group-data-[collapsible=icon]:hidden">{t('Compose')}</span>
+          </Button>
+        ) : null}
         {isMobile ? (
           <Button variant="ghost" className="justify-start" onClick={close}>
-            <X /> Close navigation
+            <X /> {t('Close navigation ')}
           </Button>
         ) : null}
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>{admin ? 'Manage' : 'Mailbox'}</SidebarGroupLabel>
-          <nav aria-label={admin ? 'Administration navigation' : 'Mailbox navigation'}>
+          <nav aria-label={admin ? t('Administration navigation') : t('Mailbox navigation')}>
             <SidebarMenu>
               {admin ? (
                 adminNavigation.map((item) => (
                   <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton asChild isActive={pathname === item.to} tooltip={item.label}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={pathname === item.to}
+                      tooltip={t(item.label)}
+                    >
                       <Link to={item.to} onClick={close}>
                         <item.icon />
-                        <span>{item.label}</span>
+                        <span>{t(item.label)}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))
               ) : (
                 <>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={pathname === '/mailboxes'}
-                      tooltip="All mailboxes"
-                    >
-                      <Link to="/mailboxes" onClick={close}>
-                        <Mail />
-                        <span>All mailboxes</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  {mailboxId ? (
+                  {navigationMailboxId ? (
                     <>
-                      <SidebarMenuItem>
-                        <SidebarMenuButton asChild tooltip="Compose">
-                          <Link
-                            to="/mailbox/$mailboxId/compose"
-                            params={{ mailboxId }}
-                            onClick={close}
-                          >
-                            <Plus />
-                            <span>Compose</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
                       {folders.map((item) => (
                         <SidebarMenuItem key={item.key}>
                           <SidebarMenuButton
                             asChild
-                            tooltip={item.label}
+                            tooltip={t(item.label)}
                             isActive={
-                              pathname === `/mailbox/${mailboxId}` &&
+                              pathname === `/mailbox/${navigationMailboxId}` &&
                               (search.folder ?? 'inbox') === item.key
                             }
                           >
                             <Link
                               to="/mailbox/$mailboxId"
-                              params={{ mailboxId }}
+                              params={{ mailboxId: navigationMailboxId }}
                               search={{ folder: item.key }}
                               onClick={close}
                             >
                               <item.icon />
-                              <span>{item.label}</span>
+                              <span>{t(item.label)}</span>
                             </Link>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
@@ -300,16 +332,16 @@ function Navigation({ admin }: { admin: boolean }): ReactElement {
                       <SidebarMenuItem>
                         <SidebarMenuButton
                           asChild
-                          tooltip="Members"
+                          tooltip={t('Members')}
                           isActive={pathname.endsWith('/members')}
                         >
                           <Link
                             to="/mailbox/$mailboxId/members"
-                            params={{ mailboxId }}
+                            params={{ mailboxId: navigationMailboxId }}
                             onClick={close}
                           >
                             <Users />
-                            <span>Members</span>
+                            <span>{t('Members')}</span>
                           </Link>
                         </SidebarMenuButton>
                       </SidebarMenuItem>
@@ -325,23 +357,26 @@ function Navigation({ admin }: { admin: boolean }): ReactElement {
         {admin ? (
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Back to mailbox">
+              <SidebarMenuButton asChild tooltip={t('Back to mailbox')}>
                 <Link to="/mailbox" onClick={close}>
                   <ArrowLeft />
-                  <span>{admin ? 'Back to mailbox' : 'All mailboxes'}</span>
+                  <span>{admin ? t('Back to mailbox') : t('All mailboxes')}</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         ) : null}
-        <div className="sidebar-identity">
-          <Avatar className="size-8">
-            <AvatarFallback>{session?.email?.slice(0, 1).toUpperCase() ?? 'U'}</AvatarFallback>
-          </Avatar>
+        <button
+          type="button"
+          className="sidebar-identity text-start"
+          onClick={openSettings}
+          aria-label={t('Open account settings')}
+        >
+          <UserAvatar />
           <span className="truncate text-xs text-muted-foreground">
             {session?.email ?? 'Unimailbox'}
           </span>
-        </div>
+        </button>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -354,11 +389,8 @@ export function AppShell({
   children: ReactNode;
   admin?: boolean;
 }): ReactElement {
-  const session = authSessionQuery().data;
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const title = admin
-    ? (adminNavigation.find((item) => item.to === pathname)?.label ?? 'Administration')
-    : 'Mailbox';
+  const t = useT();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <ShellContext.Provider value={true}>
       <SidebarProvider
@@ -367,57 +399,55 @@ export function AppShell({
         data-testid={admin ? 'admin-layout' : 'mailbox-layout'}
       >
         <a href="#page-content" className="skip-link">
-          Skip to content
+          {t('Skip to content')}
         </a>
-        <Navigation admin={admin} />
+        <Navigation admin={admin} openSettings={() => setSettingsOpen(true)} />
         <SidebarInset className="min-w-0">
           <header className="product-header">
             <SidebarTrigger />
-            <Separator orientation="vertical" className="h-5" />
-            <span className="text-sm text-muted-foreground">{title}</span>
             <div className="ms-auto flex items-center gap-2">
               {!admin ? <AppNav /> : null}
-              <ThemeSwitch />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label="Account menu">
-                    <Avatar className="size-8">
-                      <AvatarFallback>
-                        {session?.email?.slice(0, 1).toUpperCase() ?? 'U'}
-                      </AvatarFallback>
-                    </Avatar>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="max-w-[calc(100vw-2rem)]">
-                  <DropdownMenuLabel className="break-all">
-                    {session?.email ?? 'Account'}
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link to="/change-password">Change password</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <div className="p-1">
-                    <LogoutButton />
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <AppearanceControls />
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t('Account menu')}
+                onClick={() => setSettingsOpen(true)}
+              >
+                <UserAvatar />
+              </Button>
             </div>
           </header>
           <div id="page-content" className="product-content" tabIndex={-1}>
-            <Suspense
-              fallback={
-                <div role="status" className="space-y-4">
-                  <span className="text-sm text-muted-foreground">Loading…</span>
-                  <div className="h-40 animate-pulse rounded-lg bg-muted" />
-                </div>
-              }
-            >
-              {children}
-            </Suspense>
+            <Suspense fallback={<ShellPending admin={admin} />}>{children}</Suspense>
           </div>
         </SidebarInset>
+        <QuickSettings open={settingsOpen} onOpenChange={setSettingsOpen} />
       </SidebarProvider>
     </ShellContext.Provider>
   );
+}
+
+function ShellPending({ admin }: { admin: boolean }): ReactElement {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  if (admin) {
+    return (
+      <main className="admin-page">
+        <ContentSkeleton
+          variant={
+            pathname === '/admin/settings' ? 'form' : pathname === '/admin' ? 'overview' : 'list'
+          }
+        />
+      </main>
+    );
+  }
+  if (pathname === '/mailboxes') return <MailboxListSkeleton />;
+  if (pathname.includes('/messages/')) return <MessageDetailSkeleton />;
+  if (pathname.includes('/draft/'))
+    return (
+      <main className="mailbox-shell">
+        <ContentSkeleton variant="compose" />
+      </main>
+    );
+  return <InboxListSkeleton />;
 }

@@ -19,6 +19,8 @@ export interface CreateUserInput {
   readonly passwordHash: Uint8Array;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly mustChangePassword?: boolean;
+  readonly initialPasswordExpiresAt?: string | null;
 }
 
 /**
@@ -40,8 +42,8 @@ export function prepareCreateUser(db: Database, input: CreateUserInput): D1Prepa
     .prepare(
       `INSERT INTO users (id, email, display_name, status,
         password_algorithm, password_iterations, password_salt, password_hash,
-        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        created_at, updated_at, must_change_password, initial_password_expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       input.id,
@@ -54,6 +56,8 @@ export function prepareCreateUser(db: Database, input: CreateUserInput): D1Prepa
       input.passwordHash,
       input.createdAt,
       input.updatedAt,
+      input.mustChangePassword ? 1 : 0,
+      input.initialPasswordExpiresAt ?? null,
     );
 }
 
@@ -62,8 +66,8 @@ export async function createUser(db: Database, input: CreateUserInput): Promise<
     .prepare(
       `INSERT INTO users (id, email, display_name, status,
         password_algorithm, password_iterations, password_salt, password_hash,
-        created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        created_at, updated_at, must_change_password, initial_password_expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       input.id,
@@ -76,6 +80,8 @@ export async function createUser(db: Database, input: CreateUserInput): Promise<
       input.passwordHash,
       input.createdAt,
       input.updatedAt,
+      input.mustChangePassword ? 1 : 0,
+      input.initialPasswordExpiresAt ?? null,
     )
     .run();
 }
@@ -108,6 +114,8 @@ export interface UserRow {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  must_change_password: number;
+  initial_password_expires_at: string | null;
 }
 
 /**
@@ -125,7 +133,8 @@ export async function findUserByEmail(db: Database, email: string): Promise<User
     .prepare(
       `SELECT id, email, display_name, status,
               password_algorithm, password_iterations, password_salt, password_hash,
-              created_at, updated_at, deleted_at
+              created_at, updated_at, deleted_at,
+              must_change_password, initial_password_expires_at
        FROM users
        WHERE email = ?`,
     )
@@ -133,6 +142,125 @@ export async function findUserByEmail(db: Database, email: string): Promise<User
     .first<UserRow>();
 
   return result ?? null;
+}
+
+export interface ManagedUserInput {
+  readonly id: string;
+  readonly email: EmailAddress;
+  readonly displayName: string | null;
+  readonly passwordAlgorithm: string;
+  readonly passwordIterations: number;
+  readonly passwordSalt: Uint8Array;
+  readonly passwordHash: Uint8Array;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly initialPasswordExpiresAt: string;
+  readonly grantedBy: string;
+}
+
+/**
+ * Atomically creates an admin-managed member account and its initial role.
+ * The caller supplies a PBKDF2 hash; plaintext passwords never cross this
+ * repository boundary. Role assignment is kept in the same D1 batch so an
+ * account cannot be created without the member role.
+ */
+export async function createManagedUser(db: Database, input: ManagedUserInput): Promise<void> {
+  await db.batch(prepareCreateManagedUser(db, input));
+}
+
+/**
+ * Returns the user and default-member-role statements for an admin-created
+ * account. Callers that also need an audit/idempotency record can append these
+ * statements to the same D1 batch.
+ */
+export function prepareCreateManagedUser(
+  db: Database,
+  input: ManagedUserInput,
+): D1PreparedStatement[] {
+  const user = prepareCreateUser(db, {
+    ...input,
+    status: 'active',
+    mustChangePassword: true,
+  });
+  const role = db
+    .prepare(
+      `INSERT INTO user_roles (user_id, role_id, granted_by, granted_at)
+       VALUES (?, 'member', ?, ?)`,
+    )
+    .bind(input.id, input.grantedBy, input.createdAt);
+  return [user, role];
+}
+
+export function prepareUpdatePassword(
+  db: Database,
+  input: {
+    userId: string;
+    passwordAlgorithm: string;
+    passwordIterations: number;
+    passwordSalt: Uint8Array;
+    passwordHash: Uint8Array;
+    updatedAt: string;
+    mustChangePassword: boolean;
+    initialPasswordExpiresAt?: string | null;
+  },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE users
+       SET password_algorithm = ?, password_iterations = ?, password_salt = ?, password_hash = ?,
+           updated_at = ?, must_change_password = ?, initial_password_expires_at = ?
+       WHERE id = ?`,
+    )
+    .bind(
+      input.passwordAlgorithm,
+      input.passwordIterations,
+      input.passwordSalt,
+      input.passwordHash,
+      input.updatedAt,
+      input.mustChangePassword ? 1 : 0,
+      input.initialPasswordExpiresAt ?? null,
+      input.userId,
+    );
+}
+
+export function prepareUpdateUserStatus(
+  db: Database,
+  userId: string,
+  status: UserRow['status'],
+  updatedAt: string,
+): D1PreparedStatement {
+  return db
+    .prepare(`UPDATE users SET status = ?, updated_at = ?, deleted_at = ? WHERE id = ?`)
+    .bind(status, updatedAt, status === 'deleted' ? updatedAt : null, userId);
+}
+
+export async function findUserById(db: Database, userId: string): Promise<UserRow | null> {
+  return db
+    .prepare(
+      `SELECT id, email, display_name, status,
+              password_algorithm, password_iterations, password_salt, password_hash,
+              created_at, updated_at, deleted_at,
+              must_change_password, initial_password_expires_at
+       FROM users WHERE id = ?`,
+    )
+    .bind(userId)
+    .first<UserRow>();
+}
+
+export async function setMustChangePassword(
+  db: Database,
+  userId: string,
+  mustChangePassword: boolean,
+  expiresAt: string | null,
+  updatedAt: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE users SET must_change_password = ?, initial_password_expires_at = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .bind(mustChangePassword ? 1 : 0, expiresAt, updatedAt, userId)
+    .run();
 }
 
 /**

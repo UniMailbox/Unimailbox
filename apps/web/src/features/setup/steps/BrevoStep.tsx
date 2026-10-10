@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — BrevoStep.
 //
 // CAP-041 / step 7. Collects the Brevo API key. R-SECRET-003: the key
@@ -23,14 +24,12 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import {
-  reclaimInstallationToken,
-  useSkipRemainingSetup,
-} from '../use-skip-remaining-setup';
+import { reclaimInstallationToken, useSkipRemainingSetup } from '../use-skip-remaining-setup';
 import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function BrevoStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -88,8 +87,8 @@ export function BrevoStep(): ReactElement {
 
   return (
     <Card
-      title="Configure Brevo"
-      description="Provide the Brevo API key for outbound email delivery."
+      title={t('Configure Brevo')}
+      description={t('Provide the Brevo API key for outbound email delivery.')}
     >
       <SetupGuidance
         purpose="Connect the provider that will send outbound email."
@@ -106,8 +105,8 @@ export function BrevoStep(): ReactElement {
           id="brevo-api-key"
           type="password"
           autoComplete="off"
-          label="Brevo API key"
-          help="The key is stored encrypted and never returned by the API."
+          label={t('Brevo API key')}
+          help={t('The key is stored encrypted and never returned by the API.')}
           error={errors.apiKey?.message}
           {...register('apiKey')}
         />
@@ -115,7 +114,7 @@ export function BrevoStep(): ReactElement {
           <ErrorPanel
             message={submitErrorMessage}
             code={submitErrorCode}
-            retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+            retryLabel={isUnauthorized ? t('Re-claim installation token') : t('Retry')}
             onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
           />
         ) : null}
@@ -127,7 +126,7 @@ export function BrevoStep(): ReactElement {
             aria-busy={isSubmitting}
             data-testid="brevo-submit"
           >
-            {isSubmitting ? <Spinner /> : 'Save API key'}
+            {isSubmitting ? <Spinner /> : t('Save API key')}
           </Button>
         </div>
       </form>
@@ -135,12 +134,8 @@ export function BrevoStep(): ReactElement {
         <ErrorPanel
           message={skipRemaining.error.message}
           code={skipRemaining.error.code}
-          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            skipRemaining.isUnauthorized
-              ? handleReclaim
-              : () => void skipRemaining.skip()
-          }
+          retryLabel={skipRemaining.isUnauthorized ? t('Re-claim installation token') : t('Retry')}
+          onRetry={skipRemaining.isUnauthorized ? handleReclaim : () => void skipRemaining.skip()}
         />
       ) : null}
       <SkipRemainingSetupButton

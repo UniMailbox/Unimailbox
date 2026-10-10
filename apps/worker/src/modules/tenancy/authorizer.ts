@@ -35,16 +35,13 @@ export type MailboxOp =
  *
  * Authorization logic:
  * 1. Owner can do everything (implicit membership per R-MAILBOX-003)
- * 2. Global administrator (has role.manage) can do everything except delete operations
- * 3. Members are authorized per the permission matrix
- * 4. Non-owners with no membership are denied
+ * 2. Members are authorized per the permission matrix
+ * 3. Non-owners with no membership are denied, including global administrators
  *
  * @param db — D1 database binding
  * @param userId — UUID of the user performing the operation
  * @param mailboxId — UUID of the target mailbox (authorizes against this, not client input)
  * @param op — The operation to perform
- * @param isAdmin — Optional pre-computed admin status (from admin.checkPermission('role.manage'))
- *                   If not provided, skips the admin check path.
  * @throws DomainError with MAILBOX_NOT_FOUND (404) or MAILBOX_ACCESS_DENIED (403)
  */
 export async function assertCan(
@@ -52,7 +49,6 @@ export async function assertCan(
   userId: string,
   mailboxId: string,
   op: MailboxOp,
-  isAdmin?: boolean,
 ): Promise<void> {
   // 1. Check if mailbox exists and get owner info
   const mailbox = await findMailboxById(db, mailboxId);
@@ -69,20 +65,7 @@ export async function assertCan(
     return;
   }
 
-  // 3. Check if user has administrator role (global admin bypass)
-  // Admins can do everything except delete_message and delete_mailbox
-  if (isAdmin === true) {
-    if (op === 'delete_message' || op === 'delete_mailbox') {
-      throw new DomainError({
-        code: 'MAILBOX_ACCESS_DENIED',
-        message: `Operation '${op}' not allowed for global administrators`,
-        httpStatus: 403,
-      });
-    }
-    return;
-  }
-
-  // 4. Check member role (explicit membership via mailbox_members table)
+  // 3. Check member role (explicit membership via mailbox_members table)
   const member = await findMailboxMember(db, mailboxId, userId);
   if (!member) {
     throw new DomainError({
@@ -92,7 +75,7 @@ export async function assertCan(
     });
   }
 
-  // 5. Check permission matrix
+  // 4. Check permission matrix
   const allowedOps: Record<string, string[]> = {
     viewer: ['read'],
     sender: ['read', 'send'],

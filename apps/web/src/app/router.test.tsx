@@ -699,6 +699,36 @@ describe('router — CAP-067 production role route', () => {
 
     expect(history.location.pathname).toBe('/admin/roles');
   });
+
+  it('redirects a member away from the real admin workspace', async () => {
+    const apiClient = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => 'member-access-token',
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        if (url.includes('/api/v1/setup/status')) {
+          return jsonResponse({ data: { status: 'complete', currentStep: 'complete' } });
+        }
+        if (url.includes('/api/v1/auth/me')) {
+          return jsonResponse({
+            data: {
+              user: { id: 'member-id', email: 'member@example.test', displayName: 'Member' },
+              mustChangePassword: false,
+              canAccessAdmin: false,
+            },
+          });
+        }
+        return jsonResponse({ data: { items: [] } });
+      }) as typeof fetch,
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const history = createMemoryHistory({ initialEntries: ['/admin'] });
+    const router = createAppRouter(apiClient, queryClient, history);
+
+    await router.load();
+
+    expect(history.location.pathname).toBe('/mailbox');
+  });
 });
 
 function buildAdminRouteTree(

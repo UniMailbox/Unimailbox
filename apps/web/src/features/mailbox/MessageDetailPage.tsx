@@ -1,3 +1,6 @@
+import { Skeleton } from '../../components/ui/shadcn/skeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { useInAppShell } from '../../components/layouts/AppShell';
 // apps/web — MessageDetailPage.
 //
 // CAP-043 Slice 2 (AC 11 + AC 12). The single-message view at
@@ -32,8 +35,10 @@ import { MessageDetailSkeleton } from './MessageDetailSkeleton';
 import { MessageAttachments } from './MessageAttachments';
 import { SanitizedMessageHtml } from './SanitizedMessageHtml';
 import { MessageThreadPanel } from './MessageThreadPanel';
+import { useInlineAttachmentUrls } from './use-inline-attachment-urls';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Card } from '../../components/ui/Card';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import { LogoutButton } from '../auth/LogoutButton';
 import type { MessageRecipientInfo } from '@unimailbox/contracts';
 
@@ -64,9 +69,12 @@ interface MessageDetailContentProps {
 }
 
 function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProps): ReactElement {
+  const t = useT();
+  const inShell = useInAppShell();
   const sessionQuery = authSessionQuery();
   const detailQuery = messageDetailQuery(mailboxId, messageId);
   const threadQuery = messageThreadQuery(mailboxId, messageId);
+  const inlineImageUrls = useInlineAttachmentUrls(mailboxId, detailQuery.data?.attachments);
   const { mutate: markMessageRead } = useMarkMessageReadMutation();
 
   // AC 12 / R-MESSAGE-005: fire mark-read ONCE per message open. The
@@ -88,24 +96,24 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
     markMessageRead({ mailboxId, messageId: detail.id, folder: detail.folder });
   }, [detailQuery.data, mailboxId, markMessageRead]);
 
-  if (detailQuery.isLoading && detailQuery.data === undefined) {
+  if (detailQuery.isPending && detailQuery.data === undefined) {
     return <MessageDetailSkeleton />;
   }
 
-  if (detailQuery.error !== null) {
+  if (detailQuery.error !== null && detailQuery.data === undefined) {
     // messageDetailQuery declares its error type as ApiError (unlike the
     // inbox infinite query, whose error type is un-inferable), so no
     // instanceof narrowing is needed here.
     return (
       <main className="mailbox-shell" data-testid="message-detail-error">
-        <Card title="Could not load message" description="The message is unavailable.">
+        <Card title={t('Could not load message')} description={t('The message is unavailable.')}>
           <ErrorPanel
             message={detailQuery.error.message}
             code={detailQuery.error.code}
             onRetry={() => {
               void detailQuery.refetch();
             }}
-            retryLabel="Retry"
+            retryLabel={t('Retry')}
             testId="message-detail-error-panel"
           />
         </Card>
@@ -123,36 +131,52 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
   return (
     <main className="mailbox-shell" data-testid="message-detail-page">
       <header className="mailbox-header">
-        <h1 className="mailbox-title">Message</h1>
+        <h1 className="mailbox-title">{t('Message')}</h1>
         <div className="mailbox-header-meta">
           <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
-          <LogoutButton />
+          {!inShell ? <LogoutButton /> : null}
         </div>
       </header>
 
       <p className="message-detail-back">
         <Link to="/mailbox/$mailboxId" params={{ mailboxId }}>
-          Back to inbox
+          {t('Back to inbox')}
         </Link>
       </p>
 
       {/* G10 (fe L2): the Card carries only the subject — the from
           address renders exactly once, in the message-from meta row. */}
       <Card title={detail.subject}>
+        {detailQuery.error !== null ? (
+          <ErrorPanel
+            message={detailQuery.error.message}
+            code={detailQuery.error.code}
+            onRetry={() => void detailQuery.refetch()}
+            testId="message-detail-refresh-error"
+          />
+        ) : null}
         <div className="message-detail-meta">
           <p data-testid="message-from">{formatFrom(detail.fromAddress, detail.fromName)}</p>
-          <p data-testid="message-to">To: {formatRecipients(detail.recipients.to)}</p>
+          <p data-testid="message-to">
+            {t('To: ')}
+            {formatRecipients(detail.recipients.to)}
+          </p>
           {detail.recipients.cc.length > 0 ? (
-            <p data-testid="message-cc">Cc: {formatRecipients(detail.recipients.cc)}</p>
+            <p data-testid="message-cc">
+              {t('Cc: ')}
+              {formatRecipients(detail.recipients.cc)}
+            </p>
           ) : null}
-          <p data-testid="message-date">{detail.createdAt}</p>
+          <p data-testid="message-date">
+            <LocalDateTime value={detail.createdAt} />
+          </p>
         </div>
 
         {detail.htmlBody.trim().length > 0 ? (
           <SanitizedMessageHtml
             htmlBody={detail.htmlBody}
-            mailboxId={mailboxId}
             attachments={detail.attachments}
+            inlineImageUrls={inlineImageUrls}
           />
         ) : (
           <pre className="message-detail-body" data-testid="message-body">
@@ -160,19 +184,23 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
           </pre>
         )}
 
-        <MessageAttachments mailboxId={mailboxId} attachments={detail.attachments} />
+        <MessageAttachments
+          mailboxId={mailboxId}
+          attachments={detail.attachments}
+          inlineImageUrls={inlineImageUrls}
+        />
 
         {/* Headers collapsed by default (AC 11). RFC 5322 threading
             headers shown verbatim — the raw values are what the thread
             root resolution (D-CAP-043-C) is computed from. */}
         <details className="message-detail-headers" data-testid="message-headers">
-          <summary>Headers</summary>
+          <summary>{t('Headers')}</summary>
           <dl>
-            <dt>Message-ID</dt>
+            <dt>{t('Message-ID')}</dt>
             <dd data-testid="message-header-message-id">{detail.messageIdHeader ?? '—'}</dd>
-            <dt>In-Reply-To</dt>
+            <dt>{t('In-Reply-To')}</dt>
             <dd data-testid="message-header-in-reply-to">{detail.inReplyToHeader ?? '—'}</dd>
-            <dt>References</dt>
+            <dt>{t('References')}</dt>
             <dd data-testid="message-header-references">{detail.referencesHeader}</dd>
           </dl>
         </details>
@@ -188,7 +216,7 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
             className="btn btn-secondary btn-md"
             data-testid="message-reply-link"
           >
-            Reply
+            {t('Reply')}
           </Link>
         </div>
 
@@ -206,14 +234,21 @@ function MessageDetailContent({ mailboxId, messageId }: MessageDetailContentProp
               onRetry={() => {
                 void threadQuery.refetch();
               }}
-              retryLabel="Retry"
+              retryLabel={t('Retry')}
               testId="message-thread-error-panel"
             />
           </div>
         ) : (
-          <p className="message-thread-loading" data-testid="message-thread-loading">
-            Loading thread…
-          </p>
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label={t('Loading thread…')}
+            className="space-y-3"
+            data-testid="message-thread-loading"
+          >
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-16 w-full" />
+          </div>
         )}
       </Card>
     </main>

@@ -91,7 +91,7 @@ type TestRootRoute = RootRoute<
 function withAdminProbeDenied(inner: typeof fetch): typeof fetch {
   return async (input, init) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       return authSessionResolver();
     }
     if (url.startsWith('/api/v1/admin/audit-events')) {

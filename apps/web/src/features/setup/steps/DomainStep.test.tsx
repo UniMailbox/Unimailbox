@@ -12,12 +12,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, screen } from '@testing-library/react';
 import { DomainStep } from './DomainStep';
-import {
-  errorResponse,
-  jsonResponse,
-  renderStep,
-  spyFetch,
-} from '../../../test-utils';
+import { errorResponse, jsonResponse, renderStep, spyFetch } from '../../../test-utils';
 
 afterEach(() => {
   cleanup();

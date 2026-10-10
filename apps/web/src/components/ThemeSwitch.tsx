@@ -1,3 +1,4 @@
+import { useT } from '../infrastructure/i18n/locale';
 /* Adapted from satnaing/shadcn-admin theme-switch/theme-provider; MIT attribution in docs/rebuild/licenses. */
 import { useEffect, useState, type ReactElement } from 'react';
 import { Check, Moon, Sun } from 'lucide-react';
@@ -25,6 +26,7 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
 }
 export function ThemeSwitch(): ReactElement {
+  const t = useT();
   const [theme, setTheme] = useState<Theme>(readTheme);
   useEffect(() => {
     applyTheme(theme);
@@ -36,7 +38,7 @@ export function ThemeSwitch(): ReactElement {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Change theme">
+        <Button variant="ghost" size="icon" aria-label={t('Change theme')}>
           <Sun className="dark:hidden" />
           <Moon className="hidden dark:block" />
         </Button>
@@ -54,8 +56,7 @@ export function ThemeSwitch(): ReactElement {
               }
             }}
           >
-            {value[0]?.toUpperCase()}
-            {value.slice(1)}
+            {t(value === 'light' ? 'Light' : value === 'dark' ? 'Dark' : 'System')}
             {theme === value ? <Check className="ms-auto size-4" /> : null}
           </DropdownMenuItem>
         ))}

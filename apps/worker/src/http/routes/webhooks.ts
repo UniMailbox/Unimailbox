@@ -4,15 +4,14 @@
 // Hono sub-app for POST /api/v1/webhooks/:providerKey/:connectionId.
 //
 // Public endpoint — no authn/authz middleware. Identity is proven by the
-// HMAC-SHA256 signature over the raw body (R-INBOUND-SIGNATURE per
+// provider-authenticated header (Brevo Bearer token or legacy HMAC-SHA256) per
 // .claude/rules/architecture.md §API conventions and
 // .claude/rules/security.md §Secrets).
 //
 // Order of operations is load-bearing:
-//   1. Read the raw body as text (c.req.text()) BEFORE any JSON parse.
-//   2. Hand rawBody + X-Webhook-Signature to verifyAndProcessEvent, which
-//      recomputes HMAC over the same bytes and constant-time compares before
-//      calling JSON.parse.
+//   1. Read raw bytes BEFORE any UTF-8 decode or JSON parse.
+//   2. Hand rawBody + the provider authentication header to the adapter,
+//      which constant-time verifies authentication before parsing JSON.
 //   3. After verification: parse, resolve messageId, build prepared
 //      statements (messages UPDATE + webhook_deliveries INSERT) and
 //      APPEND the audit_events INSERT — all three run in one D1 batch
@@ -34,6 +33,21 @@ import { systemIds } from '../../platform/ids';
 import type { AppEnv } from '../../platform/env';
 import { sqliteTimestamp } from '../../platform/idempotency';
 import { buildAppContext } from '../../app-context';
+import { DomainError } from '../../platform/errors';
+import { parseProviderKey } from '@unimailbox/contracts';
+import { providerRegistry } from '../../integrations/providers/provider-registry';
+
+const MAX_WEBHOOK_BODY_BYTES = 65_536;
+
+function assertWebhookBodySize(size: number): void {
+  if (size > MAX_WEBHOOK_BODY_BYTES) {
+    throw new DomainError({
+      code: 'BODY_TOO_LARGE',
+      message: 'Webhook body exceeds 64 KiB',
+      httpStatus: 413,
+    });
+  }
+}
 
 export function webhookRoutes(): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
@@ -42,17 +56,21 @@ export function webhookRoutes(): Hono<AppEnv> {
    * POST /api/v1/webhooks/:providerKey/:connectionId
    *
    * Body: raw bytes Brevo sent (JSON-shaped, but we verify before parsing).
-   * Header X-Webhook-Signature: hex HMAC-SHA256(rawBody, webhook_secret).
+   * Brevo Authorization: Bearer webhook_secret; legacy X-Webhook-Signature supported.
    */
   routes.post('/webhooks/:providerKey/:connectionId', async (c) => {
     const connectionId = c.req.param('connectionId');
-    // providerKey is parsed but unused in Phase 1: Brevo is the only
-    // outbound provider, so connectionId uniquely identifies the secret.
-    // A future provider dispatch will branch on it.
+    const providerKey = c.req.param('providerKey');
 
     // R-INBOUND-SIGNATURE: read raw body BEFORE JSON parse.
-    const rawBody = await c.req.text();
-    const signatureHeader = c.req.header('X-Webhook-Signature') ?? null;
+    const declaredSize = Number(c.req.header('Content-Length'));
+    if (Number.isFinite(declaredSize)) assertWebhookBodySize(declaredSize);
+    const rawBody = new Uint8Array(await c.req.arrayBuffer());
+    assertWebhookBodySize(rawBody.byteLength);
+    const signatureHeader =
+      (providerKey === 'brevo' ? c.req.header('Authorization') : undefined) ??
+      c.req.header('X-Webhook-Signature') ??
+      null;
 
     // CAP-040 / R-AUDIT-001: pull the request correlation UUID the
     // request-id middleware stamped on this request so the audit row
@@ -62,8 +80,10 @@ export function webhookRoutes(): Hono<AppEnv> {
     const result = await verifyAndProcessEvent({
       db: c.env.DB,
       connectionId,
+      providerKey,
       rawBody,
       signatureHeader,
+      adapter: providerRegistry.getWebhook(parseProviderKey(providerKey)),
     });
 
     // R-AUDIT-001 + D-CAP-029-A: the messages UPDATE + webhook_deliveries

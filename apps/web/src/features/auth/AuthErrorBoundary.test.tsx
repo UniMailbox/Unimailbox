@@ -45,7 +45,8 @@ describe('AuthErrorBoundary', () => {
     );
     expect(screen.getByTestId('auth-error-boundary')).toBeInTheDocument();
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-    expect(screen.getByText('explode')).toBeInTheDocument();
+    expect(screen.queryByText('explode')).not.toBeInTheDocument();
+    expect(screen.getByText('Something went wrong. Please try again.')).toBeInTheDocument();
     expect(screen.getByTestId('auth-error-reset')).toBeInTheDocument();
   });
 });

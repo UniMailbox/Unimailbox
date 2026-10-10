@@ -91,10 +91,12 @@ function withAdminProbe(
   inner: typeof fetch,
   sessionResponse: () => Response,
   probeResponse: () => Response,
+  mailboxList: ReadonlyArray<MailboxListItem> = [],
 ): typeof fetch {
   return async (input, init) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.endsWith('/api/v1/mailboxes')) return jsonResponse({ data: { items: mailboxList } });
+    if (url.includes('/api/v1/auth/me')) {
       return sessionResponse();
     }
     if (url.startsWith('/api/v1/admin/audit-events')) {
@@ -120,6 +122,7 @@ interface RenderInboxOptions {
    * test the empty-cache fallback.
    */
   readonly mailboxList?: ReadonlyArray<MailboxListItem>;
+  readonly mailboxResponse?: ReadonlyArray<MailboxListItem>;
   /**
    * Fix (f): when true, the probe answers 200 (an administrator), so
    * AppNav renders the Admin link — the in-situ admin case. Default
@@ -153,6 +156,11 @@ function mountInboxRouter(
     path: '/mailbox/$mailboxId/compose',
     component: () => <div data-testid="arrived-compose">compose</div>,
   });
+  const messageRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/mailbox/$mailboxId/messages/$messageId',
+    component: () => <div data-testid="arrived-message">message</div>,
+  });
   const draftRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/mailbox/$mailboxId/draft/$draftId',
@@ -179,6 +187,7 @@ function mountInboxRouter(
     routeTree: rootRoute.addChildren([
       inboxRoute,
       composeRoute,
+      messageRoute,
       draftRoute,
       membersRoute,
       loginRoute,
@@ -239,7 +248,16 @@ function renderInbox(options: RenderInboxOptions): {
     getSessionToken: () => null,
     // CAP-044 Slice 3: the AppNav probe and every get-session refetch are
     // URL-dispatched before they can consume a sequential resolver slot.
-    fetchImpl: withAdminProbe(fetchImpl, sessionResponse, probeResponse),
+    fetchImpl: async (input, init) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/api/v1/mailboxes')) {
+        calls.push({ url, method: 'GET' });
+        return jsonResponse({
+          data: { items: options.mailboxResponse ?? options.mailboxList ?? [] },
+        });
+      }
+      return withAdminProbe(fetchImpl, sessionResponse, probeResponse)(input, init);
+    },
   });
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -365,6 +383,13 @@ describe('InboxListPage', () => {
           call.url === `/api/v1/mailboxes/${MAILBOX_ID}/messages?folder=sent`,
       ),
     ).toBe(true);
+    const messageLink = screen.getByRole('link', { name: 'Sent message' });
+    expect(messageLink).toHaveAttribute(
+      'href',
+      `/mailbox/${MAILBOX_ID}/messages/00000000-0000-4000-8000-000000000099`,
+    );
+    await userEvent.click(messageLink);
+    await waitFor(() => expect(screen.getByTestId('arrived-message')).toBeInTheDocument());
   });
 
   it('CAP-062 R-MESSAGE-010: links draft rows to the mailbox-scoped recovery view', async () => {
@@ -555,7 +580,8 @@ describe('InboxListPage', () => {
     const probeGets: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL): Promise<Response> => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/v1/auth/better/get-session')) {
+      if (url.endsWith('/api/v1/mailboxes')) return jsonResponse({ data: { items: [] } });
+      if (url.includes('/api/v1/auth/me')) {
         sessionGets.push(url);
         return jsonResponse({
           data: {
@@ -748,8 +774,7 @@ describe('InboxListPage', () => {
     });
   });
 
-  // G11 (fe L3): the address lookup at InboxListPage.tsx:75-81 reads
-  // the cached mailbox list (no fetch) and falls back to the raw UUID.
+  // The subscribed mailbox query resolves both cached and direct navigation addresses.
   it('shows the mailbox address from the cached mailbox list in the Card title (G11)', async () => {
     renderInbox({
       resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
@@ -778,16 +803,15 @@ describe('InboxListPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
     });
-    // The Card title shows THIS mailbox's address, not another's and
+    // The page header shows THIS mailbox's address, not another's and
     // not the raw UUID.
     expect(screen.getByText('inbox@example.com')).toBeInTheDocument();
     expect(screen.queryByText('other@example.com')).not.toBeInTheDocument();
     expect(screen.queryByText(`Mailbox ${MAILBOX_ID}`)).not.toBeInTheDocument();
   });
 
-  it('falls back to the raw mailbox UUID when the mailbox-list cache is empty, without crashing (G11)', async () => {
-    // No mailboxList seed — the non-subscribing cache read misses and
-    // the fallback renders. It must not fire a mailbox-list fetch.
+  it('keeps neutral mailbox context when the mailbox-list query returns no accessible mailbox', async () => {
+    // No accessible mailbox descriptor; raw UUIDs should not appear in the page context.
     const { fetchCalls } = renderInbox({
       resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
       session: SESSION,
@@ -795,10 +819,33 @@ describe('InboxListPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
     });
-    expect(screen.getByText(`Mailbox ${MAILBOX_ID}`)).toBeInTheDocument();
+    expect(screen.getByText('Mailbox', { selector: '.mailbox-subtitle' })).toBeInTheDocument();
+    expect(screen.queryByText(`Mailbox ${MAILBOX_ID}`)).not.toBeInTheDocument();
     expect(
       fetchCalls.some((call) => call.method === 'GET' && call.url.endsWith('/api/v1/mailboxes')),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it('resolves the address on a direct URL with no preseeded mailbox cache', async () => {
+    renderInbox({
+      session: SESSION,
+      resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
+      mailboxResponse: [
+        {
+          id: MAILBOX_ID,
+          address: 'direct@example.com',
+          displayName: '',
+          status: 'active',
+          domainId: 'd-1',
+          localPart: 'direct',
+          ownerUserId: SESSION.userId,
+        },
+      ],
+    });
+    expect(
+      await screen.findByText('direct@example.com', { selector: '.mailbox-subtitle' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(`Mailbox ${MAILBOX_ID}`)).not.toBeInTheDocument();
   });
 
   // CAP-044 Slice 1 / AC 1: the inbox carries the Compose entry point.

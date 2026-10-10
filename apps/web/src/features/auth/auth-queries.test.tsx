@@ -1,183 +1,172 @@
-// apps/web — auth queries test.
-//
-// CAP-042 (Batch 5) AC 20 / AC 22. Tests:
-// - `parseSessionResponse` accepts every Better Auth shape documented
-//   in `auth-queries.ts` and rejects everything else to `null`.
-// - `fetchAuthSession` swallows 401 (no cookie) and rethrows other
-//   errors so the router's `beforeLoad` can redirect without leaking
-//   the failure.
-//
-// CAP-042 Batch 8 (M-2 fix): the mutation tests live here now. The
-// test harness spins up a real `QueryClient` so we can observe
-// `setQueryData` / `invalidateQueries` calls and assert the redundant
-// `invalidateQueries` was dropped from `useSignInMutation.onSuccess`
-// (D-CAP-041-1 promise: one HTTP GET per navigation, not two).
+// Tests for the application-owned D1 session contract.
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   parseSessionResponse,
   fetchAuthSession,
   authQueryKeys,
   useSignInMutation,
+  useChangePasswordMutation,
 } from './auth-queries';
 import { ApiError } from '../../infrastructure/api/errors';
 import type { ApiClient } from '../../infrastructure/api/client';
 import { renderHook, act } from '@testing-library/react';
 import { ApiClientProvider } from '../../infrastructure/api/client-provider';
-import { QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement, ReactNode } from 'react';
+import { useAuthSession, setAuthSession, resetAuthSessionForTesting } from './auth-session-store';
 
 const VALID_USER_ID = '11111111-1111-4111-8111-111111111111';
 const VALID_EMAIL = 'auth-queries@example.test';
 const VALID_DISPLAY_NAME = 'Auth Queries';
-const VALID_EXPIRES = '2099-01-01T00:00:00Z';
 
 describe('parseSessionResponse', () => {
-  it('returns null for null / undefined / empty input', () => {
+  it('returns null for invalid or missing application envelopes', () => {
     expect(parseSessionResponse(null)).toBeNull();
     expect(parseSessionResponse(undefined)).toBeNull();
-  });
-
-  it('returns null for an unwrapped `{ user: null, session: null }`', () => {
-    expect(parseSessionResponse({ user: null, session: null })).toBeNull();
-  });
-
-  it('returns null for a wrapped `{ data: null }` envelope', () => {
     expect(parseSessionResponse({ data: null })).toBeNull();
+    expect(parseSessionResponse({ data: { user: null } })).toBeNull();
+    expect(parseSessionResponse('not-a-session')).toBeNull();
   });
 
-  it('returns a descriptor for a valid Better Auth session payload', () => {
+  it('parses the /auth/me response and normalizes optional fields', () => {
     const descriptor = parseSessionResponse({
-      user: {
-        id: VALID_USER_ID,
-        email: VALID_EMAIL,
-        name: VALID_DISPLAY_NAME,
-      },
-      session: {
-        userId: VALID_USER_ID,
-        expiresAt: VALID_EXPIRES,
+      data: {
+        user: { id: VALID_USER_ID, email: VALID_EMAIL, displayName: VALID_DISPLAY_NAME },
+        mustChangePassword: false,
+        canAccessAdmin: true,
       },
     });
-    expect(descriptor).not.toBeNull();
-    expect(descriptor?.userId).toBe(VALID_USER_ID);
-    expect(descriptor?.email).toBe(VALID_EMAIL);
-    expect(descriptor?.displayName).toBe(VALID_DISPLAY_NAME);
-    expect(descriptor?.expiresAt).toBe(VALID_EXPIRES);
+    expect(descriptor).toEqual({
+      userId: VALID_USER_ID,
+      email: VALID_EMAIL,
+      displayName: VALID_DISPLAY_NAME,
+      expiresAt: '',
+      mustChangePassword: false,
+      canAccessAdmin: true,
+    });
   });
 
-  it('returns a descriptor when the payload is wrapped in a `{ data }` envelope', () => {
+  it('uses null for a missing display name and preserves the password-change gate', () => {
     const descriptor = parseSessionResponse({
       data: {
         user: { id: VALID_USER_ID, email: VALID_EMAIL },
-        session: { userId: VALID_USER_ID, expiresAt: VALID_EXPIRES },
+        mustChangePassword: true,
       },
     });
-    expect(descriptor).not.toBeNull();
-    expect(descriptor?.userId).toBe(VALID_USER_ID);
-  });
-
-  it('returns null when the user is missing a string id', () => {
-    expect(
-      parseSessionResponse({
-        user: { id: 42, email: VALID_EMAIL },
-        session: { userId: VALID_USER_ID, expiresAt: VALID_EXPIRES },
-      }),
-    ).toBeNull();
-  });
-
-  it('returns null when the session is missing an expiresAt timestamp', () => {
-    expect(
-      parseSessionResponse({
-        user: { id: VALID_USER_ID, email: VALID_EMAIL },
-        session: { userId: VALID_USER_ID },
-      }),
-    ).toBeNull();
-  });
-
-  it('returns null for non-object payloads', () => {
-    expect(parseSessionResponse('not-a-session')).toBeNull();
-    expect(parseSessionResponse(42)).toBeNull();
-  });
-
-  it('treats a missing `name` as `displayName: null`', () => {
-    const descriptor = parseSessionResponse({
-      user: { id: VALID_USER_ID, email: VALID_EMAIL },
-      session: { userId: VALID_USER_ID, expiresAt: VALID_EXPIRES },
-    });
     expect(descriptor?.displayName).toBeNull();
+    expect(descriptor?.mustChangePassword).toBe(true);
+  });
+
+  it('rejects a user without string id or email', () => {
+    expect(parseSessionResponse({ data: { user: { id: 42, email: VALID_EMAIL } } })).toBeNull();
+    expect(parseSessionResponse({ data: { user: { id: VALID_USER_ID, email: 42 } } })).toBeNull();
   });
 });
 
 describe('fetchAuthSession', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    resetAuthSessionForTesting();
   });
+  afterEach(() => vi.restoreAllMocks());
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('returns the parsed descriptor when the API returns a valid session', async () => {
+  it('returns the parsed descriptor from /auth/me', async () => {
     const apiClient = makeClient(
       jsonResponse({
-        user: { id: VALID_USER_ID, email: VALID_EMAIL },
-        session: { userId: VALID_USER_ID, expiresAt: VALID_EXPIRES },
+        data: {
+          user: { id: VALID_USER_ID, email: VALID_EMAIL, displayName: VALID_DISPLAY_NAME },
+          mustChangePassword: false,
+        },
       }),
     );
-    const descriptor = await fetchAuthSession(apiClient);
-    expect(descriptor?.userId).toBe(VALID_USER_ID);
+    await expect(fetchAuthSession(apiClient)).resolves.toMatchObject({ userId: VALID_USER_ID });
   });
 
-  it('returns null when the API responds with 401 (no cookie)', async () => {
-    const apiClient = makeClient(errorResponse('UNAUTHORIZED', 'Authentication required', 401));
-    const descriptor = await fetchAuthSession(apiClient);
-    expect(descriptor).toBeNull();
+  it('returns null when the access token and refresh cookie are both invalid', async () => {
+    await expect(
+      fetchAuthSession(
+        makeClient(
+          errorResponse('AUTHENTICATION_REQUIRED', 'Required', 401),
+          errorResponse('REFRESH_TOKEN_INVALID', 'Invalid', 401),
+        ),
+      ),
+    ).resolves.toBeNull();
   });
 
-  it('returns null when the API responds with `{ data: null }`', async () => {
-    const apiClient = makeClient(jsonResponse({ data: null }));
-    expect(await fetchAuthSession(apiClient)).toBeNull();
+  it('returns null when the browser has no refresh cookie', async () => {
+    await expect(
+      fetchAuthSession(
+        makeClient(
+          errorResponse('AUTHENTICATION_REQUIRED', 'Required', 401),
+          errorResponse('REFRESH_TOKEN_REQUIRED', 'Refresh token required', 401),
+        ),
+      ),
+    ).resolves.toBeNull();
   });
 
-  it('rethrows non-401 ApiErrors so the error boundary can surface them', async () => {
-    const apiClient = makeClient(errorResponse('INTERNAL', 'Database unreachable', 500));
-    await expect(fetchAuthSession(apiClient)).rejects.toBeInstanceOf(ApiError);
+  it('rethrows non-authentication failures', async () => {
+    await expect(
+      fetchAuthSession(makeClient(errorResponse('INTERNAL', 'Database unreachable', 500))),
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('recovers a hard reload with the HttpOnly-cookie refresh endpoint', async () => {
+    const calls: string[] = [];
+    let currentAccessToken: string | null = null;
+    const apiClient: ApiClient = {
+      baseUrl: '',
+      async fetch<T>(path: string): Promise<T> {
+        calls.push(path);
+        currentAccessToken = useAuthSession.getState().accessToken;
+        if (path.endsWith('/me') && currentAccessToken === null) {
+          throw new ApiError('AUTHENTICATION_REQUIRED', 'Required', 401);
+        }
+        if (path.endsWith('/refresh')) {
+          return { data: { accessToken: 'recovered-access-token' } } as T;
+        }
+        return {
+          data: {
+            user: { id: VALID_USER_ID, email: VALID_EMAIL, displayName: VALID_DISPLAY_NAME },
+            mustChangePassword: false,
+          },
+        } as T;
+      },
+    };
+    await expect(fetchAuthSession(apiClient)).resolves.toMatchObject({ userId: VALID_USER_ID });
+    expect(calls).toEqual(['/api/v1/auth/me', '/api/v1/auth/refresh', '/api/v1/auth/me']);
+    expect(currentAccessToken).toBe('recovered-access-token');
+    expect(useAuthSession.getState().session?.userId).toBe(VALID_USER_ID);
+  });
+
+  it('drops the refreshed token if the follow-up identity check fails', async () => {
+    const apiClient: ApiClient = {
+      baseUrl: '',
+      async fetch<T>(path: string): Promise<T> {
+        if (path.endsWith('/refresh')) {
+          return { data: { accessToken: 'unverified-access-token' } } as T;
+        }
+        throw new ApiError('AUTHENTICATION_REQUIRED', 'Required', 401);
+      },
+    };
+    await expect(fetchAuthSession(apiClient)).resolves.toBeNull();
+    expect(useAuthSession.getState().accessToken).toBeNull();
   });
 });
 
-function makeClient(response: Response): ApiClient {
-  // Mirror the real `ApiClient` behavior: parse the error envelope and
-  // throw `ApiError` on non-2xx responses. Otherwise
-  // `fetchAuthSession` cannot distinguish "API said no session" from
-  // "API blew up", and the router's `beforeLoad` would silently treat
-  // a 500 as a logged-out user (a security regression — R-AUTH-006
-  // spirit).
+function makeClient(...responses: Response[]): ApiClient {
+  let index = 0;
   return {
     baseUrl: '',
     async fetch<T>(): Promise<T> {
+      const response = responses[Math.min(index++, responses.length - 1)];
+      if (response === undefined) throw new Error('test response queue is empty');
       if (!response.ok) {
-        // Replicate `parseErrorBody` minimally; the real helper lives
-        // in `infrastructure/api/errors.ts` and is shared with the
-        // production client.
-        let code = 'HTTP_ERROR';
-        let message = `Request failed with status ${String(response.status)}`;
-        try {
-          const body = (await response.json()) as {
-            error?: { code?: string; message?: string };
-          } | null;
-          if (
-            body !== null &&
-            typeof body === 'object' &&
-            body.error &&
-            typeof body.error === 'object'
-          ) {
-            if (typeof body.error.code === 'string') code = body.error.code;
-            if (typeof body.error.message === 'string') message = body.error.message;
-          }
-        } catch {
-          // body wasn't JSON — keep the fallback envelope.
-        }
-        throw new ApiError(code, message, response.status);
+        const body = (await response.json()) as { error?: { code?: string; message?: string } };
+        throw new ApiError(
+          body.error?.code ?? 'HTTP_ERROR',
+          body.error?.message ?? 'Request failed',
+          response.status,
+        );
       }
       return (await response.json()) as T;
     },
@@ -192,46 +181,27 @@ function jsonResponse(data: unknown): Response {
 }
 
 function errorResponse(code: string, message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: { code, message, requestId: 'req-test' } }), {
+  return new Response(JSON.stringify({ error: { code, message } }), {
     status,
     headers: { 'content-type': 'application/json' },
   });
 }
 
-// CAP-042 Batch 8 (M-2 fix): verify the sign-in mutation writes the
-// fresh descriptor into the cache and does NOT trigger a follow-up
-// `invalidateQueries` that would force a second network round-trip
-// when the router re-warms the cache (D-CAP-041-1).
-describe('useSignInMutation cache write (M-2)', () => {
-  it('writes the descriptor into the cache via setQueryData and does not refetch', async () => {
-    // Build a Response factory so the mutationFn's two fetch calls
-    // (POST /sign-in/email then GET /get-session) each receive a fresh
-    // Response — happy-dom streams the body, so reusing the same
-    // Response object across fetches would error.
-    const buildDescriptorResponse = (): Response =>
-      jsonResponse({
-        user: { id: VALID_USER_ID, email: VALID_EMAIL, name: VALID_DISPLAY_NAME },
-        session: { userId: VALID_USER_ID, expiresAt: VALID_EXPIRES },
-      });
+describe('useSignInMutation cache write', () => {
+  it('writes the login response into the session cache without a refetch', async () => {
     const apiClient: ApiClient = {
       baseUrl: '',
-      async fetch<T>(path: string): Promise<T> {
-        // Both /sign-in/email and /get-session return the same payload
-        // here — the real sign-in response is opaque, so we short-circuit.
-        void path;
-        const response = buildDescriptorResponse();
-        if (!response.ok) {
-          throw new Error('unreachable in this test');
-        }
-        return (await response.json()) as T;
+      async fetch<T>(): Promise<T> {
+        return (await jsonResponse({
+          data: {
+            accessToken: 'access-token-test',
+            user: { id: VALID_USER_ID, email: VALID_EMAIL, displayName: VALID_DISPLAY_NAME },
+            mustChangePassword: false,
+          },
+        }).json()) as T;
       },
     };
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, staleTime: 0 },
-        mutations: { retry: false },
-      },
-    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
     function Wrapper({ children }: { children: ReactNode }): ReactElement {
       return (
@@ -242,18 +212,48 @@ describe('useSignInMutation cache write (M-2)', () => {
     }
     const { result } = renderHook(() => useSignInMutation(), { wrapper: Wrapper });
     await act(async () => {
-      await result.current.mutateAsync({
-        email: VALID_EMAIL,
-        password: 'secret123',
-      });
+      await result.current.mutateAsync({ email: VALID_EMAIL, password: 'secret123' });
     });
-    // The cache must hold the descriptor; no second fetch is queued
-    // by `invalidateQueries` (the redundant call removed by M-2).
-    const cached = queryClient.getQueryData(authQueryKeys.session());
-    expect(cached).toMatchObject({
+    expect(queryClient.getQueryData(authQueryKeys.session())).toMatchObject({
       userId: VALID_USER_ID,
       email: VALID_EMAIL,
+      mustChangePassword: false,
     });
     expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('useChangePasswordMutation session update', () => {
+  it('keeps the in-memory access token after the first password change', async () => {
+    resetAuthSessionForTesting();
+    const descriptor = {
+      userId: VALID_USER_ID,
+      email: VALID_EMAIL,
+      displayName: VALID_DISPLAY_NAME,
+      expiresAt: '',
+      mustChangePassword: true,
+    };
+    setAuthSession({ ...descriptor, accessToken: 'first-login-token' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(authQueryKeys.session(), descriptor);
+    const apiClient: ApiClient = {
+      baseUrl: '',
+      async fetch<T>(): Promise<T> {
+        return undefined as T;
+      },
+    };
+    function Wrapper({ children }: { children: ReactNode }): ReactElement {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ApiClientProvider client={apiClient}>{children}</ApiClientProvider>
+        </QueryClientProvider>
+      );
+    }
+    const { result } = renderHook(() => useChangePasswordMutation(), { wrapper: Wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ currentPassword: 'old-pass', newPassword: 'new-pass' });
+    });
+    expect(useAuthSession.getState().accessToken).toBe('first-login-token');
+    expect(useAuthSession.getState().session?.mustChangePassword).toBe(false);
   });
 });

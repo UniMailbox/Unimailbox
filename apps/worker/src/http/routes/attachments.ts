@@ -11,9 +11,8 @@ import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { downloadAttachment, uploadAttachment } from '../../modules/attachments';
 import { assertCan } from '../../modules/tenancy';
-import { checkPermission } from '../../modules/admin';
 import { buildAppContext } from '../../app-context';
-import { getAttachmentByteStore } from '../../platform/cache';
+import { getAttachmentByteStore, getAttachmentObjectStore } from '../../platform/cache';
 import { DomainError } from '../../platform/errors';
 import type { AppEnv } from '../../platform/env';
 
@@ -35,12 +34,12 @@ function encodeFilenameParameter(filename: string): string {
   );
 }
 
-function contentDisposition(disposition: 'attachment' | 'inline', filename: string): string {
+function contentDisposition(filename: string): string {
   // The ASCII fallback prevents path separators, quotes, and control/non-ASCII
   // characters from becoming unsafe header syntax. filename* retains the
   // canonical UTF-8 name for clients that support RFC 5987.
   const fallback = filename.replace(/[^\x20-\x7e]|[\\"/]/g, '_') || 'attachment';
-  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeFilenameParameter(filename)}`;
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeFilenameParameter(filename)}`;
 }
 
 function rejectOversizedContentLength(contentLength: string | undefined): void {
@@ -114,7 +113,6 @@ export function attachmentRoutes(): Hono<AppEnv> {
 
       const mailboxId = c.req.param('mailboxId');
       const attachmentId = c.req.param('attachmentId');
-      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
 
       let result;
       try {
@@ -122,12 +120,12 @@ export function attachmentRoutes(): Hono<AppEnv> {
           {
             db: c.env.DB,
             cache: getAttachmentByteStore(c.env),
+            objectStore: getAttachmentObjectStore(c.env),
           },
           {
             actorUserId: userId,
             mailboxId,
             attachmentId,
-            isAdmin,
           },
         );
       } catch (error) {
@@ -150,7 +148,13 @@ export function attachmentRoutes(): Hono<AppEnv> {
         headers: {
           'Content-Type': result.contentType,
           'Content-Length': String(result.sizeBytes),
-          'Content-Disposition': contentDisposition(result.disposition, result.filename),
+          // Every direct navigation downloads as a file. Inline raster
+          // previews use an authenticated fetch and document-scoped object
+          // URL, so attacker-controlled MIME never executes on our origin.
+          'Content-Disposition': contentDisposition(result.filename),
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'private, no-store',
+          'Content-Security-Policy': 'sandbox',
         },
       });
       const requestId = c.get('requestId');
@@ -184,9 +188,8 @@ export function attachmentRoutes(): Hono<AppEnv> {
       const mailboxId = c.req.param('mailboxId');
       // Authorize the target mailbox before reading an untrusted body. The
       // use case repeats the check at its own boundary for defense in depth.
-      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
       try {
-        await assertCan(c.env.DB, userId, mailboxId, 'send', isAdmin);
+        await assertCan(c.env.DB, userId, mailboxId, 'send');
       } catch (error) {
         // A mailbox upload must not disclose whether a foreign mailbox UUID
         // exists. Collapse both tenancy outcomes to the same 404 envelope.
@@ -221,7 +224,6 @@ export function attachmentRoutes(): Hono<AppEnv> {
           actorUserId: userId,
           mailboxId,
           idempotencyKey,
-          isAdmin,
           requestId: c.get('requestId') ?? null,
           metadata,
           bytes,

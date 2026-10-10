@@ -39,6 +39,32 @@ export async function checkPermission(
 }
 
 /**
+ * UI hint for the administrative workspace. Mailbox and message permissions
+ * belong to the mailbox surface (the default member role has several of
+ * them), so only permissions backed by an admin page qualify. Individual
+ * admin API routes still enforce their own permission on every request.
+ */
+export async function hasAdministrativePermission(db: Database, userId: string): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `SELECT 1 FROM user_roles ur
+       JOIN role_permissions rp ON ur.role_id = rp.role_id
+       JOIN permissions p ON rp.permission_id = p.id
+       WHERE ur.user_id = ?
+         AND p.key IN (
+           'user.read', 'user.manage', 'role.read', 'role.manage',
+           'domain.read', 'domain.manage', 'signature.read', 'signature.manage',
+           'settings.read', 'settings.manage', 'provider.sync',
+           'webhook_event.read', 'webhook_event.delete', 'analytics.read', 'audit.read'
+         )
+       LIMIT 1`,
+    )
+    .bind(userId)
+    .first<{ '1': number }>();
+  return !!result;
+}
+
+/**
  * Gets all role IDs assigned to a user.
  *
  * Useful for UI rendering of user roles or audit logging.

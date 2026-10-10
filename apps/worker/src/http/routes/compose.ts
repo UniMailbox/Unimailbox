@@ -2,7 +2,7 @@
 // Hono sub-app for POST /api/v1/mailboxes/:mailboxId/messages/send.
 //
 // R-AUTHZ-003: Two layers — requirePermission('message.send') on the route,
-// then mailbox-scoped assertCan(..., 'send', isAdmin) inside the handler.
+// then mailbox-scoped assertCan(..., 'send') inside the handler.
 // R-AUTHZ-004: assertCan authorises against the path's mailboxId, never a
 // client-supplied owner ID.
 // R-OUTBOUND-006: message + recipients + mailbox_message + outbound_jobs
@@ -48,12 +48,32 @@
 // ownership or lifecycle details to the caller.
 
 import { Hono } from 'hono';
-import { composeRequestSchema } from '@unimailbox/contracts';
+import {
+  prepareEditorAssetUsages,
+  resolveEditorAssets,
+  prepareHostedLegacyAttachments,
+  appendAttachmentList,
+  assetPath,
+} from '../../modules/editor-assets';
+import { findEnabledSignature, sanitizeSignatureHtml } from '../../modules/signatures';
+import {
+  composeRequestSchema,
+  EDITOR_BODY_MAX_BYTES,
+  estimateEmailBytes,
+  OUTBOUND_SAFE_MAX_BYTES,
+  OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES,
+} from '@unimailbox/contracts';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan, findMailboxById } from '../../modules/tenancy';
-import { checkPermission, prepareCreateAuditEvent } from '../../modules/admin';
-import { prepareCreateOutboundJob } from '../../modules/outbound-mail';
+import { prepareCreateAuditEvent } from '../../modules/admin';
+import {
+  findActiveOutboundConnectionForMailbox,
+  prepareCreateOutboundJob,
+  validateScheduledAt,
+  scheduleRecoveryAt,
+  enqueueScheduledJob,
+} from '../../modules/outbound-mail';
 import {
   createMessageWithRelations,
   listAttachmentUploadsForConsume,
@@ -75,7 +95,7 @@ import {
   replayAfterRace,
 } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
-import { getAttachmentByteStore } from '../../platform/cache';
+import { getAttachmentByteStore, getAttachmentObjectStore } from '../../platform/cache';
 import { parseJsonBody } from '../middleware/parse-json-body';
 
 const SEND_OPERATION = 'POST /api/v1/mailboxes/:mailboxId/messages/send';
@@ -173,11 +193,8 @@ export function composeRoutes(): Hono<AppEnv> {
 
       const mailboxId = c.req.param('mailboxId');
 
-      // R-AUTHZ-003: global permission already checked by middleware; now the
-      // mailbox-scoped check. R-AUTHZ-005: admin bypass flows through
-      // checkPermission('role.manage').
-      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
-      await assertCan(c.env.DB, userId, mailboxId, 'send', isAdmin);
+      // Global permission and mailbox membership are independent checks.
+      await assertCan(c.env.DB, userId, mailboxId, 'send');
 
       // Read the raw body so the SHA-256 hash is computed over the bytes
       // the client actually sent (a JSON re-serialise would change whitespace
@@ -217,6 +234,10 @@ export function composeRoutes(): Hono<AppEnv> {
         actorUserId: userId,
       });
 
+      const scheduledAt = body.scheduledAt
+        ? validateScheduledAt(body.scheduledAt, systemClock.now())
+        : null;
+
       // Look up the mailbox so we can construct the from address and verify
       // it exists. findMailboxById returns the full localPart@domain.name.
       const mailbox = await findMailboxById(c.env.DB, mailboxId);
@@ -228,12 +249,9 @@ export function composeRoutes(): Hono<AppEnv> {
         });
       }
 
-      // Resolve the active provider connection. There is exactly one outbound
-      // provider in Phase 1 (Brevo); we pick the first 'active' row. CAP-024
-      // will tighten this to the connection on the managed domain.
-      const connection = await c.env.DB.prepare(
-        "SELECT id FROM provider_connections WHERE status = 'active' ORDER BY created_at ASC LIMIT 1",
-      ).first<{ id: string }>();
+      // Resolve the active provider connection assigned to this mailbox's
+      // managed domain. Never fall back to another domain's connection.
+      const connection = await findActiveOutboundConnectionForMailbox(c.env.DB, mailboxId);
       if (!connection) {
         throw new DomainError({
           code: 'PROVIDER_CONNECTION_NOT_FOUND',
@@ -267,16 +285,102 @@ export function composeRoutes(): Hono<AppEnv> {
         // stable envelope. CAP-049 CAP-051 owns KV cleanup, so we never
         // delete here.
         const attachmentByteStore = getAttachmentByteStore(c.env);
+        const attachmentObjectStore = getAttachmentObjectStore(c.env);
         for (const row of attachmentRows) {
           const bytes = await attachmentByteStore.get(row.kvKey);
           if (!bytes || bytes.byteLength !== row.sizeBytes) {
             throwAttachmentUnavailable();
           }
+          // Persist the bytes before the D1 consume batch. If the batch later
+          // rolls back, the upload remains `uploaded` and scheduled expiry
+          // can remove this orphaned R2 object safely.
+          await attachmentObjectStore.put(row.kvKey, bytes);
         }
       }
 
+      const signature = await findEnabledSignature(c.env.DB, mailbox.domainId);
+      const authoredHtml = sanitizeSignatureHtml(body.htmlBody);
+      const escapeText = (text: string): string =>
+        text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>');
+      let htmlBody = signature
+        ? `${authoredHtml || (body.textBody ? `<p>${escapeText(body.textBody)}</p>` : '')}<div><br>${signature.htmlContent || escapeText(signature.textContent)}</div>`
+        : authoredHtml;
+      let textBody = signature ? `${body.textBody}\n\n${signature.textContent}` : body.textBody;
+      const authoredAssets = await resolveEditorAssets(c.env.DB, {
+        html: authoredHtml,
+        text: body.textBody,
+        actorUserId: userId,
+        scope: { mailboxId },
+      });
+      const signatureAssets = signature
+        ? await resolveEditorAssets(c.env.DB, {
+            html: signature.htmlContent,
+            text: signature.textContent,
+            actorUserId: userId,
+            scope: { domainId: mailbox.domainId },
+          })
+        : [];
+      const fileAssets = [
+        ...new Map(
+          [...authoredAssets, ...signatureAssets]
+            .filter((asset) => asset.kind === 'file')
+            .map((asset) => [asset.id, asset]),
+        ).values(),
+      ];
+      const fileDescriptors = fileAssets.map((asset) => ({
+        id: asset.id,
+        filename: asset.filename,
+        sizeBytes: asset.size_bytes,
+        url: new URL(assetPath(asset.id, asset.secret), c.req.url).href,
+      }));
+      // Count the actual footer too: adding it must not push a regular
+      // message over the provider boundary after the mode was selected.
+      const regularBody = appendAttachmentList(htmlBody, textBody, fileDescriptors, false);
+      const largeAttachments =
+        estimateEmailBytes(regularBody.html, regularBody.text, body.subject, [
+          ...attachmentRows.map((row) => row.sizeBytes),
+          ...fileAssets.map((asset) => asset.size_bytes),
+        ]) > OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES;
       const now = sqliteTimestamp(systemClock.now());
       const messageId = systemIds.uuid();
+      const hosted =
+        largeAttachments && attachmentRows.length
+          ? await prepareHostedLegacyAttachments(c.env.DB, {
+              actorUserId: userId,
+              mailboxId,
+              messageId,
+              origin: c.req.url,
+              now,
+              files: attachmentRows,
+            })
+          : { files: [], statements: [] };
+      const listed = appendAttachmentList(
+        htmlBody,
+        textBody,
+        [...fileDescriptors, ...hosted.files],
+        largeAttachments,
+      );
+      htmlBody = listed.html;
+      textBody = listed.text;
+      if (
+        new TextEncoder().encode(htmlBody).byteLength > EDITOR_BODY_MAX_BYTES ||
+        estimateEmailBytes(
+          htmlBody,
+          textBody,
+          body.subject,
+          largeAttachments ? [] : attachmentRows.map((row) => row.sizeBytes),
+        ) > OUTBOUND_SAFE_MAX_BYTES
+      ) {
+        throw new DomainError({
+          code: 'BODY_TOO_LARGE',
+          message: 'Email is too large. Upload files as download links instead.',
+          httpStatus: 413,
+        });
+      }
       const jobId = systemIds.uuid();
       const idempotencyRecordId = systemIds.uuid();
       const idempotencyNow = sqliteTimestamp(systemClock.now());
@@ -291,7 +395,11 @@ export function composeRoutes(): Hono<AppEnv> {
       // Build the success body up front so we can store the exact same JSON
       // the client will receive on a replay.
       const successBody = JSON.stringify({
-        data: { messageId, status: 'queued' },
+        data: {
+          messageId,
+          status: 'queued',
+          ...(scheduledAt ? { scheduledAt: scheduledAt.replace(' ', 'T') + '.000Z' } : {}),
+        },
       });
 
       // R-OUTBOUND-006: every row that must exist for the queue consumer to
@@ -301,7 +409,17 @@ export function composeRoutes(): Hono<AppEnv> {
       // CAP-046 / D-CAP-046-B: the audit row is folded into the same D1
       // batch so a crash between the message INSERT and the audit row
       // cannot leave the message without its audit entry (R-AUDIT-001).
+      const assetUsages = await prepareEditorAssetUsages(c.env.DB, {
+        html: authoredHtml,
+        text: body.textBody,
+        actorUserId: userId,
+        scope: { mailboxId },
+        resourceType: 'message',
+        resourceId: messageId,
+      });
       const statements: D1PreparedStatement[] = [
+        ...assetUsages,
+        ...hosted.statements,
         // 1. Message row, status 'queued', from the mailbox address.
         // CAP-030 D-CAP-030-D: this INSERT path intentionally bypasses the
         // CAP-030 direction guard (`updateMessageStatus`'s
@@ -324,8 +442,8 @@ export function composeRoutes(): Hono<AppEnv> {
           messageId,
           mailbox.address,
           body.subject,
-          body.htmlBody,
-          body.textBody,
+          htmlBody,
+          textBody,
           body.inReplyTo ?? null,
           body.references ?? '',
           userId,
@@ -339,19 +457,25 @@ export function composeRoutes(): Hono<AppEnv> {
              VALUES (?, ?, ?, ?, 'to', ?)`,
           ).bind(systemIds.uuid(), messageId, r.address, r.displayName ?? '', now),
         ),
-        // 3. 'cc' recipients (bcc is intentionally not exposed on compose).
+        // 3. Cc and blind recipients remain distinct through provider delivery.
         ...body.cc.map((r) =>
           c.env.DB.prepare(
             `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
              VALUES (?, ?, ?, ?, 'cc', ?)`,
           ).bind(systemIds.uuid(), messageId, r.address, r.displayName ?? '', now),
         ),
+        ...body.bcc.map((r) =>
+          c.env.DB.prepare(
+            `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at)
+             VALUES (?, ?, ?, ?, 'bcc', ?)`,
+          ).bind(systemIds.uuid(), messageId, r.address, r.displayName ?? '', now),
+        ),
         // 4. Mailbox association. A composed message starts in 'sent' — it
         // represents the user's own outbound copy.
         c.env.DB.prepare(
           `INSERT INTO mailbox_messages (id, mailbox_id, message_id, is_read, is_starred, folder, created_at)
-           VALUES (?, ?, ?, 1, 0, 'sent', ?)`,
-        ).bind(systemIds.uuid(), mailboxId, messageId, now),
+           VALUES (?, ?, ?, 1, 0, ?, ?)`,
+        ).bind(systemIds.uuid(), mailboxId, messageId, scheduledAt ? 'scheduled' : 'sent', now),
         // 5. CAP-050 message_attachments INSERTs — must come BEFORE the
         // consume UPDATE so the BEFORE INSERT trigger observes the
         // pre-transition `status='uploaded'` row. Any missing / expired
@@ -392,14 +516,15 @@ export function composeRoutes(): Hono<AppEnv> {
           messageId,
           providerConnectionId: connection.id,
           createdAt: now,
-          updatedAt: now,
+          updatedAt: scheduleRecoveryAt(scheduledAt, systemClock.now()),
+          ...(scheduledAt ? { scheduledAt, mailboxId } : {}),
         }),
         // 8. message.send audit row (R-AUDIT-001) — folded into the same
         // batch so the message INSERT and the audit entry land atomically.
         prepareCreateAuditEvent(c.env.DB, {
           id: auditEventId,
           actorUserId: userId,
-          action: 'message.send',
+          action: scheduledAt ? 'message.scheduled' : 'message.send',
           resourceType: 'message',
           resourceId: messageId,
           requestId,
@@ -442,6 +567,13 @@ export function composeRoutes(): Hono<AppEnv> {
       try {
         await createMessageWithRelations(c.env.DB, statements);
       } catch (error) {
+        if (error instanceof Error && error.message.includes('EDITOR_ASSET_PENDING_LIMIT')) {
+          throw new DomainError({
+            code: 'VALIDATION_ERROR',
+            message: 'Pending upload limit reached; send or save existing uploads first',
+            httpStatus: 400,
+          });
+        }
         // CAP-050 race routing: three constraints can fire here for the
         // same logical race — two concurrent compose requests with the
         // same Idempotency-Key, or two concurrent requests that raced on
@@ -484,7 +616,7 @@ export function composeRoutes(): Hono<AppEnv> {
       // Hand the job to the queue. The consumer (entrypoints/queue.ts) reads
       // the job, decrypts the credential, calls the adapter, and updates
       // message + job status.
-      await c.env.OUTBOUND.send(JSON.stringify({ jobId }));
+      await enqueueScheduledJob(c.env.DB, c.env.OUTBOUND, jobId, scheduledAt, systemClock.now());
 
       return new Response(successBody, {
         status: 202,

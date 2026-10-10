@@ -1,3 +1,6 @@
+import { Spinner } from '../components/ui/Spinner';
+import { errorMessage } from '../infrastructure/i18n/error-messages';
+import { useT } from '../infrastructure/i18n/locale';
 // apps/web router — code-based TanStack Router.
 // CAP-001 stub extended by CAP-041 with the /setup tree. CAP-042 Batch 5
 // adds the /login, /register, and /mailbox subtree; the router validates
@@ -47,6 +50,8 @@ import {
   Link,
   redirect,
   useParams,
+  useNavigate,
+  useLocation,
 } from '@tanstack/react-router';
 import type { RouterHistory } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
@@ -58,7 +63,8 @@ import {
   type InstallationStep,
   type MessageFolder,
 } from '@unimailbox/contracts';
-import type { ReactElement } from 'react';
+import { lazy, useEffect, type ReactElement } from 'react';
+import { ComposeWindowProvider, useComposer } from '../features/mailbox/compose-window-context';
 import { ApiError } from '../infrastructure/api/errors';
 import type { ApiClient } from '../infrastructure/api/client';
 import { fetchSetupStatus, setupQueryKeys } from '../features/setup/setup-queries';
@@ -66,6 +72,7 @@ import { SetupLayout } from '../features/setup/setup-layout';
 import { authQueryKeys, fetchAuthSession } from '../features/auth/auth-queries';
 import { LoginPage } from '../features/auth/LoginPage';
 import { RegisterPage } from '../features/auth/RegisterPage';
+import { ChangePasswordPage } from '../features/auth/ChangePasswordPage';
 import { AuthErrorBoundary } from '../features/auth/AuthErrorBoundary';
 import {
   ClaimStep,
@@ -78,22 +85,76 @@ import {
   OutboundSmokeStep,
   CompleteStep,
 } from '../features/setup';
-import { MailboxListPage } from '../features/mailbox/MailboxListPage';
-import { InboxListPage } from '../features/mailbox/InboxListPage';
-import { MessageDetailPage } from '../features/mailbox/MessageDetailPage';
-import { ComposeEmail } from '../features/mailbox/ComposeEmail';
-import { DraftRecoveryPage } from '../features/mailbox/DraftRecoveryPage';
-import { MailboxMembersPage } from '../features/mailbox/MailboxMembersPage';
-import { AdminLandingPage } from '../features/admin/AdminLandingPage';
-import { AuditEventsPage } from '../features/admin/AuditEventsPage';
-import { UsersPage } from '../features/admin/UsersPage';
-import { ConnectionsPage } from '../features/admin/ConnectionsPage';
-import { WebhookEventsPage } from '../features/admin/WebhookEventsPage';
-import { DomainsPage } from '../features/admin/DomainsPage';
-import { RolesPage } from '../features/admin/RolesPage';
-import { SignaturesPage } from '../features/admin/SignaturesPage';
-import { SettingsPage } from '../features/admin/SettingsPage';
+
 import { AdminLayout } from '../components/layouts/AdminLayout';
+import { MailboxLayout } from '../components/layouts/MailboxLayout';
+
+// Keep management and message editors out of the initial authentication bundle.
+const DefaultMailboxPage = lazy(() =>
+  import('../features/mailbox/DefaultMailboxPage').then((module) => ({
+    default: module.DefaultMailboxPage,
+  })),
+);
+const MailboxListPage = lazy(() =>
+  import('../features/mailbox/MailboxListPage').then((module) => ({
+    default: module.MailboxListPage,
+  })),
+);
+const MailboxWorkspace = lazy(() =>
+  import('../features/mailbox/MailboxWorkspace').then((module) => ({
+    default: module.MailboxWorkspace,
+  })),
+);
+const MessageDetailPage = lazy(() =>
+  import('../features/mailbox/MessageDetailPage').then((module) => ({
+    default: module.MessageDetailPage,
+  })),
+);
+const DraftRecoveryPage = lazy(() =>
+  import('../features/mailbox/DraftRecoveryPage').then((module) => ({
+    default: module.DraftRecoveryPage,
+  })),
+);
+const MailboxMembersPage = lazy(() =>
+  import('../features/mailbox/MailboxMembersPage').then((module) => ({
+    default: module.MailboxMembersPage,
+  })),
+);
+const AdminLandingPage = lazy(() =>
+  import('../features/admin/AdminLandingPage').then((module) => ({
+    default: module.AdminLandingPage,
+  })),
+);
+const AuditEventsPage = lazy(() =>
+  import('../features/admin/AuditEventsPage').then((module) => ({
+    default: module.AuditEventsPage,
+  })),
+);
+const UsersPage = lazy(() =>
+  import('../features/admin/UsersPage').then((module) => ({ default: module.UsersPage })),
+);
+const ConnectionsPage = lazy(() =>
+  import('../features/admin/ConnectionsPage').then((module) => ({
+    default: module.ConnectionsPage,
+  })),
+);
+const WebhookEventsPage = lazy(() =>
+  import('../features/admin/WebhookEventsPage').then((module) => ({
+    default: module.WebhookEventsPage,
+  })),
+);
+const DomainsPage = lazy(() =>
+  import('../features/admin/DomainsPage').then((module) => ({ default: module.DomainsPage })),
+);
+const RolesPage = lazy(() =>
+  import('../features/admin/RolesPage').then((module) => ({ default: module.RolesPage })),
+);
+const SignaturesPage = lazy(() =>
+  import('../features/admin/SignaturesPage').then((module) => ({ default: module.SignaturesPage })),
+);
+const SettingsPage = lazy(() =>
+  import('../features/admin/SettingsPage').then((module) => ({ default: module.SettingsPage })),
+);
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -122,10 +183,10 @@ async function requireCompletedSetup({ apiClient, queryClient }: RouterContext):
   }
 }
 
-async function requireAuthenticatedSession({
-  apiClient,
-  queryClient,
-}: RouterContext): Promise<void> {
+async function requireAuthenticatedSession(
+  { apiClient, queryClient }: RouterContext,
+  options: { readonly allowPasswordChange?: boolean } = {},
+): Promise<void> {
   await requireCompletedSetup({ apiClient, queryClient });
   const descriptor = await queryClient.ensureQueryData({
     queryKey: authQueryKeys.session(),
@@ -134,31 +195,61 @@ async function requireAuthenticatedSession({
   if (descriptor === null) {
     throw redirect({ to: '/login' });
   }
+  if (descriptor.mustChangePassword === true && options.allowPasswordChange !== true) {
+    throw redirect({ to: '/change-password' });
+  }
+}
+
+async function requireAdministrativeSession(context: RouterContext): Promise<void> {
+  await requireAuthenticatedSession(context);
+  // The login/cache descriptor is only a UI hint. Re-read /me when entering
+  // the admin workspace so a revoked role cannot leave its navigation shell
+  // visible. Individual admin API routes remain the authorization authority.
+  const descriptor = await context.queryClient.fetchQuery({
+    queryKey: authQueryKeys.session(),
+    queryFn: () => fetchAuthSession(context.apiClient),
+    staleTime: 0,
+  });
+  if (descriptor?.canAccessAdmin === false) {
+    throw redirect({ to: '/mailbox' });
+  }
 }
 
 function DefaultPending(): ReactElement {
+  const t = useT();
   return (
-    <main className="unimailbox-stub">
-      <p>Loading…</p>
+    <main className="flex min-h-dvh items-center justify-center" aria-busy="true">
+      <Spinner label={t('Loading…')} />
     </main>
   );
 }
 
 function DefaultError({ error }: ErrorComponentProps): ReactElement {
-  const message = error instanceof Error ? error.message : 'Something went wrong.';
+  const t = useT();
+  const message = errorMessage(error instanceof ApiError ? error.code : 'INTERNAL');
   return (
     <main className="unimailbox-stub" role="alert">
-      <h1>Something went wrong</h1>
+      <h1>{t('Something went wrong')}</h1>
       <p>{message}</p>
       <p>
-        <Link to="/">Back to home</Link>
+        <a href={window.location.pathname}>{t('Reload')}</a>
       </p>
     </main>
   );
 }
 
+function ApplicationOutlet(): ReactElement {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  return pathname.startsWith('/mailbox') || pathname.startsWith('/admin') ? (
+    <ComposeWindowProvider>
+      <Outlet />
+    </ComposeWindowProvider>
+  ) : (
+    <Outlet />
+  );
+}
 const rootRoute = createRootRouteWithContext<RouterContext>()({
-  component: () => <Outlet />,
+  component: ApplicationOutlet,
   notFoundComponent: () => (
     <main className="unimailbox-stub">
       <h1>404</h1>
@@ -185,8 +276,7 @@ const indexRoute = createRoute({
   component: DefaultPending,
 });
 
-// CAP-042 Batch 5 — /login. The login form posts to
-// /api/v1/auth/better/sign-in/email; success navigates to /mailbox.
+// /login uses the application-owned email/password session endpoint.
 // CAP-042 Batch 8 (M-1 fix): wrap the auth surface in
 // <AuthErrorBoundary> so a render-time error inside the form falls
 // through to the auth-styled fallback (not the outermost ErrorBoundary
@@ -202,10 +292,8 @@ const loginRoute = createRoute({
   ),
 });
 
-// CAP-042 Batch 5 — /register. Self-service registration is the legacy
-// /api/v1/auth/register endpoint; success navigates to /login so the
-// user can sign in with the new credentials (registration is separate
-// from sign-in, per CAP-019 / R-AUTH-006).
+// /register is a compatibility page explaining admin-managed account
+// creation; no invitation or self-service flow is available.
 // CAP-042 Batch 8 (M-1 fix): same boundary wrap as /login.
 const registerRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -214,6 +302,18 @@ const registerRoute = createRoute({
   component: () => (
     <AuthErrorBoundary>
       <RegisterPage />
+    </AuthErrorBoundary>
+  ),
+});
+
+const changePasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/change-password',
+  beforeLoad: async ({ context }) =>
+    requireAuthenticatedSession(context, { allowPasswordChange: true }),
+  component: () => (
+    <AuthErrorBoundary>
+      <ChangePasswordPage />
     </AuthErrorBoundary>
   ),
 });
@@ -239,7 +339,22 @@ const mailboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox',
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: () => <MailboxListPage />,
+  component: () => (
+    <MailboxLayout>
+      <DefaultMailboxPage />
+    </MailboxLayout>
+  ),
+});
+
+const allMailboxesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mailboxes',
+  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
+  component: () => (
+    <MailboxLayout>
+      <MailboxListPage />
+    </MailboxLayout>
+  ),
 });
 
 // CAP-043 Slice 1 (AC 8): the inbox page for a single mailbox.
@@ -257,7 +372,11 @@ const inboxRoute = createRoute({
     // declared schema (`$mailboxId` → `mailboxId: string`).
     const params = useParams({ strict: false });
     const search = inboxRoute.useSearch();
-    return <InboxListPage mailboxId={params.mailboxId} folder={search.folder} />;
+    return (
+      <MailboxLayout>
+        <MailboxWorkspace mailboxId={params.mailboxId} folder={search.folder} />
+      </MailboxLayout>
+    );
   },
 });
 
@@ -271,7 +390,11 @@ const messageDetailRoute = createRoute({
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: function MessageDetailRoute(): ReactElement {
     const params = useParams({ strict: false });
-    return <MessageDetailPage mailboxId={params.mailboxId} messageId={params.messageId} />;
+    return (
+      <MailboxLayout>
+        <MessageDetailPage mailboxId={params.mailboxId} messageId={params.messageId} />
+      </MailboxLayout>
+    );
   },
 });
 
@@ -322,7 +445,19 @@ const composeRoute = createRoute({
     // Route-bound hook: the search type comes from THIS route's
     // validateSearch output, not from a globally registered router.
     const search = composeRoute.useSearch();
-    return <ComposeEmail mailboxId={params.mailboxId} replyToMessageId={search.replyTo} />;
+    const composer = useComposer();
+    const navigate = useNavigate();
+    useEffect(() => {
+      if (!params.mailboxId) return;
+      composer?.open({ mailboxId: params.mailboxId, replyToMessageId: search.replyTo });
+      void navigate({
+        to: '/mailbox/$mailboxId',
+        params: { mailboxId: params.mailboxId },
+        search: { folder: 'inbox' },
+        replace: true,
+      });
+    }, [composer?.open, navigate, params.mailboxId, search.replyTo]);
+    return <DefaultPending />;
   },
 });
 
@@ -334,7 +469,11 @@ const draftRecoveryRoute = createRoute({
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: function DraftRecoveryRoute(): ReactElement {
     const params = useParams({ strict: false });
-    return <DraftRecoveryPage mailboxId={params.mailboxId} draftId={params.draftId} />;
+    return (
+      <MailboxLayout>
+        <DraftRecoveryPage mailboxId={params.mailboxId} draftId={params.draftId} />
+      </MailboxLayout>
+    );
   },
 });
 
@@ -347,29 +486,26 @@ const mailboxMembersRoute = createRoute({
   beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
   component: function MailboxMembersRoute(): ReactElement {
     const params = useParams({ strict: false });
-    return <MailboxMembersPage mailboxId={params.mailboxId} />;
+    return (
+      <MailboxLayout>
+        <MailboxMembersPage mailboxId={params.mailboxId} />
+      </MailboxLayout>
+    );
   },
 });
 
-// CAP-044 Slice 2 (AC 13; CAP-033 absorbed, D-CAP-044-E): the /admin
-// section. Session-guarded exactly like /mailbox (D-CAP-041-1 cache
-// hydration + D-CAP-041-9 redirect). Authorization is NOT decided here —
-// the session descriptor carries no role/permission signal (see
-// features/admin/admin-queries.ts), so each admin page enforces its
-// permission server-side and renders the not-authorized state for
-// members. The nav-signal gap is reported to the orchestrator; widening
-// the session endpoint is not this slice's call.
-function AdminRoute({ children }: { readonly children: ReactElement }): ReactElement {
-  return <AdminLayout>{children}</AdminLayout>;
-}
-
+// The /admin workspace is hidden when the fresh /me response says the user
+// has no administrative capability. Every API route still enforces its own
+// permission server-side; this guard only controls the UI shell.
 const adminLandingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function AdminLandingRoute(): ReactElement {
-    return <AdminRoute><AdminLandingPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <AdminLandingPage />
+    </AdminLayout>
+  ),
 });
 
 // CAP-044 Slice 2 (AC 13): the audit-trail viewer. Same session guard;
@@ -378,10 +514,12 @@ const adminLandingRoute = createRoute({
 const adminAuditEventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/audit-events',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function AuditEventsRoute(): ReactElement {
-    return <AdminRoute><AuditEventsPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <AuditEventsPage />
+    </AdminLayout>
+  ),
 });
 
 // CAP-044 Slice 3 (AC 19–21): the users / connections / webhook-events
@@ -392,64 +530,78 @@ const adminAuditEventsRoute = createRoute({
 const adminUsersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/users',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function UsersRoute(): ReactElement {
-    return <AdminRoute><UsersPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <UsersPage />
+    </AdminLayout>
+  ),
 });
 
 const adminConnectionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/connections',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function ConnectionsRoute(): ReactElement {
-    return <AdminRoute><ConnectionsPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <ConnectionsPage />
+    </AdminLayout>
+  ),
 });
 
 const adminWebhookEventsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/webhook-events',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function WebhookEventsRoute(): ReactElement {
-    return <AdminRoute><WebhookEventsPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <WebhookEventsPage />
+    </AdminLayout>
+  ),
 });
 
 const adminDomainsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/domains',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function DomainsRoute(): ReactElement {
-    return <AdminRoute><DomainsPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <DomainsPage />
+    </AdminLayout>
+  ),
 });
 
 const adminRolesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/roles',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function RolesRoute(): ReactElement {
-    return <AdminRoute><RolesPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <RolesPage />
+    </AdminLayout>
+  ),
 });
 
 const adminSignaturesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/signatures',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function SignaturesRoute(): ReactElement {
-    return <AdminRoute><SignaturesPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <SignaturesPage />
+    </AdminLayout>
+  ),
 });
 
 const adminSettingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/settings',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function SettingsRoute(): ReactElement {
-    return <AdminRoute><SettingsPage /></AdminRoute>;
-  },
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <SettingsPage />
+    </AdminLayout>
+  ),
 });
 
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
@@ -650,7 +802,9 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   registerRoute,
+  changePasswordRoute,
   mailboxRoute,
+  allMailboxesRoute,
   inboxRoute,
   messageDetailRoute,
   composeRoute,

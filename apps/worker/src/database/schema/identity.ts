@@ -194,3 +194,27 @@ export type AuthVerification = typeof authVerifications.$inferSelect;
 export type NewAuthVerification = typeof authVerifications.$inferInsert;
 export type IdempotencyRecord = typeof idempotencyRecords.$inferSelect;
 export type NewIdempotencyRecord = typeof idempotencyRecords.$inferInsert;
+
+// Typing only; migration 0031 is authoritative.
+export const userPreferences = sqliteTable('user_preferences', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  language: text('language', { enum: ['en', 'zh-CN'] })
+    .notNull()
+    .default('en'),
+  theme: text('theme', { enum: ['system', 'light', 'dark'] })
+    .notNull()
+    .default('system'),
+  density: text('density', { enum: ['comfortable', 'compact'] })
+    .notNull()
+    .default('comfortable'),
+  readingPane: text('reading_pane', { enum: ['none', 'right', 'bottom'] })
+    .notNull()
+    .default('none'),
+  defaultMailboxId: text('default_mailbox_id'),
+  avatarObjectKey: text('avatar_object_key').unique(),
+  avatarContentType: text('avatar_content_type'),
+  avatarVersion: text('avatar_version'),
+  updatedAt: text('updated_at').notNull(),
+});

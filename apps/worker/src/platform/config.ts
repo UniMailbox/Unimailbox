@@ -198,7 +198,13 @@ export function parseAdditionalTrustedOrigins(
 export function loadConfig(env: Env): PlatformConfig {
   const environment = parseEnvironment(env.ENVIRONMENT);
   const authProvider = parseAuthProvider(env.AUTH_PROVIDER);
-  const betterAuthUrl = parseBetterAuthUrl(env.BETTER_AUTH_URL, environment);
+  // Better Auth is migration-only and is not part of the deployed auth
+  // surface. Keep a local sentinel for the quarantined adapter so the
+  // composition root remains backwards-compatible while no deployment
+  // configuration or request path depends on it.
+  const betterAuthUrl = env.BETTER_AUTH_URL
+    ? parseBetterAuthUrl(env.BETTER_AUTH_URL, environment)
+    : 'http://localhost';
   const additionalTrustedOrigins = parseAdditionalTrustedOrigins(
     env.BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS,
     environment,

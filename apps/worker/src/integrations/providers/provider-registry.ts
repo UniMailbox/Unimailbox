@@ -5,10 +5,16 @@
 // interface — never the SDK directly. This registry is the single place
 // to look up an adapter by key.
 //
-// Phase 1: Only Brevo. Phase 5 adds Resend and CF-Sendmail.
+// Brevo is the first registered implementation. Additional SMTP/provider
+// adapters can register here without changing outbound-mail use cases.
 
-import type { OutboundProviderAdapter, ProviderKey } from '@unimailbox/contracts';
+import type {
+  OutboundProviderAdapter,
+  ProviderKey,
+  WebhookProviderAdapter,
+} from '@unimailbox/contracts';
 import { brevoAdapter } from './brevo';
+import { brevoWebhookAdapter } from './brevo-webhook';
 
 /**
  * ProviderRegistry — maps provider keys to their adapter implementations.
@@ -19,11 +25,11 @@ import { brevoAdapter } from './brevo';
  */
 class ProviderRegistry {
   private readonly adapters = new Map<ProviderKey, OutboundProviderAdapter>();
+  private readonly webhookAdapters = new Map<ProviderKey, WebhookProviderAdapter>();
 
   constructor() {
-    // Register Brevo for CAP-014
     this.register(brevoAdapter);
-    // Resend and CF-Sendmail will be registered in Phase 5
+    this.registerWebhook(brevoWebhookAdapter);
   }
 
   /**
@@ -33,6 +39,14 @@ class ProviderRegistry {
    */
   register(adapter: OutboundProviderAdapter): void {
     this.adapters.set(adapter.key, adapter);
+  }
+
+  registerWebhook(adapter: WebhookProviderAdapter): void {
+    this.webhookAdapters.set(adapter.key, adapter);
+  }
+
+  getWebhook(key: ProviderKey): WebhookProviderAdapter | undefined {
+    return this.webhookAdapters.get(key);
   }
 
   /**

@@ -451,6 +451,16 @@ export async function getMessageDetail(
     .bind(messageId)
     .all<MessageAttachmentDetailRow>();
 
+  const inboundAttachmentRows = await db
+    .prepare(
+      `SELECT id, filename, content_type, size_bytes, disposition, content_id
+         FROM inbound_message_attachments
+        WHERE message_id = ?
+        ORDER BY created_at ASC, id ASC`,
+    )
+    .bind(messageId)
+    .all<MessageAttachmentDetailRow>();
+
   return {
     id: row.id,
     fromAddress: row.from_address,
@@ -467,14 +477,16 @@ export async function getMessageDetail(
     folder: messageFolderSchema.parse(row.folder),
     createdAt: row.created_at,
     recipients: groupRecipients(recipientRows.results ?? []),
-    attachments: (attachmentRows.results ?? []).map((attachment) => ({
-      id: attachment.id,
-      filename: attachment.filename,
-      contentType: attachment.content_type,
-      sizeBytes: attachment.size_bytes,
-      disposition: attachment.disposition,
-      contentId: attachment.content_id,
-    })),
+    attachments: [...(attachmentRows.results ?? []), ...(inboundAttachmentRows.results ?? [])].map(
+      (attachment) => ({
+        id: attachment.id,
+        filename: attachment.filename,
+        contentType: attachment.content_type,
+        sizeBytes: attachment.size_bytes,
+        disposition: attachment.disposition,
+        contentId: attachment.content_id,
+      }),
+    ),
   };
 }
 

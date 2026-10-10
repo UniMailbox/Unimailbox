@@ -210,8 +210,8 @@ export interface MessageAttachmentForSend {
 /**
  * Per-message attachment projection read by `processOutboundJob` so the
  * queue consumer can assemble `SendProviderMessage.attachments` from D1
- * metadata + the exact bytes it reads from CACHE through the
- * `AttachmentByteStore` seam. Read-only — no repository writes through
+ * metadata + the exact bytes it reads from R2 (or legacy CACHE) through the
+ * byte-store seams. Read-only — no repository writes through
  * this entry point.
  */
 export async function listMessageAttachmentsForSend(
@@ -261,7 +261,7 @@ export async function listMessageAttachmentsForSend(
  * Canonical metadata needed to serve one consumed attachment. The
  * `message_attachments` row is authoritative for the wire metadata; the
  * upload row is joined only to require the consume-side lifecycle state and
- * to retain the canonical CACHE key.
+ * to retain the canonical object key.
  */
 export interface MessageAttachmentForDownload {
   readonly uploadId: string;
@@ -346,7 +346,7 @@ export interface ExpiredAttachmentUpload {
   readonly status: 'uploaded' | 'expired';
 }
 
-/** Lists expired uploads, including rows awaiting a CACHE-delete retry. */
+/** Bounded pending cleanup only; successfully cleaned rows stay out of later ticks. */
 export async function listExpiredAttachmentUploads(
   db: Database,
   input: { readonly now: string },
@@ -355,9 +355,11 @@ export async function listExpiredAttachmentUploads(
     .prepare(
       `SELECT id AS upload_id, kv_key AS kv_key, status AS status
          FROM attachment_uploads
-        WHERE (status = 'uploaded' AND expires_at <= ?)
-           OR status = 'expired'
-        ORDER BY expires_at ASC, id ASC`,
+        WHERE cleanup_completed_at IS NULL
+          AND status IN ('uploaded', 'expired')
+          AND (status = 'expired' OR expires_at <= ?)
+        ORDER BY expires_at ASC, id ASC
+        LIMIT 100`,
     )
     .bind(input.now)
     .all<{ upload_id: string; kv_key: string; status: 'uploaded' | 'expired' }>();
@@ -367,6 +369,20 @@ export async function listExpiredAttachmentUploads(
     kvKey: row.kv_key,
     status: row.status,
   }));
+}
+
+/** Storage cleanup must finish before this durable checkpoint is written. */
+export async function completeAttachmentCleanup(
+  db: Database,
+  input: { readonly uploadId: string; readonly now: string },
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE attachment_uploads SET cleanup_completed_at = ?
+      WHERE id = ? AND status = 'expired' AND cleanup_completed_at IS NULL`,
+    )
+    .bind(input.now, input.uploadId)
+    .run();
 }
 
 /** Prepares the guarded uploaded -> expired lifecycle transition. */

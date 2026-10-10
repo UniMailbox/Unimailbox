@@ -1,3 +1,4 @@
+import { errorMessage } from '../i18n/error-messages';
 // apps/web — API error envelope.
 // The Worker returns `{ error: { code, message, requestId } }` (R-API-002).
 // The client parses that envelope, throws a typed `ApiError` on any
@@ -27,6 +28,7 @@ export class ApiError extends Error {
   constructor(code: string, message: string, status: number, requestId?: string) {
     super(message);
     this.name = 'ApiError';
+    Object.defineProperty(this, 'message', { get: () => errorMessage(code), configurable: true });
     this.code = code;
     this.status = status;
     if (requestId !== undefined) {

@@ -73,11 +73,8 @@ describe('POST /api/v1/setup/preflight', () => {
       const body = await response.json();
       const { bindings } = body.data;
 
-      // All 8 bindings should be present and true.
-      // CAP-042 (AC 11): BETTER_AUTH_SECRET is an independent binding read
-      // through readSecret() in preflight.ts. The test pool provides a
-      // plain-string value (apps/worker/wrangler.test.jsonc), and
-      // readSecret() handles both forms.
+      // All deployed bindings should be present and true. Authentication is
+      // application-owned and has no Better Auth secret binding.
       expect(bindings).toEqual({
         DB: true,
         ATTACHMENTS: true,
@@ -86,11 +83,10 @@ describe('POST /api/v1/setup/preflight', () => {
         OUTBOUND: true,
         INSTALLATION_TOKEN: true,
         CREDENTIAL_ENCRYPTION_KEY: true,
-        BETTER_AUTH_SECRET: true,
       });
 
-      // Exactly 8 keys
-      expect(Object.keys(bindings).length).toBe(8);
+      // Exactly 7 keys
+      expect(Object.keys(bindings).length).toBe(7);
     });
 
     it('reports schema version from d1_migrations', async () => {
@@ -363,9 +359,9 @@ describe('POST /api/v1/setup/preflight', () => {
    * always seeds the row, so callers should not see null).
    */
   async function currentInstallationStep(): Promise<string | null> {
-    const row = await env.DB
-      .prepare('SELECT current_step FROM installation_state WHERE id = 1')
-      .first<{ current_step: string }>();
+    const row = await env.DB.prepare(
+      'SELECT current_step FROM installation_state WHERE id = 1',
+    ).first<{ current_step: string }>();
     return row?.current_step ?? null;
   }
 
@@ -375,8 +371,7 @@ describe('POST /api/v1/setup/preflight', () => {
    * rows when it does not).
    */
   async function countAuditEvents(action: string): Promise<number> {
-    const row = await env.DB
-      .prepare('SELECT COUNT(*) AS n FROM audit_events WHERE action = ?')
+    const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM audit_events WHERE action = ?')
       .bind(action)
       .first<{ n: number }>();
     return row?.n ?? 0;
@@ -414,7 +409,6 @@ describe('POST /api/v1/setup/preflight', () => {
       expect(body.data.bindings).toMatchObject({
         DB: true,
         INSTALLATION_TOKEN: true,
-        BETTER_AUTH_SECRET: true,
       });
       expect(body.data.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
       // The `advanced` flag is server-internal and must NOT leak into the
@@ -429,17 +423,15 @@ describe('POST /api/v1/setup/preflight', () => {
       // R-AUDIT-001: the audit row carries the requestId the middleware
       // stamped on the HTTP request so logs/traces can correlate the
       // advance with the originating call.
-      const audit = await env.DB
-        .prepare(
-          `SELECT actor_user_id, action, resource_type, request_id
+      const audit = await env.DB.prepare(
+        `SELECT actor_user_id, action, resource_type, request_id
              FROM audit_events WHERE action = 'setup.preflight.complete'`,
-        )
-        .first<{
-          actor_user_id: string | null;
-          action: string;
-          resource_type: string;
-          request_id: string | null;
-        }>();
+      ).first<{
+        actor_user_id: string | null;
+        action: string;
+        resource_type: string;
+        request_id: string | null;
+      }>();
       expect(audit).not.toBeNull();
       expect(audit?.actor_user_id).toBeNull();
       expect(audit?.action).toBe('setup.preflight.complete');
@@ -449,15 +441,11 @@ describe('POST /api/v1/setup/preflight', () => {
       );
     });
 
-    // AC-3: Missing binding (BETTER_AUTH_SECRET cleared) → 200 with
+    // AC-3: Missing binding (credential encryption key cleared) → 200 with
     // bindings.<name>=false, current_step unchanged, ZERO new audit rows.
     it('AC-3 missing binding does not advance and does not write an audit row', async () => {
-      // Remove BETTER_AUTH_SECRET from the test pool so checkSecret() fails.
-      const originalSecret = env.BETTER_AUTH_SECRET;
-      // Setting to undefined makes !!env.BETTER_AUTH_SECRET evaluate to false
-      // and makes readSecret() throw — both prongs of the binding check
-      // should report missing.
-      (env as { BETTER_AUTH_SECRET?: string }).BETTER_AUTH_SECRET = undefined;
+      const originalSecret = env.CREDENTIAL_ENCRYPTION_KEY;
+      (env as { CREDENTIAL_ENCRYPTION_KEY?: string }).CREDENTIAL_ENCRYPTION_KEY = undefined;
       try {
         expect(await currentInstallationStep()).toBe('preflight');
         const before = await countAuditEvents('setup.preflight.complete');
@@ -472,7 +460,7 @@ describe('POST /api/v1/setup/preflight', () => {
 
         expect(response.status).toBe(200);
         const body = await response.json();
-        expect(body.data.bindings.BETTER_AUTH_SECRET).toBe(false);
+        expect(body.data.bindings.CREDENTIAL_ENCRYPTION_KEY).toBe(false);
         // Object-store bindings are still present — only the secret fails.
         expect(body.data.bindings.DB).toBe(true);
 
@@ -480,7 +468,7 @@ describe('POST /api/v1/setup/preflight', () => {
         const after = await countAuditEvents('setup.preflight.complete');
         expect(after - before).toBe(0);
       } finally {
-        (env as { BETTER_AUTH_SECRET?: string }).BETTER_AUTH_SECRET = originalSecret;
+        (env as { CREDENTIAL_ENCRYPTION_KEY?: string }).CREDENTIAL_ENCRYPTION_KEY = originalSecret;
       }
     });
 
@@ -492,13 +480,11 @@ describe('POST /api/v1/setup/preflight', () => {
       // is `ORDER BY id DESC LIMIT 1`, so UPDATE the highest-id row in
       // place — preserves the desc-order invariant without resorting to
       // DELETE + re-INSERT.
-      await env.DB
-        .prepare(
-          `UPDATE d1_migrations
+      await env.DB.prepare(
+        `UPDATE d1_migrations
              SET name = '0099_drift.sql'
              WHERE id = (SELECT id FROM d1_migrations ORDER BY id DESC LIMIT 1)`,
-        )
-        .run();
+      ).run();
 
       expect(await currentInstallationStep()).toBe('preflight');
       const before = await countAuditEvents('setup.preflight.complete');
@@ -530,12 +516,11 @@ describe('POST /api/v1/setup/preflight', () => {
     // test-kit's `seedInstallationState` INSERT — because claimSession()
     // above already seeded the row at 'preflight' (UNIQUE PK on id=1).
     it('AC-5 re-applying preflight when already advanced is a no-op', async () => {
-      await env.DB
-        .prepare(
-          `UPDATE installation_state
+      await env.DB.prepare(
+        `UPDATE installation_state
              SET current_step = ?, updated_at = ?
              WHERE id = 1`,
-        )
+      )
         .bind('administrator', '2026-01-01 00:00:00')
         .run();
 

@@ -34,6 +34,13 @@ export interface AttachmentByteStore {
   delete(key: string): Promise<void>;
 }
 
+/** Persistent object-store seam for attachments associated with messages. */
+export interface AttachmentObjectStore {
+  get(key: string): Promise<ArrayBuffer | null>;
+  put(key: string, bytes: ArrayBuffer): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
 export function getAttachmentByteStore(env: Env): AttachmentByteStore {
   return {
     // KVNamespace.get returns `string | ArrayBuffer | null`. The CAP-049
@@ -52,5 +59,24 @@ export function getAttachmentByteStore(env: Env): AttachmentByteStore {
     },
     put: (key, bytes, options) => env.CACHE.put(key, bytes, options),
     delete: (key) => env.CACHE.delete(key),
+  };
+}
+
+/**
+ * R2-backed attachment bytes. R2 has no TTL; lifecycle and authorization stay
+ * in D1, while scheduled expiry/deletion explicitly removes unreferenced
+ * objects. This store is deliberately separate from the KV staging seam so
+ * an upload can remain retryable until its D1 consume transaction commits.
+ */
+export function getAttachmentObjectStore(env: Env): AttachmentObjectStore {
+  return {
+    get: async (key) => {
+      const object = await env.ATTACHMENTS.get(key);
+      return object ? object.arrayBuffer() : null;
+    },
+    put: async (key, bytes) => {
+      await env.ATTACHMENTS.put(key, bytes);
+    },
+    delete: (key) => env.ATTACHMENTS.delete(key).then(() => undefined),
   };
 }

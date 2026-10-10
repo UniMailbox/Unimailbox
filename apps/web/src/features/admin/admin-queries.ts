@@ -906,7 +906,7 @@ export function useAdminNavProbe() {
       await apiClient.fetch('/api/v1/admin/audit-events?limit=1');
       return true;
     },
-    enabled: session !== undefined && session !== null,
+    enabled: session !== undefined && session !== null && session.canAccessAdmin === undefined,
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
     retryOnMount: false,

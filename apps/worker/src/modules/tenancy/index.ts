@@ -20,7 +20,6 @@ export {
   findMailboxById,
   findMailboxByAddress,
   listMailboxesByUser,
-  listMailboxesByOwner,
   findMailboxMember,
   listMailboxMemberRows,
   prepareCreateMailboxMember,

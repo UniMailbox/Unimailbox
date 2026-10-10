@@ -70,7 +70,8 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
     assets: {
       directory: '../web/dist',
       binding: 'ASSETS',
-      not_found_handling: 'single-page-application',
+      not_found_handling: 'none',
+      run_worker_first: ['/api', '/api/*', '/healthz', '/healthz/*', '/readyz'],
     },
     queues: {
       producers: [{ queue: 'unimailbox-outbound' }],
@@ -117,6 +118,16 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       const r = evaluateWebAssetsBinding(mutated, repoRoot);
       expect(r.ok).toBe(false);
       expect(r.detail).toContain('not_found_handling');
+    });
+
+    it('fails when /healthz is not worker-first', () => {
+      const mutated = {
+        ...passingProd,
+        assets: { ...(passingProd.assets as object), run_worker_first: ['/api/*'] },
+      };
+      const r = evaluateWebAssetsBinding(mutated, repoRoot);
+      expect(r.ok).toBe(false);
+      expect(r.detail).toContain('/healthz');
     });
   });
 
@@ -236,7 +247,7 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
   // Drift between any two is a blocking finding. The pure evaluator is
   // `evaluateWranglerBindings`; the fixtures below mirror the real
   // three surfaces so a regression on any name surfaces immediately.
-  describe('wrangler-bindings (CAP-042 AC 11)', () => {
+  describe('wrangler-bindings (self-managed authentication)', () => {
     const requiredEnvKeys = new Set([
       'DB',
       'ATTACHMENTS',
@@ -246,10 +257,7 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       'ASSETS',
       'INSTALLATION_TOKEN',
       'CREDENTIAL_ENCRYPTION_KEY',
-      'BETTER_AUTH_SECRET',
       'ENVIRONMENT',
-      'BETTER_AUTH_URL',
-      'AUTH_PROVIDER',
     ]);
 
     const fullProd: Record<string, unknown> = {
@@ -260,13 +268,10 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       secrets_store_secrets: [
         { binding: 'INSTALLATION_TOKEN' },
         { binding: 'CREDENTIAL_ENCRYPTION_KEY' },
-        { binding: 'BETTER_AUTH_SECRET' },
       ],
       assets: { binding: 'ASSETS' },
       vars: {
         ENVIRONMENT: 'local',
-        BETTER_AUTH_URL: 'http://localhost',
-        AUTH_PROVIDER: 'legacy',
       },
     };
 
@@ -278,11 +283,8 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       assets: { binding: 'ASSETS' },
       vars: {
         ENVIRONMENT: 'local',
-        BETTER_AUTH_URL: 'http://localhost',
-        AUTH_PROVIDER: 'legacy',
         INSTALLATION_TOKEN: 'x',
         CREDENTIAL_ENCRYPTION_KEY: 'x',
-        BETTER_AUTH_SECRET: 'x',
       },
     };
 
@@ -291,54 +293,47 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       expect(r).toEqual<R>({ name: 'wrangler-bindings', ok: true });
     });
 
-    it('fails when wrangler.jsonc omits BETTER_AUTH_SECRET', () => {
+    it('fails when wrangler.jsonc omits CREDENTIAL_ENCRYPTION_KEY', () => {
       const prod = {
         ...fullProd,
-        secrets_store_secrets: [
-          { binding: 'INSTALLATION_TOKEN' },
-          { binding: 'CREDENTIAL_ENCRYPTION_KEY' },
-        ],
+        secrets_store_secrets: [{ binding: 'INSTALLATION_TOKEN' }],
       };
       const r = evaluateWranglerBindings(prod, fullTest, requiredEnvKeys);
       expect(r.ok).toBe(false);
       expect(r.detail).toContain('wrangler.jsonc missing');
-      expect(r.detail).toContain('BETTER_AUTH_SECRET');
+      expect(r.detail).toContain('CREDENTIAL_ENCRYPTION_KEY');
     });
 
-    it('fails when wrangler.test.jsonc omits BETTER_AUTH_SECRET', () => {
+    it('fails when wrangler.test.jsonc omits CREDENTIAL_ENCRYPTION_KEY', () => {
       const test = {
         ...fullTest,
         vars: {
           ENVIRONMENT: 'local',
-          BETTER_AUTH_URL: 'http://localhost',
-          AUTH_PROVIDER: 'legacy',
           INSTALLATION_TOKEN: 'x',
-          CREDENTIAL_ENCRYPTION_KEY: 'x',
         },
       };
       const r = evaluateWranglerBindings(fullProd, test, requiredEnvKeys);
       expect(r.ok).toBe(false);
       expect(r.detail).toContain('wrangler.test.jsonc missing');
-      expect(r.detail).toContain('BETTER_AUTH_SECRET');
+      expect(r.detail).toContain('CREDENTIAL_ENCRYPTION_KEY');
     });
 
-    it('fails when env.ts omits AUTH_PROVIDER', () => {
+    it('fails when env.ts omits CACHE', () => {
       const envKeys = new Set([...requiredEnvKeys]);
-      envKeys.delete('AUTH_PROVIDER');
+      envKeys.delete('CACHE');
       const r = evaluateWranglerBindings(fullProd, fullTest, envKeys);
       expect(r.ok).toBe(false);
       expect(r.detail).toContain('env.ts missing');
-      expect(r.detail).toContain('AUTH_PROVIDER');
+      expect(r.detail).toContain('CACHE');
     });
 
-    it('fails when BETTER_AUTH_URL is missing from a non-test var list', () => {
+    it('allows production config without legacy auth variables', () => {
       const prod = {
         ...fullProd,
-        vars: { ENVIRONMENT: 'local', AUTH_PROVIDER: 'legacy' },
+        vars: { ENVIRONMENT: 'local' },
       };
       const r = evaluateWranglerBindings(prod, fullTest, requiredEnvKeys);
-      expect(r.ok).toBe(false);
-      expect(r.detail).toContain('BETTER_AUTH_URL');
+      expect(r.ok).toBe(true);
     });
 
     it('reports every drift in a single failure detail', () => {
@@ -346,8 +341,8 @@ describe('CAP-039 — deployment substrate doctor checks', () => {
       const test = { ...fullTest, vars: { ENVIRONMENT: 'local' } };
       const r = evaluateWranglerBindings(prod, test, requiredEnvKeys);
       expect(r.ok).toBe(false);
-      expect(r.detail).toContain('BETTER_AUTH_URL');
-      expect(r.detail).toContain('AUTH_PROVIDER');
+      expect(r.detail).toContain('INSTALLATION_TOKEN');
+      expect(r.detail).toContain('CREDENTIAL_ENCRYPTION_KEY');
     });
   });
 });

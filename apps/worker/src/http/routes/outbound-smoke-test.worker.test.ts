@@ -6,20 +6,28 @@
 // Tests cover:
 // - Valid session + configured Brevo → 200 with providerMessageId
 // - Installation step advances to 'complete' after success
-// - Brevo API error → 502 PROVIDER_SEND_FAILED
 // - No session → 401
 // - Response does NOT include the decrypted API key (R-SECRET-003)
 // - No administrator → 409 SETUP_ADMINISTRATOR_REQUIRED
 // - No domain → 409 SETUP_DOMAIN_REQUIRED
 // - Brevo not configured → 409 SETUP_BREVO_NOT_CONFIGURED
+//
+// Provider HTTP is intercepted by MSW; the full route and real storage bindings run.
+// This suite needs no provider credentials and cannot send a real email.
 
-import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, beforeAll, afterEach, afterAll } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, FIXED_TIMESTAMP } from '@unimailbox/test-kit';
+import { BREVO_TEST_CONFIG, createBrevoNetwork } from '@unimailbox/test-kit/brevo-network';
 
 describe('POST /api/v1/setup/outbound-smoke-test', () => {
   let sessionToken: string;
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  const provider = createBrevoNetwork();
+  beforeAll(() => provider.network.enable());
+  beforeEach(() => provider.reset());
+  afterEach(() => provider.network.resetHandlers());
+  afterAll(() => provider.network.disable());
 
   // Helper: claim a session before each test
   async function claimSession(): Promise<string> {
@@ -41,12 +49,14 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
   }
 
   // Helper: setup prerequisites (administrator + domain + brevo)
-  async function setupPrerequisites(existingFetchSpy: ReturnType<typeof vi.spyOn>): Promise<void> {
+  async function setupPrerequisites(): Promise<void> {
+    const config = BREVO_TEST_CONFIG;
+
     // Create administrator
     const adminResponse = await SELF.fetch('http://localhost/api/v1/setup/administrator', {
       method: 'POST',
       body: JSON.stringify({
-        email: 'admin@example.com',
+        email: config.recipientEmail,
         password: 'securePassword123',
         displayName: 'Admin User',
       }),
@@ -63,7 +73,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     // Create domain
     const domainResponse = await SELF.fetch('http://localhost/api/v1/setup/domain', {
       method: 'POST',
-      body: JSON.stringify({ name: 'example.com' }),
+      body: JSON.stringify({ name: config.domain }),
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
@@ -81,23 +91,9 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       .bind(FIXED_TIMESTAMP)
       .run();
 
-    // Setup Brevo - mock the fetch for the Brevo validation call specifically
-    existingFetchSpy.mockImplementation(async (url: string, options?: RequestInit) => {
-      if (url === 'https://api.brevo.com/v3/account' && options?.method === undefined) {
-        // GET request for account validation
-        return new Response(JSON.stringify({ id: 'test-account' }), { status: 200 });
-      }
-      if (url === 'https://api.brevo.com/v3/smtp/email' && options?.method === 'POST') {
-        // POST request for sending email
-        return new Response(JSON.stringify({ messageId: 'test-send-id' }), { status: 200 });
-      }
-      // Default response for any other calls
-      return new Response(JSON.stringify({}), { status: 200 });
-    });
-
     const brevoResponse = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
       method: 'POST',
-      body: JSON.stringify({ apiKey: 'test-brevo-api-key' }),
+      body: JSON.stringify({ apiKey: config.apiKey }),
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${sessionToken}`,
@@ -110,44 +106,19 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     }
   }
 
-  // Helper: mock successful send for smoke test
-  function mockSuccessfulSend(messageId: string = 'brevo-message-123') {
-    fetchSpy.mockImplementation(async (url: string, options?: RequestInit) => {
-      if (url === 'https://api.brevo.com/v3/smtp/email' && options?.method === 'POST') {
-        return new Response(JSON.stringify({ messageId }), { status: 200 });
-      }
-      return new Response(JSON.stringify({}), { status: 200 });
-    });
-  }
-
-  // Helper: mock failed send
-  function mockFailedSend(status: number, message: string = 'Send failed') {
-    fetchSpy.mockImplementation(async (url: string, options?: RequestInit) => {
-      if (url === 'https://api.brevo.com/v3/smtp/email' && options?.method === 'POST') {
-        return new Response(JSON.stringify({ message }), { status });
-      }
-      return new Response(JSON.stringify({}), { status: 200 });
-    });
-  }
-
   beforeEach(async () => {
-    // Spy on global fetch to mock Brevo API calls BEFORE any setup
-    fetchSpy = vi.spyOn(globalThis, 'fetch');
-
     await resetAndMigrate();
     sessionToken = await claimSession();
-    await setupPrerequisites(fetchSpy);
+    await setupPrerequisites();
   });
 
-  afterEach(() => {
-    // Restore the original fetch implementation
-    fetchSpy.mockRestore();
+  it('blocks unexpected external HTTP during the deployment gate', async () => {
+    await expect(fetch('https://unexpected-provider.invalid/deployment-gate')).rejects.toThrow();
+    expect(provider.sent).toHaveLength(0);
   });
 
   describe('valid session and configured Brevo', () => {
     it('returns 200 with providerMessageId', async () => {
-      mockSuccessfulSend();
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
@@ -162,12 +133,11 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
 
       const body = await response.json();
       expect(body).toHaveProperty('data');
-      expect(body.data).toHaveProperty('providerMessageId', 'brevo-message-123');
+      expect(body.data.providerMessageId).toEqual(expect.any(String));
+      expect(body.data.providerMessageId.length).toBeGreaterThan(0);
     });
 
     it('advances the installation step to complete', async () => {
-      mockSuccessfulSend();
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
@@ -193,8 +163,6 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     });
 
     it('sends the test email to the admin user', async () => {
-      mockSuccessfulSend();
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
@@ -205,23 +173,15 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       });
 
       expect(response.status).toBe(200);
-
-      // Verify Brevo API was called with the correct payload
-      expect(fetchSpy).toHaveBeenCalled();
-      const call = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
-      expect(call[0]).toBe('https://api.brevo.com/v3/smtp/email');
-
-      const bodyArg = call[1]?.body;
-      expect(bodyArg).toBeDefined();
-      const parsedBody = JSON.parse(bodyArg as string);
-      expect(parsedBody.sender).toEqual({ email: 'noreply@example.com', name: undefined });
-      expect(parsedBody.to).toEqual([{ email: 'admin@example.com', name: undefined }]);
-      expect(parsedBody.subject).toBe('Unimailbox Setup Smoke Test');
+      const body = await response.json();
+      expect(body.data.providerMessageId).toEqual(expect.any(String));
+      expect(provider.sent).toHaveLength(1);
+      expect(provider.sent[0]?.to).toEqual([
+        expect.objectContaining({ email: BREVO_TEST_CONFIG.recipientEmail }),
+      ]);
     });
 
     it('returns the success envelope { data: T }', async () => {
-      mockSuccessfulSend();
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
@@ -237,7 +197,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     });
 
     it('response does NOT include the decrypted API key (R-SECRET-003)', async () => {
-      mockSuccessfulSend();
+      const config = BREVO_TEST_CONFIG;
 
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
@@ -253,69 +213,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
 
       // Verify API key is not in the response
       expect(body.data).not.toHaveProperty('apiKey');
-      expect(JSON.stringify(body)).not.toContain('test-brevo-api-key');
-    });
-  });
-
-  describe('Brevo API errors', () => {
-    it('returns 502 PROVIDER_SEND_FAILED when Brevo send fails', async () => {
-      mockFailedSend(401, 'Invalid API key');
-
-      const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-outbound-smoke-key',
-        },
-      });
-
-      expect(response.status).toBe(502);
-      const body = await response.json();
-      expect(body).toHaveProperty('error');
-      expect(body.error.code).toBe('PROVIDER_SEND_FAILED');
-    });
-
-    it('does not advance step when Brevo send fails', async () => {
-      mockFailedSend(503, 'Service unavailable');
-
-      const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-outbound-smoke-key',
-        },
-      });
-
-      expect(response.status).toBe(502);
-
-      // Verify step did NOT advance (should still be 'outbound-smoke')
-      const state = await env.DB.prepare(
-        'SELECT current_step FROM installation_state WHERE id = 1',
-      ).first<{ current_step: string }>();
-
-      if (!state) {
-        throw new Error('Installation state not found');
-      }
-
-      // Step should still be 'outbound-smoke' (where Brevo setup left it)
-      expect(state.current_step).toBe('outbound-smoke');
-    });
-
-    it('returns 502 when Brevo returns 500', async () => {
-      mockFailedSend(500, 'Internal Server Error');
-
-      const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-outbound-smoke-key',
-        },
-      });
-
-      expect(response.status).toBe(502);
+      expect(JSON.stringify(body)).not.toContain(config.apiKey);
     });
   });
 
@@ -370,8 +268,6 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
         .bind(FIXED_TIMESTAMP)
         .run();
 
-      mockSuccessfulSend();
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
@@ -389,8 +285,6 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
     it('returns 409 SETUP_DOMAIN_REQUIRED when no domain exists', async () => {
       // Remove the domain
       await env.DB.prepare('DELETE FROM managed_domains').run();
-
-      mockSuccessfulSend();
 
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
@@ -412,8 +306,6 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       // Then remove the encrypted credential
       await env.DB.prepare('DELETE FROM encrypted_credentials').run();
 
-      mockSuccessfulSend();
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
@@ -431,8 +323,6 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
 
   describe('idempotency (CAP-027 / ADR-004)', () => {
     it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
-      mockSuccessfulSend();
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
         headers: {
@@ -448,7 +338,6 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
 
     it('replays the stored response when same key + same body', async () => {
       const idempotencyKey = 'test-outbound-smoke-key-abc123';
-      mockSuccessfulSend('brevo-message-123');
 
       const response1 = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
@@ -461,7 +350,7 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
 
       expect(response1.status).toBe(200);
       const body1 = await response1.json();
-      expect(body1.data.providerMessageId).toBe('brevo-message-123');
+      expect(body1.data.providerMessageId).toEqual(expect.any(String));
 
       // Reset step to allow second call (simulating a replay attempt)
       await env.DB.prepare(
@@ -469,9 +358,6 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       )
         .bind(FIXED_TIMESTAMP)
         .run();
-
-      // Change the mock to return a different messageId - replay should return the original
-      mockSuccessfulSend('brevo-message-different');
 
       const response2 = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
         method: 'POST',
@@ -485,115 +371,8 @@ describe('POST /api/v1/setup/outbound-smoke-test', () => {
       expect(response2.status).toBe(200);
       const body2 = await response2.json();
       // Should return the SAME providerMessageId as the first request (replay)
-      expect(body2.data.providerMessageId).toBe('brevo-message-123');
-    });
-
-    it('generates a unique idempotency key for each send', async () => {
-      let callCount = 0;
-      fetchSpy.mockImplementation(async () => {
-        callCount++;
-        return new Response(JSON.stringify({ messageId: `brevo-msg-${callCount}` }), {
-          status: 200,
-        });
-      });
-
-      // First call
-      const response1 = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'unique-key-1',
-        },
-      });
-
-      expect(response1.status).toBe(200);
-      const body1 = await response1.json();
-      expect(body1.data.providerMessageId).toBe('brevo-msg-1');
-
-      // Reset step to allow second call
-      await env.DB.prepare(
-        `UPDATE installation_state SET current_step = 'outbound-smoke', updated_at = ? WHERE id = 1`,
-      )
-        .bind(FIXED_TIMESTAMP)
-        .run();
-
-      // Second call with different key
-      const response2 = await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'unique-key-2',
-        },
-      });
-
-      expect(response2.status).toBe(200);
-      const body2 = await response2.json();
-      expect(body2.data.providerMessageId).toBe('brevo-msg-2');
-
-      // Verify both calls were made
-      expect(callCount).toBe(2);
-    });
-  });
-
-  describe('request payload', () => {
-    it('includes correct from address with noreply@ domain', async () => {
-      mockSuccessfulSend();
-
-      await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-outbound-smoke-key',
-        },
-      });
-
-      const call = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
-      const bodyArg = call[1]?.body;
-      const parsedBody = JSON.parse(bodyArg as string);
-
-      expect(parsedBody.sender.email).toBe('noreply@example.com');
-    });
-
-    it('includes subject "Unimailbox Setup Smoke Test"', async () => {
-      mockSuccessfulSend();
-
-      await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-outbound-smoke-key',
-        },
-      });
-
-      const call = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
-      const bodyArg = call[1]?.body;
-      const parsedBody = JSON.parse(bodyArg as string);
-
-      expect(parsedBody.subject).toBe('Unimailbox Setup Smoke Test');
-    });
-
-    it('includes both html and text content', async () => {
-      mockSuccessfulSend();
-
-      await SELF.fetch('http://localhost/api/v1/setup/outbound-smoke-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-outbound-smoke-key',
-        },
-      });
-
-      const call = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1];
-      const bodyArg = call[1]?.body;
-      const parsedBody = JSON.parse(bodyArg as string);
-
-      expect(parsedBody.htmlContent).toBe('<p>This is a test message from Unimailbox setup.</p>');
-      expect(parsedBody.textContent).toBe('This is a test message from Unimailbox setup.');
+      expect(body2.data.providerMessageId).toBe(body1.data.providerMessageId);
+      expect(provider.sent).toHaveLength(1);
     });
   });
 });

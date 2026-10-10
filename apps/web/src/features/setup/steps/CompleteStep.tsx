@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — CompleteStep.
 //
 // CAP-041 / step 9. Final POST to /complete flips installation_state.status
@@ -18,6 +19,7 @@ import { clearSetupSession } from '../setup-session-store';
 import { SetupGuidance } from '../setup-guidance';
 
 export function CompleteStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -71,8 +73,8 @@ export function CompleteStep(): ReactElement {
 
   return (
     <Card
-      title="Complete setup"
-      description="Mark the installation complete and route the app to the dashboard."
+      title={t('Complete setup')}
+      description={t('Mark the installation complete and route the app to the dashboard.')}
     >
       <SetupGuidance
         purpose="Finalize installation and make the mailbox application available."
@@ -87,16 +89,18 @@ export function CompleteStep(): ReactElement {
       />
       {completed ? (
         <Alert variant="success" testId="complete-success">
-          Installation is complete. The app is now live.
+          {t('Installation is complete. The app is now live.')}
         </Alert>
       ) : (
-        <p className="wizard-subtitle">Click the button to mark the installation complete.</p>
+        <p className="wizard-subtitle">
+          {t('Click the button to mark the installation complete.')}
+        </p>
       )}
       {submitError !== null ? (
         <ErrorPanel
           message={submitErrorMessage}
           code={submitErrorCode}
-          retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          retryLabel={isUnauthorized ? t('Re-claim installation token') : t('Retry')}
           onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
         />
       ) : null}
@@ -108,7 +112,7 @@ export function CompleteStep(): ReactElement {
             onClick={() => void navigate({ to: '/' })}
             data-testid="complete-go-to-app"
           >
-            Go to app
+            {t('Go to app')}
           </Button>
         ) : (
           <Button
@@ -119,7 +123,7 @@ export function CompleteStep(): ReactElement {
             aria-busy={submitting}
             data-testid="complete-submit"
           >
-            {submitting ? <Spinner /> : 'Complete setup'}
+            {submitting ? <Spinner /> : t('Complete setup')}
           </Button>
         )}
       </div>

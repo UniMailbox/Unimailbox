@@ -2,6 +2,9 @@
 // ADR-007 (AES-GCM via Secrets Store). Real hashing/encryption lands with
 // the identity module.
 
+import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+
 /**
  * Constant-time string comparison. Compares UTF-8 byte sequences with XOR
  * accumulation — no early exit on character mismatch. Returns false immediately
@@ -28,9 +31,44 @@ export function constantTimeCompare(a: string, b: string): boolean {
 // PBKDF2-SHA256 password hashing — ADR-006
 // ---------------------------------------------------------------------------
 
-const PBKDF2_ITERATIONS = 600_000;
+// Operator-approved hosted Workers work factor (2026-10-06).
+const PBKDF2_ITERATIONS = 100_000;
 const PBKDF2_SALT_BYTES = 16;
 const PBKDF2_HASH_BITS = 256;
+
+/** Preserve the ADR-006 work factor on hosted Workers, whose Web Crypto
+ * PBKDF2 implementation rejects more than 100,000 iterations. The fallback
+ * computes the same standard PBKDF2 bytes; other native failures propagate. */
+async function derivePasswordBits(
+  password: string,
+  salt: Uint8Array,
+  iterations: number,
+): Promise<Uint8Array> {
+  const passwordBytes = new TextEncoder().encode(password);
+  const key = await crypto.subtle.importKey('raw', passwordBytes, 'PBKDF2', false, ['deriveBits']);
+  try {
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+      key,
+      PBKDF2_HASH_BITS,
+    );
+    return new Uint8Array(bits);
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      error.name !== 'NotSupportedError' ||
+      !/iteration counts above \d+ are not supported/.test(error.message)
+    ) {
+      throw error;
+    }
+    return await pbkdf2Async(sha256, passwordBytes, salt, {
+      c: iterations,
+      dkLen: PBKDF2_HASH_BITS / 8,
+    });
+  } finally {
+    passwordBytes.fill(0);
+  }
+}
 
 /**
  * PasswordHash — the result of hashing a password with PBKDF2-SHA256.
@@ -47,37 +85,28 @@ export interface PasswordHash {
  * Hash a password using PBKDF2-SHA256 per ADR-006.
  *
  * - Salt: 16 random bytes per user
- * - Iterations: 600,000 (modern minimum)
+ * - Iterations: 100,000 by default, matching the hosted native API limit.
  * - Hash: 256-bit (32 bytes) derived via SHA-256
  *
- * This function takes ~600ms on Cloudflare Workers. Do NOT reduce iterations
- * for tests — testing.md §Determinism requires we test what we ship.
+ * Existing hashes keep their stored iteration count during verification.
  *
  * See .claude/rules/security.md §Passwords and ADR-006.
- * Uses the Web Crypto API directly — no external dependencies.
+ * Uses Web Crypto with a compatible PBKDF2 fallback for hosted Workers.
  *
  * @param password - The plaintext password to hash (6–30 characters enforced by API)
  * @returns A PasswordHash containing algorithm, iterations, salt, and hash
  */
-export async function hashPassword(password: string): Promise<PasswordHash> {
+export async function hashPassword(
+  password: string,
+  iterations = PBKDF2_ITERATIONS,
+): Promise<PasswordHash> {
   const salt = crypto.getRandomValues(new Uint8Array(PBKDF2_SALT_BYTES));
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(password),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  );
-  const hashBuffer = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
-    key,
-    PBKDF2_HASH_BITS,
-  );
+  const hash = await derivePasswordBits(password, salt, iterations);
   return {
     algorithm: 'pbkdf2-sha256',
-    iterations: PBKDF2_ITERATIONS,
+    iterations,
     salt,
-    hash: new Uint8Array(hashBuffer),
+    hash,
   };
 }
 
@@ -177,26 +206,10 @@ export async function decrypt(data: EncryptedData, key: CryptoKey): Promise<stri
  * See .claude/rules/security.md §Passwords and ADR-006.
  */
 export async function verifyPassword(password: string, stored: PasswordHash): Promise<boolean> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(password),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  );
-  const hashBuffer = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt: stored.salt,
-      iterations: stored.iterations,
-      hash: 'SHA-256',
-    },
-    key,
-    PBKDF2_HASH_BITS,
-  );
+  const hash = await derivePasswordBits(password, stored.salt, stored.iterations);
 
   // constantTimeCompare works with strings, so convert both Uint8Arrays to hex
-  const derivedHex = bufferToHex(new Uint8Array(hashBuffer));
+  const derivedHex = bufferToHex(hash);
   const storedHex = bufferToHex(stored.hash);
   return constantTimeCompare(derivedHex, storedHex);
 }
@@ -225,7 +238,7 @@ function bufferToHex(buffer: Uint8Array): string {
 //
 // Envelope wire format:
 //
-//   pbkdf2-sha256$600000$<32 lowercase hex salt bytes>$<64 lowercase hex hash bytes>
+//   pbkdf2-sha256$<approved iterations>$<32 lowercase hex salt>$<64 lowercase hex hash>
 //
 // The encoder is pure: it accepts the platform `PasswordHash` value object
 // and returns a string. The verifier (in `integrations/better-auth/password.ts`)
@@ -244,15 +257,14 @@ const ADR006_HASH_BYTES = 32;
  *
  * Throws on any deviation from ADR-006 so column-row mismatches fail loud
  * during migration and backfill rather than silently producing a hash that
- * the verifier will later reject. The iteration segment is always written
- * as the ADR-006 minimum; any other value reaches the wire only as a
- * rejection.
+ * the verifier will later reject. Only the current and legacy work factors
+ * are accepted; the envelope preserves the actual stored derivation count.
  */
 export function encodeAdr006Password(stored: PasswordHash): string {
   if (stored.algorithm !== ADR006_ALGORITHM) {
     throw new Error(`Unsupported algorithm: ${String(stored.algorithm)}`);
   }
-  if (stored.iterations !== ADR006_ITERATIONS) {
+  if (stored.iterations !== ADR006_ITERATIONS && stored.iterations !== PBKDF2_ITERATIONS) {
     throw new Error(`Unsupported iteration count: ${stored.iterations}`);
   }
   if (!(stored.salt instanceof Uint8Array) || stored.salt.byteLength !== ADR006_SALT_BYTES) {
@@ -261,5 +273,5 @@ export function encodeAdr006Password(stored: PasswordHash): string {
   if (!(stored.hash instanceof Uint8Array) || stored.hash.byteLength !== ADR006_HASH_BYTES) {
     throw new Error(`Hash must be exactly ${ADR006_HASH_BYTES} bytes`);
   }
-  return `pbkdf2-sha256$${ADR006_ITERATIONS}$${bufferToHex(stored.salt)}$${bufferToHex(stored.hash)}`;
+  return `pbkdf2-sha256$${stored.iterations}$${bufferToHex(stored.salt)}$${bufferToHex(stored.hash)}`;
 }

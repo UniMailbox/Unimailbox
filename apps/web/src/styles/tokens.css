@@ -262,8 +262,9 @@ body {
   display: inline-block;
   width: 1rem;
   height: 1rem;
-  border: 2px solid var(--muted);
-  border-top-color: var(--primary);
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
   border-radius: 50%;
   animation: unimailbox-spin 0.8s linear infinite;
 }

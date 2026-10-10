@@ -17,11 +17,13 @@ export function rememberMailbox(userId: string, mailboxId: string): void {
 export function selectDefaultMailbox(
   items: readonly MailboxListItem[],
   user: { userId: string; email: string },
+  configured?: string | null,
 ): MailboxListItem | undefined {
   const active = items.filter((item) => item.status === 'active');
   const saved = preferredMailboxId(user.userId);
   return (
-    active.find((item) => item.id === saved) ??
+    active.find((item) => item.id === configured) ??
+    (configured === undefined ? active.find((item) => item.id === saved) : undefined) ??
     active.find((item) => item.address.toLowerCase() === user.email.toLowerCase()) ??
     active.find((item) => item.ownerUserId === user.userId) ??
     active[0]

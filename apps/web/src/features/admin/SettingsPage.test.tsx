@@ -90,6 +90,45 @@ function mountPage(handler: (url: string, init?: RequestInit) => Response | Prom
 }
 
 describe('SettingsPage (CAP-069)', () => {
+  it('shows a non-interactive skeleton until settings arrive, then replaces it with the form', async () => {
+    let resolveSettings!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveSettings = resolve;
+    });
+    mountPage(() => pending);
+    const loading = await screen.findByTestId('admin-loading');
+    expect(loading.querySelector('[role="status"]')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByLabelText('Site title')).not.toBeInTheDocument();
+    expect(loading.querySelector('button, input, select')).toBeNull();
+    resolveSettings(jsonResponse({ data: settings({ siteTitle: 'Ready mailbox' }) }));
+    expect(await screen.findByLabelText('Site title')).toHaveValue('Ready mailbox');
+    expect(screen.queryByTestId('admin-loading')).not.toBeInTheDocument();
+  });
+
+  it('keeps form values visible and blocks duplicate saves while showing a busy button', async () => {
+    let resolveSave!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveSave = resolve;
+    });
+    const { calls } = mountPage((_url, init) =>
+      init?.method === 'PATCH' ? pending : jsonResponse({ data: settings() }),
+    );
+    const title = await screen.findByLabelText('Site title');
+    const user = userEvent.setup();
+    await user.clear(title);
+    await user.type(title, 'Operations');
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    const busy = await screen.findByRole('button', { name: 'Saving…' });
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+    expect(busy).toBeDisabled();
+    expect(busy.querySelector('[data-testid="spinner"]')).toHaveAttribute('aria-hidden', 'true');
+    expect(title).toHaveValue('Operations');
+    await user.click(busy);
+    expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
+    resolveSave(jsonResponse({ data: settings({ siteTitle: 'Operations' }) }));
+    expect(await screen.findByRole('button', { name: 'Save settings' })).toBeEnabled();
+  });
+
   it('R-SETTINGS-007 renders, edits, and saves settings with a success state', async () => {
     const { calls } = mountPage((url, init) => {
       if ((init?.method ?? 'GET') === 'GET') return jsonResponse({ data: settings() });

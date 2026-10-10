@@ -1,10 +1,14 @@
+import { translate } from './infrastructure/i18n/locale';
+import { errorMessage } from './infrastructure/i18n/error-messages';
+import { PersonalSettingsProvider } from './features/settings/personal-settings-context';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { Component, useMemo, useState, type ErrorInfo, type ReactElement } from 'react';
 import { createAppRouter } from './app/router';
 import { ApiClientProvider } from './infrastructure/api/client-provider';
-import { createApiClient } from './infrastructure/api/client';
+import { createAuthenticatedApiClient } from './features/auth/auth-api-client';
 import { useSetupSession } from './features/setup/setup-session-store';
+import { useAuthSession } from './features/auth/auth-session-store';
 
 // Top-level error boundary — catches the throw that escapes a route's
 // `defaultErrorComponent` (e.g. an error during provider setup, an error
@@ -33,13 +37,14 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
   override render(): ReactElement {
     if (this.state.error !== null) {
-      const message = this.state.error.message;
+      const message = errorMessage('INTERNAL');
       return (
         <main className="unimailbox-stub" role="alert">
-          <h1>Something went wrong</h1>
+          <h1>{translate('Something went wrong')}</h1>
           <p>{message}</p>
+          <span className="error-panel-code">INTERNAL</span>
           <p>
-            <a href="/">Reload</a>
+            <a href="/">{translate('Reload')}</a>
           </p>
         </main>
       );
@@ -76,9 +81,10 @@ export function App(): ReactElement {
   // router's context).
   const apiClient = useMemo(
     () =>
-      createApiClient({
+      createAuthenticatedApiClient({
         baseUrl: '',
-        getSessionToken: () => useSetupSession.getState().sessionToken,
+        getSessionToken: () =>
+          useAuthSession.getState().accessToken ?? useSetupSession.getState().sessionToken,
       }),
     [],
   );
@@ -88,7 +94,9 @@ export function App(): ReactElement {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <ApiClientProvider client={apiClient}>
-          <RouterProvider router={router} />
+          <PersonalSettingsProvider>
+            <RouterProvider router={router} />
+          </PersonalSettingsProvider>
         </ApiClientProvider>
       </QueryClientProvider>
     </ErrorBoundary>

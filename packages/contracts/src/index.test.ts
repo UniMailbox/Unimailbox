@@ -44,6 +44,9 @@ import {
   userListItemSchema,
   userListResponseSchema,
   userListQueryParamsSchema,
+  changePasswordRequestSchema,
+  adminCreateUserRequestSchema,
+  adminUserStatusRequestSchema,
   composeRecipientSchema,
   composeRequestSchema,
   composeResponseSchema,
@@ -63,6 +66,27 @@ import {
   assertCanTransition,
   allowedFromForMessageStatus,
 } from './index';
+
+describe('CAP-A1 admin-managed authentication contracts', () => {
+  it('accepts valid password-change and admin user inputs', () => {
+    expect(
+      changePasswordRequestSchema.safeParse({ currentPassword: 'current', newPassword: 'newpass1' })
+        .success,
+    ).toBe(true);
+    expect(
+      adminCreateUserRequestSchema.parse({ email: 'person@example.com', displayName: 'Person' }),
+    ).toEqual({ email: 'person@example.com', displayName: 'Person' });
+    expect(adminUserStatusRequestSchema.parse({ status: 'banned' })).toEqual({ status: 'banned' });
+  });
+
+  it('rejects invalid lifecycle values and weak new passwords', () => {
+    expect(
+      changePasswordRequestSchema.safeParse({ currentPassword: 'x', newPassword: 'short' }).success,
+    ).toBe(false);
+    expect(adminCreateUserRequestSchema.safeParse({ email: 'not-an-email' }).success).toBe(false);
+    expect(adminUserStatusRequestSchema.safeParse({ status: 'invited' }).success).toBe(false);
+  });
+});
 
 describe('CAP-057 mailbox sharing contracts (R-API-001 R-API-002 R-API-003 R-DATA-001)', () => {
   it('accepts only the closed member roles and strict add body', () => {
@@ -1080,8 +1104,15 @@ describe('messageListItemSchema', () => {
 });
 
 describe('messageFolderSchema — CAP-059 folder filter contract', () => {
-  it('accepts exactly the five user-visible folders', () => {
-    expect(messageFolderSchema.options).toEqual(['inbox', 'sent', 'drafts', 'archive', 'trash']);
+  it('accepts exactly the six user-visible folders', () => {
+    expect(messageFolderSchema.options).toEqual([
+      'inbox',
+      'sent',
+      'drafts',
+      'scheduled',
+      'archive',
+      'trash',
+    ]);
     for (const folder of messageFolderSchema.options) {
       expect(messageFolderSchema.parse(folder)).toBe(folder);
     }
@@ -1433,12 +1464,16 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'mailbox.create',
         'message.receive',
         'message.send',
+        'message.scheduled',
+        'message.schedule_updated',
+        'message.schedule_cancelled',
         'webhook.delivered',
         'blocklist.create',
         'blocklist.delete',
         'domain.created',
         'domain.deleted',
         'domain.verified',
+        'domain.outbound_connection.updated',
         'role_policy.set',
         'webhook_delivery.reconcile',
         'webhook_secret.reveal',
@@ -1459,6 +1494,11 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'signature.updated',
         'signature.deleted',
         'settings.updated',
+        'user.created',
+        'user.preferences_updated',
+        'user.avatar_updated',
+        'user.password_reset',
+        'user.status_changed',
       ].sort(),
     );
   });
@@ -1960,6 +2000,22 @@ describe('composeRecipientSchema', () => {
 });
 
 describe('composeRequestSchema', () => {
+  it('validates and normalizes Bcc separately with a safe default', () => {
+    expect(composeRequestSchema.parse({ to: [{ address: 'to@example.com' }] }).bcc).toEqual([]);
+    expect(
+      composeRequestSchema.parse({
+        to: [{ address: 'to@example.com' }],
+        bcc: [{ address: ' HIDDEN@Example.com ' }],
+      }).bcc,
+    ).toEqual([{ address: 'hidden@example.com' }]);
+    expect(
+      composeRequestSchema.safeParse({
+        to: [{ address: 'to@example.com' }],
+        bcc: [{ address: 'bad' }],
+      }).success,
+    ).toBe(false);
+  });
+
   it('accepts a minimal valid request (to only)', () => {
     const result = composeRequestSchema.parse({
       to: [{ address: 'recipient@example.com' }],
@@ -3036,5 +3092,62 @@ describe('sendDraftSchema — POST /drafts/:id/send (CAP-047)', () => {
     expect(sendDraftSchema.safeParse('send').success).toBe(false);
     expect(sendDraftSchema.safeParse(42).success).toBe(false);
     expect(sendDraftSchema.safeParse([]).success).toBe(false);
+  });
+});
+describe('scheduled-send wire contracts', () => {
+  it('scheduledSendListSchema requires canonical times and nonnegative revisions', async () => {
+    const { scheduledSendListSchema } = await import('./index');
+    expect(scheduledSendListSchema.parse({ items: [], nextCursor: null })).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    const item = {
+      id: '00000000-0000-4000-8000-000000000001',
+      subject: 'Later',
+      fromAddress: 'me@example.com',
+      fromName: '',
+      folder: 'scheduled',
+      isRead: 1,
+      isStarred: 0,
+      createdAt: '2026-10-09T08:00:00.000Z',
+      recipients: { to: [{ address: 'to@example.com', displayName: '' }], cc: [] },
+      scheduledAt: '2026-10-10T08:00:00.000Z',
+      revision: 0,
+    };
+    expect(scheduledSendListSchema.safeParse({ items: [item], nextCursor: 'signed' }).success).toBe(
+      true,
+    );
+    for (const invalid of [
+      { ...item, scheduledAt: '2026-10-10 08:00' },
+      { ...item, revision: -1 },
+      { ...item, revision: 0.5 },
+    ])
+      expect(
+        scheduledSendListSchema.safeParse({ items: [invalid], nextCursor: null }).success,
+      ).toBe(false);
+  });
+
+  it('schedule changes accept offset timestamps but require the revision token', async () => {
+    const { changeScheduledSendSchema } = await import('./index');
+    const valid = { scheduledAt: '2026-10-10T16:00:00+08:00', expectedRevision: 2 };
+    expect(changeScheduledSendSchema.safeParse(valid).success).toBe(true);
+    expect(changeScheduledSendSchema.safeParse({ scheduledAt: valid.scheduledAt }).success).toBe(
+      false,
+    );
+    expect(changeScheduledSendSchema.safeParse({ ...valid, status: 'sent' }).success).toBe(false);
+  });
+
+  it('cancellation rejects extra fields and invalid revision values', async () => {
+    const { cancelScheduledSendSchema } = await import('./index');
+    expect(cancelScheduledSendSchema.parse({ expectedRevision: 0 })).toEqual({
+      expectedRevision: 0,
+    });
+    for (const invalid of [
+      {},
+      { expectedRevision: -1 },
+      { expectedRevision: 0.5 },
+      { expectedRevision: 0, scheduledAt: '2026-10-10T08:00:00Z' },
+    ])
+      expect(cancelScheduledSendSchema.safeParse(invalid).success).toBe(false);
   });
 });

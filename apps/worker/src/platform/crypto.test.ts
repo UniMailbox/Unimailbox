@@ -1,6 +1,7 @@
 // platform/crypto.test.ts — unit tests for constantTimeCompare, hashPassword,
 // verifyPassword, and AES-GCM encrypt/decrypt (ADR-007).
-import { describe, expect, it } from 'vitest';
+import { pbkdf2Sync } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import {
   constantTimeCompare,
   hashPassword,
@@ -45,10 +46,42 @@ describe('constantTimeCompare', () => {
 });
 
 describe('hashPassword', () => {
+  it('preserves standard 600k PBKDF2 bytes when hosted Workers reject the native work factor', async () => {
+    const password = 'staging-test-中文';
+    const native = vi
+      .spyOn(crypto.subtle, 'deriveBits')
+      .mockRejectedValue(
+        new DOMException(
+          'Pbkdf2 failed: iteration counts above 100000 are not supported (requested 600000).',
+          'NotSupportedError',
+        ),
+      );
+    try {
+      const result = await hashPassword(password, 600_000);
+      const reference = pbkdf2Sync(password, result.salt, 600_000, 32, 'sha256');
+      expect(result.iterations).toBe(600_000);
+      expect(result.hash).toEqual(new Uint8Array(reference));
+      expect(await verifyPassword(password, result)).toBe(true);
+      expect(await verifyPassword('wrong-password', result)).toBe(false);
+    } finally {
+      native.mockRestore();
+    }
+  }, 20_000);
+
+  it('propagates native failures unrelated to the hosted iteration limit', async () => {
+    const error = new DOMException('Unavailable crypto service', 'OperationError');
+    const native = vi.spyOn(crypto.subtle, 'deriveBits').mockRejectedValue(error);
+    try {
+      await expect(hashPassword('staging-test-password')).rejects.toBe(error);
+    } finally {
+      native.mockRestore();
+    }
+  });
+
   it('returns a PasswordHash with correct algorithm and iterations', async () => {
     const result = await hashPassword('test-password');
     expect(result.algorithm).toBe('pbkdf2-sha256');
-    expect(result.iterations).toBe(600_000);
+    expect(result.iterations).toBe(100_000);
   });
 
   it('generates a salt of exactly 16 bytes', async () => {

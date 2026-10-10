@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — ClaimStep.
 //
 // CAP-041 / step 1. The operator pastes the INSTALLATION_TOKEN. On success
@@ -24,6 +25,7 @@ interface ClaimFormFields {
 }
 
 export function ClaimStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const [submitError, setSubmitError] = useState<{
@@ -67,7 +69,10 @@ export function ClaimStep(): ReactElement {
   const tokenError = errors.token?.message;
 
   return (
-    <Card title="Claim installation" description="Provide the deploy-time INSTALLATION_TOKEN.">
+    <Card
+      title={t('Claim installation')}
+      description={t('Provide the deploy-time INSTALLATION_TOKEN.')}
+    >
       <SetupGuidance
         purpose="Confirm that you have access to the deployment before changing installation settings."
         prepare="The INSTALLATION_TOKEN supplied through your protected deployment handoff or secret manager."
@@ -83,8 +88,8 @@ export function ClaimStep(): ReactElement {
           id="claim-token"
           type="password"
           autoComplete="off"
-          label="Installation token"
-          help="Required. Use the token from the protected deployment handoff."
+          label={t('Installation token')}
+          help={t('Required. Use the token from the protected deployment handoff.')}
           error={tokenError}
           {...register('token')}
         />
@@ -103,7 +108,7 @@ export function ClaimStep(): ReactElement {
             aria-busy={isSubmitting}
             data-testid="claim-submit"
           >
-            {isSubmitting ? <Spinner /> : 'Claim installation'}
+            {isSubmitting ? <Spinner /> : t('Claim installation')}
           </Button>
         </div>
       </form>

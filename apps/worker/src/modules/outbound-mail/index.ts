@@ -19,6 +19,13 @@ export {
 } from './connection-repository';
 
 export {
+  findActiveOutboundConnectionForMailbox,
+  findActiveOutboundConnectionForJob,
+  type MailboxOutboundConnection,
+  type JobOutboundConnection,
+} from './connection-resolver';
+
+export {
   prepareCreateOutboundJob,
   // CAP-047: marker-guarded INSERT...SELECT for the draft→queued send path.
   // Lives in the same D1 batch as the idempotency record so a replay cannot
@@ -31,7 +38,7 @@ export {
   markOutboundJobRetryable,
   markOutboundJobTerminal,
   reclaimStaleOutboundJobs,
-  findOrphanedQueuedJobs,
+  claimOrphanedQueuedJobs,
   isJobTerminal,
   type CreateJobInput,
   type CreateJobGuardedInput,
@@ -78,3 +85,7 @@ export {
   prepareReconciliationStatements,
   type ReconcileResult,
 } from './reconcile-webhook-deliveries';
+
+export { validateScheduledAt, scheduleRecoveryAt } from './schedule-time';
+export { enqueueScheduledJob } from './enqueue-scheduled-job';
+export { listScheduledSends, changeScheduledSend } from './scheduled-send';

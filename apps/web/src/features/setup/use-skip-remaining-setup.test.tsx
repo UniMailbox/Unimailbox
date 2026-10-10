@@ -27,11 +27,7 @@ import {
 import { createApiClient, type ApiClient } from '../../infrastructure/api/client';
 import { ApiClientProvider } from '../../infrastructure/api/client-provider';
 import { useSkipRemainingSetup } from './use-skip-remaining-setup';
-import {
-  errorResponse,
-  jsonResponse,
-  lastPathname,
-} from '../../test-utils';
+import { errorResponse, jsonResponse, lastPathname } from '../../test-utils';
 
 afterEach(() => {
   cleanup();

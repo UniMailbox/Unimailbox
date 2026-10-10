@@ -1,3 +1,5 @@
+import { useT } from '../../infrastructure/i18n/locale';
+import { Trash2 } from 'lucide-react';
 // apps/web — DeleteMessageButton.
 //
 // CAP-043 Slice 3 / AC 15 + AC 16. Opens the ConfirmDeleteDialog; only
@@ -33,6 +35,7 @@ export function DeleteMessageButton({
   folder = 'inbox',
   message,
 }: DeleteMessageButtonProps): ReactElement {
+  const t = useT();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const deleteMessage = useDeleteMessageMutation();
@@ -40,7 +43,9 @@ export function DeleteMessageButton({
   // H12: subject-qualified accessible name; a bare "Delete" next to every
   // row is indistinguishable in the accessibility tree.
   const triggerLabel =
-    message.subject !== '' ? `Delete message: ${message.subject}` : 'Delete message';
+    message.subject !== ''
+      ? t('Delete message: {value0}', { value0: message.subject })
+      : 'Delete message';
 
   return (
     <>
@@ -57,7 +62,7 @@ export function DeleteMessageButton({
           setConfirmOpen(true);
         }}
       >
-        Delete
+        <Trash2 aria-hidden="true" />
       </Button>
       <ConfirmDeleteDialog
         open={confirmOpen}

@@ -1,3 +1,11 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { EditorDialog } from '../../components/ui/EditorDialog';
+import { Badge } from '../../components/ui/shadcn/badge';
+import { Checkbox } from '../../components/ui/shadcn/checkbox';
+import { Input as PrimitiveInput } from '../../components/ui/shadcn/input';
+import { Textarea } from '../../components/ui/shadcn/textarea';
+import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — role administration (CAP-067).
 //
 // The page is session-gated by the router. The Worker remains the authority
@@ -34,7 +42,7 @@ export function RolesPage(): ReactElement {
   if (sessionQuery.data === undefined) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -45,11 +53,13 @@ export function RolesPage(): ReactElement {
 }
 
 function RolesContent(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   const session = authSessionQuery().data;
   const query = adminRolesQuery();
   const createNameInputRef = useRef<HTMLInputElement>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [permissionKeys, setPermissionKeys] = useState<PermissionKey[]>([]);
@@ -75,8 +85,8 @@ function RolesContent(): ReactElement {
       setName('');
       setDescription('');
       setPermissionKeys([]);
-      setNotice(`Created ${role.name}.`);
-      createNameInputRef.current?.focus();
+      setNotice(t('Created {value0}.', { value0: role.name }));
+      setCreateOpen(false);
       void queryClient.invalidateQueries({ queryKey: rolesKey, refetchType: 'none' });
     },
     onError: (error) => {
@@ -89,7 +99,7 @@ function RolesContent(): ReactElement {
   if (!hasData && query.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -97,10 +107,10 @@ function RolesContent(): ReactElement {
     return (
       <main className="admin-page" data-testid="admin-not-authorized" role="status">
         <Card
-          title="Administrator access required"
-          description="Your account does not have permission to read roles."
+          title={t('Administrator access required')}
+          description={t('Your account does not have permission to read roles.')}
         >
-          <p>Ask an administrator if you need access to this area.</p>
+          <p>{t('Ask an administrator if you need access to this area.')}</p>
         </Card>
       </main>
     );
@@ -108,10 +118,23 @@ function RolesContent(): ReactElement {
   if (!hasData && queryError !== null) {
     return (
       <main className="admin-page" data-testid="admin-error">
-        <header className="admin-header">
-          <h1>Roles</h1>
-        </header>
-        <Card title="Could not load roles" description="Role definitions are unavailable.">
+        <PageHeader
+          title={t('Roles')}
+          actions={
+            <Button
+              onClick={() => {
+                setCreateError(null);
+                setCreateOpen(true);
+              }}
+            >
+              {t('New role')}
+            </Button>
+          }
+        />
+        <Card
+          title={t('Could not load roles')}
+          description={t('Role definitions are unavailable.')}
+        >
           <ErrorPanel
             message={queryError.message}
             code={queryError.code}
@@ -125,7 +148,11 @@ function RolesContent(): ReactElement {
 
   const data = query.data;
   if (data === undefined) {
-    return <main className="admin-page" data-testid="admin-loading" />;
+    return (
+      <main className="admin-page" data-testid="admin-loading">
+        <ContentSkeleton variant="list" />
+      </main>
+    );
   }
 
   const submitCreate = (event: FormEvent<HTMLFormElement>): void => {
@@ -140,50 +167,74 @@ function RolesContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-roles-page">
-      <header className="admin-header">
-        <h1>Roles</h1>
-      </header>
-      <Card
-        title="Role definitions"
-        description="System roles are protected. Custom roles control their own permission grants."
-      >
-        <form
-          onSubmit={submitCreate}
-          className="admin-form"
-          noValidate
-          data-testid="role-create-form"
-        >
-          <h3>Create custom role</h3>
-          <label htmlFor="create-role-name">Role name</label>
-          <input
-            id="create-role-name"
-            ref={createNameInputRef}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            autoComplete="off"
-            aria-describedby={createError === null ? undefined : 'role-create-error'}
-          />
-          <label htmlFor="create-role-description">Role description</label>
-          <textarea
-            id="create-role-description"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-          <PermissionCheckboxes
-            permissions={data.permissions}
-            selected={permissionKeys}
-            onChange={setPermissionKeys}
-            labelPrefix=""
-          />
-          {createError !== null ? (
-            <div className="admin-error-banner" role="alert" data-testid="role-create-error">
-              <span>{createError.message}</span> <span>{createError.code}</span>
-            </div>
-          ) : null}
-          <Button type="submit" disabled={createMutation.isPending}>
-            {createMutation.isPending ? 'Creating…' : 'Create role'}
+      <PageHeader
+        title={t('Roles')}
+        actions={
+          <Button
+            onClick={() => {
+              setCreateError(null);
+              setCreateOpen(true);
+            }}
+          >
+            {t('New role')}
           </Button>
-        </form>
+        }
+      />
+      <Card
+        title={t('Role definitions')}
+        description={t(
+          'System roles are protected. Custom roles control their own permission grants.',
+        )}
+      >
+        <EditorDialog
+          open={createOpen}
+          onOpenChange={(open) => {
+            if (!createMutation.isPending) setCreateOpen(open);
+          }}
+          title={t('New role')}
+          description={t('Choose a name and permissions for a custom role.')}
+        >
+          <form
+            onSubmit={submitCreate}
+            className="admin-form"
+            noValidate
+            data-testid="role-create-form"
+          >
+            <label htmlFor="create-role-name">{t('Role name')}</label>
+            <PrimitiveInput
+              id="create-role-name"
+              ref={createNameInputRef}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoComplete="off"
+              aria-describedby={createError === null ? undefined : 'role-create-error'}
+            />
+            <label htmlFor="create-role-description">{t('Role description')}</label>
+            <Textarea
+              id="create-role-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+            <PermissionCheckboxes
+              permissions={data.permissions}
+              selected={permissionKeys}
+              onChange={setPermissionKeys}
+              labelPrefix=""
+            />
+            {createError !== null ? (
+              <div className="admin-error-banner" role="alert" data-testid="role-create-error">
+                <span>{createError.message}</span> <span>{createError.code}</span>
+              </div>
+            ) : null}
+            <Button
+              type="submit"
+              loading={createMutation.isPending}
+              disabled={createMutation.isPending}
+            >
+              {createMutation.isPending ? t('Creating…') : t('Create role')}
+            </Button>
+          </form>
+        </EditorDialog>
         {notice !== null ? (
           <p role="status" className="admin-success" data-testid="role-success">
             {notice}
@@ -191,15 +242,18 @@ function RolesContent(): ReactElement {
         ) : null}
         {queryError !== null ? (
           <div className="admin-error-banner" role="alert" data-testid="roles-query-error">
-            <span>Could not refresh roles: {queryError.message}</span>{' '}
+            <span>
+              {t('Could not refresh roles: ')}
+              {queryError.message}
+            </span>{' '}
             <span>{queryError.code}</span>
             <Button type="button" variant="secondary" onClick={() => void query.refetch()}>
-              Retry
+              {t('Retry')}
             </Button>
           </div>
         ) : null}
         {data.roles.length === 0 ? (
-          <p data-testid="admin-roles-empty">No roles exist yet.</p>
+          <p data-testid="admin-roles-empty">{t('No roles exist yet.')}</p>
         ) : (
           <ul className="admin-role-list" data-testid="admin-roles-list">
             {data.roles.map((role) =>
@@ -211,8 +265,14 @@ function RolesContent(): ReactElement {
                   role={role}
                   permissions={data.permissions}
                   rolesKey={rolesKey}
+                  onUpdated={(name) => setNotice(t('Saved {value0}.', { value0: name }))}
                   onDeleted={() => {
-                    createNameInputRef.current?.focus();
+                    setNotice(t('Deleted {value0}.', { value0: role.name }));
+                    document
+                      .querySelector<HTMLButtonElement>(
+                        '[data-testid=admin-roles-page] .page-header button',
+                      )
+                      ?.focus();
                   }}
                 />
               ),
@@ -231,11 +291,12 @@ function SystemRoleRow({
   readonly role: Role;
   readonly permissions: ReadonlyArray<RolePermission>;
 }): ReactElement {
+  const t = useT();
   return (
     <li className="admin-role-row" data-testid={`role-${role.id}-read-only`} data-role-id={role.id}>
       <div className="admin-role-row-meta">
         <strong>{role.name}</strong>
-        <span>System role</span>
+        <Badge variant="secondary">{t('System role')}</Badge>
       </div>
       <p>{role.description}</p>
       <PermissionSummary role={role} permissions={permissions} />
@@ -247,19 +308,23 @@ function EditableRoleRow({
   role,
   permissions,
   rolesKey,
+  onUpdated,
   onDeleted,
 }: {
   readonly role: Role;
   readonly permissions: ReadonlyArray<RolePermission>;
   readonly rolesKey: readonly unknown[];
+  readonly onUpdated: (name: string) => void;
   readonly onDeleted: () => void;
 }): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   const [name, setName] = useState(role.name);
   const [description, setDescription] = useState(role.description);
   const [permissionKeys, setPermissionKeys] = useState<PermissionKey[]>([...role.permissionKeys]);
   const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [validationError, setValidationError] = useState<ApiError | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   useEffect(() => {
@@ -281,6 +346,8 @@ function EditableRoleRow({
     },
     onSuccess: (updated) => {
       setDirty(false);
+      setEditing(false);
+      onUpdated(updated.name);
       queryClient.setQueryData<RoleListResponse>(rolesKey, (current) =>
         current === undefined
           ? current
@@ -328,92 +395,139 @@ function EditableRoleRow({
 
   return (
     <li className="admin-role-row" data-testid={`role-form-${role.id}`} data-role-id={role.id}>
-      <form onSubmit={submit} className="admin-form" noValidate>
-        <h3>Custom role</h3>
-        <label htmlFor={`edit-role-name-${role.id}`}>Edit {role.name} role name</label>
-        <input
-          id={`edit-role-name-${role.id}`}
-          value={name}
-          onChange={(event) => {
-            setDirty(true);
-            setName(event.target.value);
-          }}
-          autoComplete="off"
-          required
-          aria-invalid={roleUpdateError === null ? undefined : true}
-          aria-describedby={roleUpdateError === null ? undefined : `role-update-error-${role.id}`}
-        />
-        <label htmlFor={`edit-role-description-${role.id}`}>
-          Edit {role.name} role description
-        </label>
-        <textarea
-          id={`edit-role-description-${role.id}`}
-          value={description}
-          onChange={(event) => {
-            setDirty(true);
-            setDescription(event.target.value);
-          }}
-          required
-          aria-invalid={roleUpdateError === null ? undefined : true}
-          aria-describedby={roleUpdateError === null ? undefined : `role-update-error-${role.id}`}
-        />
-        <PermissionCheckboxes
-          permissions={permissions}
-          selected={permissionKeys}
-          onChange={(keys) => {
-            setDirty(true);
-            setPermissionKeys(keys);
-          }}
-          labelPrefix={`Edit ${role.name}: `}
-          legend={`Permissions for ${role.name}`}
-          idPrefix={`edit-${role.id}`}
-        />
-        {roleUpdateError !== null ? (
-          <div
-            className="admin-error-banner"
-            role="alert"
-            id={`role-update-error-${role.id}`}
-            data-testid={`role-update-error-${role.id}`}
+      <div className="resource-row-header">
+        <div>
+          <strong>{role.name}</strong>
+          <Badge variant="outline">{t('Custom role')}</Badge>
+        </div>
+        <div className="resource-row-actions">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setEditing(true)}
+            aria-label={t('Edit {value0}', { value0: role.name })}
           >
-            <span>{roleUpdateError.message}</span> <span>{roleUpdateError.code}</span>
-          </div>
-        ) : null}
-        {deleteError !== null ? (
-          <div
-            className="admin-error-banner"
-            role="alert"
-            data-testid={`role-delete-error-${role.id}`}
-          >
-            <span>{deleteError.message}</span> <span>{deleteError.code}</span>
-          </div>
-        ) : null}
-        <div className="admin-role-actions">
-          <Button type="submit" disabled={updateMutation.isPending || deleteMutation.isPending}>
-            {updateMutation.isPending ? 'Saving…' : `Save ${role.name}`}
+            {t('Edit')}
           </Button>
           <Button
             type="button"
-            variant="danger"
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            aria-label={t('Delete {value0}', { value0: role.name })}
             disabled={updateMutation.isPending || deleteMutation.isPending}
             onClick={() => setDeleteOpen(true)}
           >
-            Delete {role.name}
+            {t('Delete')}
           </Button>
         </div>
-      </form>
+      </div>
+      <p className="resource-row-description">{role.description}</p>
+      <PermissionSummary role={role} permissions={permissions} />
+      <EditorDialog
+        open={editing}
+        onOpenChange={(open) => {
+          if (updateMutation.isPending) return;
+          if (!open) {
+            setDirty(false);
+            setName(role.name);
+            setDescription(role.description);
+            setPermissionKeys([...role.permissionKeys]);
+            setValidationError(null);
+            updateMutation.reset();
+          }
+          setEditing(open);
+        }}
+        title={t('Edit {value0}', { value0: role.name })}
+        description={t('Update the role name and permission grants.')}
+      >
+        <form onSubmit={submit} className="admin-form" noValidate>
+          <label htmlFor={`edit-role-name-${role.id}`}>
+            {t('Edit ')}
+            {role.name} {t('role name')}
+          </label>
+          <PrimitiveInput
+            id={`edit-role-name-${role.id}`}
+            value={name}
+            onChange={(event) => {
+              setDirty(true);
+              setName(event.target.value);
+            }}
+            autoComplete="off"
+            required
+            aria-invalid={roleUpdateError === null ? undefined : true}
+            aria-describedby={roleUpdateError === null ? undefined : `role-update-error-${role.id}`}
+          />
+          <label htmlFor={`edit-role-description-${role.id}`}>
+            {t('Edit ')}
+            {role.name} {t('role description ')}
+          </label>
+          <Textarea
+            id={`edit-role-description-${role.id}`}
+            value={description}
+            onChange={(event) => {
+              setDirty(true);
+              setDescription(event.target.value);
+            }}
+            required
+            aria-invalid={roleUpdateError === null ? undefined : true}
+            aria-describedby={roleUpdateError === null ? undefined : `role-update-error-${role.id}`}
+          />
+          <PermissionCheckboxes
+            permissions={permissions}
+            selected={permissionKeys}
+            onChange={(keys) => {
+              setDirty(true);
+              setPermissionKeys(keys);
+            }}
+            labelPrefix={t('Edit {value0}: ', { value0: role.name })}
+            legend={t('Permissions for {value0}', { value0: role.name })}
+            idPrefix={`edit-${role.id}`}
+          />
+          {roleUpdateError !== null ? (
+            <div
+              className="admin-error-banner"
+              role="alert"
+              id={`role-update-error-${role.id}`}
+              data-testid={`role-update-error-${role.id}`}
+            >
+              <span>{roleUpdateError.message}</span> <span>{roleUpdateError.code}</span>
+            </div>
+          ) : null}
+          {deleteError !== null ? (
+            <div
+              className="admin-error-banner"
+              role="alert"
+              data-testid={`role-delete-error-${role.id}`}
+            >
+              <span>{deleteError.message}</span> <span>{deleteError.code}</span>
+            </div>
+          ) : null}
+          <div className="admin-role-actions">
+            <Button
+              type="submit"
+              loading={updateMutation.isPending}
+              disabled={updateMutation.isPending || deleteMutation.isPending}
+            >
+              {updateMutation.isPending ? t('Saving…') : t('Save {value0}', { value0: role.name })}
+            </Button>
+          </div>
+        </form>
+      </EditorDialog>
       <AlertDialog
         open={deleteOpen}
-        name={`Delete ${role.name}`}
-        title="Delete this custom role?"
-        confirmLabel={deleteMutation.isPending ? 'Deleting…' : 'Delete role'}
+        name={t('Delete {value0}', { value0: role.name })}
+        title={t('Delete this custom role?')}
+        confirmLabel={deleteMutation.isPending ? t('Deleting…') : t('Delete role')}
         confirmDisabled={deleteMutation.isPending}
+        confirmBusy={deleteMutation.isPending}
         error={deleteError === null ? undefined : `${deleteError.message} (${deleteError.code})`}
         onCancel={() => {
           if (!deleteMutation.isPending) setDeleteOpen(false);
         }}
         onConfirm={() => deleteMutation.mutate()}
       >
-        <p>This cannot be undone. A role assigned to a user cannot be deleted.</p>
+        <p>{t('This cannot be undone. A role assigned to a user cannot be deleted.')}</p>
       </AlertDialog>
     </li>
   );
@@ -434,19 +548,21 @@ function PermissionCheckboxes({
   readonly legend?: string;
   readonly idPrefix?: string;
 }): ReactElement {
+  const t = useT();
   return (
     <fieldset className="admin-role-permissions">
-      <legend>{legend ?? (labelPrefix === '' ? 'Permissions for new role' : 'Permissions')}</legend>
+      <legend>
+        {legend ?? t(labelPrefix === '' ? 'Permissions for new role' : 'Permissions')}
+      </legend>
       {permissions.map((permission) => {
         const checked = selected.includes(permission.key);
         const inputId = `${idPrefix}-permission-${permission.key.replaceAll('.', '-')}`;
         return (
           <label key={permission.key} htmlFor={inputId}>
-            <input
+            <Checkbox
               id={inputId}
-              type="checkbox"
               checked={checked}
-              onChange={() => {
+              onCheckedChange={() => {
                 onChange(
                   checked
                     ? selected.filter((key) => key !== permission.key)
@@ -455,7 +571,7 @@ function PermissionCheckboxes({
               }}
             />
             {labelPrefix}
-            {permission.description}
+            {t(permission.description)}
           </label>
         );
       })}
@@ -470,13 +586,20 @@ function PermissionSummary({
   readonly role: Role;
   readonly permissions: ReadonlyArray<RolePermission>;
 }): ReactElement {
-  const descriptions = role.permissionKeys.map(
-    (key) => permissions.find((permission) => permission.key === key)?.description ?? key,
+  const t = useT();
+  const descriptions = role.permissionKeys.map((key) =>
+    t(permissions.find((permission) => permission.key === key)?.description ?? key),
   );
   return (
-    <p data-testid={`role-${role.id}-permissions`}>
-      Permissions: {descriptions.length === 0 ? 'None' : descriptions.join(', ')}
-    </p>
+    <details className="permission-summary">
+      <summary>
+        {descriptions.length} {t('permissions')}
+      </summary>
+      <p data-testid={`role-${role.id}-permissions`}>
+        {t('Permissions: ')}
+        {descriptions.length === 0 ? t('None') : descriptions.join(', ')}
+      </p>
+    </details>
   );
 }
 

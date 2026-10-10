@@ -1,3 +1,6 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { useInAppShell } from '../../components/layouts/AppShell';
 // apps/web — MailboxMembersPage.
 //
 // CAP-065. This page is the browser surface for CAP-057's existing-member
@@ -16,6 +19,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Input } from '../../components/ui/Input';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import { MailboxLoading } from './MailboxLoading';
 import { Unauthorized } from '../auth/Unauthorized';
 import { LogoutButton } from '../auth/LogoutButton';
@@ -62,6 +66,8 @@ export function MailboxMembersPage({ mailboxId }: MailboxMembersPageProps): Reac
 }
 
 function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactElement {
+  const t = useT();
+  const inShell = useInAppShell();
   const sessionQuery = authSessionQuery();
   const query = mailboxMembersQuery(mailboxId);
   const addMutation = useAddMailboxMemberMutation();
@@ -141,16 +147,23 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
   }, [pendingRemoval]);
 
   if (!hasData && query.isPending) {
-    return <MailboxLoading />;
+    return (
+      <main className="mailbox-shell">
+        <ContentSkeleton />
+      </main>
+    );
   }
 
   if (!hasData && apiError !== null) {
     return (
       <main className="mailbox-shell" data-testid="mailbox-members-error">
         <header className="mailbox-header">
-          <h1 className="mailbox-title">Mailbox members</h1>
+          <h1 className="mailbox-title">{t('Mailbox members')}</h1>
         </header>
-        <Card title="Could not load members" description="The mailbox members are unavailable.">
+        <Card
+          title={t('Could not load members')}
+          description={t('The mailbox members are unavailable.')}
+        >
           <ErrorPanel
             message={apiError.message}
             code={apiError.code}
@@ -171,8 +184,7 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
     <main className="mailbox-shell" data-testid="mailbox-members-page">
       <header className="mailbox-header">
         <div>
-          <h1 className="mailbox-title">Mailbox members</h1>
-          <p className="mailbox-subtitle">Manage who can access this mailbox.</p>
+          <h1 className="mailbox-title">{t('Mailbox members')}</h1>
         </div>
         <div className="mailbox-header-meta">
           <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
@@ -182,9 +194,9 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
             className="mailbox-folder-link"
             data-testid="mailbox-members-back-link"
           >
-            Back to inbox
+            {t('Back to inbox')}
           </Link>
-          <LogoutButton />
+          {!inShell ? <LogoutButton /> : null}
         </div>
       </header>
 
@@ -204,7 +216,10 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
           role="alert"
           data-testid="mailbox-members-error-banner"
         >
-          <p>Could not refresh members: {apiError.message}</p>
+          <p>
+            {t('Could not refresh members: ')}
+            {apiError.message}
+          </p>
           <span className="error-panel-code">{apiError.code}</span>
           <Button
             type="button"
@@ -215,12 +230,15 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
               void query.refetch();
             }}
           >
-            Retry
+            {t('Retry')}
           </Button>
         </div>
       ) : null}
 
-      <Card title="Add a member" description="Add an existing active user to this mailbox.">
+      <Card
+        title={t('Add a member')}
+        description={t('Add an existing active user to this mailbox.')}
+      >
         <form
           className="mailbox-members-form"
           data-testid="mailbox-member-form"
@@ -231,15 +249,15 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
             id="mailbox-member-email"
             type="email"
             autoComplete="email"
-            label="Member email"
-            help="The user must already have an active account."
+            label={t('Member email')}
+            help={t('The user must already have an active account.')}
             error={errors.email?.message}
             disabled={submitting}
             {...register('email')}
           />
           <div className="wizard-field">
             <label className="input-label" htmlFor="mailbox-member-role">
-              Member role
+              {t('Member role')}
             </label>
             <select
               id="mailbox-member-role"
@@ -249,9 +267,9 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
               aria-describedby={errors.role !== undefined ? 'mailbox-member-role-error' : undefined}
               {...register('role')}
             >
-              <option value="viewer">Viewer — read mailbox messages</option>
-              <option value="sender">Sender — read and send messages</option>
-              <option value="admin">Admin — manage mailbox members</option>
+              <option value="viewer">{t('Viewer — read mailbox messages')}</option>
+              <option value="sender">{t('Sender — read and send messages')}</option>
+              <option value="admin">{t('Admin — manage mailbox members')}</option>
             </select>
             {errors.role?.message !== undefined ? (
               <span id="mailbox-member-role-error" className="input-error" role="alert">
@@ -266,7 +284,7 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
               onRetry={() => {
                 void onSubmit();
               }}
-              retryLabel="Retry add"
+              retryLabel={t('Retry add')}
               testId="mailbox-member-add-error"
             />
           ) : null}
@@ -275,21 +293,21 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
               type="submit"
               variant="primary"
               disabled={submitting}
-              aria-busy={submitting}
+              loading={submitting}
               data-testid="mailbox-member-add-submit"
             >
-              {submitting ? 'Adding…' : 'Add member'}
+              {submitting ? t('Adding…') : t('Add member')}
             </Button>
           </div>
         </form>
       </Card>
 
       <Card
-        title="Current members"
-        description="The mailbox owner is managed separately and is not listed here."
+        title={t('Current members')}
+        description={t('The mailbox owner is managed separately and is not listed here.')}
       >
         {members.length === 0 ? (
-          <p data-testid="mailbox-members-empty">No explicit members yet.</p>
+          <p data-testid="mailbox-members-empty">{t('No explicit members yet.')}</p>
         ) : (
           <ul className="mailbox-member-list" data-testid="mailbox-member-list">
             {members.map((member) => (
@@ -311,9 +329,10 @@ function MailboxMembersContent({ mailboxId }: MailboxMembersPageProps): ReactEle
       <AlertDialog
         open={pendingRemoval !== null}
         name="Remove mailbox member"
-        title="Remove this mailbox member?"
-        confirmLabel="Remove member"
+        title={t('Remove this mailbox member?')}
+        confirmLabel={t('Remove member')}
         confirmDisabled={removeMutation.isPending}
+        confirmBusy={removeMutation.isPending}
         error={
           removeError === null ? undefined : (
             <>
@@ -347,6 +366,7 @@ interface MemberRowProps {
 }
 
 function MemberRow({ member, disabled, onRemove }: MemberRowProps): ReactElement {
+  const t = useT();
   return (
     <li
       className="mailbox-member-row"
@@ -358,8 +378,14 @@ function MemberRow({ member, disabled, onRemove }: MemberRowProps): ReactElement
         <span className="mailbox-member-role">{member.role}</span>
       </div>
       <div className="mailbox-member-row-detail">
-        <span>name: {member.displayName ?? '—'}</span>
-        <span>added: {member.createdAt}</span>
+        <span>
+          {t('name: ')}
+          {member.displayName ?? '—'}
+        </span>
+        <span>
+          {t('added: ')}
+          <LocalDateTime value={member.createdAt} />
+        </span>
       </div>
       <div className="mailbox-member-row-actions">
         <Button
@@ -369,7 +395,7 @@ function MemberRow({ member, disabled, onRemove }: MemberRowProps): ReactElement
           disabled={disabled}
           onClick={(event) => onRemove(event.currentTarget)}
         >
-          Remove
+          {t('Remove')}
         </Button>
       </div>
     </li>

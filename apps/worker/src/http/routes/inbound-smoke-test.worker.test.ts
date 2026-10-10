@@ -151,7 +151,8 @@ describe('POST /api/v1/setup/inbound-smoke-test', () => {
 
       const body = await response.json();
 
-      expect(Object.keys(body.data)).toEqual(['smokeTestAddress']);
+      expect(Object.keys(body.data).sort()).toEqual(['expiresAt', 'smokeTestAddress']);
+      expect(Date.parse(body.data.expiresAt)).toBeGreaterThan(Date.now());
     });
 
     it('does NOT advance the installation step', async () => {
@@ -415,6 +416,34 @@ describe('POST /api/v1/setup/inbound-smoke-test/check', () => {
       await resetAndMigrate();
       sessionToken = await claimSession();
       await createDomain('example.com', sessionToken);
+    });
+
+    it('GET polling has no idempotency writes, reports expiry and never advances setup', async () => {
+      const { token } = await startSmokeTest();
+      const before = await env.DB.prepare(
+        'SELECT count(*) AS count FROM idempotency_records',
+      ).first('count');
+      const step = await env.DB.prepare('SELECT current_step FROM installation_state').first(
+        'current_step',
+      );
+      const get = () =>
+        SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test/check', {
+          headers: { Authorization: `Bearer ${sessionToken}` },
+        });
+      expect(await (await get()).json()).toEqual({ data: { status: 'pending' } });
+      await env.CACHE.put(`smoke-result:${token}`, '1', { expirationTtl: 300 });
+      expect(await (await get()).json()).toEqual({ data: { status: 'received' } });
+      expect(
+        await env.DB.prepare('SELECT current_step FROM installation_state').first('current_step'),
+      ).toBe(step);
+      await env.CACHE.delete('smoke:active');
+      expect(await (await get()).json()).toEqual({ data: { status: 'expired' } });
+      expect(
+        await env.DB.prepare('SELECT count(*) AS count FROM idempotency_records').first('count'),
+      ).toBe(before);
+      expect(
+        (await SELF.fetch('http://localhost/api/v1/setup/inbound-smoke-test/check')).status,
+      ).toBe(401);
     });
 
     it('returns { status: "pending" } before email is received', async () => {

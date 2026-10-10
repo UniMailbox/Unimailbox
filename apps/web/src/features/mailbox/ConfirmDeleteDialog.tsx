@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — ConfirmDeleteDialog.
 //
 // CAP-043 Slice 3 / AC 15-16: presentational wrapper around the
@@ -33,23 +34,27 @@ export function ConfirmDeleteDialog({
   onConfirm,
   onCancel,
 }: ConfirmDeleteDialogProps): ReactElement | null {
+  const t = useT();
   return (
     <AlertDialog
       open={open}
       name="Delete this message?"
-      title="Delete this message?"
-      confirmLabel="Delete"
+      title={t('Delete this message?')}
+      confirmLabel={t('Delete')}
       confirmDisabled={confirmDisabled}
       error={
         errorMessage !== undefined && errorMessage !== null
-          ? `The message was not deleted. ${errorMessage}`
+          ? t('The message was not deleted. {value0}', { value0: errorMessage })
           : undefined
       }
       onConfirm={onConfirm}
       onCancel={onCancel}
     >
-      Delete “{subject}” from your inbox? This removes it for you only — other members of the
-      mailbox keep their copy.
+      {t('Delete “')}
+      {subject}
+      {t(
+        '” from your inbox? This removes it for you only — other members of the mailbox keep their copy. ',
+      )}
     </AlertDialog>
   );
 }

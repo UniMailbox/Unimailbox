@@ -7,10 +7,16 @@
 // AC7: the entrypoint invokes the reclaim at the start of every cron tick and
 // is safe under repeated ticks (no attempts++ on reclaim, no double reclaim).
 
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import scheduled from './scheduled';
+import {
+  maintenanceHealth,
+  CRON_HEARTBEAT_KEY,
+  HOURLY_CRON_HEARTBEAT_KEY,
+  DAILY_CRON_HEARTBEAT_KEY,
+} from '../platform/health';
 import { OUTBOX_LEASE_TTL_MS } from '../platform/outbox-config';
 
 /** SQLite datetime literal offset from the real clock by `offsetMs`. */
@@ -67,15 +73,23 @@ function fetchJob(jobId: string) {
 }
 
 /** Minimal controller stub — the handler ignores it (void _controller). */
-function controller(): Parameters<typeof scheduled.scheduled>[0] {
+function controller(
+  cron = '*/5 * * * *',
+  scheduledTime = Date.UTC(2026, 9, 9, 12, 5),
+): Parameters<typeof scheduled.scheduled>[0] {
   return {
-    cron: '*/2 * * * *',
-    scheduledTime: Date.now(),
+    cron,
+    scheduledTime,
     noRetry() {},
   } as unknown as Parameters<typeof scheduled.scheduled>[0];
 }
 
+function dailyController() {
+  return controller('*/5 * * * *', Date.UTC(2026, 9, 9, 19, 0));
+}
+
 describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(async () => {
     await resetAndMigrate();
     await seedInstallationState({ status: 'complete', currentStep: 'complete' });
@@ -145,7 +159,116 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
     expect(expired?.attempts).toBe(0); // two ticks, still no increment
   });
 
+  it('keeps a stalled delivery unhealthy when recovery refreshes its retry timestamp', async () => {
+    await seedSendingJob({ attempts: 0, lockedAt: EXPIRED_LEASE, lockedBy: 'crashed' });
+    vi.spyOn(env.OUTBOUND, 'send').mockResolvedValue(undefined);
+    await scheduled.scheduled(controller(), env);
+    expect(await maintenanceHealth(env)).toBe(false);
+  });
+
+  it('ignores waiting schedules in stalled-delivery monitoring but catches overdue schedules', async () => {
+    const id = await seedSendingJob({ attempts: 0, lockedAt: EXPIRED_LEASE, lockedBy: 'crashed' });
+    await env.DB.prepare(
+      "UPDATE outbound_jobs SET status='queued',scheduled_at=datetime('now','+1 day') WHERE id=?",
+    )
+      .bind(id)
+      .run();
+    vi.spyOn(env.OUTBOUND, 'send').mockResolvedValue(undefined);
+    await scheduled.scheduled(controller(), env);
+    expect(await maintenanceHealth(env)).toBe(true);
+    await env.DB.prepare(
+      "UPDATE outbound_jobs SET scheduled_at=datetime('now','-20 minutes') WHERE id=?",
+    )
+      .bind(id)
+      .run();
+    expect(await maintenanceHealth(env)).toBe(false);
+  });
+
   it('is a clean no-op on an empty outbox', async () => {
     await expect(scheduled.scheduled(controller(), env)).resolves.toBeUndefined();
+  });
+
+  it('keeps upload expiry hourly and preserves its failed heartbeat after frequent success', async () => {
+    await env.DB.prepare('DROP TABLE editor_asset_usages').run();
+    await expect(scheduled.scheduled(controller(), env)).resolves.toBeUndefined();
+    expect(await env.CACHE.get(HOURLY_CRON_HEARTBEAT_KEY)).toBeNull();
+    await expect(
+      scheduled.scheduled(controller('*/5 * * * *', Date.UTC(2026, 9, 9, 12, 0)), env),
+    ).rejects.toThrow('Maintenance failed');
+    expect(await env.CACHE.get(HOURLY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+      failedTasks: ['editor-assets.expire'],
+    });
+    await scheduled.scheduled(controller(), env);
+    expect(await env.CACHE.get(HOURLY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+      failedTasks: ['editor-assets.expire'],
+    });
+  });
+
+  it('keeps frequent expiry/reclaim free of cursor reads, deletes and bucket scans', async () => {
+    // Spies observe real binding calls; no return values or storage are replaced.
+    const get = vi.spyOn(env.CACHE, 'get');
+    const remove = vi.spyOn(env.CACHE, 'delete');
+    const list = vi.spyOn(env.ATTACHMENTS, 'list');
+    await scheduled.scheduled(controller(), env);
+    expect(get).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY, 'json')).toMatchObject({ failedTasks: [] });
+  });
+
+  it('runs five daily cursor reads with no empty deletes and an independent heartbeat', async () => {
+    const get = vi.spyOn(env.CACHE, 'get');
+    const remove = vi.spyOn(env.CACHE, 'delete');
+    await scheduled.scheduled(dailyController(), env);
+    expect(get).toHaveBeenCalledTimes(5);
+    expect(remove).not.toHaveBeenCalled();
+    expect(await env.CACHE.get(DAILY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+      failedTasks: [],
+    });
+    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY, 'json')).toMatchObject({ failedTasks: [] });
+  });
+
+  it('persists daily pagination across invocations and removes only existing finished cursors', async () => {
+    for (const prefix of ['user-avatars/', 'editor-assets/']) {
+      for (let index = 0; index < 101; index++) {
+        await env.ATTACHMENTS.put(`${prefix}${String(index).padStart(3, '0')}`, 'recent');
+      }
+    }
+    await scheduled.scheduled(dailyController(), env);
+    expect(await env.CACHE.get('avatar-sweep-cursor')).not.toBeNull();
+    expect(await env.CACHE.get('editor-assets:orphan-cursor')).not.toBeNull();
+    const remove = vi.spyOn(env.CACHE, 'delete');
+    await scheduled.scheduled(dailyController(), env);
+    expect(remove.mock.calls).toEqual([['editor-assets:orphan-cursor'], ['avatar-sweep-cursor']]);
+    expect(await env.CACHE.get('avatar-sweep-cursor')).toBeNull();
+    expect(await env.CACHE.get('editor-assets:orphan-cursor')).toBeNull();
+    // Grace periods protect uploads created during an in-flight publication.
+    expect((await env.ATTACHMENTS.list({ prefix: 'user-avatars/' })).objects).toHaveLength(101);
+    expect((await env.ATTACHMENTS.list({ prefix: 'editor-assets/' })).objects).toHaveLength(101);
+  });
+
+  it('rejects an unconfigured schedule without running maintenance', async () => {
+    await expect(scheduled.scheduled(controller('* * * * *'), env)).rejects.toThrow('Unknown');
+    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY)).toBeNull();
+  });
+
+  it('skips daily scans on the ticks immediately before and after 19:00 UTC', async () => {
+    const get = vi.spyOn(env.CACHE, 'get');
+    for (const time of [Date.UTC(2026, 9, 9, 18, 55), Date.UTC(2026, 9, 9, 19, 5)]) {
+      await scheduled.scheduled(controller('*/5 * * * *', time), env);
+    }
+    expect(get).not.toHaveBeenCalled();
+    expect(await env.CACHE.get(DAILY_CRON_HEARTBEAT_KEY)).toBeNull();
+  });
+
+  it('still runs daily scans when frequent outbox recovery fails', async () => {
+    await env.DB.prepare('DROP TABLE outbound_jobs').run();
+    await expect(scheduled.scheduled(dailyController(), env)).rejects.toThrow('Maintenance failed');
+    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+      failedTasks: ['outbound.reclaim'],
+    });
+    expect(await env.CACHE.get(DAILY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+      failedTasks: [],
+    });
   });
 });

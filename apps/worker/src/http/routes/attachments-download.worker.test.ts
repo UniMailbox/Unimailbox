@@ -7,7 +7,8 @@ import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { hashPassword } from '../../platform/crypto';
 import { createAuditEventWriter } from '../../modules/admin';
 import { expireAttachments } from '../../modules/attachments';
-import { getAttachmentByteStore } from '../../platform/cache';
+import { sweepOrphanedInboundObjects } from '../../modules/messages';
+import { getAttachmentByteStore, getAttachmentObjectStore } from '../../platform/cache';
 import scheduled from '../../entrypoints/scheduled';
 
 const BYTES = new Uint8Array([0, 255, 1, 254, 2]);
@@ -91,6 +92,7 @@ async function createUser(
 async function createSession(userId: string): Promise<string> {
   const accessToken = crypto.randomUUID();
   const refreshToken = crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(refreshToken));
   const hashHex = Array.from(new Uint8Array(hash), (byte) =>
     byte.toString(16).padStart(2, '0'),
@@ -100,14 +102,16 @@ async function createSession(userId: string): Promise<string> {
      VALUES (?, ?, ?, ?, ?)`,
   )
     .bind(
-      crypto.randomUUID(),
+      sessionId,
       userId,
       hashHex,
       Math.floor(Date.now() / 1000) + 86_400,
       new Date().toISOString(),
     )
     .run();
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), { expirationTtl: 900 });
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
+    expirationTtl: 900,
+  });
   return accessToken;
 }
 
@@ -242,8 +246,8 @@ function downloadUrl(mailboxId: string, attachmentId: string): string {
 
 function controller(): Parameters<typeof scheduled.scheduled>[0] {
   return {
-    cron: '*/2 * * * *',
-    scheduledTime: Date.now(),
+    cron: '*/5 * * * *',
+    scheduledTime: Date.UTC(2026, 9, 9, 12, 0),
     noRetry() {},
   } as unknown as Parameters<typeof scheduled.scheduled>[0];
 }
@@ -270,9 +274,29 @@ describe('GET /api/v1/mailboxes/:mailboxId/attachments/:attachmentId/download', 
     expect(response.headers.get('Content-Type')).toBe('image/png');
     expect(response.headers.get('Content-Length')).toBe(String(BYTES.byteLength));
     expect(response.headers.get('Content-Disposition')).toBe(
-      `inline; filename="logo.png"; filename*=UTF-8''%6C%6F%67%6F%2E%70%6E%67`,
+      `attachment; filename="logo.png"; filename*=UTF-8''%6C%6F%67%6F%2E%70%6E%67`,
     );
+    expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(response.headers.get('Content-Security-Policy')).toBe('sandbox');
     expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual(Array.from(BYTES));
+  });
+
+  it('reads a consumed attachment from R2 after its KV staging key expires', async () => {
+    const ownerId = await createUser('download-r2@example.com');
+    const token = await createSession(ownerId);
+    const mailboxId = await createMailbox(ownerId);
+    const attachment = await seedConsumedAttachment(ownerId, mailboxId);
+    await env.ATTACHMENTS.put(attachment.kvKey, BYTES);
+    await env.CACHE.delete(attachment.kvKey);
+
+    const response = await SELF.fetch(downloadUrl(mailboxId, attachment.attachmentId), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual(Array.from(BYTES));
+    await env.ATTACHMENTS.delete(attachment.kvKey);
   });
 
   it('R-AUTHZ-003/004 gives authorized viewers access and foreign users one safe 404', async () => {
@@ -303,6 +327,28 @@ describe('GET /api/v1/mailboxes/:mailboxId/attachments/:attachmentId/download', 
       headers: { Authorization: `Bearer ${ownerToken}` },
     });
     expect(ownerResponse.status).toBe(200);
+  });
+
+  it('does not expose attachment bytes to an administrator without mailbox membership', async () => {
+    const ownerId = await createUser('download-owner-admin-boundary@example.com');
+    const adminId = await createUser('download-admin-boundary@example.com', 'administrator');
+    const adminToken = await createSession(adminId);
+    const mailboxId = await createMailbox(ownerId);
+    const attachment = await seedConsumedAttachment(ownerId, mailboxId);
+    const url = downloadUrl(mailboxId, attachment.attachmentId);
+
+    const denied = await SELF.fetch(url, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(denied.status).toBe(404);
+    expect((await denied.json()).error.code).toBe('MESSAGE_NOT_FOUND');
+
+    await addMember(mailboxId, adminId);
+    const granted = await SELF.fetch(url, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(granted.status).toBe(200);
+    expect(Array.from(new Uint8Array(await granted.arrayBuffer()))).toEqual(Array.from(BYTES));
   });
 
   it('R-ATTACHMENT-005/R-AUTHZ-004 collapses missing, soft-deleted, and CACHE-missing states', async () => {
@@ -342,6 +388,160 @@ describe('GET /api/v1/mailboxes/:mailboxId/attachments/:attachmentId/download', 
 });
 
 describe('attachment expiry cleanup', () => {
+  it('R-ATTACHMENT-007 daily scanning removes late R2 writes after checkpoint while protecting live uploads', async () => {
+    const ownerId = await createUser('expiry-late-r2@example.com');
+    const mailboxId = await createMailbox(ownerId);
+    const uploadId = await seedExpiredUpload(ownerId, mailboxId);
+    const consumed = await seedConsumedAttachment(ownerId, mailboxId);
+    const pendingId = await seedExpiredUpload(ownerId, mailboxId);
+    await env.DB.prepare(
+      "UPDATE attachment_uploads SET expires_at='2099-01-01 00:00:00' WHERE id=?",
+    )
+      .bind(pendingId)
+      .run();
+    const key = `attachment:${uploadId}`;
+    await expireAttachments(
+      {
+        db: env.DB,
+        cache: getAttachmentByteStore(env),
+        objectStore: getAttachmentObjectStore(env),
+        auditEventWriter: createAuditEventWriter(env.DB),
+      },
+      { requestId: crypto.randomUUID(), now: new Date('2026-08-29T00:00:00Z') },
+    );
+    expect(
+      await env.DB.prepare('SELECT cleanup_completed_at FROM attachment_uploads WHERE id=?')
+        .bind(uploadId)
+        .first(),
+    ).toEqual({ cleanup_completed_at: '2026-08-29 00:00:00' });
+    // Simulate a compose copy landing after cleanup's final storage read.
+    await env.ATTACHMENTS.put(key, BYTES);
+    await env.ATTACHMENTS.put(consumed.kvKey, BYTES);
+    await env.ATTACHMENTS.put(`attachment:${pendingId}`, BYTES);
+    const dependencies = { db: env.DB, objectStore: env.ATTACHMENTS, cursorStore: env.CACHE };
+    expect((await sweepOrphanedInboundObjects(dependencies)).deleted).toBe(0);
+    const future = new Date(Date.now() + 2 * 86400_000);
+    expect(await sweepOrphanedInboundObjects(dependencies, future)).toEqual({
+      scanned: 3,
+      deleted: 1,
+      failed: 0,
+    });
+    expect(await env.ATTACHMENTS.get(key)).toBeNull();
+    expect(await env.ATTACHMENTS.get(consumed.kvKey)).not.toBeNull();
+    expect(await env.ATTACHMENTS.get(`attachment:${pendingId}`)).not.toBeNull();
+  });
+
+  it('R-ATTACHMENT-007 checkpoints both stores and never probes completed rows again', async () => {
+    const ownerId = await createUser('expiry-checkpoint@example.com');
+    const mailboxId = await createMailbox(ownerId);
+    const uploadId = await seedExpiredUpload(ownerId, mailboxId);
+    const key = `attachment:${uploadId}`;
+    await env.ATTACHMENTS.put(key, BYTES);
+    const cache = getAttachmentByteStore(env);
+    const objectStore = getAttachmentObjectStore(env);
+    const dependencies = {
+      db: env.DB,
+      cache,
+      objectStore,
+      auditEventWriter: createAuditEventWriter(env.DB),
+    };
+    const input = { requestId: crypto.randomUUID(), now: new Date('2026-08-29T00:00:00Z') };
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 1,
+      expired: 1,
+      failed: 0,
+    });
+    expect(await env.CACHE.get(key)).toBeNull();
+    expect(await env.ATTACHMENTS.get(key)).toBeNull();
+    expect(
+      await env.DB.prepare('SELECT cleanup_completed_at FROM attachment_uploads WHERE id=?')
+        .bind(uploadId)
+        .first(),
+    ).toEqual({ cleanup_completed_at: '2026-08-29 00:00:00' });
+    const kvRead = vi.spyOn(cache, 'get');
+    const r2Read = vi.spyOn(objectStore, 'get');
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 0,
+      expired: 0,
+      failed: 0,
+    });
+    expect(kvRead).not.toHaveBeenCalled();
+    expect(r2Read).not.toHaveBeenCalled();
+  });
+
+  it('R-ATTACHMENT-007 retries a failed completion write after storage is already gone', async () => {
+    const ownerId = await createUser('expiry-marker-retry@example.com');
+    const mailboxId = await createMailbox(ownerId);
+    const uploadId = await seedExpiredUpload(ownerId, mailboxId);
+    await env.DB.prepare(
+      `CREATE TRIGGER abort_cleanup_checkpoint
+      BEFORE UPDATE OF cleanup_completed_at ON attachment_uploads
+      BEGIN SELECT RAISE(ABORT, 'checkpoint unavailable'); END`,
+    ).run();
+    const dependencies = {
+      db: env.DB,
+      cache: getAttachmentByteStore(env),
+      objectStore: getAttachmentObjectStore(env),
+      auditEventWriter: createAuditEventWriter(env.DB),
+    };
+    const input = { requestId: crypto.randomUUID(), now: new Date('2026-08-29T00:00:00Z') };
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 1,
+      expired: 1,
+      failed: 1,
+    });
+    expect(await env.CACHE.get(`attachment:${uploadId}`)).toBeNull();
+    expect(
+      await env.DB.prepare('SELECT status, cleanup_completed_at FROM attachment_uploads WHERE id=?')
+        .bind(uploadId)
+        .first(),
+    ).toEqual({ status: 'expired', cleanup_completed_at: null });
+    await env.DB.prepare('DROP TRIGGER abort_cleanup_checkpoint').run();
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 1,
+      expired: 0,
+      failed: 0,
+    });
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 0,
+      expired: 0,
+      failed: 0,
+    });
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS count FROM audit_events WHERE action='attachment.expired'",
+      ).first(),
+    ).toEqual({ count: 1 });
+  });
+
+  it('R-ATTACHMENT-007 bounds each tick to 100 uploads and drains the remainder on the next tick', async () => {
+    const ownerId = await createUser('expiry-batch@example.com');
+    const mailboxId = await createMailbox(ownerId);
+    for (let index = 0; index < 101; index++) await seedExpiredUpload(ownerId, mailboxId);
+    const dependencies = {
+      db: env.DB,
+      cache: getAttachmentByteStore(env),
+      objectStore: getAttachmentObjectStore(env),
+      auditEventWriter: createAuditEventWriter(env.DB),
+    };
+    const input = { requestId: crypto.randomUUID(), now: new Date('2026-08-29T00:00:00Z') };
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 100,
+      expired: 100,
+      failed: 0,
+    });
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 1,
+      expired: 1,
+      failed: 0,
+    });
+    expect(await expireAttachments(dependencies, input)).toEqual({
+      found: 0,
+      expired: 0,
+      failed: 0,
+    });
+  });
+
   it('R-ATTACHMENT-007/R-AUDIT-001 removes bytes, transitions once, and correlates one audit', async () => {
     const ownerId = await createUser('expiry-owner@example.com');
     const mailboxId = await createMailbox(ownerId);
@@ -389,7 +589,7 @@ describe('attachment expiry cleanup', () => {
       },
       { requestId: crypto.randomUUID(), now: new Date('2026-08-29T00:00:00.000Z') },
     );
-    expect(replay).toEqual({ found: 1, expired: 0, failed: 0 });
+    expect(replay).toEqual({ found: 0, expired: 0, failed: 0 });
     expect(
       await env.DB.prepare(
         `SELECT COUNT(*) AS count FROM audit_events WHERE action = 'attachment.expired'`,

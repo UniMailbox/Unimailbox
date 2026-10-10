@@ -5,11 +5,9 @@
 // rather than passing a `Fetcher` masquerading as `Env`.
 //
 // CAP-039 — Deployment substrate. The router now mounts an SPA fallback
-// (GET / and GET *) that forwards to env.ASSETS. The wrangler
-// `assets.not_found_handling: "single-page-application"` returns index.html
-// for any non-API GET the binding can't resolve, so unknown GETs are no
-// longer 404. The /api/v1/* sub-app still wins on its own path. /healthz
-// is unaffected.
+// (GET / and browser routes) that explicitly forwards to env.ASSETS '/'.
+// Missing files and API paths return 404 with not_found_handling: "none".
+// The /api/v1/* sub-app still wins on its own path. /healthz is unaffected.
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
@@ -24,7 +22,7 @@ describe('HTTP entry (/healthz via SELF)', () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as { ok: boolean; surface: string };
-    expect(body).toEqual({ ok: true, surface: 'router' });
+    expect(body).toMatchObject({ ok: true, surface: 'router', tree: 'development' });
   });
 });
 
@@ -120,7 +118,11 @@ describe('CAP-039 — SPA fallback', () => {
       // to assert that ANY hashed JS bundle the build emits is served
       // by the asset binding. A literal hash would lock the test to a
       // specific build and break on every Vite re-run.
-      const response = await SELF.fetch('http://localhost/assets/index-NZV9_L46.js');
+      const shell = await SELF.fetch('http://localhost/');
+      const html = await shell.text();
+      const entry = html.match(/src="(\/assets\/[^" ]+\.js)"/)?.[1];
+      expect(entry).toBeDefined();
+      const response = await SELF.fetch(`http://localhost${entry}`);
       expect(response.status).toBe(200);
       const ct = response.headers.get('content-type') ?? '';
       expect(ct).toMatch(/javascript|text/);
@@ -131,6 +133,27 @@ describe('CAP-039 — SPA fallback', () => {
       // literal hash above drifts in a future build.
       expect(response.url).toMatch(/\/assets\/index-[A-Za-z0-9_-]+\.js$/);
       expect(body.length).toBeGreaterThan(0);
+    });
+
+    it.each([
+      '/api',
+      '/api/',
+      '/api/no-such-route',
+      '/assets/missing.js',
+      '/assets/missing.js.map',
+    ])('returns a real 404 for %s', async (path) => {
+      const response = await SELF.fetch(`http://localhost${path}`);
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain('<div id="root">');
+    });
+
+    it('serves security headers and immutable cache headers on actual hashed assets', async () => {
+      const shell = await SELF.fetch('http://localhost/');
+      expect(shell.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+      expect(shell.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      const entry = (await shell.text()).match(/src="(\/assets\/[^" ]+\.js)"/)?.[1];
+      const response = await SELF.fetch(`http://localhost${entry}`);
+      expect(response.headers.get('Cache-Control')).toContain('immutable');
     });
 
     it('POST /unknown returns 404 (only GETs reach the asset fallback)', async () => {
@@ -154,5 +177,14 @@ describe('CAP-039 — SPA fallback', () => {
       expect(response.status).toBe(302);
       expect(response.headers.get('location')).toBe('/setup');
     });
+  });
+});
+
+describe('deployment readiness', () => {
+  beforeEach(resetAndMigrate);
+  it('checks the current schema and secret bindings before setup is complete', async () => {
+    const response = await SELF.fetch('http://localhost/readyz');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, schema: '0033' });
   });
 });

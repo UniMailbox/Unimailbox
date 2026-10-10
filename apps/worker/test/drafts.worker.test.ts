@@ -129,7 +129,7 @@ async function createSession(userId: string): Promise<string> {
     .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
     .run();
 
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 15 * 60,
   });
 
@@ -193,6 +193,11 @@ async function createActiveProviderConnection(): Promise<string> {
       `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
        VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
     ).bind(connectionId, credentialId, now, now),
+    env.DB.prepare(
+      `UPDATE managed_domains
+          SET outbound_connection_id = ?, updated_at = ?
+        WHERE id = (SELECT id FROM managed_domains ORDER BY created_at ASC, id ASC LIMIT 1)`,
+    ).bind(connectionId, now),
   ]);
 
   return connectionId;
@@ -1092,7 +1097,7 @@ describe('GET /api/v1/drafts/:draftId — CAP-047 server draft-read slice', () =
       'drafts-read-leak-001',
     );
 
-    // Foreign actor: not the owner, no membership, not a global admin.
+    // Foreign actor: not the owner and has no mailbox membership.
     const response = await SELF.fetch(DRAFT_PATH(messageId), {
       method: 'GET',
       headers: { Authorization: `Bearer ${foreignToken}` },
@@ -1207,16 +1212,9 @@ describe('GET /api/v1/drafts/:draftId — CAP-047 server draft-read slice', () =
     expect(body.data.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
-  // -------- global administrator (role.manage, no mailbox_members) -----
+  // -------- administrator role does not grant mailbox content access -----
 
-  it("lets a global administrator (role.manage, no mailbox_members row) read another user's draft", async () => {
-    // The owner creates the draft in their own mailbox. The administrator
-    // is a separate user with NO mailbox_members entry — but they hold the
-    // 'administrator' role which carries role.manage, so the
-    // assertCan(c.env.DB, adminId, mailboxId, 'read', isAdmin=true) bypass
-    // authorises them. This exercises the multi-association iteration
-    // path indirectly (single association, admin bypass) and pins that a
-    // 200 is returned, not a 403 / 404.
+  it("requires explicit mailbox membership before an administrator can read another user's draft", async () => {
     const ownerId = await createUserWithRole('member', 'owner-admin@example.com');
     const ownerToken = await createSession(ownerId);
     const adminId = await createUserWithRole('administrator', 'admin@example.com');
@@ -1225,8 +1223,7 @@ describe('GET /api/v1/drafts/:draftId — CAP-047 server draft-read slice', () =
     const domainId = await createDomain();
     const mailboxId = await createMailbox(domainId, ownerId, 'admin-shared');
 
-    // Confirm the admin has NO mailbox_members row — the assertion relies
-    // on the role.manage bypass, not on membership.
+    // Global role.manage must not reveal mailbox content without a grant.
     const memberRow = await env.DB.prepare(
       `SELECT role FROM mailbox_members WHERE mailbox_id = ? AND user_id = ?`,
     )
@@ -1238,13 +1235,22 @@ describe('GET /api/v1/drafts/:draftId — CAP-047 server draft-read slice', () =
       mailboxId,
       ownerToken,
       {
-        subject: 'Admin can read',
+        subject: 'Private draft',
         body_text: 'body',
         to: ['to-admin-read@example.com'],
       },
       'drafts-read-admin-001',
     );
 
+    const denied = await SELF.fetch(DRAFT_PATH(messageId), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(denied.status).toBe(404);
+    expect((await denied.json()).error.code).toBe('MESSAGE_NOT_FOUND');
+
+    await addMailboxMember(mailboxId, adminId, 'viewer');
     const response = await SELF.fetch(DRAFT_PATH(messageId), {
       method: 'GET',
       headers: { Authorization: `Bearer ${adminToken}` },
@@ -1268,7 +1274,7 @@ describe('GET /api/v1/drafts/:draftId — CAP-047 server draft-read slice', () =
     };
     expect(body.data.id).toBe(messageId);
     expect(body.data.mailboxId).toBe(mailboxId);
-    expect(body.data.subject).toBe('Admin can read');
+    expect(body.data.subject).toBe('Private draft');
     expect(body.data.body_text).toBe('body');
     expect(body.data.to).toEqual(['to-admin-read@example.com']);
     expect(body.data.status).toBe('draft');

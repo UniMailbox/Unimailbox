@@ -65,6 +65,14 @@ import messageAttachmentsSql from '../../../migrations/0022_message_attachments.
 import messageUserStateStarSql from '../../../migrations/0023_message_user_state_star.sql?raw';
 import domainSignaturesSql from '../../../migrations/0024_domain_signatures.sql?raw';
 import systemSettingsRevisionSql from '../../../migrations/0025_system_settings_revision.sql?raw';
+import adminUserLifecycleSql from '../../../migrations/0026_admin_user_lifecycle.sql?raw';
+import webhookEventProjectionSql from '../../../migrations/0027_webhook_event_projection.sql?raw';
+import inboundAttachmentsSql from '../../../migrations/0028_inbound_attachments.sql?raw';
+import editorAssetsSql from '../../../migrations/0029_editor_assets.sql?raw';
+import attachmentCleanupSql from '../../../migrations/0032_attachment_cleanup.sql?raw';
+import scheduledSendSql from '../../../migrations/0033_scheduled_send.sql?raw';
+import userPreferencesSql from '../../../migrations/0031_user_preferences.sql?raw';
+import editorAssetSystemLimitSql from '../../../migrations/0030_editor_asset_system_limit.sql?raw';
 
 // Split migration SQL for applyD1Migrations. CREATE TRIGGER bodies contain
 // internal semicolons, so they remain one statement through their END; line.
@@ -200,6 +208,34 @@ const MIGRATIONS = [
     fileName: '0025_system_settings_revision.sql',
     sql: systemSettingsRevisionSql,
   },
+  {
+    name: '0026_admin_user_lifecycle',
+    fileName: '0026_admin_user_lifecycle.sql',
+    sql: adminUserLifecycleSql,
+  },
+  {
+    name: '0027_webhook_event_projection',
+    fileName: '0027_webhook_event_projection.sql',
+    sql: webhookEventProjectionSql,
+  },
+  {
+    name: '0028_inbound_attachments',
+    fileName: '0028_inbound_attachments.sql',
+    sql: inboundAttachmentsSql,
+  },
+  { name: '0029_editor_assets', fileName: '0029_editor_assets.sql', sql: editorAssetsSql },
+  {
+    name: '0030_editor_asset_system_limit',
+    fileName: '0030_editor_asset_system_limit.sql',
+    sql: editorAssetSystemLimitSql,
+  },
+  { name: '0031_user_preferences', fileName: '0031_user_preferences.sql', sql: userPreferencesSql },
+  {
+    name: '0032_attachment_cleanup',
+    fileName: '0032_attachment_cleanup.sql',
+    sql: attachmentCleanupSql,
+  },
+  { name: '0033_scheduled_send', fileName: '0033_scheduled_send.sql', sql: scheduledSendSql },
 ] as const;
 
 export interface MigrationsDbOptions {

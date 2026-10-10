@@ -1,3 +1,5 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
 import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — AuditEventsPage.
 //
@@ -60,7 +62,7 @@ export function AuditEventsPage(): ReactElement {
   if (sessionQuery.data === undefined) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -74,6 +76,7 @@ export function AuditEventsPage(): ReactElement {
 }
 
 function AuditEventsContent(): ReactElement {
+  const t = useT();
   // Draft form state — only an explicit Apply commits filters to the
   // query key, so typing never refires the query per keystroke.
   const [actorUserId, setActorUserId] = useState('');
@@ -137,7 +140,7 @@ function AuditEventsContent(): ReactElement {
   if (!hasData && query.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -147,32 +150,32 @@ function AuditEventsContent(): ReactElement {
       onSubmit={applyFilters}
       data-testid="audit-filters"
       className="audit-table-list-header"
-      aria-label="Audit event filters"
+      aria-label={t('Audit event filters')}
     >
       <Input
         id="audit-filter-actor"
-        label="Actor user id"
-        placeholder="uuid"
+        label={t('Actor user id')}
+        placeholder={t('uuid')}
         value={actorUserId}
         onChange={(e) => setActorUserId(e.target.value)}
       />
       <Input
         id="audit-filter-resource-type"
-        label="Resource type"
-        placeholder="message"
+        label={t('Resource type')}
+        placeholder={t('message')}
         value={resourceType}
         onChange={(e) => setResourceType(e.target.value)}
       />
       <Input
         id="audit-filter-resource-id"
-        label="Resource id"
-        placeholder="resource id"
+        label={t('Resource id')}
+        placeholder={t('resource id')}
         value={resourceId}
         onChange={(e) => setResourceId(e.target.value)}
       />
       <div className="wizard-field">
         <label className="input-label" htmlFor="audit-filter-action">
-          Action
+          {t('Action')}
         </label>
         <SelectField
           id="audit-filter-action"
@@ -186,12 +189,12 @@ function AuditEventsContent(): ReactElement {
       </div>
       {pairError !== null ? (
         <p className="input-error admin-filter-wide" role="alert" data-testid="audit-filter-error">
-          {pairError}
+          {pairError ? t(pairError) : null}
         </p>
       ) : null}
       <div className="admin-filter-wide">
         <Button type="submit" variant="primary" data-testid="audit-apply-filters">
-          Apply
+          {t('Apply')}
         </Button>
       </div>
     </form>
@@ -205,11 +208,11 @@ function AuditEventsContent(): ReactElement {
     return (
       <main className="admin-page" data-testid="admin-not-authorized" role="status">
         <Card
-          title="Administrator access required"
-          description="Your account does not have permission to read the audit trail."
+          title={t('Administrator access required')}
+          description={t('Your account does not have permission to read the audit trail.')}
         >
           <p data-testid="admin-not-authorized-message">
-            Ask an administrator if you need access to this area.
+            {t('Ask an administrator if you need access to this area.')}
           </p>
         </Card>
       </main>
@@ -224,8 +227,11 @@ function AuditEventsContent(): ReactElement {
     // request forever.
     return (
       <main className="admin-page" data-testid="admin-error">
-        <PageHeader title="Audit events" description="Review administrative activity." />
-        <Card title="Could not load audit events" description="The audit trail is unavailable.">
+        <PageHeader title={t('Audit events')} />
+        <Card
+          title={t('Could not load audit events')}
+          description={t('The audit trail is unavailable.')}
+        >
           {filterForm}
           <ErrorPanel
             message={apiError.message}
@@ -237,7 +243,7 @@ function AuditEventsContent(): ReactElement {
                     void query.refetch();
                   }
             }
-            retryLabel={apiError.code === 'INVALID_CURSOR' ? 'Start over' : 'Retry'}
+            retryLabel={apiError.code === 'INVALID_CURSOR' ? t('Start over') : t('Retry')}
             testId="admin-error-panel"
           />
         </Card>
@@ -249,15 +255,18 @@ function AuditEventsContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="audit-events-page">
-      <PageHeader title="Audit events" description="Review administrative activity." />
-      <Card title="Audit trail" description="Newest first.">
+      <PageHeader title={t('Audit events')} />
+      <Card title={t('Audit trail')}>
         {filterForm}
         {apiError !== null ? (
           // Fix (e): errors with data on screen render as a banner ABOVE
           // the list; the loaded rows below are never wiped by a failed
           // background refetch or a failed load-more.
           <div className="admin-error-banner" role="alert" data-testid="audit-error-banner">
-            <p>Could not load audit events: {apiError.message}</p>
+            <p>
+              {t('Could not load audit events: ')}
+              {apiError.message}
+            </p>
             {apiError.code === 'INVALID_CURSOR' ? (
               <Button
                 type="button"
@@ -265,7 +274,7 @@ function AuditEventsContent(): ReactElement {
                 data-testid="audit-start-over"
                 onClick={startOver}
               >
-                Start over
+                {t('Start over')}
               </Button>
             ) : (
               <Button
@@ -276,13 +285,13 @@ function AuditEventsContent(): ReactElement {
                   void query.refetch();
                 }}
               >
-                Retry
+                {t('Retry')}
               </Button>
             )}
           </div>
         ) : null}
         {items.length === 0 ? (
-          <p data-testid="audit-events-empty">No audit events match these filters.</p>
+          <p data-testid="audit-events-empty">{t('No audit events match these filters.')}</p>
         ) : (
           <>
             <ul className="audit-event-list" data-testid="audit-events-list">
@@ -292,17 +301,18 @@ function AuditEventsContent(): ReactElement {
             </ul>
             {query.hasNextPage ? (
               <div className="admin-pagination">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-secondary"
+                  variant="secondary"
                   data-testid="audit-load-more"
                   onClick={() => {
                     void query.fetchNextPage();
                   }}
+                  loading={query.isFetchingNextPage}
                   disabled={query.isFetchingNextPage}
                 >
-                  {query.isFetchingNextPage ? 'Loading…' : 'Load more'}
-                </button>
+                  {t('Load more')}
+                </Button>
               </div>
             ) : null}
           </>
@@ -313,6 +323,7 @@ function AuditEventsContent(): ReactElement {
 }
 
 function AuditEventRow({ item }: { readonly item: AuditEventItem }): ReactElement {
+  const t = useT();
   return (
     <li className="audit-event-row" data-testid="audit-event-row" data-event-id={item.id}>
       <div className="audit-event-row-meta">
@@ -320,12 +331,19 @@ function AuditEventRow({ item }: { readonly item: AuditEventItem }): ReactElemen
         <LocalDateTime className="audit-event-row-date" value={item.createdAt} />
       </div>
       <div className="audit-event-row-detail">
-        <span>actor: {item.actorUserId ?? 'system'}</span>
         <span>
-          resource: {item.resourceType}
+          {t('actor: ')}
+          {item.actorUserId ?? 'system'}
+        </span>
+        <span>
+          {t('resource: ')}
+          {item.resourceType}
           {item.resourceId !== null ? `:${item.resourceId}` : ''}
         </span>
-        <span>request: {item.requestId ?? '—'}</span>
+        <span>
+          {t('request: ')}
+          {item.requestId ?? '—'}
+        </span>
       </div>
     </li>
   );

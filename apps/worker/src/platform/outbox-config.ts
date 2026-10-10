@@ -21,7 +21,7 @@ import { sqliteTimestamp } from './idempotency';
  * Picked to be at least 10× the expected single-job send duration (Brevo
  * send + decrypt + persist takes <1s in worker-pool tests; 60s is two orders
  * of magnitude of headroom). The cron in `apps/worker/wrangler.jsonc`
- * (every 2 minutes) reclaims rows whose lease has expired.
+ * (every 5 minutes) reclaims rows whose lease has expired.
  */
 export const OUTBOX_LEASE_TTL_MS = 60_000;
 
@@ -30,8 +30,8 @@ export const OUTBOX_LEASE_TTL_MS = 60_000;
  * sweep, in milliseconds.
  *
  * A healthy `queued` row is claimed within seconds of its enqueue. 5 minutes
- * is comfortably past lease TTL (60s) plus cron cadence (2 min), so the sweep
- * never races a live enqueue-to-claim pipeline — it only catches rows whose
+ * is comfortably beyond a healthy enqueue-to-claim pipeline, so the sweep
+ * avoids normal immediate queue delivery — it only catches rows whose
  * queue message was lost (a failed post-reclaim re-enqueue, or a compose-path
  * enqueue outage).
  */

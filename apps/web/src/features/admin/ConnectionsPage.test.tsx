@@ -149,7 +149,7 @@ function renderConnectionsPage(options: RenderOptions): {
   let postsSeen = 0;
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       calls.push({ url, method: 'GET' });
       return authSessionResolver();
     }
@@ -368,7 +368,7 @@ describe('ConnectionsPage (CAP-044 Slice 3 / AC 20)', () => {
       expect(screen.getByTestId('alert-dialog-error')).toBeInTheDocument();
     });
     expect(screen.getByTestId('alert-dialog-error').textContent).toContain(
-      'provider.sync required',
+      'You do not have permission for this action.',
     );
     expect(screen.getByTestId('alert-dialog')).toBeInTheDocument();
     expect(screen.queryByTestId(`admin-secret-revealed-${row.id}`)).not.toBeInTheDocument();

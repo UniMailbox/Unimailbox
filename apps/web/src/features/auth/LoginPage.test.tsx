@@ -1,7 +1,7 @@
 // apps/web — LoginPage tests.
 //
 // CAP-042 (Batch 5) AC 20 + AC 22. The login form posts to
-// /api/v1/auth/better/sign-in/email and:
+// /api/v1/auth/login and:
 // - on success stores the descriptor in the in-memory store and
 //   navigates to /mailbox;
 // - on 401 surfaces an "unauthorized" ErrorPanel;
@@ -29,14 +29,13 @@ afterEach(() => {
 describe('LoginPage', () => {
   it('submits the credentials, stores the descriptor, and navigates to /mailbox', async () => {
     const { fetchImpl, calls } = spyFetch([
-      // 1st POST /sign-in/email → 200
-      () => jsonResponse({ user: { id: 'u-1', email: 'a@b.test' }, session: {} }),
-      // follow-up GET /get-session (called by useSignInMutation's
-      // `onSuccess` chain via fetchAuthSession)
       () =>
         jsonResponse({
-          user: { id: 'u-1', email: 'a@b.test', name: 'A B' },
-          session: { userId: 'u-1', expiresAt: '2099-01-01T00:00:00Z' },
+          data: {
+            accessToken: 'access-token-test',
+            user: { id: 'u-1', email: 'a@b.test', displayName: 'A B' },
+            mustChangePassword: false,
+          },
         }),
     ]);
     const user = userEvent.setup();
@@ -45,12 +44,12 @@ describe('LoginPage', () => {
       login: <LoginPage />,
     });
     await user.type(screen.getByLabelText(/email/i), 'a@b.test');
-    await user.type(screen.getByLabelText(/password/i), 'secret123');
+    await user.type(screen.getByLabelText(/^password$/i), 'secret123');
     await user.click(screen.getByTestId('login-submit'));
     await waitFor(() => {
       expect(lastPathname(history)).toBe('/mailbox');
     });
-    const signInCall = calls.find((c) => c.url === '/api/v1/auth/better/sign-in/email');
+    const signInCall = calls.find((c) => c.url === '/api/v1/auth/login');
     expect(signInCall?.method).toBe('POST');
     // The in-memory descriptor is populated after sign-in resolves.
     const state = useAuthSession.getState();
@@ -69,7 +68,7 @@ describe('LoginPage', () => {
     // than 6 chars client-side, so this test now uses a 7-char
     // password that zod accepts. The 5-char bound is covered by the
     // dedicated validation-error test below.
-    await user.type(screen.getByLabelText(/password/i), 'wrongpw');
+    await user.type(screen.getByLabelText(/^password$/i), 'wrongpw');
     await user.click(screen.getByTestId('login-submit'));
     const code = await screen.findByTestId('login-unauthorized');
     expect(code).toBeInTheDocument();
@@ -85,7 +84,7 @@ describe('LoginPage', () => {
     // Form must pass zod so the request actually goes out and the
     // server's 4xx surfaces via ErrorPanel.
     await user.type(screen.getByLabelText(/email/i), 'user@b.test');
-    await user.type(screen.getByLabelText(/password/i), 'secret123');
+    await user.type(screen.getByLabelText(/^password$/i), 'secret123');
     await user.click(screen.getByTestId('login-submit'));
     const code = await screen.findByTestId('error-code');
     expect(code.textContent).toBe('VALIDATION_ERROR');
@@ -112,13 +111,13 @@ describe('LoginPage', () => {
     const user = userEvent.setup();
     await renderAuthPage({ fetchImpl, login: <LoginPage /> });
     await user.type(screen.getByLabelText(/email/i), 'short@b.test');
-    await user.type(screen.getByLabelText(/password/i), '12345');
+    await user.type(screen.getByLabelText(/^password$/i), '12345');
     await user.click(screen.getByTestId('login-submit'));
     // zod rejects; no fetch, no submit error panel.
     expect(calls.length).toBe(0);
     expect(screen.queryByTestId('login-error')).toBeNull();
     expect(screen.queryByTestId('login-unauthorized')).toBeNull();
-    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText(/^password$/i).getAttribute('aria-invalid')).toBe('true');
   });
 
   it('rejects a 31-character password with a max-length validation error (R-AUTH-007)', async () => {
@@ -126,11 +125,11 @@ describe('LoginPage', () => {
     const user = userEvent.setup();
     await renderAuthPage({ fetchImpl, login: <LoginPage /> });
     await user.type(screen.getByLabelText(/email/i), 'long@b.test');
-    await user.type(screen.getByLabelText(/password/i), 'a'.repeat(31));
+    await user.type(screen.getByLabelText(/^password$/i), 'a'.repeat(31));
     await user.click(screen.getByTestId('login-submit'));
     expect(calls.length).toBe(0);
     expect(screen.queryByTestId('login-error')).toBeNull();
     expect(screen.queryByTestId('login-unauthorized')).toBeNull();
-    expect(screen.getByLabelText(/password/i).getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByLabelText(/^password$/i).getAttribute('aria-invalid')).toBe('true');
   });
 });

@@ -68,12 +68,17 @@ export const auditActionSchema = z.enum([
   'setup.complete',
   // CAP-A1 admin-managed identity lifecycle.
   'user.created',
+  'user.preferences_updated',
+  'user.avatar_updated',
   'user.password_reset',
   'user.status_changed',
   // CAP-026 mailbox / message
   'mailbox.create',
   'message.receive',
   'message.send',
+  'message.scheduled',
+  'message.schedule_updated',
+  'message.schedule_cancelled',
   // CAP-029 webhook receiver
   'webhook.delivered',
   // CAP-035 admin blocklist + role policies

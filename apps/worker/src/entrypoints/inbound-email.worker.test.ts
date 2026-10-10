@@ -14,6 +14,8 @@ import { migrationsDb, seedInstallationState } from '@unimailbox/test-kit';
 import { systemIds } from '../platform/ids';
 import { prepareCreateDomain } from '../modules/tenancy';
 import { hashPassword } from '../platform/crypto';
+import { downloadAttachment } from '../modules/attachments';
+import { getAttachmentByteStore, getAttachmentObjectStore } from '../platform/cache';
 
 // Module-scope helpers — used by both describe blocks (CAP-021 base
 // behaviour + D-CAP-021 / CAP-035 rejection paths).
@@ -160,6 +162,10 @@ This is a test email body.`;
     expect(messages?.text_body).toBe('This is a test email body.');
     expect(messages?.status).toBe('delivered'); // Inbound emails have status 'delivered'
     expect(messages?.message_id_header).toBe('<test@message.id>');
+    expect(messages?.raw_object_key).toMatch(/^raw-mime\//);
+    const rawObject = await env.ATTACHMENTS.get(messages?.raw_object_key as string);
+    expect(rawObject).not.toBeNull();
+    expect(await rawObject?.text()).toBe(rawEmail);
 
     // Verify recipients were persisted
     const recipients = await db
@@ -180,6 +186,77 @@ This is a test email body.`;
     expect(mailboxMessages.results?.[0].folder).toBe('inbox');
     expect(mailboxMessages.results?.[0].is_read).toBe(0); // INTEGER stored as number
     expect(mailboxMessages.results?.[0].is_starred).toBe(0);
+  });
+
+  it('persists nested MIME attachments in R2 and serves them through mailbox authorization', async () => {
+    const db = await migrationsDb();
+    const ownerId = await createTestUser(db);
+    const domainId = await createTestDomain(db);
+    const mailboxId = await createTestMailbox(db, domainId, ownerId, 'inbox');
+    const rawEmail = [
+      'From: sender@example.com',
+      'To: inbox@example.com',
+      'Subject: Nested attachment',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="outer"',
+      '',
+      '--outer',
+      'Content-Type: multipart/alternative; boundary="inner"',
+      '',
+      '--inner',
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: quoted-printable',
+      '',
+      'Hello=20world',
+      '--inner--',
+      '--outer',
+      'Content-Type: application/octet-stream; name="report.bin"',
+      'Content-Disposition: attachment; filename="report.bin"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      'AAEC/w==',
+      '--outer--',
+      '',
+    ].join('\r\n');
+    await inboundEmail.email(
+      makeMessage('inbox@example.com', 'sender@example.com', 'Nested attachment', rawEmail),
+      env,
+    );
+
+    const stored = await db
+      .prepare('SELECT id, text_body, raw_object_key FROM messages WHERE subject = ?')
+      .bind('Nested attachment')
+      .first<{ id: string; text_body: string; raw_object_key: string }>();
+    expect(stored?.text_body).toContain('Hello world');
+    const attachment = await db
+      .prepare(
+        'SELECT id, object_key, filename, size_bytes FROM inbound_message_attachments WHERE message_id = ?',
+      )
+      .bind(stored?.id)
+      .first<{ id: string; object_key: string; filename: string; size_bytes: number }>();
+    expect(attachment?.filename).toBe('report.bin');
+    expect(attachment?.size_bytes).toBe(4);
+    expect(attachment?.object_key).toMatch(/^inbound-attachment\//);
+    const object = await env.ATTACHMENTS.get(attachment?.object_key as string);
+    expect(new Uint8Array((await object?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(
+      new Uint8Array([0, 1, 2, 255]),
+    );
+    const downloaded = await downloadAttachment(
+      {
+        db,
+        cache: getAttachmentByteStore(env),
+        objectStore: getAttachmentObjectStore(env),
+      },
+      { actorUserId: ownerId, mailboxId, attachmentId: attachment?.id as string },
+    );
+    expect(new Uint8Array(downloaded.bytes)).toEqual(new Uint8Array([0, 1, 2, 255]));
+    const otherUserId = crypto.randomUUID();
+    await expect(
+      downloadAttachment(
+        { db, cache: getAttachmentByteStore(env), objectStore: getAttachmentObjectStore(env) },
+        { actorUserId: otherUserId, mailboxId, attachmentId: attachment?.id as string },
+      ),
+    ).rejects.toThrow();
   });
 
   it('rejects email to unknown recipient', async () => {
@@ -223,7 +300,7 @@ Body`;
 
     await inboundEmail.email(message, env);
 
-    // Should accept because at least one recipient has a mailbox
+    // The SMTP envelope recipient is the known mailbox.
     expect(message._getRejectReason()).toBeNull();
 
     // Verify message was created
@@ -246,14 +323,14 @@ Body`;
     expect(recipients.results).toHaveLength(3); // 1 to + 1 cc
   });
 
-  it('handles multiple mailboxes for different recipients', async () => {
+  it('routes only the envelope recipient when MIME To names two local mailboxes', async () => {
     const db = await migrationsDb();
 
     // Setup: create a user, domain, and two mailboxes
     const userId = await createTestUser(db);
     const domainId = await createTestDomain(db);
     const mailboxId1 = await createTestMailbox(db, domainId, userId, 'inbox');
-    const mailboxId2 = await createTestMailbox(db, domainId, userId, 'support');
+    await createTestMailbox(db, domainId, userId, 'support');
 
     // Email to two mailboxes
     const rawEmail = `From: sender@example.com
@@ -272,14 +349,56 @@ Body`;
     const messages = await db.prepare('SELECT * FROM messages LIMIT 1').first();
     expect(messages).toBeDefined();
 
-    // Verify two mailbox_messages rows
+    // A second delivery callback with support@example.com as message.to
+    // would create its own association. The MIME header alone cannot do so.
     const mailboxMessages = await db
       .prepare('SELECT * FROM mailbox_messages WHERE message_id = ? ORDER BY mailbox_id')
       .bind(messages?.id)
       .all();
-    expect(mailboxMessages.results).toHaveLength(2);
-    const mailboxIds = mailboxMessages.results?.map((m) => m.mailbox_id).sort();
-    expect(mailboxIds).toEqual([mailboxId1, mailboxId2].sort());
+    expect(mailboxMessages.results).toHaveLength(1);
+    expect(mailboxMessages.results?.[0].mailbox_id).toBe(mailboxId1);
+  });
+
+  it('rejects a forged MIME To when the envelope recipient has no mailbox', async () => {
+    const db = await migrationsDb();
+    const userId = await createTestUser(db);
+    const domainId = await createTestDomain(db);
+    await createTestMailbox(db, domainId, userId, 'inbox');
+    const rawEmail = `From: sender@example.com
+To: inbox@example.com
+Subject: Forged recipient
+
+Body`;
+    const message = makeMessage('unknown@example.com', 'sender@example.com', 'Test', rawEmail);
+
+    await inboundEmail.email(message, env);
+
+    expect(message._getRejectReason()).toBe(
+      'Unknown recipient. No mailbox found for this address.',
+    );
+    const rows = await db.prepare('SELECT COUNT(*) AS n FROM messages').first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
+
+  it('delivers a Bcc envelope recipient absent from MIME To and Cc', async () => {
+    const db = await migrationsDb();
+    const userId = await createTestUser(db);
+    const domainId = await createTestDomain(db);
+    const mailboxId = await createTestMailbox(db, domainId, userId, 'private');
+    const rawEmail = `From: sender@example.com
+To: external@example.net
+Subject: Private delivery
+
+Body`;
+    const message = makeMessage('private@example.com', 'sender@example.com', 'Test', rawEmail);
+
+    await inboundEmail.email(message, env);
+
+    expect(message._getRejectReason()).toBeNull();
+    const row = await db
+      .prepare('SELECT mailbox_id FROM mailbox_messages LIMIT 1')
+      .first<{ mailbox_id: string }>();
+    expect(row?.mailbox_id).toBe(mailboxId);
   });
 
   it('parses multipart/alternative emails', async () => {
@@ -532,6 +651,26 @@ Body`;
       .bind('<block-test-2@message.id>')
       .first();
     expect(msg).toBeNull();
+  });
+
+  it('applies sender policy to the envelope sender when RFC From is forged', async () => {
+    const db = await migrationsDb();
+    await setupMailboxWithRolePolicy({
+      ban_email_patterns_json: JSON.stringify(['spammer@example.com']),
+      avail_domain_patterns_json: '[]',
+    });
+    const rawEmail = `From: allowed@example.com
+To: inbox@example.com
+Subject: Forged sender
+
+Body`;
+    const message = makeMessage('inbox@example.com', 'spammer@example.com', 'Test', rawEmail);
+
+    await inboundEmail.email(message, env);
+
+    expect(message._getRejectReason()).toContain('spammer@example.com');
+    const rows = await db.prepare('SELECT COUNT(*) AS n FROM messages').first<{ n: number }>();
+    expect(rows?.n).toBe(0);
   });
 
   // R-INBOUND-006 — banEmail `*` denies even if domain would be allowed.

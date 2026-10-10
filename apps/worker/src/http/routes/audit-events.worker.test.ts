@@ -128,7 +128,7 @@ async function createSession(userId: string): Promise<string> {
     .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
     .run();
 
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 15 * 60,
   });
 
@@ -398,7 +398,10 @@ Body text.`;
         .bind(mailboxId, domainId, ownerId, now, now)
         .run();
 
-      await createActiveProviderConnection();
+      const connectionId = await createActiveProviderConnection();
+      await env.DB.prepare('UPDATE managed_domains SET outbound_connection_id = ? WHERE id = ?')
+        .bind(connectionId, domainId)
+        .run();
 
       const response = await SELF.fetch(
         `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`,

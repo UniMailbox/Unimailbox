@@ -5,7 +5,11 @@
 // R-AUTHZ-002: Authorization checks hit the database per request; no cache older than 5 minutes.
 // R-AUTHZ-005: Admin identity comes from user_roles, never a flag on users.
 
-export { checkPermission, getUserRoleIds } from './permission-repository';
+export {
+  checkPermission,
+  hasAdministrativePermission,
+  getUserRoleIds,
+} from './permission-repository';
 export { seedRolesAndPermissions, assignRole } from './seed-repository';
 export {
   createAuditEvent,
@@ -99,5 +103,5 @@ export {
   SYSTEM_SETTINGS_REVISION_KEY,
   type SystemSettingsSnapshot,
 } from './settings-repository';
-
 export { readAdminOverview } from './overview-repository';
+export { getEditorUploadPolicy } from './editor-upload-policy';

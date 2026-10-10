@@ -96,19 +96,20 @@ async function createUser(roleId: 'sender-role' | 'reader-role', email: string):
 async function createSession(userId: string): Promise<string> {
   const accessToken = crypto.randomUUID();
   const refreshToken = crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
   await env.DB.prepare(
     `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
      VALUES (?, ?, ?, ?, ?)`,
   )
     .bind(
-      crypto.randomUUID(),
+      sessionId,
       userId,
       await hashToken(refreshToken),
       Math.floor(Date.now() / 1000) + 86_400,
       new Date().toISOString(),
     )
     .run();
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 900,
   });
   return accessToken;
@@ -221,7 +222,8 @@ describe('POST /api/v1/mailboxes/:mailboxId/attachments/uploads', () => {
       sizeBytes: UPLOAD_BYTES.byteLength,
       status: 'uploaded',
     });
-    expect(responseText).not.toContain('255');
+    // Random UUIDs can contain byte-value digits; require metadata-only output instead.
+    expect(envelope.data).toEqual(descriptor);
 
     const row = await env.DB.prepare(
       `SELECT owner_user_id, mailbox_id, kv_key, filename, content_type,
@@ -605,7 +607,6 @@ describe('POST /api/v1/mailboxes/:mailboxId/attachments/uploads', () => {
           actorUserId: userId,
           mailboxId,
           idempotencyKey: 'attachment-preserve-state',
-          isAdmin: false,
           metadata: {
             filename: 'replacement.bin',
             contentType: 'application/octet-stream',

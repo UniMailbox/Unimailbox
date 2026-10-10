@@ -9,21 +9,58 @@
 // that the button is rendered (enabled on mount — this step polls every
 // 5s waiting for a message that may never arrive, so skip must NOT be
 // gated on that poll).
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { InboundSmokeStep } from './InboundSmokeStep';
-import {
-  errorResponse,
-  jsonResponse,
-  renderStep,
-  spyFetch,
-} from '../../../test-utils';
+import { errorResponse, jsonResponse, renderStep, spyFetch } from '../../../test-utils';
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe('InboundSmokeStep', () => {
+  it('stops after expiry, restarts explicitly, then confirms receipt once with POST', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { fetchImpl, calls } = spyFetch([
+      () => jsonResponse({ data: { smokeTestAddress: 'old@example.com' } }),
+      () => jsonResponse({ data: { status: 'expired' } }),
+      () => jsonResponse({ data: { smokeTestAddress: 'new@example.com' } }),
+      () => jsonResponse({ data: { status: 'received' } }),
+      () => jsonResponse({ data: { status: 'received' } }),
+    ]);
+    await renderStep({ fetchImpl, step: <InboundSmokeStep /> });
+    await screen.findByTestId('inbound-expired');
+    expect(calls[1]?.method).toBe('GET');
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(calls).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Restart test' }));
+    await screen.findByTestId('arrived-brevo');
+    expect(calls.map(({ method }) => method)).toEqual(['POST', 'GET', 'POST', 'GET', 'POST']);
+  });
+
+  it('stops polling on terminal errors and avoids polling an already expired address', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { fetchImpl, calls } = spyFetch([
+      () => jsonResponse({ data: { smokeTestAddress: 'error@example.com' } }),
+      () => errorResponse('SETUP_SESSION_INVALID', 'Session expired', 401),
+    ]);
+    await renderStep({ fetchImpl, step: <InboundSmokeStep /> });
+    await screen.findByTestId('error-code');
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(calls).toHaveLength(2);
+    cleanup();
+    const expired = spyFetch([
+      () =>
+        jsonResponse({
+          data: { smokeTestAddress: 'expired@example.com', expiresAt: '2000-01-01T00:00:00Z' },
+        }),
+    ]);
+    await renderStep({ fetchImpl: expired.fetchImpl, step: <InboundSmokeStep /> });
+    await screen.findByTestId('inbound-expired');
+    expect(expired.calls).toHaveLength(1);
+  });
+
   it('starts the smoke test, surfaces the smoke-test address (happy path)', async () => {
     const { fetchImpl, calls } = spyFetch([
       () => jsonResponse({ data: { smokeTestAddress: 'check-abc@inbox.example' } }),

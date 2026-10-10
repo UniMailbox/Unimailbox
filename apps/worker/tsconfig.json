@@ -6,7 +6,7 @@
     "outDir": "./dist",
     "tsBuildInfoFile": "./.tsbuildinfo",
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"]
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
   "include": ["src/**/*.ts"],
   "exclude": [

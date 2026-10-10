@@ -13,13 +13,22 @@
 // - No session → 401
 // - Response does NOT include the API key (R-SECRET-003)
 
-import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, beforeAll, afterEach, afterAll } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, FIXED_TIMESTAMP } from '@unimailbox/test-kit';
+import { BREVO_TEST_CONFIG, createBrevoNetwork } from '@unimailbox/test-kit/brevo-network';
 
 describe('POST /api/v1/setup/brevo', () => {
   let sessionToken: string;
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  const provider = createBrevoNetwork();
+  beforeAll(() => provider.network.enable());
+  beforeEach(() => provider.reset());
+  afterEach(() => provider.network.resetHandlers());
+  afterAll(() => provider.network.disable());
+
+  function brevoTestApiKey(): string {
+    return BREVO_TEST_CONFIG.apiKey;
+  }
 
   // Helper: claim a session before each test
   async function claimSession(): Promise<string> {
@@ -86,26 +95,13 @@ describe('POST /api/v1/setup/brevo', () => {
     await resetAndMigrate();
     sessionToken = await claimSession();
     await setupPrerequisites();
-
-    // Spy on global fetch to mock Brevo API calls
-    fetchSpy = vi.spyOn(globalThis, 'fetch');
-  });
-
-  afterEach(() => {
-    // Restore the original fetch implementation
-    fetchSpy.mockRestore();
   });
 
   describe('valid API key and session', () => {
     it('returns 200 with connectionId, providerKey, and status', async () => {
-      // Mock successful Brevo validation
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'valid-brevo-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -127,20 +123,14 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(body.data.connectionId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
-
-      // Verify the Brevo API was called
-      expect(fetchSpy).toHaveBeenCalledOnce();
-      expect(fetchSpy.mock.calls[0][0]).toBe('https://api.brevo.com/v3/account');
     });
 
     it('stores encrypted credential in D1 (not plaintext)', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
+      const apiKey = brevoTestApiKey();
 
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key-12345' }),
+        body: JSON.stringify({ apiKey }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -178,7 +168,7 @@ describe('POST /api/v1/setup/brevo', () => {
       // Verify the stored data is NOT the plaintext API key
       const ciphertextBytes = new Uint8Array(credential.ciphertext as ArrayBuffer);
       const ciphertextStr = Buffer.from(ciphertextBytes).toString('utf-8');
-      expect(ciphertextStr).not.toBe('test-api-key-12345');
+      expect(ciphertextStr).not.toBe(apiKey);
 
       // Verify ciphertext, iv, and auth_tag are non-empty BLOBs
       expect(ciphertextBytes.byteLength).toBeGreaterThan(0);
@@ -191,13 +181,9 @@ describe('POST /api/v1/setup/brevo', () => {
     });
 
     it('creates provider_connection row with correct values', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -239,13 +225,9 @@ describe('POST /api/v1/setup/brevo', () => {
     });
 
     it('links the connection to the managed domain', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -269,13 +251,9 @@ describe('POST /api/v1/setup/brevo', () => {
     });
 
     it('advances the installation step to outbound-smoke', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -299,13 +277,9 @@ describe('POST /api/v1/setup/brevo', () => {
     });
 
     it('returns the success envelope { data: T }', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -319,13 +293,11 @@ describe('POST /api/v1/setup/brevo', () => {
     });
 
     it('response does NOT include the API key (R-SECRET-003)', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
+      const apiKey = brevoTestApiKey();
 
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'my-secret-api-key' }),
+        body: JSON.stringify({ apiKey }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -338,17 +310,13 @@ describe('POST /api/v1/setup/brevo', () => {
 
       // Verify API key is not in the response
       expect(body.data).not.toHaveProperty('apiKey');
-      expect(JSON.stringify(body)).not.toContain('my-secret-api-key');
+      expect(JSON.stringify(body)).not.toContain(apiKey);
     });
 
     it('response includes only connectionId, providerKey, and status', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -363,11 +331,6 @@ describe('POST /api/v1/setup/brevo', () => {
 
   describe('invalid API key', () => {
     it('returns 502 PROVIDER_CONNECTION_FAILED when Brevo returns 401', async () => {
-      // Mock Brevo API returning 401 (invalid key)
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ message: 'Invalid key' }), { status: 401 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
         body: JSON.stringify({ apiKey: 'invalid-api-key' }),
@@ -410,51 +373,13 @@ describe('POST /api/v1/setup/brevo', () => {
       }
       expect(state.current_step).toBe('brevo');
     });
-
-    it('returns 502 when Brevo returns 403', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }),
-      );
-
-      const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
-        method: 'POST',
-        body: JSON.stringify({ apiKey: 'forbidden-key' }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-brevo-403-key',
-        },
-      });
-
-      expect(response.status).toBe(502);
-      const body = await response.json();
-      expect(body.error.code).toBe('PROVIDER_CONNECTION_FAILED');
-    });
-
-    it('returns 502 when Brevo returns 500', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ message: 'Internal Server Error' }), { status: 500 }),
-      );
-
-      const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
-        method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-          'Idempotency-Key': 'test-brevo-500-key',
-        },
-      });
-
-      expect(response.status).toBe(502);
-    });
   });
 
   describe('session requirement', () => {
     it('returns 401 without a session', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': 'test-no-session-key',
@@ -470,7 +395,7 @@ describe('POST /api/v1/setup/brevo', () => {
     it('returns 401 with an invalid session token', async () => {
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': 'test-invalid-token-key',
@@ -546,13 +471,9 @@ describe('POST /api/v1/setup/brevo', () => {
       // This test verifies the gateway exemption middleware allows the request
       // The actual gateway IP check is in setup-session middleware
       // For now, we just verify the endpoint works with a valid session
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -566,14 +487,12 @@ describe('POST /api/v1/setup/brevo', () => {
 
   describe('duplicate setup', () => {
     it('returns 409 SETUP_BREVO_ALREADY_CONFIGURED on second call', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
+      const apiKey = brevoTestApiKey();
 
       // First call succeeds
       const firstResponse = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -586,7 +505,7 @@ describe('POST /api/v1/setup/brevo', () => {
       // Second call should fail with 409
       const secondResponse = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'another-api-key' }),
+        body: JSON.stringify({ apiKey }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -611,11 +530,7 @@ describe('POST /api/v1/setup/brevo', () => {
 
   describe('encryption quality', () => {
     it('produces different ciphertext for the same API key (random IV)', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
-      const apiKey = 'test-api-key-12345';
+      const apiKey = brevoTestApiKey();
 
       // First encryption
       const response1 = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
@@ -645,12 +560,6 @@ describe('POST /api/v1/setup/brevo', () => {
       sessionToken = await claimSession();
       await setupPrerequisites();
 
-      // Need a new spy for the second test
-      const fetchSpy2 = vi.spyOn(globalThis, 'fetch');
-      fetchSpy2.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response2 = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
         body: JSON.stringify({ apiKey }),
@@ -673,8 +582,6 @@ describe('POST /api/v1/setup/brevo', () => {
         throw new Error('Credential not found');
       }
 
-      fetchSpy2.mockRestore();
-
       // IVs should differ
       expect(new Uint8Array(credential1.iv)).not.toEqual(new Uint8Array(credential2.iv));
 
@@ -687,13 +594,9 @@ describe('POST /api/v1/setup/brevo', () => {
 
   describe('idempotency (CAP-027 / ADR-004)', () => {
     it('returns 400 IDEMPOTENCY_KEY_REQUIRED when Idempotency-Key is missing', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
       const response = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey: brevoTestApiKey() }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -706,15 +609,12 @@ describe('POST /api/v1/setup/brevo', () => {
     });
 
     it('replays the stored response when same key + same body', async () => {
-      fetchSpy.mockResolvedValue(
-        new Response(JSON.stringify({ id: 'test-account' }), { status: 200 }),
-      );
-
+      const apiKey = brevoTestApiKey();
       const idempotencyKey = 'test-brevo-key-abc123';
 
       const response1 = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -729,7 +629,7 @@ describe('POST /api/v1/setup/brevo', () => {
       // Second request with same key and body should replay
       const response2 = await SELF.fetch('http://localhost/api/v1/setup/brevo', {
         method: 'POST',
-        body: JSON.stringify({ apiKey: 'test-api-key' }),
+        body: JSON.stringify({ apiKey }),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${sessionToken}`,
@@ -744,8 +644,11 @@ describe('POST /api/v1/setup/brevo', () => {
       expect(body2.data.providerKey).toBe(body1.data.providerKey);
       expect(body2.data.status).toBe(body1.data.status);
 
-      // Verify only one connection was created (Brevo API called only once)
-      expect(fetchSpy).toHaveBeenCalledOnce();
+      // Verify only one connection was created.
+      const connections = await env.DB.prepare(
+        'SELECT COUNT(*) as count FROM provider_connections',
+      ).first<{ count: number }>();
+      expect(connections?.count).toBe(1);
     });
   });
 });

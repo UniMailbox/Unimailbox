@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — OutboundSmokeStep.
 //
 // CAP-041 / step 8. Submits the outbound smoke test. On success the
@@ -19,14 +20,12 @@ import { Alert } from '../../../components/ui/Alert';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import {
-  reclaimInstallationToken,
-  useSkipRemainingSetup,
-} from '../use-skip-remaining-setup';
+import { reclaimInstallationToken, useSkipRemainingSetup } from '../use-skip-remaining-setup';
 import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function OutboundSmokeStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -80,7 +79,10 @@ export function OutboundSmokeStep(): ReactElement {
   const isUnauthorized = submitErrorStatus === 401;
 
   return (
-    <Card title="Outbound smoke test" description="Send a real outbound email to confirm delivery.">
+    <Card
+      title={t('Outbound smoke test')}
+      description={t('Send a real outbound email to confirm delivery.')}
+    >
       <SetupGuidance
         purpose="Confirm that Brevo accepts a real outbound message from this installation."
         prepare="No additional input is required; the test is sent to the administrator email created earlier."
@@ -94,18 +96,18 @@ export function OutboundSmokeStep(): ReactElement {
       />
       {submitted ? (
         <Alert variant="success" testId="outbound-success">
-          Smoke test sent — the server is marking the installation complete.
+          {t('Smoke test sent — the server is marking the installation complete.')}
         </Alert>
       ) : (
         <p className="wizard-subtitle">
-          Click the button to send a test email to the administrator.
+          {t('Click the button to send a test email to the administrator.')}
         </p>
       )}
       {submitError !== null ? (
         <ErrorPanel
           message={submitErrorMessage}
           code={submitErrorCode}
-          retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          retryLabel={isUnauthorized ? t('Re-claim installation token') : t('Retry')}
           onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
         />
       ) : null}
@@ -118,19 +120,15 @@ export function OutboundSmokeStep(): ReactElement {
           aria-busy={submitting}
           data-testid="outbound-submit"
         >
-          {submitting ? <Spinner /> : 'Send outbound smoke test'}
+          {submitting ? <Spinner /> : t('Send outbound smoke test')}
         </Button>
       </div>
       {skipRemaining.error !== null ? (
         <ErrorPanel
           message={skipRemaining.error.message}
           code={skipRemaining.error.code}
-          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            skipRemaining.isUnauthorized
-              ? handleReclaim
-              : () => void skipRemaining.skip()
-          }
+          retryLabel={skipRemaining.isUnauthorized ? t('Re-claim installation token') : t('Retry')}
+          onRetry={skipRemaining.isUnauthorized ? handleReclaim : () => void skipRemaining.skip()}
         />
       ) : null}
       <SkipRemainingSetupButton

@@ -13,7 +13,8 @@ describe('ApiError', () => {
     expect(err.code).toBe('INVALID_INPUT');
     expect(err.status).toBe(400);
     expect(err.requestId).toBe('req-1');
-    expect(err.message).toBe('bad');
+    expect(err.message).toBe('Something went wrong. Please try again.');
+    expect(err.message).not.toContain('bad');
     expect(err.name).toBe('ApiError');
     expect(err).toBeInstanceOf(Error);
   });

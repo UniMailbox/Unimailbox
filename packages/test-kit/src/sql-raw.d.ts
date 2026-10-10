@@ -5,11 +5,11 @@
 // about the `?raw` suffix, so declare it once here.
 //
 // `cloudflare:test` is a virtual module provided by
-// @cloudflare/vitest-pool-workers inside workerd. It only resolves at
+// @cloudflare/vitest-plugin inside workerd. It only resolves at
 // runtime in the worker pool — node-pool callers see a resolution
 // failure. We declare a typed shape so dynamic imports typecheck.
 //
-// D-CAP-004-D: the @cloudflare/vitest-pool-workers/types/cloudflare-test.d.ts
+// D-CAP-004-D: the @cloudflare/vitest-plugin/types/cloudflare-test.d.ts
 // official surface exists in 0.21.x (verified at node_modules) but the
 // test-kit tsconfig does not pull it in. The local declaration below is
 // therefore the *only* source of typings, not a shadow. If a future

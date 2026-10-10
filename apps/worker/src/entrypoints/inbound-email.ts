@@ -7,7 +7,7 @@
 // 1. Check if this is a smoke test message (CAP-013 backward compatibility)
 // 2. Read raw email stream
 // 3. Parse MIME headers and body
-// 4. For each recipient address, find mailbox
+// 4. Resolve the Cloudflare envelope recipient to one active mailbox
 // 5. If no mailbox found: reject (unknown recipient)
 // 6. D-CAP-021: load blocklist + recipient mailbox owners' role policies and
 //    evaluate the policy. If rejected, call message.setReject(reason) and
@@ -24,13 +24,15 @@
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types';
 import type { Env } from '../platform/env';
 import { handleSmokeTestMessage } from '../modules/onboarding';
-import { parseEmail } from '@unimailbox/email-core';
+import { normalizeAddress, parseInboundMime } from '@unimailbox/email-core';
+import { attachmentContentTypeSchema, attachmentFilenameSchema } from '@unimailbox/contracts';
 import { findMailboxByAddress } from '../modules/tenancy';
 import {
   prepareCreateMessage,
   prepareCreateRecipient,
   prepareCreateMailboxMessage,
   createMessageWithRelations,
+  prepareCreateInboundAttachment,
   type CreateMessageInput,
   type CreateRecipientInput,
   type CreateMailboxMessageInput,
@@ -39,6 +41,7 @@ import { getUserRoleIds, prepareCreateAuditEvent } from '../modules/admin';
 import { buildAppContext } from '../app-context';
 import { evaluateInboundPolicy } from '../modules/inbound-mail';
 import { systemIds } from '../platform/ids';
+import { getObjectStore } from '../platform/object-store';
 
 const UNKNOWN_RECIPIENT_REASON = 'Unknown recipient. No mailbox found for this address.';
 
@@ -49,31 +52,17 @@ export default {
     if (handled) return;
 
     // Parse the raw email
-    const rawEmail = await new Response(message.raw).text();
+    const rawBytes = await new Response(message.raw).arrayBuffer();
+    // Decode transfer encodings and nested multipart parts from the original
+    // bytes. The raw RFC 5322 message is still preserved verbatim in R2.
+    const { parsed, attachments } = await parseInboundMime(new Uint8Array(rawBytes));
 
-    // Parse MIME headers and body
-    const parsed = await parseEmail(rawEmail);
-
-    // Collect all unique recipient addresses (to + cc)
-    const recipientAddresses = new Set<string>();
-    for (const recipient of parsed.to) {
-      recipientAddresses.add(recipient.address);
-    }
-    for (const recipient of parsed.cc) {
-      recipientAddresses.add(recipient.address);
-    }
-
-    // Find mailboxes for each recipient address
-    const foundMailboxes: Array<{ id: string; address: string; ownerUserId: string }> = [];
-    for (const address of recipientAddresses) {
-      const mailbox = await findMailboxByAddress(env.DB, address);
-      if (mailbox) {
-        foundMailboxes.push({ id: mailbox.id, address, ownerUserId: mailbox.ownerUserId });
-      }
-    }
-
-    // If no mailbox found for any recipient, reject
-    if (foundMailboxes.length === 0) {
+    // To/Cc headers are sender-authored display data. Cloudflare invokes this
+    // handler for the SMTP envelope recipient in message.to; only that address
+    // is allowed to determine the mailbox that receives the message. This
+    // also covers Bcc delivery, where the envelope address is absent from MIME.
+    const mailbox = await findMailboxByAddress(env.DB, message.to);
+    if (!mailbox) {
       await message.setReject(UNKNOWN_RECIPIENT_REASON);
       return;
     }
@@ -84,19 +73,19 @@ export default {
     const ctx = buildAppContext(env);
     const blocklistEntries = await ctx.blocklistReader.loadActiveBlocklistEntries();
 
-    // Collect unique role IDs across all recipient mailbox owners.
-    // Set semantics avoid loading the same policy row twice when multiple
-    // recipient mailboxes share an owner.
-    const ownerRoleIds = new Set<string>();
-    for (const mailbox of foundMailboxes) {
-      const roleIds = await getUserRoleIds(env.DB, mailbox.ownerUserId);
-      for (const roleId of roleIds) ownerRoleIds.add(roleId);
-    }
+    const ownerRoleIds = new Set(await getUserRoleIds(env.DB, mailbox.ownerUserId));
     const rolePolicies = await ctx.rolePolicyReader.loadRolePoliciesForRoleIds(
       Array.from(ownerRoleIds),
     );
 
-    const decision = evaluateInboundPolicy(parsed, rolePolicies, blocklistEntries);
+    // Sender policies use Cloudflare's SMTP envelope sender. RFC From stays
+    // intact in `parsed` for display and raw MIME evidence, but is a claim
+    // controlled by the sender and cannot bypass ban/allow rules.
+    const policyParsed = {
+      ...parsed,
+      from: { ...parsed.from, address: normalizeAddress(message.from) },
+    };
+    const decision = evaluateInboundPolicy(policyParsed, rolePolicies, blocklistEntries);
     if (!decision.allow) {
       // R-INBOUND-008: rejection short-circuits before any DB write
       // (no audit row either — Decision §Q4 OUT OF SCOPE).
@@ -106,6 +95,9 @@ export default {
 
     // Generate IDs for message and all related rows
     const messageId = systemIds.uuid();
+    const rawObjectKey = `raw-mime/${messageId}`;
+    const objectStore = getObjectStore(env);
+    const writtenKeys: string[] = [];
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
     // CAP-040 / R-AUDIT-001: synthesise one correlation UUID for this
@@ -120,6 +112,7 @@ export default {
       receivedAt: now,
       createdAt: now,
       updatedAt: now,
+      rawObjectKey,
     };
 
     // Prepare recipient statements (to + cc)
@@ -154,17 +147,38 @@ export default {
       recipientStatements.push(prepareCreateRecipient(env.DB, recipientInput));
     }
 
-    // Prepare mailbox_message statements (one per found mailbox)
-    const mailboxMessageStatements: D1PreparedStatement[] = [];
-    for (const mailbox of foundMailboxes) {
-      const mailboxMessageId = systemIds.uuid();
-      const mailboxMessageInput: CreateMailboxMessageInput = {
-        id: mailboxMessageId,
-        mailboxId: mailbox.id,
-        messageId,
-        createdAt: now,
-      };
-      mailboxMessageStatements.push(prepareCreateMailboxMessage(env.DB, mailboxMessageInput));
+    const mailboxMessageInput: CreateMailboxMessageInput = {
+      id: systemIds.uuid(),
+      mailboxId: mailbox.id,
+      messageId,
+      createdAt: now,
+    };
+    const mailboxMessageStatement = prepareCreateMailboxMessage(env.DB, mailboxMessageInput);
+
+    const attachmentStatements: D1PreparedStatement[] = [];
+    const attachmentObjects: { key: string; content: Uint8Array }[] = [];
+    for (const attachment of attachments) {
+      const attachmentId = systemIds.uuid();
+      const objectKey = `inbound-attachment/${messageId}/${attachmentId}`;
+      const safeFilename = attachmentFilenameSchema.safeParse(
+        attachment.filename.replace(/[\\/\0\r\n]/g, '_').slice(0, 255),
+      );
+      const safeContentType = attachmentContentTypeSchema.safeParse(attachment.contentType);
+      const contentId = attachment.contentId?.replace(/[\0\r\n]/g, '').slice(0, 255) || null;
+      attachmentObjects.push({ key: objectKey, content: attachment.content });
+      attachmentStatements.push(
+        prepareCreateInboundAttachment(env.DB, {
+          id: attachmentId,
+          messageId,
+          objectKey,
+          filename: safeFilename.success ? safeFilename.data : 'attachment',
+          contentType: safeContentType.success ? safeContentType.data : 'application/octet-stream',
+          sizeBytes: attachment.content.byteLength,
+          disposition: attachment.disposition,
+          contentId,
+          createdAt: now,
+        }),
+      );
     }
 
     // Execute all statements in one atomic batch (R-INBOUND-008 +
@@ -185,10 +199,25 @@ export default {
     const allStatements = [
       messageStatement,
       ...recipientStatements,
-      ...mailboxMessageStatements,
+      mailboxMessageStatement,
+      ...attachmentStatements,
       auditStatement,
     ];
 
-    await createMessageWithRelations(env.DB, allStatements);
+    try {
+      writtenKeys.push(rawObjectKey);
+      await objectStore.put(rawObjectKey, rawBytes);
+      for (const attachment of attachmentObjects) {
+        writtenKeys.push(attachment.key);
+        await objectStore.put(attachment.key, attachment.content);
+      }
+      await createMessageWithRelations(env.DB, allStatements);
+    } catch (error) {
+      // R2 and D1 cannot share a transaction. A failed D1 batch leaves no
+      // visible attachment rows; clean up the new opaque objects before the
+      // Email Routing retry. A failed cleanup leaves only orphaned R2 bytes.
+      await Promise.allSettled(writtenKeys.map((key) => objectStore.delete(key)));
+      throw error;
+    }
   },
 };

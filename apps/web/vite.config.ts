@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss()],
     build: {
       outDir: 'dist',
-      sourcemap: true,
+      sourcemap: false,
       target: 'es2022',
       rollupOptions: {
         output: {

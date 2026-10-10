@@ -20,11 +20,14 @@
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
+import type { MessageBatch } from '@cloudflare/workers-types';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { importEncryptionKey, encrypt } from '../platform/crypto';
 import { processOutboundJob } from '../modules/outbound-mail';
 import { updateJobStatus } from '../modules/outbound-mail/job-repository';
 import { parseProviderKey, type OutboundProviderAdapter } from '@unimailbox/contracts';
+import queueHandler from './queue';
+import { providerRegistry } from '../integrations/providers/provider-registry';
 
 // The test wrangler.test.jsonc pins CREDENTIAL_ENCRYPTION_KEY to 64 'a's.
 const ENCRYPTION_KEY = 'a'.repeat(64);
@@ -232,6 +235,61 @@ describe('processOutboundJob', () => {
     }
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toMatch(/Outbound job not found/);
+  });
+});
+
+describe('Queue entrypoint provider dispatch', () => {
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await seedInstallationState({ status: 'complete', currentStep: 'complete' });
+  });
+
+  it('R-OUTBOUND-008 acknowledges an inactive connection after recording a terminal job', async () => {
+    const { jobId, connectionId } = await seedJob();
+    await env.DB.prepare("UPDATE provider_connections SET status = 'disabled' WHERE id = ?")
+      .bind(connectionId)
+      .run();
+    const ack = vi.fn();
+    const retry = vi.fn();
+    const batch = {
+      messages: [{ body: { jobId }, ack, retry }],
+    } as unknown as MessageBatch<unknown>;
+
+    await queueHandler.queue(batch, env);
+
+    expect(ack).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+    const job = await env.DB.prepare('SELECT status, error_code FROM outbound_jobs WHERE id = ?')
+      .bind(jobId)
+      .first<{ status: string; error_code: string | null }>();
+    expect(job).toMatchObject({ status: 'failed', error_code: 'TERMINAL_PROVIDER_ERROR' });
+  });
+
+  it('R-OUTBOUND-008 acknowledges an unregistered provider after recording a terminal job', async () => {
+    const { jobId, connectionId } = await seedJob();
+    await env.DB.prepare("UPDATE provider_connections SET provider_key = 'smtp-test' WHERE id = ?")
+      .bind(connectionId)
+      .run();
+    const getAdapter = vi.spyOn(providerRegistry, 'get');
+    const ack = vi.fn();
+    const retry = vi.fn();
+    const batch = {
+      messages: [{ body: { jobId }, ack, retry }],
+    } as unknown as MessageBatch<unknown>;
+
+    try {
+      await queueHandler.queue(batch, env);
+      expect(getAdapter).toHaveBeenCalledWith(parseProviderKey('smtp-test'));
+    } finally {
+      getAdapter.mockRestore();
+    }
+
+    expect(ack).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+    const job = await env.DB.prepare('SELECT status, error_code FROM outbound_jobs WHERE id = ?')
+      .bind(jobId)
+      .first<{ status: string; error_code: string | null }>();
+    expect(job).toMatchObject({ status: 'failed', error_code: 'TERMINAL_PROVIDER_ERROR' });
   });
 });
 

@@ -1,3 +1,5 @@
+import { getLanguage } from '../i18n/locale';
+import { AVATAR_MAX_BYTES, EDITOR_FILE_MAX_BYTES } from '@unimailbox/contracts';
 // apps/web — API client.
 //
 // CAP-041 wires the wizard's HTTP surface. The client is the only place that
@@ -38,6 +40,8 @@ export interface ApiRequestInit {
   readonly body?: unknown;
   readonly headers?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
+  /** Binary attachment response; errors still use the normal API envelope. */
+  readonly responseType?: 'arrayBuffer';
   /** Used by tests to assert retry behaviour without sleeping in real time. */
   readonly retryDelays?: number[];
 }
@@ -88,6 +92,7 @@ export function createApiClient(init: ApiClientInit): ApiClient {
       }
 
       headers.set('Accept', 'application/json');
+      headers.set('Accept-Language', getLanguage());
 
       // D-CAP-042-auth-ct: when the body is an object, JSON-stringify it
       // AND set Content-Type: application/json unless the caller already
@@ -103,13 +108,16 @@ export function createApiClient(init: ApiClientInit): ApiClient {
       if (
         requestInit.body !== undefined &&
         typeof requestInit.body !== 'string' &&
+        !(requestInit.body instanceof Blob) &&
         !headers.has('Content-Type')
       ) {
         headers.set('Content-Type', 'application/json');
       }
 
-      const requestBody =
-        requestInit.body === undefined
+      const binary = requestInit.body instanceof Blob;
+      const requestBody = binary
+        ? (requestInit.body as Blob)
+        : requestInit.body === undefined
           ? undefined
           : typeof requestInit.body === 'string'
             ? requestInit.body
@@ -119,8 +127,18 @@ export function createApiClient(init: ApiClientInit): ApiClient {
       // BEFORE the fetch call. Returning a typed error means the browser
       // never sees a generic NetworkError, and the wizard's <ErrorPanel>
       // can surface the machine code per R-API-002.
-      if (requestBody !== undefined && requestBody.length > MAX_BODY_BYTES) {
-        throw new ApiError('PAYLOAD_TOO_LARGE', 'Request body exceeds the 1 MB limit', 413);
+      const bodyBytes =
+        requestBody instanceof Blob
+          ? requestBody.size
+          : new TextEncoder().encode(requestBody ?? '').byteLength;
+      const bodyLimit =
+        binary && /^\/api\/v1\/(?:mailboxes|admin\/domains)\/[^/]+\/editor-assets$/.test(path)
+          ? EDITOR_FILE_MAX_BYTES
+          : binary && path === '/api/v1/auth/me/avatar'
+            ? AVATAR_MAX_BYTES
+            : MAX_BODY_BYTES;
+      if (bodyBytes > bodyLimit) {
+        throw new ApiError('BODY_TOO_LARGE', 'Request body exceeds the upload limit', 413);
       }
 
       let attempt = 0;
@@ -146,9 +164,18 @@ export function createApiClient(init: ApiClientInit): ApiClient {
         if (requestInit.signal !== undefined) {
           fetchInit.signal = requestInit.signal;
         }
-        const response = await fetchImpl(url, fetchInit);
+        let response: Response;
+        try {
+          response = await fetchImpl(url, fetchInit);
+        } catch (cause) {
+          if (requestInit.signal?.aborted) throw cause;
+          throw new ApiError('NETWORK_ERROR', 'Could not connect', 0);
+        }
 
         if (response.ok) {
+          if (requestInit.responseType === 'arrayBuffer') {
+            return (await response.arrayBuffer()) as T;
+          }
           // Empty 204 — return undefined as `void`-shaped data.
           if (response.status === 204) {
             return undefined as T;

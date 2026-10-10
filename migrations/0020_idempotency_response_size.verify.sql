@@ -127,6 +127,7 @@ SELECT '0020_expiry_index_columns_unchanged' AS assertion,
       AND sql LIKE '%expires_at%'
   ) AS pass;
 
+-- BEGIN LOCAL BEHAVIOR CHECKS
 -- 6. PROBE — proves the raised CHECK executes.
 --
 -- Namespaced probe row id ('00200000-…000020probe' = the 0020 migration's

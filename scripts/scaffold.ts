@@ -72,9 +72,23 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     process.exit(result.status ?? 1);
   }
 
-  if (SUBCOMMAND === 'deploy') {
-    // CAP-005: Deploy to Cloudflare with automatic resource provisioning.
-    // Forwards all args (--force-secrets, --dry-run, --skip-migrate) to deploy.ts.
+  if (SUBCOMMAND === 'operations') {
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        fileURLToPath(new URL('./operations.ts', import.meta.url)),
+        ...process.argv.slice(3),
+      ],
+      { stdio: 'inherit' },
+    );
+    process.exit(result.status ?? 1);
+  }
+
+  if (SUBCOMMAND === 'deploy' || SUBCOMMAND === 'bootstrap' || SUBCOMMAND === 'secret:rotate') {
+    // Deployment operations share target validation, but bootstrap and rotation are explicit.
+    if (SUBCOMMAND === 'secret:rotate' && !process.argv.includes('--secret'))
+      throw new Error('Select --secret INSTALLATION_TOKEN|CURSOR_SIGNING_KEY.');
     const forwarded = [process.argv[3], ...process.argv.slice(4)].filter(
       (v): v is string => typeof v === 'string' && v !== '',
     );
@@ -85,6 +99,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
         '--no-warnings=ExperimentalWarning',
         fileURLToPath(new URL('./deploy.ts', import.meta.url)),
         ...forwarded,
+        ...(SUBCOMMAND === 'bootstrap' ? ['--bootstrap'] : []),
       ],
       { stdio: 'inherit' },
     );
@@ -94,8 +109,12 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
   console.error(`Unknown subcommand: ${SUBCOMMAND ?? '(none)'}`);
   console.error('Usage: pnpm scaffold <subcommand>');
   console.error('Subcommands:');
-  console.error('  doctor              — 13 structural checks');
+  console.error('  doctor              — structural checks');
   console.error('  db:migrate [--verify|--reset]');
-  console.error('  deploy [--force-secrets|--dry-run|--skip-migrate]');
+  console.error('  deploy --environment staging|production [--dry-run|--prepared path]');
+  console.error('  bootstrap --environment staging|production');
+  console.error(
+    '  secret:rotate --environment staging|production --secret INSTALLATION_TOKEN|CURSOR_SIGNING_KEY',
+  );
   process.exit(1);
 }

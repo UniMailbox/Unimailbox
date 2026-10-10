@@ -1,22 +1,15 @@
-// Test-only wrangler config for the vitest workers project.
-// Replaces secrets_store_secrets with plain vars so miniflare can provide
-// values without a backing Secrets Store. readSecret() in platform/secrets.ts
-// handles both string (test) and SecretsStoreSecret (production) forms.
-// The committed wrangler.jsonc remains the production config.
-//
-// CAP-039 — Deployment substrate: mirrored the assets binding + queues
-// consumer from wrangler.jsonc so worker-pool tests exercise the same
-// binding topology. `migrations_dir` removed (pending-only deploy).
+// Local/test topology mirrors deployment configs. Select an explicit environment for releases.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unimailbox-worker-test",
   "main": "src/worker.ts",
-  "compatibility_date": "2025-09-23",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-
-  "observability": { "enabled": false },
-
+  "observability": {
+    "enabled": false,
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -24,64 +17,62 @@
       "database_id": "test",
     },
   ],
-
-  "r2_buckets": [{ "binding": "ATTACHMENTS", "bucket_name": "test-attachments" }],
-
-  "kv_namespaces": [
-    { "binding": "SETUP_SESSION", "id": "test-setup-session" },
-    { "binding": "CACHE", "id": "test-cache" },
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "test-attachments",
+    },
   ],
-
+  "kv_namespaces": [
+    {
+      "binding": "SETUP_SESSION",
+      "id": "test-setup-session",
+    },
+    {
+      "binding": "CACHE",
+      "id": "test-cache",
+    },
+  ],
   "queues": {
-    "producers": [{ "binding": "OUTBOUND", "queue": "test-outbound" }],
-    "consumers": [{ "queue": "test-outbound", "max_retries": 5 }],
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "test-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "test-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "test-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "test-outbound-dlq",
+      },
+    ],
   },
-
-  // CAP-039: SPA fallback — same shape as production. The test pool
-  // serves assets from the real `apps/web/dist` build so SPA fallback
-  // tests run against the actual hashed bundle. CAP-039 D5: mirrors
-  // production's `run_worker_first` so worker-pool tests exercise the
-  // same routing precedence the deployed Worker has.
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
   },
-
-  "triggers": { "crons": ["*/2 * * * *"] },
-
-  // CAP-042 (AC 11): mirror the production env surface in the test
-  // bindings so worker-pool tests exercise the same names the production
-  // route handler reads. readSecret() handles the string form (test pool)
-  // and the SecretsStoreSecret.get() form (production) identically.
-  //
-  // BETTER_AUTH_SECRET is intentionally a fixed dev-only value; rotating
-  // it invalidates every existing Better Auth cookie, so a real secret
-  // lives only in the production Secrets Store.
-  //
-  // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY mirrors the new
-  // production binding. A fixed test value lets worker-pool tests assert
-  // cursor signing/verification without coupling to a real Secrets
-  // Store. Production rotation invalidates every existing cursor the
-  // same way BETTER_AUTH_SECRET invalidates sessions.
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
   "vars": {
     "ENVIRONMENT": "local",
     "BETTER_AUTH_URL": "http://localhost",
-    // CAP-042 (AC 23): default AUTH_PROVIDER is `'dual'` so the
-    // existing AC 12 / AC 13 / AC 14 / AC 15 / AC 16 / AC 19 suites
-    // that exercise Better Auth sign-in work without per-test
-    // override. The cutover matrix tests in
-    // `http/middleware/authn.worker.test.ts` and
-    // `http/routes/better-auth.worker.test.ts` flip this value
-    // explicitly per test via `env.AUTH_PROVIDER = '...'` (mutations
-    // propagate to the worker runtime because
-    // `http/middleware/config.ts` calls `parsePlatformConfig(c.env)`
-    // on every request).
     "AUTH_PROVIDER": "dual",
     "INSTALLATION_TOKEN": "test-installation-token",
     "CREDENTIAL_ENCRYPTION_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "BETTER_AUTH_SECRET": "test-better-auth-secret-do-not-use-elsewhere-32bytes",
     "CURSOR_SIGNING_KEY": "test-cursor-signing-key-do-not-use-elsewhere-32bytes",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
   },
 }

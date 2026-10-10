@@ -1,21 +1,8 @@
-// apps/web — auth TanStack Query hooks.
-//
-// CAP-042 (Batch 5) AC 20 + AC 22. The browser's auth surface:
-// - `fetchAuthSession` (GET /api/v1/auth/better/get-session) → reads the
-//   HttpOnly cookie via the browser's `credentials: 'include'` fetch,
-//   returns an `AuthSessionDescriptor` or `null`.
-// - `authSessionQuery()` reads the cached descriptor (D-CAP-041-1).
-// - `useSignInMutation` / `useSignOutMutation` / `useRegisterMutation`
-//   mutate the session through Better Auth (sign-in/sign-out) or the
-//   legacy application registration endpoint.
-//
-// Better Auth is the canonical sign-in surface for the application. Its
-// response shape is owned by Better Auth (CAP-042 ADR-008 / R-API-002
-// spirit). The `parseSessionResponse` parser narrows `unknown` into the
-// typed descriptor without inventing a second contract model — it
-// accepts the shapes Better Auth 1.7.1 emits and rejects anything else
-// as `null`. A future contracts-package schema for this descriptor is a
-// follow-up (logged as a gap in the implementer report).
+// Application-owned authentication queries.
+// The Worker issues a short-lived access token from /auth/login. The token is
+// held only in the in-memory auth store; protected calls use ApiClient's
+// Authorization header and D1 remains the session authority.
+
 import {
   useMutation,
   useQuery,
@@ -26,80 +13,80 @@ import {
 import type { ApiClient } from '../../infrastructure/api/client';
 import { ApiError } from '../../infrastructure/api/errors';
 import { useApiClient } from '../../infrastructure/api/client-provider';
-import { type AuthSessionDescriptor, setAuthSession, clearAuthSession } from './auth-session-store';
+import {
+  type AuthSessionDescriptor,
+  setAuthSession,
+  setAccessToken,
+  clearAuthSession,
+  useAuthSession,
+} from './auth-session-store';
 
 export const authQueryKeys = {
   all: ['auth'] as const,
   session: () => [...authQueryKeys.all, 'session'] as const,
 };
 
-/**
- * Better Auth 1.7.1's `getSession` returns one of:
- *  - `{ user: null, session: null }` when no cookie is present;
- *  - `{ user: { id, email, name, ... }, session: { userId, expiresAt, ... } }`
- *    when a valid session cookie is present;
- *  - the JSON body `null` directly.
- *
- * The Hono wrapper at `http/routes/better-auth.ts` forwards Better Auth's
- * response verbatim; the JSON parse in `ApiClient.fetch` returns whatever
- * the body held. We accept every variant the framework actually emits
- * and reject anything else to `null` so the router's `beforeLoad` can
- * treat `null` as "redirect to /login".
- */
 export function parseSessionResponse(response: unknown): AuthSessionDescriptor | null {
-  if (response === null || response === undefined) return null;
-  const outer = response as { data?: unknown };
-  const payload = outer && typeof outer === 'object' && 'data' in outer ? outer.data : response;
-  if (payload === null || payload === undefined) return null;
-  if (typeof payload !== 'object') return null;
-  const obj = payload as { user?: unknown; session?: unknown };
-  if (obj.user === null || obj.user === undefined) return null;
-  if (obj.session === null || obj.session === undefined) return null;
-  if (typeof obj.user !== 'object' || typeof obj.session !== 'object') return null;
-  const user = obj.user as { id?: unknown; email?: unknown; name?: unknown };
-  const session = obj.session as { userId?: unknown; expiresAt?: unknown };
-  if (typeof user.id !== 'string' || user.id.length === 0) return null;
-  if (typeof user.email !== 'string' || user.email.length === 0) return null;
-  if (typeof session.userId !== 'string' || session.userId.length === 0) return null;
-  if (typeof session.expiresAt !== 'string' || session.expiresAt.length === 0) return null;
-  const rawName = user.name;
-  const displayName = typeof rawName === 'string' && rawName.length > 0 ? rawName : null;
+  if (response === null || typeof response !== 'object') return null;
+  const data = (response as { data?: unknown }).data;
+  if (data === null || typeof data !== 'object') return null;
+  const body = data as {
+    user?: { id?: unknown; email?: unknown; displayName?: unknown };
+    mustChangePassword?: unknown;
+    canAccessAdmin?: unknown;
+  };
+  if (!body.user || typeof body.user.id !== 'string' || typeof body.user.email !== 'string')
+    return null;
   return {
-    userId: user.id,
-    email: user.email,
-    displayName,
-    expiresAt: session.expiresAt,
+    userId: body.user.id,
+    email: body.user.email,
+    displayName: typeof body.user.displayName === 'string' ? body.user.displayName : null,
+    expiresAt: '',
+    mustChangePassword: body.mustChangePassword === true,
+    ...(typeof body.canAccessAdmin === 'boolean' && { canAccessAdmin: body.canAccessAdmin }),
   };
 }
 
-/**
- * Fetcher for /api/v1/auth/better/get-session.
- *
- * The browser carries the HttpOnly cookie automatically; `ApiClient`
- * does not inject any header. A 401 (no cookie) maps to `null` so the
- * router's `beforeLoad` treats it as "redirect to /login". Network
- * errors and 5xx propagate so an error boundary can show them.
- */
 export async function fetchAuthSession(
   apiClient: ApiClient,
 ): Promise<AuthSessionDescriptor | null> {
   try {
-    const response = await apiClient.fetch<unknown>('/api/v1/auth/better/get-session');
-    return parseSessionResponse(response);
+    return parseSessionResponse(await apiClient.fetch<unknown>('/api/v1/auth/me'));
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      return null;
+    if (!(error instanceof ApiError) || error.status !== 401) throw error;
+
+    // A hard reload clears the in-memory access token. The refresh token is
+    // carried by the HttpOnly cookie set by the Worker, so recovery does not
+    // expose a credential to JavaScript or browser storage. The empty JSON
+    // object keeps the legacy body contract valid while the Worker fills in
+    // the token from the cookie.
+    try {
+      const refreshed = await apiClient.fetch<{ data?: { accessToken?: unknown } }>(
+        '/api/v1/auth/refresh',
+        { method: 'POST', body: {} },
+      );
+      const accessToken = refreshed.data?.accessToken;
+      if (typeof accessToken !== 'string' || accessToken.length === 0) return null;
+      // The API client reads its Bearer token from the live in-memory store.
+      // Install the refreshed token before the second /me request, then keep
+      // the verified user descriptor only after that request succeeds.
+      setAccessToken(accessToken);
+      const descriptor = parseSessionResponse(await apiClient.fetch<unknown>('/api/v1/auth/me'));
+      if (descriptor !== null) {
+        setAuthSession({ ...descriptor, accessToken });
+      } else {
+        clearAuthSession();
+      }
+      return descriptor;
+    } catch (refreshError) {
+      clearAuthSession();
+      // Authentication decisions depend only on codes/status, never translated prose.
+      if (refreshError instanceof ApiError && refreshError.status === 401) return null;
+      throw refreshError;
     }
-    throw error;
   }
 }
 
-/**
- * Read-only query hook for the auth session. The router's `beforeLoad`
- * warms the same cache via `queryClient.ensureQueryData({ queryKey: ... })`,
- * so by the time MailboxShell mounts the value is in cache and a single
- * GET serves both navigation and render (D-CAP-041-1).
- */
 export function authSessionQuery(): UseQueryResult<AuthSessionDescriptor | null, ApiError> {
   const apiClient = useApiClient();
   return useQuery({
@@ -109,22 +96,24 @@ export function authSessionQuery(): UseQueryResult<AuthSessionDescriptor | null,
   });
 }
 
-/**
- * Input for the sign-in mutation. The schema lives in the LoginPage's
- * react-hook-form resolver (zod), not here — the wire shape matches
- * Better Auth's POST /sign-in/email payload.
- */
 export interface AuthSignInInput {
   readonly email: string;
   readonly password: string;
 }
 
-/**
- * Sign-in mutation. POST /api/v1/auth/better/sign-in/email — the response
- * sets the HttpOnly session cookie. We then re-fetch the descriptor and
- * write it to the in-memory store so the UI re-renders. The cookie itself
- * is never read by JavaScript (R-SECRET-003).
- */
+interface LoginResponse {
+  readonly data: {
+    readonly accessToken: string;
+    readonly user: {
+      readonly id: string;
+      readonly email: string;
+      readonly displayName: string | null;
+    };
+    readonly mustChangePassword?: boolean;
+    readonly canAccessAdmin?: boolean;
+  };
+}
+
 export function useSignInMutation(): UseMutationResult<
   AuthSessionDescriptor,
   ApiError,
@@ -133,80 +122,57 @@ export function useSignInMutation(): UseMutationResult<
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: AuthSignInInput): Promise<AuthSessionDescriptor> => {
-      await apiClient.fetch('/api/v1/auth/better/sign-in/email', {
+    mutationFn: async (input): Promise<AuthSessionDescriptor> => {
+      const response = await apiClient.fetch<LoginResponse>('/api/v1/auth/login', {
         method: 'POST',
-        body: { email: input.email, password: input.password },
+        body: input,
       });
-      const descriptor = await fetchAuthSession(apiClient);
-      if (descriptor === null) {
-        throw new ApiError(
-          'SESSION_NOT_RESOLVED',
-          'Session cookie was set but get-session returned no user',
-          500,
-        );
-      }
-      return descriptor;
+      return {
+        userId: response.data.user.id,
+        email: response.data.user.email,
+        displayName: response.data.user.displayName,
+        expiresAt: '',
+        mustChangePassword: response.data.mustChangePassword === true,
+        ...(typeof response.data.canAccessAdmin === 'boolean' && {
+          canAccessAdmin: response.data.canAccessAdmin,
+        }),
+        accessToken: response.data.accessToken,
+      };
     },
-    onSuccess: async (descriptor) => {
-      // CAP-042 Batch 8 (M-2 fix): `setQueryData` writes the fresh
-      // descriptor into the cache synchronously. The prior
-      // `invalidateQueries({ queryKey: authQueryKeys.session() })` was
-      // redundant — it marked the cache stale so the next
-      // `ensureQueryData` in the router's `beforeLoad` re-fetched the
-      // descriptor the user had just produced (D-CAP-041-1 promise:
-      // one HTTP GET per navigation, not two).
-      queryClient.setQueryData(authQueryKeys.session(), descriptor);
+    onSuccess: (descriptor) => {
       setAuthSession(descriptor);
+      queryClient.setQueryData(authQueryKeys.session(), { ...descriptor, accessToken: undefined });
     },
   });
 }
 
-/**
- * Sign-out mutation. POST /api/v1/auth/better/sign-out — Better Auth
- * clears the cookie via its own `Set-Cookie` response. We then drop the
- * cached descriptor and clear the in-memory store so the next navigation
- * to `/mailbox` redirects to `/login`.
- */
 export function useSignOutMutation(): UseMutationResult<void, ApiError, void> {
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (): Promise<void> => {
-      await apiClient.fetch('/api/v1/auth/better/sign-out', { method: 'POST' });
+    mutationFn: async () => {
+      await apiClient.fetch('/api/v1/auth/logout', { method: 'POST' });
     },
-    onSuccess: async () => {
-      // Same rationale as `useSignInMutation.onSuccess` (CAP-042
-      // Batch 8 M-2): `setQueryData` is sufficient. `invalidateQueries`
-      // would force a fresh GET on the next navigation when we already
-      // know the user is signed out.
-      queryClient.setQueryData(authQueryKeys.session(), null);
+    onSuccess: () => {
       clearAuthSession();
+      queryClient.setQueryData(authQueryKeys.session(), null);
     },
   });
 }
 
-/**
- * Registration input. The application registration endpoint
- * (POST /api/v1/auth/register) is the *only* user-creation surface;
- * Better Auth's `sign-up/email` is disabled at the framework level
- * (CAP-042 ADR-008 / R-AUTH-006). Registration consumes one of the
- * invite codes an admin issues via POST /api/v1/admin/invite-codes
- * (R-AUTH-008 / R-AUTH-008: email-prefix limit enforced server-side).
- */
 export interface AuthRegisterInput {
   readonly code: string;
   readonly email: string;
   readonly password: string;
   readonly displayName?: string;
 }
-
 export interface AuthRegisterResult {
   readonly id: string;
   readonly email: string;
   readonly displayName: string | null;
 }
 
+/** Compatibility call retained so old clients receive REGISTRATION_DISABLED. */
 export function useRegisterMutation(): UseMutationResult<
   AuthRegisterResult,
   ApiError,
@@ -214,11 +180,44 @@ export function useRegisterMutation(): UseMutationResult<
 > {
   const apiClient = useApiClient();
   return useMutation({
-    mutationFn: async (input: AuthRegisterInput): Promise<AuthRegisterResult> => {
+    mutationFn: async (input) => {
       const response = await apiClient.fetch<{
         readonly data: { readonly user: AuthRegisterResult };
-      }>('/api/v1/auth/register', { method: 'POST', body: input });
+      }>('/api/v1/auth/register', {
+        method: 'POST',
+        body: input,
+      });
       return response.data.user;
+    },
+  });
+}
+
+export interface ChangePasswordInput {
+  readonly currentPassword: string;
+  readonly newPassword: string;
+}
+
+export function useChangePasswordMutation(): UseMutationResult<
+  void,
+  ApiError,
+  ChangePasswordInput
+> {
+  const apiClient = useApiClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input) => {
+      await apiClient.fetch('/api/v1/auth/change-password', { method: 'POST', body: input });
+    },
+    onSuccess: () => {
+      const current = queryClient.getQueryData<AuthSessionDescriptor | null>(
+        authQueryKeys.session(),
+      );
+      if (current) {
+        const updated = { ...current, mustChangePassword: false };
+        const accessToken = useAuthSession.getState().accessToken;
+        setAuthSession({ ...updated, ...(accessToken !== null && { accessToken }) });
+        queryClient.setQueryData(authQueryKeys.session(), { ...updated, accessToken: undefined });
+      }
     },
   });
 }

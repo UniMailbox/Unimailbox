@@ -1,35 +1,16 @@
-// CAP-001 — wrangler config skeleton.
-// Auto-provisions every binding the system will eventually use.
-// Real handler bodies land with later capabilities (CAP-006+).
-//
-// NOTE: wrangler.test.jsonc mirrors the binding topology for worker-pool tests
-// (replacing secrets_store_secrets with vars). When you add a binding here,
-// add it there too — the two files must stay in lockstep.
-//
-// CAP-039 — Deployment substrate: declared the `assets` binding so a single
-// `pnpm build` produces a Worker that serves the Vite-built web bundle and
-// a queue consumer that drains the outbound queue CAP-023 produces.
+// Local/test topology mirrors deployment configs. Select an explicit environment for releases.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unimailbox-worker",
   "main": "src/worker.ts",
-  "compatibility_date": "2025-09-23",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-
-  // CAP-001 §Scope — auto-provisioning is stable on wrangler >= 4.39.0.
-  // See phase-0-foundation.md §Key technical decisions.
-  // account_id left as a placeholder: the operator fills it in at deploy time.
-  // See work/active/CAP-001-monorepo-scaffold/task.md §Open questions #2.
-
   "observability": {
     "enabled": true,
+    "head_sampling_rate": 1,
   },
-
-  // ---- D1 — primary relational store ----
-  // CAP-039: `migrations_dir` removed; deploy.ts applies migrations in
-  // pending-only mode (`scripts/deploy.ts:runRemoteMigrations`) so wrangler
-  // deploy never replays the full migrations directory.
   "d1_databases": [
     {
       "binding": "DB",
@@ -37,16 +18,12 @@
       "database_id": "REPLACE_WITH_D1_DATABASE_ID",
     },
   ],
-
-  // ---- R2 — attachment bytes ----
   "r2_buckets": [
     {
       "binding": "ATTACHMENTS",
       "bucket_name": "unimailbox-attachments",
     },
   ],
-
-  // ---- KV — setup session + cache ----
   "kv_namespaces": [
     {
       "binding": "SETUP_SESSION",
@@ -57,67 +34,34 @@
       "id": "REPLACE_WITH_KV_CACHE_ID",
     },
   ],
-
-  // ---- Queue — outbound dispatch ----
-  // CAP-039: declared the consumer so the deployed Worker drains the
-  // outbound queue that CAP-023/CAP-029 enqueue to. max_retries = 5
-  // (D1) — Worker-side error taxonomy already short-circuits permanent
-  // failures, so 5 leaves room for transient 5xx/429 without exhausting
-  // retries on a brief Brevo outage.
   "queues": {
     "producers": [
       {
         "binding": "OUTBOUND",
         "queue": "unimailbox-outbound",
       },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "unimailbox-outbound-dlq",
+      },
     ],
     "consumers": [
       {
         "queue": "unimailbox-outbound",
         "max_retries": 5,
+        "dead_letter_queue": "unimailbox-outbound-dlq",
       },
     ],
   },
-
-  // ---- Assets — Vite-built web bundle ----
-  // CAP-039: SPA fallback. wrangler's `not_found_handling` returns
-  // index.html for any non-API GET the asset binding can't resolve
-  // (see D2 — Worker-side manual fallback rejected). `directory` is
-  // relative to this file (apps/worker/wrangler.jsonc), per wrangler 4.x.
-  // CAP-039 D5: `run_worker_first` with the value `/api/star` enforces the
-  // API-never-reaches-assets invariant at the Cloudflare platform layer.
-  // Without this flag, the `not_found_handling: "single-page-application"`
-  // rewrite fires on browser navigations to unknown paths and would
-  // return the SPA shell for e.g. an unknown route under the api prefix.
-  // With it set, the Worker always handles api-prefixed requests first;
-  // the router's `startsWith('/api/v1')` guard is now belt-and-braces.
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
   },
-
-  // ---- Triggers — scheduled handler ----
-  // CAP-001 ships the `scheduled` handler in `entrypoints/scheduled.ts`.
-  // CAP-028: the outbound-job reclaim runs every 2 minutes (see
-  // apps/worker/src/platform/outbox-config.ts for the lease TTL).
   "triggers": {
-    "crons": ["*/2 * * * *"],
+    "crons": ["*/5 * * * *"],
   },
-
-  // ---- Secrets Store — secrets the Worker reads via env.<name> ----
-  // CAP-042 (AC 11): BETTER_AUTH_SECRET is an independent Secrets Store
-  // binding (ADR-008 §HTTP and browser session contract). It must not be
-  // derived from CREDENTIAL_ENCRYPTION_KEY. Production deploys create it
-  // through scripts/deploy.ts:setSecrets; local/test bindings substitute
-  // a plain string (see apps/worker/wrangler.test.jsonc).
-  //
-  // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY is a third
-  // independent Secrets Store binding. It signs the inbox-list cursor
-  // (R-API-005 / D-CAP-043-D) and MUST NOT share material with
-  // CREDENTIAL_ENCRYPTION_KEY (AES-GCM, different rotation cadence)
-  // or BETTER_AUTH_SECRET (cookie HMAC, different purpose).
   "secrets_store_secrets": [
     {
       "binding": "INSTALLATION_TOKEN",
@@ -130,32 +74,17 @@
       "secret_name": "CREDENTIAL_ENCRYPTION_KEY",
     },
     {
-      "binding": "BETTER_AUTH_SECRET",
-      "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
-      "secret_name": "BETTER_AUTH_SECRET",
-    },
-    {
       "binding": "CURSOR_SIGNING_KEY",
       "store_id": "REPLACE_WITH_SECRETS_STORE_ID",
       "secret_name": "CURSOR_SIGNING_KEY",
     },
   ],
-
-  // ---- Vars — non-secret env vars ----
-  // CAP-042 (AC 11):
-  //   - ENVIRONMENT: deployment target. Allowed values: local|preview|
-  //     staging|production. Doctor's ENVIRONMENT guard rejects 'local' for
-  //     deploys.
-  //   - BETTER_AUTH_URL: bare http(s) origin for the Better Auth base URL.
-  //     Local-only default; non-local deploys must replace this value
-  //     before the config is shipped (scripts/deploy.ts refuses the
-  //     http://localhost default outside the local environment).
-  //   - AUTH_PROVIDER: closed enum (legacy|dual|better-auth) that selects
-  //     the auth mode the running Worker uses (ADR-008 §Rollout and
-  //     rollback). Defaults to 'legacy' so the cutover is opt-in.
   "vars": {
     "ENVIRONMENT": "local",
-    "BETTER_AUTH_URL": "http://localhost",
-    "AUTH_PROVIDER": "legacy",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
   },
 }

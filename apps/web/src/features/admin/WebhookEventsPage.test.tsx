@@ -126,7 +126,7 @@ function renderWebhookEventsPage(options: RenderOptions): {
   const { fetchImpl: sequentialFetch, calls } = spyFetch(options.resolvers);
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       calls.push({ url, method: 'GET' });
       return authSessionResolver();
     }

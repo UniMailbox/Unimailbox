@@ -1,6 +1,16 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { RichTextEditor, textToHtml } from '../../components/editor/RichTextEditor';
+import { EditorDialog } from '../../components/ui/EditorDialog';
+import { Badge } from '../../components/ui/shadcn/badge';
+import { Label } from '../../components/ui/shadcn/label';
+import { Switch } from '../../components/ui/shadcn/switch';
+import { SelectField } from '../../components/ui/SelectField';
+import { Textarea } from '../../components/ui/shadcn/textarea';
+import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — per-domain signature administration (CAP-068).
-// The form treats HTML as source text and never renders it. The Worker is the
-// authority for sanitization and signature.manage authorization.
+// Rich content uses the shared editor. The Worker remains the authority for
+// sanitization and signature.manage authorization.
 
 import { useState, type FormEvent, type ReactElement } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -31,7 +41,7 @@ export function SignaturesPage(): ReactElement {
   if (sessionQuery.data === undefined) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -40,6 +50,7 @@ export function SignaturesPage(): ReactElement {
 }
 
 function SignaturesContent(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   const session = authSessionQuery().data;
@@ -48,6 +59,8 @@ function SignaturesContent(): ReactElement {
   const userId = session?.userId ?? 'anonymous';
   const signaturesKey = adminQueryKeys.signatures(userId);
   const [domainId, setDomainId] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [htmlContent, setHtmlContent] = useState('');
   const [textContent, setTextContent] = useState('');
   const [isEnabled, setIsEnabled] = useState(true);
@@ -68,11 +81,12 @@ function SignaturesContent(): ReactElement {
           left.domainName.localeCompare(right.domainName),
         ),
       );
+      setCreateOpen(false);
       setDomainId('');
       setHtmlContent('');
       setTextContent('');
       setIsEnabled(true);
-      setNotice(`Created the signature for ${signature.domainName}.`);
+      setNotice(t('Created the signature for {value0}.', { value0: signature.domainName }));
       void queryClient.invalidateQueries({ queryKey: signaturesKey, refetchType: 'none' });
     },
     onError: (error) => setCreateError(normalizeApiError(error)),
@@ -85,7 +99,7 @@ function SignaturesContent(): ReactElement {
   if (!hasData && signaturesQuery.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -93,10 +107,10 @@ function SignaturesContent(): ReactElement {
     return (
       <main className="admin-page" data-testid="admin-not-authorized" role="status">
         <Card
-          title="Administrator access required"
-          description="Your account does not have permission to read signatures."
+          title={t('Administrator access required')}
+          description={t('Your account does not have permission to read signatures.')}
         >
-          <p>Ask an administrator if you need access to this area.</p>
+          <p>{t('Ask an administrator if you need access to this area.')}</p>
         </Card>
       </main>
     );
@@ -104,10 +118,11 @@ function SignaturesContent(): ReactElement {
   if (!hasData && signaturesError !== null) {
     return (
       <main className="admin-page" data-testid="admin-error">
-        <header className="admin-header">
-          <h1>Signatures</h1>
-        </header>
-        <Card title="Could not load signatures" description="Domain signatures are unavailable.">
+        <PageHeader title={t('Signatures')} />
+        <Card
+          title={t('Could not load signatures')}
+          description={t('Domain signatures are unavailable.')}
+        >
           <ErrorPanel
             message={signaturesError.message}
             code={signaturesError.code}
@@ -126,6 +141,7 @@ function SignaturesContent(): ReactElement {
 
   const submitCreate = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
+    if (uploading) return;
     const parsed = createSignatureRequestSchema.safeParse({
       domainId,
       htmlContent,
@@ -141,61 +157,92 @@ function SignaturesContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-signatures-page">
-      <header className="admin-header">
-        <h1>Signatures</h1>
-      </header>
+      <PageHeader
+        title={t('Signatures')}
+        actions={
+          availableDomains.length > 0 ? (
+            <Button
+              onClick={() => {
+                setCreateError(null);
+                setCreateOpen(true);
+              }}
+            >
+              {t('New signature')}
+            </Button>
+          ) : undefined
+        }
+      />
       <Card
-        title="Domain signatures"
-        description="Configure the signature stored for each managed domain. HTML is sanitized when saved."
+        title={t('Domain signatures')}
+        description={t(
+          'Configure the signature stored for each managed domain. HTML is sanitized when saved.',
+        )}
       >
-        <p data-testid="signature-safety-note">
-          HTML is stored as source text and is not previewed in the browser. Only safe formatting is
-          retained by the server.
+        <p className="configuration-note" data-testid="signature-safety-note">
+          {t('Enabled signatures are added automatically to outgoing mail from this domain.')}
         </p>
         {domainsError !== null && domainsError.code !== 'PERMISSION_DENIED' ? (
           <div className="admin-error-banner" role="alert" data-testid="signatures-domain-error">
-            Could not load domains: {domainsError.message} ({domainsError.code})
+            {t('Could not load domains: ')}
+            {domainsError.message} ({domainsError.code})
           </div>
         ) : null}
         {availableDomains.length > 0 ? (
-          <form
-            onSubmit={submitCreate}
-            className="admin-form"
-            noValidate
-            data-testid="signature-create-form"
+          <EditorDialog
+            open={createOpen}
+            onOpenChange={(open) => {
+              if (!createMutation.isPending && !uploading) setCreateOpen(open);
+            }}
+            title={t('New signature')}
+            description={t('Choose a domain and add your signature content.')}
           >
-            <h3>Add signature</h3>
-            <label htmlFor="signature-domain">Managed domain</label>
-            <select
-              id="signature-domain"
-              value={domainId}
-              onChange={(event) => setDomainId(event.target.value)}
+            <form
+              onSubmit={submitCreate}
+              className="admin-form"
+              noValidate
+              data-testid="signature-create-form"
             >
-              <option value="">Choose a domain</option>
-              {availableDomains.map((domain) => (
-                <option key={domain.id} value={domain.id}>
-                  {domain.name}
-                </option>
-              ))}
-            </select>
-            <SignatureFields
-              htmlContent={htmlContent}
-              textContent={textContent}
-              isEnabled={isEnabled}
-              onHtmlChange={setHtmlContent}
-              onTextChange={setTextContent}
-              onEnabledChange={setIsEnabled}
-              prefix="create"
-            />
-            {createError !== null ? (
-              <div className="admin-error-banner" role="alert" data-testid="signature-create-error">
-                {createError.message} ({createError.code})
-              </div>
-            ) : null}
-            <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? 'Saving…' : 'Add signature'}
-            </Button>
-          </form>
+              <label htmlFor="signature-domain">{t('Managed domain')}</label>
+              <SelectField
+                id="signature-domain"
+                disabled={uploading || createMutation.isPending}
+                value={domainId}
+                onValueChange={setDomainId}
+                options={[
+                  { value: '', label: 'Choose a domain' },
+                  ...availableDomains.map((domain) => ({ value: domain.id, label: domain.name })),
+                ]}
+              />
+              <SignatureFields
+                htmlContent={htmlContent}
+                textContent={textContent}
+                isEnabled={isEnabled}
+                onHtmlChange={setHtmlContent}
+                onTextChange={setTextContent}
+                onEnabledChange={setIsEnabled}
+                prefix="create"
+                domainId={domainId}
+                onBusyChange={setUploading}
+                disabled={createMutation.isPending || uploading}
+              />
+              {createError !== null ? (
+                <div
+                  className="admin-error-banner"
+                  role="alert"
+                  data-testid="signature-create-error"
+                >
+                  {createError.message} ({createError.code})
+                </div>
+              ) : null}
+              <Button
+                type="submit"
+                loading={createMutation.isPending}
+                disabled={createMutation.isPending || uploading}
+              >
+                {createMutation.isPending ? t('Saving…') : t('Add signature')}
+              </Button>
+            </form>
+          </EditorDialog>
         ) : null}
         {notice !== null ? (
           <p className="admin-success" role="status" data-testid="signature-success">
@@ -204,18 +251,19 @@ function SignaturesContent(): ReactElement {
         ) : null}
         {signaturesQuery.error !== null ? (
           <div className="admin-error-banner" role="alert" data-testid="signatures-query-error">
-            Could not refresh signatures: {signaturesError?.message} ({signaturesError?.code})
+            {t('Could not refresh signatures: ')}
+            {signaturesError?.message} ({signaturesError?.code})
             <Button
               type="button"
               variant="secondary"
               onClick={() => void signaturesQuery.refetch()}
             >
-              Retry
+              {t('Retry')}
             </Button>
           </div>
         ) : null}
         {signatures.length === 0 ? (
-          <p data-testid="admin-signatures-empty">No domain signatures exist yet.</p>
+          <p data-testid="admin-signatures-empty">{t('No domain signatures exist yet.')}</p>
         ) : (
           <ul className="admin-signature-list" data-testid="admin-signatures-list">
             {signatures.map((signature) => (
@@ -223,6 +271,7 @@ function SignaturesContent(): ReactElement {
                 key={signature.id}
                 signature={signature}
                 signaturesKey={signaturesKey}
+                onNotice={setNotice}
               />
             ))}
           </ul>
@@ -235,10 +284,13 @@ function SignaturesContent(): ReactElement {
 function SignatureRow({
   signature,
   signaturesKey,
+  onNotice,
 }: {
   readonly signature: Signature;
   readonly signaturesKey: readonly unknown[];
+  readonly onNotice: (message: string) => void;
 }): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   const [htmlContent, setHtmlContent] = useState(signature.htmlContent);
@@ -246,16 +298,21 @@ function SignatureRow({
   const [isEnabled, setIsEnabled] = useState(signature.isEnabled);
   const [error, setError] = useState<ApiError | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [editingVersion, setEditingVersion] = useState(signature.updatedAt);
   const updateMutation = useMutation({
     mutationFn: () =>
       updateAdminSignature(
         apiClient,
         signature.id,
         { htmlContent, textContent, isEnabled },
-        signature.updatedAt,
+        editingVersion,
       ),
     onMutate: () => setError(null),
     onSuccess: async (updated) => {
+      setEditing(false);
+      onNotice(t('Saved the signature for {value0}.', { value0: signature.domainName }));
       setHtmlContent(updated.htmlContent);
       setTextContent(updated.textContent);
       setIsEnabled(updated.isEnabled);
@@ -274,12 +331,14 @@ function SignatureRow({
         (current ?? []).filter((item) => item.id !== signature.id),
       );
       setDeleteOpen(false);
+      onNotice(t('Deleted the signature for {value0}.', { value0: signature.domainName }));
     },
     onError: (mutationError) => setError(normalizeApiError(mutationError)),
   });
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
+    if (uploading) return;
     if (!updateSignatureRequestSchema.safeParse({ htmlContent, textContent, isEnabled }).success) {
       setError(new ApiError('VALIDATION_ERROR', 'Enter text or HTML content.', 400));
       return;
@@ -293,49 +352,100 @@ function SignatureRow({
       data-testid="admin-signature-row"
       data-signature-id={signature.id}
     >
-      <form onSubmit={submit} className="admin-form" noValidate>
-        <h3>{signature.domainName}</h3>
-        <SignatureFields
-          htmlContent={htmlContent}
-          textContent={textContent}
-          isEnabled={isEnabled}
-          onHtmlChange={setHtmlContent}
-          onTextChange={setTextContent}
-          onEnabledChange={setIsEnabled}
-          prefix={signature.id}
-        />
-        {error !== null ? (
-          <div className="admin-error-banner" role="alert">
-            {error.message} ({error.code})
-          </div>
-        ) : null}
-        <div className="admin-domain-actions">
-          <Button type="submit" disabled={updateMutation.isPending || deleteMutation.isPending}>
-            {updateMutation.isPending ? 'Saving…' : 'Save signature'}
+      <div className="resource-row-header">
+        <div>
+          <strong>{signature.domainName}</strong>
+          <Badge variant={signature.isEnabled ? 'secondary' : 'outline'}>
+            {signature.isEnabled ? t('Enabled') : t('Disabled')}
+          </Badge>
+        </div>
+        <div className="resource-row-actions">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setHtmlContent(signature.htmlContent);
+              setTextContent(signature.textContent);
+              setIsEnabled(signature.isEnabled);
+              setEditingVersion(signature.updatedAt);
+              setError(null);
+              setEditing(true);
+            }}
+            aria-label={t('Edit {value0} signature', { value0: signature.domainName })}
+          >
+            {t('Edit')}
           </Button>
           <Button
             type="button"
-            variant="danger"
-            disabled={updateMutation.isPending || deleteMutation.isPending}
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={updateMutation.isPending || deleteMutation.isPending || uploading}
             onClick={() => setDeleteOpen(true)}
           >
-            Delete
+            {t('Delete')}
           </Button>
         </div>
-      </form>
+      </div>
+      <p className="signature-text-preview">{signature.textContent || 'HTML signature'}</p>
+      <EditorDialog
+        open={editing}
+        onOpenChange={(open) => {
+          if (updateMutation.isPending || uploading) return;
+          if (!open) {
+            setHtmlContent(signature.htmlContent);
+            setTextContent(signature.textContent);
+            setIsEnabled(signature.isEnabled);
+            setError(null);
+          }
+          setEditing(open);
+        }}
+        title={t('Edit {value0} signature', { value0: signature.domainName })}
+        description={t('Update the signature content and enabled status.')}
+      >
+        <form onSubmit={submit} className="admin-form" noValidate>
+          <SignatureFields
+            htmlContent={htmlContent}
+            textContent={textContent}
+            isEnabled={isEnabled}
+            onHtmlChange={setHtmlContent}
+            onTextChange={setTextContent}
+            onEnabledChange={setIsEnabled}
+            prefix={signature.id}
+            domainId={signature.domainId}
+            onBusyChange={setUploading}
+            disabled={updateMutation.isPending || uploading}
+          />
+          {error !== null ? (
+            <div className="admin-error-banner" role="alert">
+              {error.message} ({error.code})
+            </div>
+          ) : null}
+          <div className="admin-domain-actions">
+            <Button
+              type="submit"
+              loading={updateMutation.isPending}
+              disabled={updateMutation.isPending || deleteMutation.isPending || uploading}
+            >
+              {updateMutation.isPending ? t('Saving…') : t('Save signature')}
+            </Button>
+          </div>
+        </form>
+      </EditorDialog>
       <AlertDialog
         open={deleteOpen}
-        name={`Delete ${signature.domainName} signature`}
-        title="Delete this signature?"
-        confirmLabel={deleteMutation.isPending ? 'Deleting…' : 'Delete signature'}
+        name={t('Delete {value0} signature', { value0: signature.domainName })}
+        title={t('Delete this signature?')}
+        confirmLabel={deleteMutation.isPending ? t('Deleting…') : t('Delete signature')}
         confirmDisabled={deleteMutation.isPending}
+        confirmBusy={deleteMutation.isPending}
         error={error === null ? undefined : `${error.message} (${error.code})`}
         onCancel={() => {
           if (!deleteMutation.isPending) setDeleteOpen(false);
         }}
         onConfirm={() => deleteMutation.mutate()}
       >
-        <p>Future messages for this domain will not use a domain signature.</p>
+        <p>{t('Future messages for this domain will not use a domain signature.')}</p>
       </AlertDialog>
     </li>
   );
@@ -349,6 +459,9 @@ function SignatureFields({
   onTextChange,
   onEnabledChange,
   prefix,
+  domainId,
+  onBusyChange,
+  disabled,
 }: {
   readonly htmlContent: string;
   readonly textContent: string;
@@ -357,32 +470,50 @@ function SignatureFields({
   readonly onTextChange: (value: string) => void;
   readonly onEnabledChange: (value: boolean) => void;
   readonly prefix: string;
+  readonly domainId: string;
+  readonly onBusyChange: (busy: boolean) => void;
+  readonly disabled: boolean;
 }): ReactElement {
+  const t = useT();
   return (
-    <>
-      <label htmlFor={`signature-html-${prefix}`}>HTML content</label>
-      <textarea
+    <div className="signature-fields">
+      <RichTextEditor
+        key={domainId}
         id={`signature-html-${prefix}`}
-        value={htmlContent}
-        onChange={(event) => onHtmlChange(event.target.value)}
-        rows={4}
+        label={t('Signature')}
+        value={htmlContent || textToHtml(textContent)}
+        onChange={(html, text) => {
+          onHtmlChange(html);
+          onTextChange(text);
+        }}
+        scope={{ domainId }}
+        onBusyChange={onBusyChange}
+        disabled={disabled}
       />
-      <label htmlFor={`signature-text-${prefix}`}>Plain-text content</label>
-      <textarea
-        id={`signature-text-${prefix}`}
-        value={textContent}
-        onChange={(event) => onTextChange(event.target.value)}
-        rows={4}
-      />
-      <label>
-        <input
-          type="checkbox"
+      <details>
+        <summary className="cursor-pointer text-sm text-muted-foreground">
+          {t('Plain-text alternative')}
+        </summary>
+        <div className="wizard-field mt-2">
+          <Label htmlFor={`signature-text-${prefix}`}>{t('Plain-text content')}</Label>
+          <Textarea
+            id={`signature-text-${prefix}`}
+            value={textContent}
+            disabled={disabled}
+            onChange={(event) => onTextChange(event.target.value)}
+            rows={3}
+          />
+        </div>
+      </details>
+      <div className="configuration-toggle">
+        <Label htmlFor={`signature-enabled-${prefix}`}>{t('Enabled')}</Label>
+        <Switch
+          id={`signature-enabled-${prefix}`}
           checked={isEnabled}
-          onChange={(event) => onEnabledChange(event.target.checked)}
-        />{' '}
-        Enabled
-      </label>
-    </>
+          onCheckedChange={onEnabledChange}
+        />
+      </div>
+    </div>
   );
 }
 

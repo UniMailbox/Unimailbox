@@ -58,7 +58,7 @@ function mountPage(handler: (url: string, init?: RequestInit) => Response): {
       method: init?.method ?? 'GET',
       ...(typeof init?.body === 'string' ? { body: init.body } : {}),
     });
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       return jsonResponse({
         data: {
           user: { id: SESSION.userId, email: SESSION.email, name: SESSION.displayName },
@@ -112,6 +112,7 @@ describe('SignaturesPage (CAP-068)', () => {
                 id: created.domainId,
                 name: created.domainName,
                 status: 'active',
+                outboundConnectionId: null,
                 createdAt: created.createdAt,
                 updatedAt: created.updatedAt,
               },
@@ -122,9 +123,11 @@ describe('SignaturesPage (CAP-068)', () => {
       return jsonResponse({ data: created }, 201);
     });
     await waitFor(() => expect(screen.getByTestId('admin-signature-row')).toBeInTheDocument());
-    expect(screen.getByTestId('signature-safety-note')).toHaveTextContent('not previewed');
+    expect(screen.getByTestId('signature-safety-note')).toHaveTextContent('added automatically');
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText('Managed domain'), created.domainId as string);
+    await user.click(screen.getByRole('button', { name: 'New signature' }));
+    await user.click(screen.getByRole('combobox', { name: 'Managed domain' }));
+    await user.click(screen.getByRole('option', { name: String(created.domainName) }));
     await user.type(
       screen.getByLabelText('Plain-text content', { selector: '#signature-text-create' }),
       'New regards',
@@ -141,6 +144,51 @@ describe('SignaturesPage (CAP-068)', () => {
       textContent: 'New regards',
       isEnabled: true,
     });
+  });
+
+  it('saves an edited signature and returns to the compact list', async () => {
+    const { calls } = mountPage((url, init) => {
+      if (url.endsWith('/admin/domains')) return jsonResponse({ data: { items: [] } });
+      if ((init?.method ?? 'GET') === 'GET')
+        return jsonResponse({ data: { items: [signature()] } });
+      return jsonResponse({ data: signature({ textContent: 'Updated signature' }) });
+    });
+    expect(await screen.findByTestId('admin-signature-row')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Plain-text content')).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Edit .* signature/ }));
+    const input = screen.getByLabelText('Plain-text content');
+    await user.clear(input);
+    await user.type(input, 'Updated signature');
+    await user.click(screen.getByRole('button', { name: 'Save signature' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByText('Updated signature')).toBeInTheDocument();
+    expect(screen.getByTestId('signature-success')).toHaveTextContent('Saved the signature for');
+    expect(JSON.parse(calls.find((call) => call.method === 'PATCH')?.body ?? '')).toMatchObject({
+      textContent: 'Updated signature',
+    });
+  });
+
+  it('keeps the opening version when another writer refreshes the cached signature', async () => {
+    let submittedVersion: string | null = null;
+    const { queryClient } = mountPage((url, init) => {
+      if (url.endsWith('/admin/domains')) return jsonResponse({ data: { items: [] } });
+      if ((init?.method ?? 'GET') === 'GET')
+        return jsonResponse({ data: { items: [signature()] } });
+      submittedVersion = new Headers(init?.headers).get('If-Match');
+      return errorResponse('STALE_IF_MATCH', 'Signature changed elsewhere.', 409);
+    });
+    expect(await screen.findByTestId('admin-signature-row')).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Edit .* signature/ }));
+    await user.type(screen.getByLabelText('Plain-text content'), ' draft');
+    queryClient.setQueryData(adminQueryKeys.signatures(SESSION.userId), [
+      signature({ textContent: 'Other writer', updatedAt: '2026-09-01 00:01:00' }),
+    ]);
+    await user.click(screen.getByRole('button', { name: 'Save signature' }));
+    expect(await screen.findByText(/The data has changed/)).toBeInTheDocument();
+    expect(submittedVersion).toBe('2026-09-01 00:00:00');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('renders a server permission denial without stale cached data', async () => {

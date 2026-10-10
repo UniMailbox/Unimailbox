@@ -247,6 +247,58 @@ describe('reclaimStaleJobs (AC6 — R-OUTBOUND-007/008/009)', () => {
   });
 
   describe('orphan sweep (CAP-028 F1 — lost-enqueue recovery)', () => {
+    it('reserves a bounded retry window, including failed enqueue and concurrent ticks', async () => {
+      const jobId = await seedJob({ status: 'queued', updatedAt: at(-600_000) });
+      const outbound = recordingEnqueuer();
+      await Promise.all([
+        reclaimStaleJobs(env.DB, NOW, outbound),
+        reclaimStaleJobs(env.DB, NOW, outbound),
+      ]);
+      expect(outbound.bodies).toEqual([JSON.stringify({ jobId })]);
+      await reclaimStaleJobs(env.DB, new Date(NOW.getTime() + 240_000), outbound);
+      expect(outbound.bodies).toHaveLength(1);
+      await expect(
+        reclaimStaleJobs(env.DB, new Date(NOW.getTime() + 360_000), {
+          async send() {
+            throw new Error('unavailable');
+          },
+        }),
+      ).resolves.toBeDefined();
+      await reclaimStaleJobs(env.DB, new Date(NOW.getTime() + 360_000), outbound);
+      expect(outbound.bodies).toHaveLength(1);
+      await reclaimStaleJobs(env.DB, new Date(NOW.getTime() + 720_000), outbound);
+      expect(outbound.bodies).toHaveLength(2);
+      expect((await fetchJob(jobId))?.attempts).toBe(0);
+    });
+
+    it('bounds each sending-reclaim and queued-orphan batch to 100 jobs', async () => {
+      const reference = await seedJob({ status: 'sent' });
+      const row = await env.DB.prepare(
+        'SELECT message_id,provider_connection_id FROM outbound_jobs WHERE id=?',
+      )
+        .bind(reference)
+        .first<{ message_id: string; provider_connection_id: string }>();
+      if (!row) throw new Error('Missing seeded outbound job');
+      for (const status of ['sending', 'queued']) {
+        await env.DB.prepare(
+          `WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v+1 FROM n WHERE v<101)
+          INSERT INTO outbound_jobs (id,message_id,provider_connection_id,status,attempts,max_attempts,locked_at,locked_by,created_at,updated_at)
+          SELECT ?||v,?,?,?,0,3,?,'crashed','2025-01-01 11:00:00','2025-01-01 11:00:00' FROM n`,
+        )
+          .bind(status, row.message_id, row.provider_connection_id, status, EXPIRED_LEASE)
+          .run();
+      }
+      const outbound = recordingEnqueuer();
+      const result = await reclaimStaleJobs(env.DB, NOW, outbound);
+      expect(result.reclaimed).toBe(100);
+      expect(outbound.bodies).toHaveLength(200);
+      expect(
+        await env.DB.prepare(
+          "SELECT count(*) AS count FROM outbound_jobs WHERE status='sending'",
+        ).first('count'),
+      ).toBe(1);
+    });
+
     it('re-enqueues a queued row whose updated_at is older than the sweep threshold', async () => {
       // 11:54 — one minute past the 5-minute sweep cutoff (11:55).
       const jobId = await seedJob({
@@ -263,7 +315,7 @@ describe('reclaimStaleJobs (AC6 — R-OUTBOUND-007/008/009)', () => {
       expect(result.reclaimed).toBe(0);
       expect(result.terminal).toBe(0);
       expect(outbound.bodies).toEqual([JSON.stringify({ jobId })]);
-      // The sweep only re-drives; it does not touch the row itself.
+      // The sweep reserves a retry window without consuming a send attempt.
       const job = await fetchJob(jobId);
       expect(job?.status).toBe('queued');
       expect(job?.attempts).toBe(0);
@@ -338,6 +390,6 @@ describe('reclaimStaleJobs (AC6 — R-OUTBOUND-007/008/009)', () => {
     const line = JSON.parse(String(reenqueueWarnings[0]?.[0])) as Record<string, unknown>;
     // R-LOG-001: the warn must not carry the job ID.
     expect(line.jobId).toBeUndefined();
-    expect(String(line.error)).toBe('queue unavailable');
+    expect(String(line.error)).toBe('QUEUE_ENQUEUE_FAILED');
   });
 });

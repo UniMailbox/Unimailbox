@@ -40,6 +40,14 @@ export function requirePermission(key: PermissionKey): MiddlewareHandler<AppEnv>
       });
     }
 
+    if (c.get('mustChangePassword') === true) {
+      throw new DomainError({
+        code: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'Password change required',
+        httpStatus: 403,
+      });
+    }
+
     const hasPermission = await checkPermission(c.env.DB, userId, key);
     if (!hasPermission) {
       throw new DomainError({

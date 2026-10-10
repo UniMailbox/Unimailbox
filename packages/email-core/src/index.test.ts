@@ -3,9 +3,51 @@
  * Unit tests for RFC 5322 parsing functions (pure, deterministic).
  */
 import { describe, expect, it } from 'vitest';
-import { parseEmail, normalizeAddress } from './index';
+import { parseEmail, parseInboundMime, normalizeAddress } from './index';
 
 describe('email-core', () => {
+  it('decodes nested MIME bodies and binary attachments from original bytes', async () => {
+    const raw = [
+      'From: Sender <sender@example.com>',
+      'To: inbox@example.com',
+      'Subject: Nested MIME',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="outer"',
+      '',
+      '--outer',
+      'Content-Type: multipart/alternative; boundary="inner"',
+      '',
+      '--inner',
+      'Content-Type: text/plain; charset="UTF-8"',
+      'Content-Transfer-Encoding: quoted-printable',
+      '',
+      'Hello=20world',
+      '--inner',
+      'Content-Type: text/html; charset="UTF-8"',
+      '',
+      '<p>Hello world</p>',
+      '--inner--',
+      '--outer',
+      'Content-Type: application/octet-stream; name="report.bin"',
+      'Content-Disposition: attachment; filename="report.bin"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      'AAEC/w==',
+      '--outer--',
+      '',
+    ].join('\r\n');
+    const result = await parseInboundMime(new TextEncoder().encode(raw));
+    expect(result.parsed.from).toEqual({ address: 'sender@example.com', name: 'Sender' });
+    expect(result.parsed.textBody).toContain('Hello world');
+    expect(result.parsed.htmlBody).toContain('<p>Hello world</p>');
+    expect(result.attachments).toHaveLength(1);
+    expect(result.attachments[0]).toMatchObject({
+      filename: 'report.bin',
+      contentType: 'application/octet-stream',
+      disposition: 'attachment',
+    });
+    expect(result.attachments[0]?.content).toEqual(new Uint8Array([0, 1, 2, 255]));
+  });
   describe('normalizeAddress', () => {
     it('lowercases and trims the input', () => {
       expect(normalizeAddress('  User@Example.COM ')).toBe('user@example.com');

@@ -50,11 +50,12 @@ const SESSION = {
 
 const PROBE_URL = '/api/v1/admin/audit-events?limit=1';
 
-function authSessionResolver(): Response {
+function authSessionResolver(canAccessAdmin?: boolean): Response {
   return jsonResponse({
     data: {
       user: { id: SESSION.userId, email: SESSION.email, name: SESSION.displayName },
       session: { userId: SESSION.userId, expiresAt: SESSION.expiresAt },
+      ...(typeof canAccessAdmin === 'boolean' && { canAccessAdmin }),
     },
   });
 }
@@ -78,9 +79,10 @@ function mountAppNav(options: MountOptions): {
   const { fetchImpl: sequentialFetch, calls } = spyFetch([options.probeResponse]);
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       calls.push({ url, method: 'GET' });
-      return authSessionResolver();
+      const hint = (options.session as { canAccessAdmin?: unknown } | null)?.canAccessAdmin;
+      return authSessionResolver(typeof hint === 'boolean' ? hint : undefined);
     }
     return sequentialFetch(input, init);
   };
@@ -160,6 +162,24 @@ function probeCount(calls: ReadonlyArray<{ url: string; method: string }>): numb
 }
 
 describe('AppNav (CAP-044 Slice 3 / D-CAP-044-K)', () => {
+  it('uses the current session admin hint without an audit probe', async () => {
+    const { fetchCalls } = mountAppNav({
+      probeResponse: () => errorResponse('PERMISSION_DENIED', 'Forbidden', 403),
+      session: { ...SESSION, canAccessAdmin: true },
+    });
+    await waitFor(() => expect(screen.getByTestId('app-nav-admin-link')).toBeInTheDocument());
+    expect(probeCount(fetchCalls)).toBe(0);
+  });
+
+  it('hides the admin link for an explicit member hint without probing', async () => {
+    const { fetchCalls } = mountAppNav({
+      probeResponse: () => jsonResponse({ data: { items: [], nextCursor: null } }),
+      session: { ...SESSION, canAccessAdmin: false },
+    });
+    await waitFor(() => expect(screen.queryByTestId('app-nav')).not.toBeInTheDocument());
+    expect(probeCount(fetchCalls)).toBe(0);
+  });
+
   it('renders the Admin link when the probe succeeds', async () => {
     const { fetchCalls } = mountAppNav({
       probeResponse: () => jsonResponse({ data: { items: [], nextCursor: null } }),

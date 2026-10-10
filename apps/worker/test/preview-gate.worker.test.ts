@@ -605,6 +605,9 @@ Preview body`;
         )
         .bind(connectionId, credentialId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
       db
+        .prepare(`UPDATE managed_domains SET outbound_connection_id = ? WHERE id = ?`)
+        .bind(connectionId, domainId),
+      db
         .prepare(
           `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, created_at, updated_at)
              VALUES (?, ?, ?, 'queued', 0, 3, ?, ?)`,
@@ -1498,6 +1501,9 @@ describe('CAP-046 route-level audit correlation', () => {
            VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
         )
         .bind(connectionId, credentialId, FIXED_TIMESTAMP, FIXED_TIMESTAMP),
+      db
+        .prepare('UPDATE managed_domains SET outbound_connection_id = ? WHERE id = ?')
+        .bind(connectionId, domainRouteId),
     ]);
 
     // Drive POST /api/v1/mailboxes/:mailboxId/messages/send.

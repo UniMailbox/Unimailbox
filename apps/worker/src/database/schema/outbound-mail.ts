@@ -6,6 +6,7 @@
 // per-row version field for key rotation.
 import { sqliteTable, text, integer, blob, uniqueIndex, index } from 'drizzle-orm/sqlite-core';
 import { messages } from './messages';
+import { mailboxes } from './tenancy';
 
 export const encryptedCredentials = sqliteTable(
   'encrypted_credentials',
@@ -51,17 +52,12 @@ export type ProviderConnection = typeof providerConnections.$inferSelect;
 export type NewProviderConnection = typeof providerConnections.$inferInsert;
 
 // webhook_deliveries — CAP-024
-// One row per received provider event. Written after signature verification
-// succeeds; raw_payload is the exact bytes Brevo sent so we can replay or
-// audit. Owner: outbound-mail module.
+// One row per received provider event. Written after signature verification;
+// raw_payload preserves the decoded JSON for audit. Owner: outbound-mail.
 //
-// CAP-040: a STORED generated column `provider_message_id` mirrors the
-// Brevo messageId parsed from raw_payload. It is the index key for the
-// early-event reconciliation lookup (`webhook_deliveries_provider_message_id_idx`)
-// — when the webhook processor's job-lookup misses (the queue consumer has
-// not yet written `provider_message_id` to `outbound_jobs`), the delivery
-// row is persisted with `message_id = NULL` and reconciled back later.
-// D1 reads the column automatically; the declaration is typing only.
+// The old STORED provider_message_id column parses Brevo's JSON shape and is
+// retained for schema compatibility. Migration 0027 adds adapter-verified
+// provider ID and message status columns for provider-neutral replay.
 export const webhookDeliveries = sqliteTable(
   'webhook_deliveries',
   {
@@ -73,6 +69,8 @@ export const webhookDeliveries = sqliteTable(
     rawPayload: text('raw_payload').notNull(),
     messageId: text('message_id').references(() => messages.id, { onDelete: 'set null' }),
     providerMessageId: text('provider_message_id'),
+    verifiedProviderMessageId: text('verified_provider_message_id'),
+    messageStatus: text('message_status'),
     status: text('status').notNull().default('processed'),
     createdAt: text('created_at').notNull(),
   },
@@ -104,6 +102,9 @@ export const outboundJobs = sqliteTable(
     })
       .notNull()
       .default('queued'),
+    scheduledAt: text('scheduled_at'),
+    scheduleRevision: integer('schedule_revision').notNull().default(0),
+    mailboxId: text('mailbox_id').references(() => mailboxes.id),
     attempts: integer('attempts').notNull().default(0),
     maxAttempts: integer('max_attempts').notNull().default(3),
     lockedAt: text('locked_at'),

@@ -1,50 +1,30 @@
-// platform/env — the Cloudflare Worker `Env` type and the Hono `AppEnv` shape.
-// Owns the worker's environment shape so neither `platform/*` nor any
-// module needs to reach upward into the entrypoint layer for it.
-//
-// Per docs/rebuild/05-target-architecture/module-boundaries.md:41, this
-// type is consumed by `buildAppContext(env: Env, ...)` and is the only
-// thing the entrypoint hands the composition root.
-//
-// `ASSETS` is the binding the wrangler `assets` block produces (CAP-039);
-// the platform's `not_found_handling: "single-page-application"` returns
-// `index.html` for any non-API GET, so the Worker-side `http/router.ts`
-// only mounts a catch-all for `/` itself.
-//
-// CAP-042 (AC 11):
-//   - `BETTER_AUTH_SECRET` is a Secrets Store binding in production and a
-//     plain string in the worker-pool test (the test config provides it as
-//     a var). `readSecret()` from `platform/secrets.ts` handles both forms,
-//     so the Worker code does not need a type-narrowing branch.
-//   - `BETTER_AUTH_URL` and `AUTH_PROVIDER` are non-secret vars typed as
-//     strings here; their closed-enum/origin validation lives in
-//     `platform/config.ts:parseAuthProvider` and
-//     `platform/config.ts:parseBetterAuthUrl`. The union literal type for
-//     `AUTH_PROVIDER` is duplicated as a string at the runtime layer so a
-//     bad var still fails closed in `parseAuthProvider` before any module
-//     reads it.
-//
-// CAP-042 (AC 12): the `Variables.config` slot is set by the config
-// middleware before any Better-Auth-aware route runs. It carries the
-// strict-parsed `PlatformConfig` so the factory and the route read the
-// same canonical values without re-parsing env. The type lives in
-// `platform/config.ts`; we use a forward reference to avoid a runtime
-// cycle (env ↔ config import each other at the type level only).
-
+// Runtime resource types come from Wrangler; application and migration-only extensions live here.
 export type AuthProviderName = 'legacy' | 'dual' | 'better-auth';
 
 import type { PlatformConfig } from './config';
 
-export type Env = {
-  DB: D1Database;
-  ATTACHMENTS: R2Bucket;
-  SETUP_SESSION: KVNamespace;
-  CACHE: KVNamespace;
-  OUTBOUND: Queue;
-  ASSETS: Fetcher;
+// Resource bindings are generated from the deployable staging configuration.
+// Test/local secret values and migration compatibility vars remain explicit.
+export type Env = Omit<
+  RuntimeBindings,
+  | 'INSTALLATION_TOKEN'
+  | 'CREDENTIAL_ENCRYPTION_KEY'
+  | 'CURSOR_SIGNING_KEY'
+  | 'ENVIRONMENT'
+  | 'RELEASE_SHA'
+  | 'RELEASE_TREE'
+  | 'APP_ORIGIN'
+  | 'VERSION'
+> & {
   INSTALLATION_TOKEN: SecretsStoreSecret;
   CREDENTIAL_ENCRYPTION_KEY: SecretsStoreSecret;
-  BETTER_AUTH_SECRET: SecretsStoreSecret | string;
+  VERSION?: WorkerVersionMetadata;
+  RELEASE_SHA?: string;
+  RELEASE_TREE?: string;
+  APP_ORIGIN?: string;
+  /** Migration-only Better Auth compatibility binding; never required by the
+   * deployed self-managed authentication path. */
+  BETTER_AUTH_SECRET?: SecretsStoreSecret | string;
   // CAP-043 Slice 1 / D-CAP-043-D: CURSOR_SIGNING_KEY is the third
   // independent Secrets Store binding. It is read via readSecret() the
   // same way BETTER_AUTH_SECRET is (plain string in tests, SecretsStoreSecret
@@ -72,6 +52,8 @@ export type AppEnv = {
      *  http/middleware/request-id.ts before any other middleware. */
     requestId?: string;
     userId?: string;
+    sessionId?: string;
+    mustChangePassword?: boolean;
     /** Idempotency-Key header (CAP-027 / ADR-004). Set by
      *  http/middleware/idempotency.ts after format validation. */
     idempotencyKey?: string;

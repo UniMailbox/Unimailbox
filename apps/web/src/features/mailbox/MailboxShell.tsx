@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — MailboxShell.
 //
 // CAP-042 (Batch 5) AC 20. The authorized mailbox shell. Reached only
@@ -27,6 +28,7 @@ import { Card } from '../../components/ui/Card';
 import { MailboxLoading } from './MailboxLoading';
 
 export function MailboxShell(): ReactElement {
+  const t = useT();
   const sessionQuery = authSessionQuery();
   if (sessionQuery.data === undefined) {
     // Cache is empty (rare: a fresh navigation with a never-loaded
@@ -49,19 +51,25 @@ export function MailboxShell(): ReactElement {
   return (
     <main className="mailbox-shell" data-testid="mailbox-shell">
       <header className="mailbox-header">
-        <h1 className="mailbox-title">Mailbox</h1>
+        <h1 className="mailbox-title">{t('Mailbox')}</h1>
         <div className="mailbox-header-meta">
           <span data-testid="mailbox-user-email">{descriptor.email}</span>
           <LogoutButton />
         </div>
       </header>
-      <Card title="Authorized" description="You are signed in. The full inbox lands with CAP-043.">
+      <Card
+        title={t('Authorized')}
+        description={t('You are signed in. The full inbox lands with CAP-043.')}
+      >
         <p data-testid="mailbox-placeholder">
-          Authorized mailbox shell. Inbox, threads, and compose land with CAP-043 and CAP-044.
+          {t(
+            'Authorized mailbox shell. Inbox, threads, and compose land with CAP-043 and CAP-044.',
+          )}
         </p>
         {descriptor.displayName !== null ? (
           <p className="mailbox-subtitle" data-testid="mailbox-display-name">
-            Display name: {descriptor.displayName}
+            {t('Display name: ')}
+            {descriptor.displayName}
           </p>
         ) : null}
       </Card>

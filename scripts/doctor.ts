@@ -19,6 +19,9 @@
 // fixtures without mutating the repo's real config files.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, dirname, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { parseJsonc } from '#scripts/jsonc';
+export { parseJsonc } from '#scripts/jsonc';
 
 const REPO = resolve(new URL('..', import.meta.url).pathname);
 export type R = { name: string; ok: boolean; detail?: string };
@@ -28,103 +31,6 @@ function readJsonc(p: string): unknown {
   return parseJsonc(readFileSync(p, 'utf-8'));
 }
 
-export function parseJsonc(src: string): unknown {
-  const withoutComments = stripJsoncComments(src);
-  let normalized = '';
-  let i = 0;
-
-  while (i < withoutComments.length) {
-    const ch = withoutComments[i];
-    if (ch === '"') {
-      normalized += ch;
-      i++;
-      while (i < withoutComments.length) {
-        const c = withoutComments[i];
-        if (c === '\\' && i + 1 < withoutComments.length) {
-          normalized += c + withoutComments[i + 1];
-          i += 2;
-          continue;
-        }
-        normalized += c;
-        i++;
-        if (c === '"') break;
-      }
-      continue;
-    }
-
-    if (ch === ',') {
-      let next = i + 1;
-      while (next < withoutComments.length && /\s/.test(withoutComments.charAt(next))) next++;
-      const nextChar = withoutComments.charAt(next);
-      if (nextChar === '}' || nextChar === ']') {
-        i++;
-        continue;
-      }
-    }
-
-    normalized += ch;
-    i++;
-  }
-
-  return JSON.parse(normalized);
-}
-
-// CAP-039 D5: a proper character-based JSONC comment stripper. The
-// previous regex-based stripper matched `/*` and `*/` inside JSON
-// strings, which broke wrangler configs that legitimately contain
-// `"run_worker_first": ["/api/*"]` (block-comment opener inside a
-// string) and `"crons": ["*/2 * * * *"]` (block-comment closer inside
-// a string). The regex ate everything between them. This walker skips
-// comments only outside strings and correctly preserves escape
-// sequences in strings.
-function stripJsoncComments(src: string): string {
-  let out = '';
-  let i = 0;
-  while (i < src.length) {
-    const ch = src[i];
-    // String literal — copy verbatim, honouring escapes so the embedded
-    // `"` / `\` sequences survive intact.
-    if (ch === '"') {
-      out += ch;
-      i++;
-      while (i < src.length) {
-        const c = src[i];
-        if (c === '\\' && i + 1 < src.length) {
-          out += c + src[i + 1];
-          i += 2;
-          continue;
-        }
-        out += c;
-        if (c === '"') {
-          i++;
-          break;
-        }
-        i++;
-      }
-      continue;
-    }
-    // Line comment — skip until newline (preserve the newline).
-    if (ch === '/' && src[i + 1] === '/') {
-      while (i < src.length && src[i] !== '\n') i++;
-      continue;
-    }
-    // Block comment — replace with whitespace so two tokens cannot be
-    // silently merged (for example, `5/* gap */0` must not become `50`).
-    if (ch === '/' && src[i + 1] === '*') {
-      out += ' ';
-      i += 2;
-      while (i + 1 < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++;
-      if (i + 1 >= src.length) {
-        throw new SyntaxError('Unterminated block comment in JSONC');
-      }
-      i += 2;
-      continue;
-    }
-    out += ch;
-    i++;
-  }
-  return out;
-}
 function readJson<T>(p: string): T {
   return JSON.parse(readFileSync(p, 'utf-8')) as T;
 }
@@ -145,9 +51,8 @@ function walk(d: string): string[] {
 // bindings the deployed Worker reads — a class of bug the unit suite
 // alone will not catch.
 //
-// CAP-042 (AC 11): BETTER_AUTH_SECRET, BETTER_AUTH_URL, AUTH_PROVIDER
-// are required on every surface. The pre-existing INSTALLATION_TOKEN
-// and CREDENTIAL_ENCRYPTION_KEY bindings stay (they predate CAP-042).
+// Application-owned authentication has no Better Auth or Cloudflare Access
+// binding. The pre-existing installation and credential secrets stay.
 const BINDS = [
   'DB',
   'ATTACHMENTS',
@@ -157,10 +62,7 @@ const BINDS = [
   'ASSETS',
   'INSTALLATION_TOKEN',
   'CREDENTIAL_ENCRYPTION_KEY',
-  'BETTER_AUTH_SECRET',
   'ENVIRONMENT',
-  'BETTER_AUTH_URL',
-  'AUTH_PROVIDER',
 ];
 
 function extractBindingNames(cfg: Record<string, unknown>): Set<string> {
@@ -220,9 +122,8 @@ async function checkWranglerBindings(): Promise<R> {
   const prod = readJsonc(join(REPO, 'apps/worker/wrangler.jsonc')) as Record<string, unknown>;
   const test = readJsonc(join(REPO, 'apps/worker/wrangler.test.jsonc')) as Record<string, unknown>;
   const envBody =
-    readFileSync(join(REPO, 'apps/worker/src/platform/env.ts'), 'utf-8').match(
-      /type\s+Env\s*=\s*\{([\s\S]*?)\}/,
-    )?.[1] ?? '';
+    readFileSync(join(REPO, 'apps/worker/src/platform/env.ts'), 'utf8') +
+    readFileSync(join(REPO, 'apps/worker/src/platform/worker-bindings.d.ts'), 'utf8');
   const envKeys = new Set<string>();
   for (const m of envBody.matchAll(/(\w+)\s*[?:]/g)) envKeys.add(m[1] ?? '');
   return evaluateWranglerBindings(prod, test, envKeys);
@@ -361,10 +262,18 @@ const ALLOWED: Record<string, ReadonlySet<string>> = {
   tenancy: new Set(['platform', 'contracts', 'identity']),
   messages: new Set(['platform', 'contracts', 'tenancy']),
   'inbound-mail': new Set(['platform', 'contracts', 'tenancy', 'messages', 'email-core']),
-  'outbound-mail': new Set(['platform', 'contracts', 'tenancy', 'messages', 'email-core']),
+  'outbound-mail': new Set([
+    'platform',
+    'contracts',
+    'tenancy',
+    'messages',
+    'email-core',
+    'editor-assets',
+  ]),
   'provider-sync': new Set(['platform', 'contracts', 'messages']),
   attachments: new Set(['platform', 'contracts', 'messages', 'tenancy']),
-  signatures: new Set(['platform', 'contracts', 'tenancy']),
+  'editor-assets': new Set(['platform', 'contracts']),
+  signatures: new Set(['platform', 'contracts', 'tenancy', 'editor-assets']),
   admin: new Set(['platform', 'contracts', 'identity', 'tenancy', 'messages', 'outbound-mail']),
   installation: new Set(['platform', 'contracts', 'identity', 'tenancy', 'admin']),
   maintenance: new Set(['platform', 'contracts', 'messages', 'tenancy', 'attachments']),
@@ -517,9 +426,9 @@ async function checkTestsCoverContracts(): Promise<R> {
 
 // (a) web-assets-binding — `assets: { directory, binding }` block exists;
 // the directory resolves to apps/web/dist/ (relative or absolute), the
-// binding is the expected ASSETS string, and the not_found_handling is
-// the documented "single-page-application" so the platform performs the
-// SPA fallback.
+// binding is the expected ASSETS string, the not_found_handling is the
+// documented "single-page-application", and API/healthz requests are
+// explicitly worker-first so SPA fallback cannot swallow them.
 export function evaluateWebAssetsBinding(w: Record<string, unknown>, repoRoot: string = REPO): R {
   const assets = w['assets'];
   if (!assets || typeof assets !== 'object') {
@@ -529,7 +438,12 @@ export function evaluateWebAssetsBinding(w: Record<string, unknown>, repoRoot: s
       detail: 'apps/worker/wrangler.jsonc is missing the top-level `assets` block',
     };
   }
-  const a = assets as { directory?: string; binding?: string; not_found_handling?: string };
+  const a = assets as {
+    directory?: string;
+    binding?: string;
+    not_found_handling?: string;
+    run_worker_first?: unknown;
+  };
   if (a.binding !== 'ASSETS') {
     return {
       name: 'web-assets-binding',
@@ -555,11 +469,31 @@ export function evaluateWebAssetsBinding(w: Record<string, unknown>, repoRoot: s
       detail: `assets.directory resolves to ${resolvedDir}, expected ${expectedDir}`,
     };
   }
-  if (a.not_found_handling !== 'single-page-application') {
+  if (a.not_found_handling !== 'none') {
     return {
       name: 'web-assets-binding',
       ok: false,
-      detail: `assets.not_found_handling must be "single-page-application" (got ${JSON.stringify(a.not_found_handling)})`,
+      detail: `assets.not_found_handling must be "none" (got ${JSON.stringify(a.not_found_handling)})`,
+    };
+  }
+  if (!Array.isArray(a.run_worker_first)) {
+    return {
+      name: 'web-assets-binding',
+      ok: false,
+      detail: 'assets.run_worker_first must include /api/* and /healthz',
+    };
+  }
+  const workerFirst = new Set(
+    a.run_worker_first.filter((entry): entry is string => typeof entry === 'string'),
+  );
+  const missingWorkerFirst = ['/api', '/api/*', '/healthz', '/healthz/*', '/readyz'].filter(
+    (pattern) => !workerFirst.has(pattern),
+  );
+  if (missingWorkerFirst.length > 0) {
+    return {
+      name: 'web-assets-binding',
+      ok: false,
+      detail: `assets.run_worker_first is missing ${missingWorkerFirst.join(', ')}`,
     };
   }
   return { name: 'web-assets-binding', ok: true };
@@ -602,7 +536,10 @@ export function evaluateQueueConsumerTopology(
   const consSet = new Set(cons.consumers.map((c) => c.queue));
   const prodSet = new Set(prod.producers.map((p) => p.queue));
 
-  const missingConsumer = prod.producers.map((p) => p.queue).filter((p) => !consSet.has(p));
+  const deadLetters = new Set(cons.consumers.map((c) => c.dead_letter_queue).filter(Boolean));
+  const missingConsumer = prod.producers
+    .map((p) => p.queue)
+    .filter((p) => !consSet.has(p) && !deadLetters.has(p));
   const missingProducer = cons.consumers.map((c) => c.queue).filter((q) => !prodSet.has(q));
   const missingRetries = cons.consumers.filter((c) => typeof c.max_retries !== 'number');
   const bad: string[] = [];
@@ -817,4 +754,4 @@ async function main(): Promise<void> {
   console.log(`${passed}/${results.length} checks passed.`);
   if (passed < results.length) process.exit(1);
 }
-await main();
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) await main();

@@ -85,6 +85,7 @@ export {
   listMessageAttachmentsForSend,
   findMessageAttachmentForDownload,
   listExpiredAttachmentUploads,
+  completeAttachmentCleanup,
   prepareExpireAttachmentUpload,
   prepareRequireAttachmentExpiryTransition,
   findAttachmentUploadStatus,
@@ -107,3 +108,15 @@ export type {
   RecipientInfo,
   ListMessagesResult,
 } from './message-read-repository';
+
+export {
+  prepareCreateInboundAttachment,
+  findInboundAttachmentForDownload,
+} from './inbound-attachment-repository';
+export type { InboundAttachmentInput } from './inbound-attachment-repository';
+export { sweepOrphanedInboundObjects, INBOUND_OBJECT_GRACE_MS } from './sweep-inbound-objects';
+
+export {
+  prepareRestoreScheduledDraft,
+  prepareScheduledMessageSentFolder,
+} from './scheduled-message';

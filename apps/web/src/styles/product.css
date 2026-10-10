@@ -577,12 +577,6 @@ input[type='checkbox'] {
   justify-content: space-between;
   padding: 1.5rem 2rem;
 }
-.auth-main > footer {
-  text-align: center;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-  padding: 2rem;
-}
 .auth-form-content {
   flex: 1;
   display: flex;
@@ -1241,4 +1235,315 @@ input[type='checkbox'] {
 }
 .message-detail-html-body ol {
   list-style: decimal;
+}
+
+/* One persistent composer, independent of the folder underneath it. */
+.compose-window {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 40px #0003;
+  outline: none;
+}
+.compose-window-full {
+  inset: 0;
+  height: 100dvh;
+}
+.compose-window-docked {
+  right: 1rem;
+  bottom: 0;
+  width: min(36rem, calc(100% - 2rem));
+  height: min(42rem, 78dvh);
+  border-radius: 0.75rem 0.75rem 0 0;
+}
+.compose-window-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.compose-window-from {
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.compose-window-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 1rem;
+}
+.compose-window-body .mailbox-shell {
+  width: 100%;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0;
+}
+.compose-window-body [data-slot='card'] {
+  border: 0;
+  box-shadow: none;
+  padding-block: 0;
+}
+.compose-window-body [data-slot='card-header'] {
+  display: none;
+}
+.compose-window-body [data-slot='card-content'] {
+  padding: 0;
+}
+.compose-window-body .wizard-actions {
+  position: sticky;
+  bottom: -1rem;
+  background: var(--background);
+  padding-block: 0.75rem;
+}
+.compose-recipient-toggle {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.compose-recipient-toggle:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.email-editor-select {
+  height: 2rem;
+  max-width: 8rem;
+  border-radius: 0.25rem;
+  padding-inline: 0.3rem;
+  font-size: 0.75rem;
+  background: var(--background);
+  color: var(--foreground);
+}
+.email-editor-content h1,
+.message-detail-html-body h1 {
+  font-size: 2em;
+  font-weight: 700;
+}
+.email-editor-content h2,
+.message-detail-html-body h2 {
+  font-size: 1.5em;
+  font-weight: 700;
+}
+.email-editor-content h3,
+.message-detail-html-body h3 {
+  font-size: 1.17em;
+  font-weight: 700;
+}
+@media (max-width: 600px) {
+  .compose-window-docked {
+    right: 0.5rem;
+    width: calc(100% - 1rem);
+    height: min(36rem, 72dvh);
+  }
+  .compose-window-body {
+    padding: 0.75rem;
+  }
+}
+
+.compose-window-body {
+  display: flex;
+}
+.compose-window-body > .mailbox-shell,
+.compose-window-body [data-slot='card'],
+.compose-window-body [data-slot='card-content'],
+.compose-window-body form,
+.compose-window-body .email-editor-field,
+.compose-window-body .email-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.compose-window-body .email-editor-field {
+  min-height: 17rem;
+}
+.compose-window-body .email-editor-surface {
+  flex: 1;
+  display: flex;
+}
+.compose-window-body .email-editor-content {
+  flex: 1;
+  min-width: 0;
+}
+.compose-window-body .wizard-actions {
+  justify-content: flex-start;
+}
+
+/* Account quick settings: fixed right rail, independently scrollable on short screens. */
+.quick-settings {
+  z-index: 70;
+  width: min(25rem, 100%);
+  max-width: 100%;
+  gap: 0;
+}
+.quick-settings-heading {
+  padding: 1.25rem 3rem 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.quick-settings-heading [data-slot='sheet-title'] {
+  font-size: 1.125rem;
+}
+.quick-settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.25rem;
+}
+.quick-profile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 1.25rem;
+}
+.quick-settings-section {
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 1.25rem 0;
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.quick-settings-section h3,
+.quick-settings-section legend {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.quick-settings-section legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}
+.quick-settings-section select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+  padding: 0.6rem 0.75rem;
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+.settings-choices {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.settings-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.settings-choice:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--accent);
+}
+.settings-choice:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+.settings-choice input {
+  accent-color: var(--primary);
+}
+.quick-settings-footer {
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.quick-settings form {
+  display: grid;
+  gap: 0.75rem;
+}
+:root[data-density='compact'] .inbox-list-row {
+  padding: 0.5rem 0.75rem;
+}
+:root[data-density='compact'] .inbox-list-row-subject {
+  margin-bottom: 0.2rem;
+}
+.mail-workspace {
+  min-width: 0;
+}
+.mail-workspace-right,
+.mail-workspace-bottom {
+  display: grid;
+  height: calc(100svh - 7.5rem);
+  min-height: 22rem;
+  gap: 1rem;
+}
+.mail-workspace-right {
+  grid-template-columns: minmax(17rem, 1fr) minmax(0, 1.3fr);
+}
+.mail-workspace-bottom {
+  grid-template-rows: minmax(10rem, 42%) minmax(0, 1fr);
+}
+.mail-workspace-right > *,
+.mail-workspace-bottom > * {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.reading-detail {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--background);
+}
+.reading-detail .mailbox-header,
+.reading-detail .message-detail-back {
+  display: none;
+}
+.reading-detail .mailbox-shell {
+  padding: 1rem;
+}
+.reading-detail .card {
+  margin: 0;
+}
+.reading-placeholder {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  min-height: 8rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.reading-pane-toolbar {
+  position: sticky;
+  top: 0;
+  background: var(--background);
+  z-index: 1;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 1023px) {
+  .mail-workspace-right,
+  .mail-workspace-bottom {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+  .mail-workspace:not(.mail-workspace-selected) .reading-detail {
+    display: none;
+  }
+  .mail-workspace-selected:not(:has(> .reading-detail)) .reading-list {
+    display: block;
+  }
+  .mail-workspace-selected:has(> .reading-detail) .reading-list {
+    display: none;
+  }
 }

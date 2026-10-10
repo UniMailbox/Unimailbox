@@ -27,11 +27,15 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, rmSync, statSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseAppliedMigrationHistory } from '#scripts/deployment-migrations';
+import { parseMigrationVerificationOutput } from '#scripts/deployment-parsers';
+import { workspaceWranglerBinary } from '#scripts/deployment-runtime';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MIGRATIONS_DIR = resolve(REPO, 'migrations');
 const WORKER_DIR = resolve(REPO, 'apps/worker');
 const PERSIST_DIR = resolve(WORKER_DIR, '.wrangler/state');
+const WRANGLER = workspaceWranglerBinary(REPO);
 
 const MIGRATION_FILE = /^\d{4}_[A-Za-z0-9_-]+\.sql$/;
 const VERIFY_FILE = /^\d{4}_[A-Za-z0-9_-]+\.verify\.sql$/;
@@ -54,18 +58,16 @@ if (reset) {
   }
 }
 
-const wrangler = (subargs: string[]): { status: number | null; stdout: string } => {
-  // Merge stderr into stdout so a wrangler error message that lands on
-  // stderr cannot end up interleaved with the --json payload on stdout
-  // and confuse the parser. (F2 / code-review H7.)
-  const result = spawnSync('pnpm', ['exec', 'wrangler', ...subargs], {
+const wrangler = (subargs: string[]): { status: number | null; stdout: string; stderr: string } => {
+  // JSON stdout stays separate from diagnostics.
+  const result = spawnSync(process.execPath, ['--', WRANGLER, ...subargs], {
     cwd: WORKER_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, CI: '1' },
+    env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false', WRANGLER_HIDE_BANNER: 'true' },
   });
   const stdout = result.stdout?.toString('utf-8') ?? '';
   const stderr = result.stderr?.toString('utf-8') ?? '';
-  return { status: result.status, stdout: stdout + stderr };
+  return { status: result.status, stdout, stderr };
 };
 
 const all = readdirSync(MIGRATIONS_DIR);
@@ -92,11 +94,7 @@ const assertSafeMigrationName = (name: string): void => {
   }
 };
 
-// F8: read d1_migrations regardless of --verify / apply. On a fresh
-// DB the table doesn't exist yet — `wrangler d1 execute --command` on
-// a missing table returns success=false with an `error` field, which
-// our JSON shape check turns into an empty applied set. The ghost
-// check still runs so a missing-file scenario is caught in both modes.
+// Only an explicitly missing tracking table counts as a fresh local database.
 let applied: string[] = [];
 const beforeResult = wrangler([
   'd1',
@@ -109,9 +107,11 @@ const beforeResult = wrangler([
   'SELECT name FROM d1_migrations ORDER BY name',
   '--json',
 ]);
-const beforeApplied = parseWranglerJson(beforeResult, 'before-applied');
-if (beforeApplied.ok) {
-  applied = extractColumn(beforeApplied.data, 'name');
+try {
+  applied = parseAppliedMigrationHistory(beforeResult, 'Read local migration history');
+} catch (error) {
+  console.error(error instanceof Error ? error.message : 'Cannot read migration history.');
+  process.exit(1);
 }
 
 const onDisk = new Set(migrations);
@@ -185,19 +185,11 @@ for (const file of migrations) {
     failed++;
     continue;
   }
-  const parsed = parseWranglerJson(r, verify);
-  if (!parsed.ok) {
-    console.error(`Could not parse JSON output from ${verify}: ${parsed.error}`);
-    failed++;
-    continue;
-  }
-  const assertions = validateAssertionRows(parsed.data, verify);
+  const assertions = parseMigrationVerificationOutput(r.stdout, verify);
   if (!assertions.ok) {
     console.error(assertions.error);
     failed++;
-  } else {
-    console.log(`${verify}: ${assertions.rows.length} assertion(s) passed.`);
-  }
+  } else console.log(`${verify}: ${assertions.assertions.length} assertion(s) passed.`);
 }
 
 if (failed > 0) {
@@ -205,119 +197,3 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log(`\n${ran}/${migrations.length} verify script(s) passed.`);
-
-interface AssertionRow {
-  assertion: string;
-  pass: number;
-}
-
-// F2: wrangler --json shape is documented as an array of batches:
-//   [{ results: [...], success: true, meta: {...} }]
-// Anything else — single-object shape, streamed JSON, an error object
-// from wrangler — fails closed. The runner exits 1 with a non-empty
-// error message; the JSON.parse catch path no longer swallows.
-function parseWranglerJson(
-  r: { status: number | null; stdout: string },
-  source: string,
-): { ok: true; data: unknown } | { ok: false; error: string } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(r.stdout);
-  } catch (e) {
-    return {
-      ok: false,
-      error: `JSON.parse failed: ${(e as Error).message}; first 200 chars: ${r.stdout.slice(0, 200)}`,
-    };
-  }
-  if (!Array.isArray(parsed)) {
-    return {
-      ok: false,
-      error: `expected JSON array from wrangler, got ${typeof parsed}; first 200 chars: ${r.stdout.slice(0, 200)}`,
-    };
-  }
-  for (const batch of parsed) {
-    if (batch && typeof batch === 'object' && (batch as { success?: unknown }).success === false) {
-      const err = (batch as { error?: unknown }).error;
-      return {
-        ok: false,
-        error: `wrangler batch reported success=false: ${typeof err === 'string' ? err : JSON.stringify(err)}`,
-      };
-    }
-    if (!batch || typeof batch !== 'object' || !('results' in batch)) {
-      return {
-        ok: false,
-        error: `wrangler batch missing 'results' key (source=${source}); first 200 chars: ${r.stdout.slice(0, 200)}`,
-      };
-    }
-  }
-  return { ok: true, data: parsed };
-}
-
-function validateAssertionRows(
-  parsed: unknown,
-  source: string,
-): { ok: true; rows: AssertionRow[] } | { ok: false; error: string } {
-  const rows: AssertionRow[] = [];
-  if (!Array.isArray(parsed)) {
-    return { ok: false, error: `${source}: expected Wrangler batch array` };
-  }
-  for (const batch of parsed) {
-    if (batch && typeof batch === 'object' && 'results' in batch) {
-      const results = (batch as { results: unknown }).results;
-      if (!Array.isArray(results)) {
-        return { ok: false, error: `${source}: Wrangler batch results must be an array` };
-      }
-      for (const result of results) {
-        if (!result || typeof result !== 'object') continue;
-        const hasAssertion = 'assertion' in result;
-        const hasPass = 'pass' in result;
-        if (!hasAssertion && !hasPass) {
-          return {
-            ok: false,
-            error: `${source}: unexpected non-assertion row ${JSON.stringify(result)}`,
-          };
-        }
-        const row = result as { assertion?: unknown; pass?: unknown };
-        if (typeof row.assertion !== 'string' || typeof row.pass !== 'number') {
-          return {
-            ok: false,
-            error: `${source}: malformed assertion row ${JSON.stringify(result)}`,
-          };
-        }
-        rows.push({ assertion: row.assertion, pass: row.pass });
-      }
-    }
-  }
-  if (rows.length === 0) {
-    return { ok: false, error: `${source}: zero assertion rows returned` };
-  }
-  const failed = rows.filter((row) => row.pass !== 1);
-  if (failed.length > 0) {
-    return {
-      ok: false,
-      error: `${source}: failed assertion(s): ${failed
-        .map((row) => `${row.assertion} (pass=${row.pass})`)
-        .join(', ')}`,
-    };
-  }
-  return { ok: true, rows };
-}
-
-function extractColumn(parsed: unknown, col: string): string[] {
-  const out: string[] = [];
-  if (!Array.isArray(parsed)) return out;
-  for (const batch of parsed) {
-    if (batch && typeof batch === 'object' && 'results' in batch) {
-      const results = (batch as { results: unknown }).results;
-      if (Array.isArray(results)) {
-        for (const r of results) {
-          if (r && typeof r === 'object' && col in r) {
-            const v = (r as Record<string, unknown>)[col];
-            if (typeof v === 'string') out.push(v);
-          }
-        }
-      }
-    }
-  }
-  return out;
-}

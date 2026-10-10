@@ -1,3 +1,4 @@
+import { getLanguage, useLanguage } from '../../infrastructure/i18n/locale';
 import type { ReactElement, TimeHTMLAttributes } from 'react';
 
 /**
@@ -32,7 +33,7 @@ export function formatLocalDateTime(value: string): string {
   const parsed = parseUtcTimestamp(value);
   if (parsed === null) return value;
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getLanguage(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(parsed);
@@ -50,6 +51,7 @@ export interface LocalDateTimeProps
  * inspection without becoming the visible value or changing query semantics.
  */
 export function LocalDateTime({ value, title, ...props }: LocalDateTimeProps): ReactElement {
+  useLanguage();
   return (
     <time {...props} dateTime={toUtcIsoTimestamp(value)} title={title ?? `UTC ${value}`}>
       {formatLocalDateTime(value)}

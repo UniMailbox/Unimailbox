@@ -1,3 +1,5 @@
+import { useT } from '../../infrastructure/i18n/locale';
+import { AppearanceControls } from '../settings/AppearanceControls';
 // apps/web — setup layout.
 //
 // CAP-041 wires the wizard. The layout renders the step indicator (a chip
@@ -42,6 +44,7 @@ const STEPS: ReadonlyArray<InstallationStep> =
   installationStepSchema.options as ReadonlyArray<InstallationStep>;
 
 export function SetupLayout(): ReactElement {
+  const t = useT();
   const navigate = useNavigate();
   const [showConfirm, setShowConfirm] = useState(false);
   const hasSetupSession = useSetupSession((state) => state.sessionToken !== null);
@@ -69,12 +72,15 @@ export function SetupLayout(): ReactElement {
   return (
     <main className="wizard" data-testid="setup-layout">
       <header className="wizard-header">
-        <h1 className="wizard-title">Set up Unimailbox</h1>
+        <div className="float-right">
+          <AppearanceControls />
+        </div>
+        <h1 className="wizard-title">{t('Set up Unimailbox')}</h1>
         <p className="wizard-subtitle">
-          Walk through the deployment steps to bring the system online.
+          {t('Walk through the deployment steps to bring the system online.')}
         </p>
       </header>
-      <nav aria-label="Wizard progress">
+      <nav aria-label={t('Wizard progress')}>
         <ol className="wizard-steps">
           {STEPS.map((step, index) => {
             const stateAttr: 'complete' | 'current' | 'upcoming' =
@@ -106,8 +112,9 @@ export function SetupLayout(): ReactElement {
         <footer className="wizard-footer">
           {showConfirm ? (
             <p className="wizard-subtitle" role="alert" data-testid="restart-confirm">
-              Restarting will clear your in-memory session token. Click &ldquo;Clear setup
-              session&rdquo; again to confirm.
+              {t(
+                'Restarting will clear your in-memory session token. Click “Clear setup session” again to confirm.',
+              )}
             </p>
           ) : null}
           <Button
@@ -117,7 +124,7 @@ export function SetupLayout(): ReactElement {
             onClick={handleRestart}
             data-testid="restart-wizard"
           >
-            {showConfirm ? 'Confirm restart' : 'Clear setup session'}
+            {showConfirm ? t('Confirm restart') : t('Clear setup session')}
           </Button>
         </footer>
       ) : null}

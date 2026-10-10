@@ -30,9 +30,9 @@ import { prepareConditionalUpdateInstallationStep } from './installation-state-r
  * Cloudflare Env — modules must not import Env (architecture.md §Forbidden).
  * The route handler passes `c.env`, which is structurally compatible.
  *
- * CAP-042 (AC 11): BETTER_AUTH_SECRET is added so the preflight reports
- * eight binding/resource checks (was seven). readSecret() handles both the
- * SecretsStoreSecret (production) and plain string (test pool) forms.
+ * Application-owned authentication uses the D1 users/sessions tables. The
+ * old Better Auth secret is intentionally absent from preflight; it is not a
+ * deployed binding and must not block setup health checks.
  */
 export interface PreflightBindings {
   readonly DB: Database;
@@ -42,7 +42,6 @@ export interface PreflightBindings {
   readonly OUTBOUND: Queue;
   readonly INSTALLATION_TOKEN: SecretLike;
   readonly CREDENTIAL_ENCRYPTION_KEY: SecretLike;
-  readonly BETTER_AUTH_SECRET: SecretLike;
 }
 
 export interface PreflightResult {
@@ -105,12 +104,8 @@ export async function runPreflight(
   deps: { clock: Clock; ids: IdGenerator },
 ): Promise<PreflightResult> {
   // Check each binding's existence
-  // CAP-042 (AC 11): eight binding/resource checks now that
-  // BETTER_AUTH_SECRET is provisioned independently (ADR-008 §HTTP and
-  // browser session contract). The secret is read via readSecret so the
-  // diagnostic reports the same shape the runtime would see; a missing
-  // or unreadable secret fails this check the same way a missing
-  // KV namespace would.
+  // Application-owned authentication has no external identity secret to
+  // inspect; D1 users/sessions are the authority.
   const bindings: Record<string, boolean> = {
     DB: !!input.env.DB,
     ATTACHMENTS: !!input.env.ATTACHMENTS,
@@ -120,7 +115,6 @@ export async function runPreflight(
     // For secrets, check the value is accessible
     INSTALLATION_TOKEN: await checkSecret(input.env.INSTALLATION_TOKEN),
     CREDENTIAL_ENCRYPTION_KEY: await checkSecret(input.env.CREDENTIAL_ENCRYPTION_KEY),
-    BETTER_AUTH_SECRET: await checkSecret(input.env.BETTER_AUTH_SECRET),
   };
 
   // Read schema version from d1_migrations. If the table doesn't exist
@@ -172,14 +166,7 @@ export async function runPreflight(
            FROM installation_state
            WHERE id = 1 AND current_step = ?`,
       )
-      .bind(
-        auditId,
-        'setup.preflight.complete',
-        'system',
-        input.requestId,
-        now,
-        'preflight',
-      );
+      .bind(auditId, 'setup.preflight.complete', 'system', input.requestId, now, 'preflight');
     const advanceStmt = prepareConditionalUpdateInstallationStep(
       input.db,
       'preflight',

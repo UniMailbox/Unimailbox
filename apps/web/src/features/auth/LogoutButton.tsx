@@ -1,8 +1,8 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — LogoutButton.
 //
-// CAP-042 (Batch 5) AC 20. Posts to /api/v1/auth/better/sign-out
-// (Better Auth clears the HttpOnly session cookie via its own
-// `Set-Cookie` response) and then redirects to /login. The in-memory
+// Posts to /api/v1/auth/logout, revokes the D1 session, and then redirects to
+// /login. The in-memory
 // session descriptor is cleared as part of the mutation's `onSuccess`
 // (see `useSignOutMutation` in `auth-queries.ts`).
 //
@@ -14,11 +14,11 @@ import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { Button } from '../../components/ui/Button';
-import { Spinner } from '../../components/ui/Spinner';
 import { authQueryKeys, useSignOutMutation } from './auth-queries';
 import { clearAuthSession } from './auth-session-store';
 
 export function LogoutButton(): ReactElement {
+  const t = useT();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const signOutMutation = useSignOutMutation();
@@ -44,10 +44,10 @@ export function LogoutButton(): ReactElement {
       variant="ghost"
       onClick={() => void handleSignOut()}
       disabled={signOutMutation.isPending}
-      aria-busy={signOutMutation.isPending}
+      loading={signOutMutation.isPending}
       data-testid="logout-button"
     >
-      {signOutMutation.isPending ? <Spinner /> : 'Sign out'}
+      {t('Sign out')}
     </Button>
   );
 }

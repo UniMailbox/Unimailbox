@@ -1,3 +1,5 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
 import { ConfigurationSection } from '../../components/ui/ConfigurationSection';
 import { Input } from '../../components/ui/Input';
 import { Label } from '../../components/ui/shadcn/label';
@@ -28,13 +30,14 @@ import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import { adminQueryKeys, adminSettingsQuery, updateAdminSettings } from './admin-queries';
+import { editorUploadPolicyKey } from '../../components/editor/upload-policy';
 
 export function SettingsPage(): ReactElement {
   const sessionQuery = authSessionQuery();
   if (sessionQuery.data === undefined) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="form" />
       </main>
     );
   }
@@ -43,6 +46,7 @@ export function SettingsPage(): ReactElement {
 }
 
 function SettingsContent(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   const session = authSessionQuery().data;
@@ -92,7 +96,8 @@ function SettingsContent(): ReactElement {
     onSuccess: (result) => {
       setForm(result.settings);
       queryClient.setQueryData(settingsKey, result);
-      setNotice('General settings saved.');
+      void queryClient.invalidateQueries({ queryKey: editorUploadPolicyKey });
+      setNotice(t('General settings saved.'));
     },
     onError: (error) => {
       const apiError = normalizeApiError(error);
@@ -109,10 +114,10 @@ function SettingsContent(): ReactElement {
     return (
       <main className="admin-page" data-testid="admin-not-authorized" role="status">
         <Card
-          title="Administrator access required"
-          description="Your account does not have permission to read general settings."
+          title={t('Administrator access required')}
+          description={t('Your account does not have permission to read general settings.')}
         >
-          <p>Ask an administrator if you need access to this area.</p>
+          <p>{t('Ask an administrator if you need access to this area.')}</p>
         </Card>
       </main>
     );
@@ -120,18 +125,18 @@ function SettingsContent(): ReactElement {
   if (!hasData && query.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="form" />
       </main>
     );
   }
   if (!hasData && queryError !== null) {
     return (
       <main className="admin-page" data-testid="admin-error">
-        <PageHeader
-          title="General settings"
-          description="Configure preferences for this deployment."
-        />
-        <Card title="Could not load settings" description="General settings are unavailable.">
+        <PageHeader title={t('General settings')} />
+        <Card
+          title={t('Could not load settings')}
+          description={t('General settings are unavailable.')}
+        >
           <ErrorPanel
             message={queryError.message}
             code={queryError.code}
@@ -143,7 +148,11 @@ function SettingsContent(): ReactElement {
     );
   }
   if (form === null || query.data === undefined) {
-    return <main className="admin-page" data-testid="admin-loading" />;
+    return (
+      <main className="admin-page" data-testid="admin-loading">
+        <ContentSkeleton variant="form" />
+      </main>
+    );
   }
 
   const canManage = query.data.canManage;
@@ -159,37 +168,35 @@ function SettingsContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-settings-page">
-      <PageHeader
-        title="General settings"
-        description="Configure preferences for this deployment."
-      />
+      <PageHeader title={t('General settings')} />
       <div className="settings-metadata" data-testid="settings-runtime-info">
         <span>
-          Environment: <strong>{query.data.environment}</strong>
+          {t('Environment: ')}
+          <strong>{query.data.environment}</strong>
         </span>
         <span>
-          Last saved:{' '}
+          {t('Last saved:')}{' '}
           {query.data.updatedAt.startsWith('1970-01-01') ? (
-            'Not saved yet'
+            t('Not saved yet')
           ) : (
             <LocalDateTime value={query.data.updatedAt} />
           )}
         </span>
       </div>
       <p className="configuration-note" data-testid="settings-policy-note">
-        Stored policy. Some values are not yet enforced by runtime services.
+        {t('Stored policy. Some values are not yet enforced by runtime services.')}
       </p>
       {!canManage ? (
         <p role="status" data-testid="settings-read-only-note">
-          Read-only access. Ask an administrator to make changes.
+          {t('Read-only access. Ask an administrator to make changes.')}
         </p>
       ) : null}
       <form onSubmit={submit} className="settings-form" noValidate data-testid="settings-form">
         <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
-          <ConfigurationSection title="General" description="Name and account access.">
+          <ConfigurationSection title={t('General')}>
             <Input
               id="settings-site-title"
-              label="Site title"
+              label={t('Site title')}
               type="text"
               value={form.siteTitle}
               onChange={(event) => setForm({ ...form, siteTitle: event.target.value })}
@@ -197,15 +204,17 @@ function SettingsContent(): ReactElement {
             />
             <div className="configuration-toggle">
               <Label htmlFor="settings-registration">
-                Public registration disabled{' '}
-                <span className="configuration-help">Accounts are created by administrators.</span>
+                {t('Public registration disabled')}{' '}
+                <span className="configuration-help">
+                  {t('Accounts are created by administrators.')}
+                </span>
               </Label>
               <Checkbox id="settings-registration" checked={false} disabled />
             </div>
           </ConfigurationSection>
-          <ConfigurationSection title="Mail flow" description="Receiving and sending preferences.">
+          <ConfigurationSection title={t('Mail flow')}>
             <div className="configuration-toggle">
-              <Label htmlFor="settings-inbound">Inbound mail enabled</Label>
+              <Label htmlFor="settings-inbound">{t('Inbound mail enabled')}</Label>
               <Switch
                 id="settings-inbound"
                 checked={form.inboundEnabled}
@@ -214,7 +223,7 @@ function SettingsContent(): ReactElement {
               />
             </div>
             <div className="configuration-toggle">
-              <Label htmlFor="settings-outbound">Outbound mail enabled</Label>
+              <Label htmlFor="settings-outbound">{t('Outbound mail enabled')}</Label>
               <Switch
                 id="settings-outbound"
                 checked={form.outboundEnabled}
@@ -223,7 +232,7 @@ function SettingsContent(): ReactElement {
               />
             </div>
             <div className="wizard-field">
-              <Label htmlFor="settings-unknown-recipient">Unknown recipient policy</Label>
+              <Label htmlFor="settings-unknown-recipient">{t('Unknown recipient policy')}</Label>
               <SelectField
                 id="settings-unknown-recipient"
                 value={form.unknownRecipientPolicy}
@@ -241,10 +250,10 @@ function SettingsContent(): ReactElement {
               />
             </div>
           </ConfigurationSection>
-          <ConfigurationSection title="Limits" description="Mailbox and attachment limits.">
+          <ConfigurationSection title={t('Limits')}>
             <Input
               id="settings-max-mailboxes"
-              label="Maximum mailboxes per user"
+              label={t('Maximum mailboxes per user')}
               type="number"
               min={1}
               max={100}
@@ -255,7 +264,7 @@ function SettingsContent(): ReactElement {
             />
             <Input
               id="settings-max-attachments"
-              label="Maximum attachments per message"
+              label={t('Maximum attachments per message')}
               type="number"
               min={1}
               max={10}
@@ -271,8 +280,8 @@ function SettingsContent(): ReactElement {
                 <div className="settings-attachment-size" data-testid="settings-attachment-size">
                   <Input
                     id="settings-max-attachment-value"
-                    label="Maximum attachment size"
-                    help="Limit applies to each message attachment."
+                    label={t('Maximum attachment size')}
+                    help={t('Limit applies to each message attachment.')}
                     type="number"
                     min={1}
                     max={Math.floor(SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES / factor)}
@@ -290,11 +299,11 @@ function SettingsContent(): ReactElement {
                   />
                   <div className="settings-attachment-unit">
                     <label className="input-label" htmlFor="settings-max-attachment-unit">
-                      Unit
+                      {t('Unit')}
                     </label>
                     <SelectField
                       id="settings-max-attachment-unit"
-                      label="Attachment size unit"
+                      label={t('Attachment size unit')}
                       value={attachment.unit}
                       onValueChange={(unit) => {
                         const nextFactor = unit === 'MB' ? 1024 * 1024 : 1024;
@@ -321,12 +330,12 @@ function SettingsContent(): ReactElement {
             })()}
           </ConfigurationSection>
           <ConfigurationSection
-            title="Retention"
-            description="Stored policy. Automatic cleanup is not active yet."
+            title={t('Retention')}
+            description={t('Stored policy. Automatic cleanup is not active yet.')}
           >
             <Input
               id="settings-audit-retention"
-              label="Audit retention in days"
+              label={t('Audit retention in days')}
               type="number"
               min={1}
               max={3650}
@@ -337,7 +346,7 @@ function SettingsContent(): ReactElement {
             />
             <Input
               id="settings-idempotency-retention"
-              label="Idempotency retention in hours"
+              label={t('Idempotency retention in hours')}
               type="number"
               min={1}
               max={168}
@@ -355,23 +364,27 @@ function SettingsContent(): ReactElement {
         ) : null}
         {canManage ? (
           <div className="configuration-save-bar">
-            <span className="configuration-help">Changes apply after saving.</span>
-            <Button type="submit" disabled={updateMutation.isPending || isRefreshingAfterConflict}>
+            <span className="configuration-help">{t('Changes apply after saving.')}</span>
+            <Button
+              type="submit"
+              loading={updateMutation.isPending || isRefreshingAfterConflict}
+              disabled={updateMutation.isPending || isRefreshingAfterConflict}
+            >
               {isRefreshingAfterConflict
-                ? 'Refreshing…'
+                ? t('Refreshing…')
                 : updateMutation.isPending
-                  ? 'Saving…'
-                  : 'Save settings'}
+                  ? t('Saving…')
+                  : t('Save settings')}
             </Button>
           </div>
         ) : null}
       </form>
       {isRefreshingAfterConflict ? (
         <p role="status" data-testid="settings-refreshing">
-          Settings changed elsewhere. Loading the latest values…
+          {t('Settings changed elsewhere. Loading the latest values… ')}
           {refreshError !== null || queryError !== null ? (
             <Button type="button" variant="secondary" onClick={refreshAfterConflict}>
-              Retry loading latest settings
+              {t('Retry loading latest settings')}
             </Button>
           ) : null}
         </p>
@@ -383,13 +396,14 @@ function SettingsContent(): ReactElement {
       ) : null}
       {queryError !== null ? (
         <div className="admin-error-banner" role="alert" data-testid="settings-query-error">
-          Could not refresh settings: {queryError.message} ({queryError.code})
+          {t('Could not refresh settings: ')}
+          {queryError.message} ({queryError.code})
           <Button
             type="button"
             variant="secondary"
             onClick={isRefreshingAfterConflict ? refreshAfterConflict : () => void query.refetch()}
           >
-            Retry
+            {t('Retry')}
           </Button>
         </div>
       ) : null}

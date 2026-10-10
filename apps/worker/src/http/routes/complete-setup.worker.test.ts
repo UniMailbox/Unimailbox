@@ -478,7 +478,7 @@ describe('GET /', () => {
 
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body).toEqual({ ok: true, surface: 'router' });
+      expect(body).toMatchObject({ ok: true, surface: 'router', tree: 'development' });
     });
 
     it('/setup/* paths are exempt', async () => {

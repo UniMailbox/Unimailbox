@@ -5,6 +5,7 @@
  *
  * CAP-021: Add MIME parsing for inbound mail.
  */
+import PostalMime from 'postal-mime';
 
 /**
  * Lowercases and trims an email address — R-DATA-001 (email addresses are
@@ -34,6 +35,53 @@ export interface ParsedEmail {
   readonly messageId: string | null;
   readonly inReplyTo: string | null;
   readonly references: string;
+}
+
+export interface ParsedInboundAttachment {
+  readonly filename: string;
+  readonly contentType: string;
+  readonly disposition: 'attachment' | 'inline';
+  readonly contentId: string | null;
+  readonly content: Uint8Array;
+}
+
+/** Decode nested MIME and transfer encodings from the original email bytes. */
+export async function parseInboundMime(rawBytes: Uint8Array): Promise<{
+  readonly parsed: ParsedEmail;
+  readonly attachments: ReadonlyArray<ParsedInboundAttachment>;
+}> {
+  const email = await PostalMime.parse(rawBytes, { attachmentEncoding: 'arraybuffer' });
+  const addresses = (entries: ReadonlyArray<{ address?: string; name: string }> | undefined) =>
+    (entries ?? [])
+      .filter((entry): entry is { address: string; name: string } => Boolean(entry.address))
+      .map((entry) => ({ address: normalizeAddress(entry.address), name: entry.name ?? '' }));
+
+  return {
+    parsed: {
+      from: {
+        address: normalizeAddress(email.from.address ?? ''),
+        name: email.from.name ?? '',
+      },
+      to: addresses(email.to),
+      cc: addresses(email.cc),
+      subject: email.subject ?? '',
+      htmlBody: (email.html ?? '').trim(),
+      textBody: (email.text ?? '').trim(),
+      messageId: email.messageId || null,
+      inReplyTo: email.inReplyTo || null,
+      references: email.references ?? '',
+    },
+    attachments: email.attachments.map((attachment) => ({
+      filename: attachment.filename || 'attachment',
+      contentType: attachment.mimeType || 'application/octet-stream',
+      disposition: attachment.disposition === 'inline' ? 'inline' : 'attachment',
+      contentId: attachment.contentId?.replace(/^<|>$/g, '') || null,
+      content:
+        typeof attachment.content === 'string'
+          ? new TextEncoder().encode(attachment.content)
+          : new Uint8Array(attachment.content),
+    })),
+  };
 }
 
 /**

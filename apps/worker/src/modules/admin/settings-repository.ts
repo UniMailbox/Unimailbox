@@ -82,8 +82,15 @@ export async function readSystemSettings(db: Database): Promise<SystemSettingsSn
   }
   if (revisionUpdatedAt !== null) updatedAt = revisionUpdatedAt;
 
+  // Public registration is permanently disabled in the self-managed user
+  // model. Keep reading the legacy key for migration compatibility, but never
+  // allow an old `true` value to reopen the removed registration flow.
   return {
-    settings: systemSettingsSchema.parse({ ...DEFAULT_SYSTEM_SETTINGS, ...values }),
+    settings: systemSettingsSchema.parse({
+      ...DEFAULT_SYSTEM_SETTINGS,
+      ...values,
+      registrationEnabled: false,
+    }),
     updatedAt,
   };
 }

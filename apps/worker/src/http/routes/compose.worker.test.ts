@@ -51,7 +51,7 @@ async function completeSetup(): Promise<void> {
     env.DB.prepare(
       `INSERT OR IGNORE INTO roles (id, name, description, is_system, created_at) VALUES ('member', 'member', 'Standard user', 1, datetime('now'))`,
     ),
-    // Administrator: all the permissions we need, plus role.manage (admin bypass).
+    // Administrator: global permissions alone do not grant mailbox access.
     env.DB.prepare(
       `INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES ('administrator', 'message.read', datetime('now'))`,
     ),
@@ -64,7 +64,7 @@ async function completeSetup(): Promise<void> {
     env.DB.prepare(
       `INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES ('administrator', 'role.manage', datetime('now'))`,
     ),
-    // Member: read + send + mailbox.create. No role.manage (so no admin bypass).
+    // Member: read + send + mailbox.create.
     env.DB.prepare(
       `INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES ('member', 'message.read', datetime('now'))`,
     ),
@@ -132,7 +132,7 @@ async function createSession(userId: string): Promise<string> {
     .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
     .run();
 
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 15 * 60,
   });
 
@@ -199,6 +199,11 @@ async function createActiveProviderConnection(): Promise<string> {
       `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
        VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
     ).bind(connectionId, credentialId, now, now),
+    env.DB.prepare(
+      `UPDATE managed_domains
+          SET outbound_connection_id = ?, updated_at = ?
+        WHERE id = (SELECT id FROM managed_domains ORDER BY created_at ASC, id ASC LIMIT 1)`,
+    ).bind(connectionId, now),
   ]);
 
   return connectionId;
@@ -276,6 +281,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
         body: JSON.stringify({
           to: [{ address: 'to@example.com', displayName: 'To' }],
           cc: [{ address: 'cc@example.com' }],
+          bcc: [{ address: 'hidden@example.com' }],
           subject: 'Hello',
           htmlBody: '<p>body</p>',
           textBody: 'body',
@@ -318,7 +324,7 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
       .bind(messageId)
       .all<{ type: string; address: string }>();
     const types = (recipients.results ?? []).map((r) => `${r.type}:${r.address}`).sort();
-    expect(types).toEqual(['cc:cc@example.com', 'to:to@example.com']);
+    expect(types).toEqual(['bcc:hidden@example.com', 'cc:cc@example.com', 'to:to@example.com']);
 
     // Mailbox association: folder 'sent', is_read true (the sender's own copy).
     const mailboxMessage = await env.DB.prepare(
@@ -426,6 +432,41 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     expect(response.status).toBe(403);
     const body = await response.json();
     expect(body.error.code).toBe('MAILBOX_ACCESS_DENIED');
+  });
+
+  it('requires sender membership for a global administrator to send from a mailbox', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-admin-send@example.com');
+    const adminId = await createUserWithRole('administrator', 'admin-send@example.com');
+    const adminToken = await createSession(adminId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId, 'admin-send-boundary');
+    await createActiveProviderConnection();
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`;
+    const body = JSON.stringify({ to: [{ address: 'to@example.com' }] });
+
+    const denied = await SELF.fetch(url, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'admin-send-denied',
+      },
+    });
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error.code).toBe('MAILBOX_ACCESS_DENIED');
+
+    await addMailboxMember(mailboxId, adminId, 'sender');
+    const granted = await SELF.fetch(url, {
+      method: 'POST',
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`,
+        'Idempotency-Key': 'admin-send-granted',
+      },
+    });
+    expect(granted.status).toBe(202);
   });
 
   it('lets a sender-role member send (allowed by the permission matrix)', async () => {
@@ -854,5 +895,389 @@ describe('POST /api/v1/mailboxes/:mailboxId/messages/send', () => {
     expect(retryResponse.status).toBe(202);
     const retryBody = await retryResponse.json();
     expect(retryBody.data.status).toBe('queued');
+  });
+  it('appends a sanitized enabled domain signature once, including on idempotent replay', async () => {
+    const ownerId = await createUserWithRole('member', 'owner@example.com');
+    const token = await createSession(ownerId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await createActiveProviderConnection();
+    await env.DB.prepare(
+      `INSERT INTO domain_signatures (id,domain_id,html_content,text_content,is_enabled,created_at,updated_at) VALUES (?,?,'<p>Regards &amp; thanks</p>','Regards & thanks',1,datetime('now'),datetime('now'))`,
+    )
+      .bind(crypto.randomUUID(), domainId)
+      .run();
+    const key = crypto.randomUUID();
+    const request = () =>
+      SELF.fetch(`http://localhost/api/v1/mailboxes/${mailboxId}/messages/send`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': key,
+        },
+        body: JSON.stringify({
+          to: [{ address: 'recipient@example.com' }],
+          subject: 'Signature check',
+          htmlBody: '<p><strong>Hello</strong><script>bad()</script></p>',
+          textBody: 'Hello',
+        }),
+      });
+    const response = await request();
+    expect(response.status).toBe(202);
+    const result = await response.json<{ data: { messageId: string } }>();
+    expect((await request()).status).toBe(202);
+    const row = await env.DB.prepare('SELECT html_body,text_body FROM messages WHERE id=?')
+      .bind(result.data.messageId)
+      .first<{ html_body: string; text_body: string }>();
+    expect(row?.html_body).toBe(
+      '<p><strong>Hello</strong></p><div><br><p>Regards &amp; thanks</p></div>',
+    );
+    expect(row?.text_body).toBe('Hello\n\nRegards & thanks');
+  });
+});
+
+describe('Scheduled sending — durable snapshot and management', () => {
+  let sendSpy: ReturnType<typeof vi.spyOn>;
+  let owner: string;
+  let token: string;
+  let mailbox: string;
+  beforeEach(async () => {
+    await resetAndMigrate();
+    await completeSetup();
+    owner = await createUserWithRole('member', 'schedule-owner@example.com');
+    token = await createSession(owner);
+    mailbox = await createMailbox(await createDomain(), owner);
+    await createActiveProviderConnection();
+    sendSpy = vi.spyOn(env.OUTBOUND, 'send').mockResolvedValue(undefined);
+  });
+  afterEach(() => vi.restoreAllMocks());
+  const future = (hours = 1) =>
+    new Date(Math.ceil((Date.now() + hours * 3600_000) / 1000) * 1000).toISOString();
+  function request(
+    path: string,
+    method = 'GET',
+    body?: unknown,
+    key = crypto.randomUUID(),
+    auth = token,
+  ) {
+    return SELF.fetch(`http://localhost/api/v1/mailboxes/${mailbox}/${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${auth}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': key,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  }
+  async function schedule(time = future(), key = crypto.randomUUID()) {
+    const response = await request(
+      'messages/send',
+      'POST',
+      {
+        to: [{ address: 'to@example.com' }],
+        bcc: [{ address: 'blind@example.com' }],
+        subject: 'Scheduled snapshot',
+        htmlBody: '<p><strong>Keep me</strong></p>',
+        textBody: 'Keep me',
+        inReplyTo: '<parent@example.com>',
+        scheduledAt: time,
+      },
+      key,
+    );
+    expect(response.status).toBe(202);
+    return (await response.json<{ data: { messageId: string; scheduledAt: string } }>()).data;
+  }
+  async function job(id: string) {
+    return env.DB.prepare('SELECT * FROM outbound_jobs WHERE message_id=?').bind(id).first<{
+      id: string;
+      status: string;
+      scheduled_at: string;
+      attempts: number;
+      schedule_revision: number;
+      updated_at: string;
+    }>();
+  }
+
+  it('delays once, preserves the snapshot, and replays without another enqueue', async () => {
+    const time = future();
+    const key = crypto.randomUUID();
+    const first = await schedule(time, key);
+    const second = await schedule(time, key);
+    expect(second).toEqual(first);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0]?.[1]).toMatchObject({ delaySeconds: expect.any(Number) });
+    expect(sendSpy.mock.calls[0]?.[1]?.delaySeconds).toBeGreaterThan(3590);
+    expect(await job(first.messageId)).toMatchObject({
+      status: 'queued',
+      attempts: 0,
+      scheduled_at: time.slice(0, 19).replace('T', ' '),
+      updated_at: time.slice(0, 19).replace('T', ' '),
+    });
+    const message = await env.DB.prepare(
+      'SELECT html_body,in_reply_to_header,status FROM messages WHERE id=?',
+    )
+      .bind(first.messageId)
+      .first();
+    expect(message).toMatchObject({
+      html_body: '<p><strong>Keep me</strong></p>',
+      in_reply_to_header: '<parent@example.com>',
+      status: 'queued',
+    });
+    const list = await request('scheduled-sends');
+    expect(list.status).toBe(200);
+    const wire = await list.text();
+    expect(wire).toContain(first.messageId);
+    expect(wire).not.toContain('blind@example.com');
+    expect((await request('messages?folder=sent')).status).toBe(200);
+    expect(await (await request('messages?folder=sent')).text()).not.toContain(first.messageId);
+  });
+
+  it('holds far-future tasks without Queue calls, then dispatches once within 24h', async () => {
+    const time = future(48);
+    const sent = await schedule(time);
+    expect(sendSpy).not.toHaveBeenCalled();
+    const { reclaimStaleJobs } = await import('../../modules/outbound-mail');
+    await reclaimStaleJobs(env.DB, new Date(), env.OUTBOUND);
+    expect(sendSpy).not.toHaveBeenCalled();
+    const window = new Date(Date.parse(time) - 23 * 3600_000);
+    await reclaimStaleJobs(env.DB, window, env.OUTBOUND);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0]?.[1]).toEqual({ delaySeconds: 23 * 3600 });
+    await reclaimStaleJobs(env.DB, new Date(window.getTime() + 10 * 60_000), env.OUTBOUND);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(await job(sent.messageId)).toMatchObject({
+      updated_at: time.slice(0, 19).replace('T', ' '),
+    });
+  });
+
+  it('retries a failed delayed enqueue on recovery instead of losing the future task', async () => {
+    const time = future(48);
+    await schedule(time);
+    const { reclaimStaleJobs } = await import('../../modules/outbound-mail');
+    const window = new Date(Date.parse(time) - 23 * 3600_000);
+    sendSpy.mockRejectedValueOnce(new Error('synthetic queue outage'));
+    await reclaimStaleJobs(env.DB, window, env.OUTBOUND);
+    await reclaimStaleJobs(env.DB, new Date(window.getTime() + 10 * 60_000), env.OUTBOUND);
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects early atomic claims and defers delivery without consuming an attempt', async () => {
+    const sent = await schedule();
+    const row = await job(sent.messageId);
+    if (!row) throw new Error('Missing job');
+    const { processOutboundJob, claimOutboundJob } = await import('../../modules/outbound-mail');
+    const adapter = vi.fn(() => undefined);
+    const deferred = await processOutboundJob(row.id, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      resolveAdapter: adapter,
+    });
+    expect(deferred).toMatchObject({ delaySeconds: expect.any(Number) });
+    expect(adapter).not.toHaveBeenCalled();
+    expect(
+      await claimOutboundJob(
+        env.DB,
+        row.id,
+        crypto.randomUUID(),
+        new Date(Date.now() + 60_000).toISOString(),
+      ),
+    ).toBeNull();
+    expect(await job(sent.messageId)).toMatchObject({ status: 'queued', attempts: 0 });
+  });
+
+  it('changes time with CAS, rejects stale changes, and defers old deliveries to the new time', async () => {
+    const sent = await schedule(future(48));
+    const time = future(2);
+    const change = await request(`scheduled-sends/${sent.messageId}`, 'PATCH', {
+      scheduledAt: time,
+      expectedRevision: 0,
+    });
+    expect(change.status).toBe(200);
+    expect(await job(sent.messageId)).toMatchObject({
+      scheduled_at: time.slice(0, 19).replace('T', ' '),
+      schedule_revision: 1,
+    });
+    expect(
+      (
+        await request(`scheduled-sends/${sent.messageId}`, 'PATCH', {
+          scheduledAt: future(3),
+          expectedRevision: 0,
+        })
+      ).status,
+    ).toBe(409);
+    const row = await job(sent.messageId);
+    if (!row) throw new Error('Missing job');
+    const { processOutboundJob } = await import('../../modules/outbound-mail');
+    const deferred = await processOutboundJob(row.id, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+    });
+    expect(deferred?.delaySeconds).toBeGreaterThan(7100);
+  });
+
+  it('cancel is atomic, preserves a draft, and skips old Queue messages', async () => {
+    const sent = await schedule();
+    const path = `scheduled-sends/${sent.messageId}/cancel`;
+    const responses = await Promise.all([
+      request(path, 'POST', { expectedRevision: 0 }),
+      request(path, 'POST', { expectedRevision: 0 }),
+    ]);
+    expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+    const row = await job(sent.messageId);
+    if (!row) throw new Error('Missing job');
+    expect(row.status).toBe('failed');
+    expect(
+      await env.DB.prepare('SELECT status FROM messages WHERE id=?').bind(sent.messageId).first(),
+    ).toEqual({ status: 'draft' });
+    expect(
+      await env.DB.prepare('SELECT folder FROM mailbox_messages WHERE message_id=?')
+        .bind(sent.messageId)
+        .first(),
+    ).toEqual({ folder: 'drafts' });
+    const { processOutboundJob } = await import('../../modules/outbound-mail');
+    const resolveAdapter = vi.fn(() => undefined);
+    await processOutboundJob(row.id, { db: env.DB, encryptionKey: ENCRYPTION_KEY, resolveAdapter });
+    expect(resolveAdapter).not.toHaveBeenCalled();
+    expect(await (await request('scheduled-sends')).text()).not.toContain(sent.messageId);
+    expect(await (await request('messages?folder=drafts')).text()).toContain(sent.messageId);
+  });
+
+  it('replays concurrent identical cancel requests with exactly one audit entry', async () => {
+    const sent = await schedule();
+    const key = crypto.randomUUID();
+    const path = `scheduled-sends/${sent.messageId}/cancel`;
+    const responses = await Promise.all([
+      request(path, 'POST', { expectedRevision: 0 }, key),
+      request(path, 'POST', { expectedRevision: 0 }, key),
+    ]);
+    expect(responses.map((r) => r.status)).toEqual([200, 200]);
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS count FROM audit_events WHERE action='message.schedule_cancelled'",
+      ).first(),
+    ).toEqual({ count: 1 });
+  });
+
+  it('cancel loses to a job already atomically claimed for delivery', async () => {
+    const sent = await schedule();
+    await env.DB.prepare("UPDATE outbound_jobs SET status='sending' WHERE message_id=?")
+      .bind(sent.messageId)
+      .run();
+    expect(
+      (await request(`scheduled-sends/${sent.messageId}/cancel`, 'POST', { expectedRevision: 0 }))
+        .status,
+    ).toBe(409);
+    expect(
+      await env.DB.prepare('SELECT status FROM messages WHERE id=?').bind(sent.messageId).first(),
+    ).toEqual({ status: 'queued' });
+  });
+
+  it('enforces mailbox authorization for foreign actors and read-only members', async () => {
+    const sent = await schedule();
+    const foreign = await createUserWithRole('member', 'foreign@example.com');
+    const auth = await createSession(foreign);
+    expect(
+      (await request('scheduled-sends', 'GET', undefined, crypto.randomUUID(), auth)).status,
+    ).toBe(403);
+    await addMailboxMember(mailbox, foreign, 'viewer');
+    expect(
+      (await request('scheduled-sends', 'GET', undefined, crypto.randomUUID(), auth)).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(
+          `scheduled-sends/${sent.messageId}/cancel`,
+          'POST',
+          { expectedRevision: 0 },
+          crypto.randomUUID(),
+          auth,
+        )
+      ).status,
+    ).toBe(403);
+  });
+
+  it('rejects past, invalid and over-one-year times before writing or enqueueing', async () => {
+    for (const scheduledAt of [
+      'bad',
+      new Date(Date.now() - 60_000).toISOString(),
+      future(365 * 24 + 1),
+    ]) {
+      const response = await request('messages/send', 'POST', {
+        to: [{ address: 'to@example.com' }],
+        scheduledAt,
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(await env.DB.prepare('SELECT count(*) AS count FROM outbound_jobs').first()).toEqual({
+      count: 0,
+    });
+  });
+  it('paginates scheduled snapshots with signed cursors without disclosing Bcc', async () => {
+    const first = await schedule(future(48));
+    const original = await job(first.messageId);
+    if (!original) throw new Error('Missing job');
+    for (let i = 0; i < 51; i++) {
+      const messageId = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO messages(id,from_address,from_name,subject,html_body,text_body,status,created_at,updated_at) SELECT ?,from_address,from_name,subject,html_body,text_body,status,created_at,updated_at FROM messages WHERE id=?`,
+        ).bind(messageId, first.messageId),
+        env.DB.prepare(
+          `INSERT INTO mailbox_messages(id,mailbox_id,message_id,is_read,is_starred,folder,created_at) VALUES(?,?,?,1,0,'scheduled',datetime('now'))`,
+        ).bind(crypto.randomUUID(), mailbox, messageId),
+        env.DB.prepare(
+          `INSERT INTO outbound_jobs(id,message_id,provider_connection_id,status,scheduled_at,mailbox_id,created_at,updated_at) SELECT ?,?,provider_connection_id,'queued',scheduled_at,mailbox_id,created_at,updated_at FROM outbound_jobs WHERE id=?`,
+        ).bind(crypto.randomUUID(), messageId, original.id),
+      ]);
+    }
+    const page = await (
+      await request('scheduled-sends')
+    ).json<{ data: { items: { id: string }[]; nextCursor: string } }>();
+    expect(page.data.items).toHaveLength(50);
+    expect(page.data.nextCursor).toBeTruthy();
+    const next = await (
+      await request(`scheduled-sends?cursor=${encodeURIComponent(page.data.nextCursor)}`)
+    ).json<{ data: { items: { id: string }[]; nextCursor: string | null } }>();
+    expect(next.data.items).toHaveLength(2);
+    expect(next.data.nextCursor).toBeNull();
+    expect(new Set([...page.data.items, ...next.data.items].map((item) => item.id)).size).toBe(52);
+    expect((await request('scheduled-sends?cursor=invalid')).status).toBe(400);
+  });
+
+  it('pins editor file bytes in R2 for a far-future scheduled snapshot', async () => {
+    const upload = await SELF.fetch(`https://localhost/api/v1/mailboxes/${mailbox}/editor-assets`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Idempotency-Key': crypto.randomUUID(),
+        'X-Filename': 'scheduled.pdf',
+        'X-Asset-Kind': 'file',
+        'X-File-Size': '3',
+        'Content-Type': 'application/pdf',
+      },
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(upload.status).toBe(201);
+    const asset = await upload.json<{ data: { id: string; url: string } }>();
+    const response = await request('messages/send', 'POST', {
+      to: [{ address: 'to@example.com' }],
+      subject: 'Scheduled attachment',
+      htmlBody: `<p>Hello</p><a href="${asset.data.url}">scheduled.pdf</a>`,
+      textBody: 'Hello',
+      scheduledAt: future(48),
+    });
+    expect(response.status).toBe(202);
+    expect(sendSpy).not.toHaveBeenCalled();
+    await env.DB.prepare("UPDATE editor_assets SET expires_at=datetime('now','-1 day') WHERE id=?")
+      .bind(asset.data.id)
+      .run();
+    const { expireEditorAssets } = await import('../../modules/editor-assets');
+    await expireEditorAssets(env.DB, env.ATTACHMENTS);
+    const download = await SELF.fetch(asset.data.url);
+    expect(download.status).toBe(200);
+    expect(new Uint8Array(await download.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
   });
 });

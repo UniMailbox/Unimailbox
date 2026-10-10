@@ -1,3 +1,7 @@
+import { useT } from '../../infrastructure/i18n/locale';
+import { useReadingPane } from './reading-pane-context';
+import { Badge } from '../../components/ui/shadcn/badge';
+import { useInAppShell } from '../../components/layouts/AppShell';
 // apps/web — InboxListPage.
 //
 // CAP-043 Slice 1 (AC 8). The paginated inbox view for a single mailbox.
@@ -38,13 +42,17 @@ import type { MessageFolder, MessageListItem } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
-import { mailboxMessagesInfiniteQuery, mailboxQueryKeys } from './mailbox-queries';
-import type { MailboxListItem } from './mailbox-queries';
+import {
+  mailboxMessagesInfiniteQuery,
+  mailboxQueryKeys,
+  mailboxListQuery,
+} from './mailbox-queries';
 import { InboxListSkeleton } from './InboxListSkeleton';
 import { InboxEmpty } from './InboxEmpty';
 import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Button } from '../../components/ui/Button';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import { AppNav } from '../../components/AppNav';
 import { LogoutButton } from '../auth/LogoutButton';
 // CAP-058 / CAP-043 Slice 3: the inbox row's per-user star + delete actions.
@@ -94,22 +102,19 @@ function folderLabel(folder: MessageFolder): string {
 }
 
 function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactElement {
+  const t = useT();
+  const inShell = useInAppShell();
   const sessionQuery = authSessionQuery();
   const query = mailboxMessagesInfiniteQuery(mailboxId, folder);
   const currentFolderLabel = folderLabel(folder);
 
-  // fe-LOW (Slice 1 review, deferred to Slice 2): the card title shows
-  // the mailbox ADDRESS, not the raw UUID. The mailbox list is already
-  // cached from MailboxListPage (the user navigated through it), so a
-  // non-subscribing cache read is enough — a cache miss (direct URL
-  // entry) falls back to the UUID rather than firing a fetch here.
+  // Resolve the display address on direct navigation as well as cached navigation.
   const queryClient = useQueryClient();
   const userId = sessionQuery.data?.userId ?? null;
-  const cachedMailboxes = queryClient.getQueryData<MailboxListItem[]>(
-    mailboxQueryKeys.list(userId),
-  );
+  const listedMailboxes = mailboxListQuery();
+  const cachedMailboxes = listedMailboxes.data;
   const mailboxAddress =
-    cachedMailboxes?.find((mailbox) => mailbox.id === mailboxId)?.address ?? `Mailbox ${mailboxId}`;
+    cachedMailboxes?.find((mailbox) => mailbox.id === mailboxId)?.address ?? 'Mailbox';
 
   // Fix (g), data-first ordering: `query.data` survives a failed
   // background refetch and a failed load-more, so the accumulated rows
@@ -164,7 +169,7 @@ function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactEl
                     void query.refetch();
                   }
             }
-            retryLabel={apiError.code === 'INVALID_CURSOR' ? 'Start over' : 'Retry'}
+            retryLabel={apiError.code === 'INVALID_CURSOR' ? t('Start over') : t('Retry')}
             testId="inbox-error-panel"
           />
         </Card>
@@ -177,58 +182,67 @@ function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactEl
   return (
     <main className="mailbox-shell" data-testid="inbox-list-page">
       <header className="mailbox-header">
-        <h1 className="mailbox-title">{currentFolderLabel}</h1>
+        <div>
+          <h1 className="mailbox-title">{t(currentFolderLabel)}</h1>
+          <p className="mailbox-subtitle">{mailboxAddress}</p>
+        </div>
         <div className="mailbox-header-meta">
           <span data-testid="mailbox-user-email">{sessionQuery.data?.email ?? ''}</span>
           {/* CAP-044 Slice 3 (D-CAP-044-K): the admin link, rendered only
               when the nav probe succeeds (member → nothing). */}
-          <AppNav />
+          {!inShell ? <AppNav /> : null}
           <Link
             to="/mailbox/$mailboxId/members"
             params={{ mailboxId }}
             className="mailbox-folder-link"
             data-testid="inbox-members-link"
           >
-            Members
+            {t('Members')}
           </Link>
-          <LogoutButton />
+          {!inShell ? (
+            <Link
+              to="/mailbox/$mailboxId/compose"
+              params={{ mailboxId }}
+              className="btn btn-md"
+              data-testid="inbox-compose-link"
+            >
+              {t('Compose')}
+            </Link>
+          ) : null}
+          {!inShell ? <LogoutButton /> : null}
         </div>
       </header>
-      <nav className="mailbox-folder-nav" aria-label="Mailbox folders" data-testid="folder-nav">
-        {FOLDER_OPTIONS.map((option) => (
-          <Link
-            key={option.value}
-            to="/mailbox/$mailboxId"
-            params={{ mailboxId }}
-            search={{ folder: option.value }}
-            className="mailbox-folder-link"
-            aria-current={option.value === folder ? 'page' : undefined}
-            data-testid={`folder-link-${option.value}`}
-          >
-            {option.label}
-          </Link>
-        ))}
-      </nav>
-      {/* CAP-044 Slice 1 / AC 1: the compose entry point for the active
-          mailbox. No `search` prop — TanStack navigates with an empty
-          search, so this always opens a BLANK composer. */}
-      <p className="inbox-compose-entry">
-        <Link
-          to="/mailbox/$mailboxId/compose"
-          params={{ mailboxId }}
-          className="btn btn-secondary btn-md"
-          data-testid="inbox-compose-link"
+      {!inShell ? (
+        <nav
+          className="mailbox-folder-nav"
+          aria-label={t('Mailbox folders')}
+          data-testid="folder-nav"
         >
-          Compose
-        </Link>
-      </p>
-      <Card title={mailboxAddress} description="Messages in this mailbox, newest first.">
+          {FOLDER_OPTIONS.map((option) => (
+            <Link
+              key={option.value}
+              to="/mailbox/$mailboxId"
+              params={{ mailboxId }}
+              search={{ folder: option.value }}
+              className="mailbox-folder-link"
+              aria-current={option.value === folder ? 'page' : undefined}
+              data-testid={`folder-link-${option.value}`}
+            >
+              {t(option.label)}
+            </Link>
+          ))}
+        </nav>
+      ) : null}
+      <Card>
         {apiError !== null ? (
           // Fix (g): errors with data on screen render as a banner ABOVE
           // the list; the loaded rows below are never wiped by a failed
           // background refetch or a failed load-more.
           <div className="inbox-error-banner" role="alert" data-testid="inbox-error-banner">
-            <p>Could not load messages: {apiError.message}</p>
+            <p>
+              {t('Could not load messages: ')}
+              {apiError.message}
+            </p>
             {apiError.code === 'INVALID_CURSOR' ? (
               <Button
                 type="button"
@@ -236,7 +250,7 @@ function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactEl
                 data-testid="inbox-start-over"
                 onClick={startOver}
               >
-                Start over
+                {t('Start over')}
               </Button>
             ) : (
               <Button
@@ -247,7 +261,7 @@ function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactEl
                   void query.refetch();
                 }}
               >
-                Retry
+                {t('Retry')}
               </Button>
             )}
           </div>
@@ -263,17 +277,18 @@ function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactEl
             </ul>
             {query.hasNextPage ? (
               <div className="inbox-pagination">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-secondary"
+                  variant="secondary"
                   data-testid="inbox-load-more"
                   onClick={() => {
                     void query.fetchNextPage();
                   }}
+                  loading={query.isFetchingNextPage}
                   disabled={query.isFetchingNextPage}
                 >
-                  {query.isFetchingNextPage ? 'Loading…' : 'Load more'}
-                </button>
+                  {t('Load more')}
+                </Button>
               </div>
             ) : null}
           </>
@@ -290,6 +305,8 @@ interface InboxListRowProps {
 }
 
 function InboxListRow({ mailboxId, folder, message }: InboxListRowProps): ReactElement {
+  const t = useT();
+  const openMessage = useReadingPane();
   const isUnread = message.isRead === 0;
   return (
     <li
@@ -307,7 +324,25 @@ function InboxListRow({ mailboxId, folder, message }: InboxListRowProps): ReactE
             {message.subject}
           </Link>
         ) : (
-          message.subject
+          <Link
+            to="/mailbox/$mailboxId/messages/$messageId"
+            params={{ mailboxId, messageId: message.id }}
+            onClick={(event) => {
+              if (
+                openMessage &&
+                event.button === 0 &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                !event.altKey
+              ) {
+                event.preventDefault();
+                openMessage(message.id);
+              }
+            }}
+          >
+            {message.subject}
+          </Link>
         )}
       </div>
       <div className="inbox-list-row-meta">
@@ -316,11 +351,15 @@ function InboxListRow({ mailboxId, folder, message }: InboxListRowProps): ReactE
             ? `${message.fromName} <${message.fromAddress}>`
             : message.fromAddress}
         </span>
-        <span className="inbox-list-row-date">{message.createdAt}</span>
+        <LocalDateTime className="inbox-list-row-date" value={message.createdAt} />
         {isUnread ? (
-          <span className="inbox-list-row-badge" data-testid="inbox-unread-badge">
-            Unread
-          </span>
+          <Badge
+            variant="secondary"
+            className="inbox-list-row-badge"
+            data-testid="inbox-unread-badge"
+          >
+            {t('Unread')}
+          </Badge>
         ) : null}
         {/* Slice 3 fix H12: a DIV container, not a span — the inline
             AlertDialog panel renders a <div class="alert-dialog"> here

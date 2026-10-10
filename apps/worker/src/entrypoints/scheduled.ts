@@ -1,49 +1,102 @@
-// Scheduled entry — cron handler. CAP-001 stub + CAP-028 outbound reclaim.
-//
-// Owner: entrypoints/scheduled.ts is a thin shell. The actual work lives in
-// modules/outbound-mail/reclaim-stale-jobs.ts; this file only wires the env
-// (D1 binding) and calls it.
-//
-// Future cron targets (idempotency-records TTL purge, encrypted_credentials
-// re-encryption) will land as additional calls in the same handler. Each
-// capability owns its target; we do not introduce a "cron bus".
-//
-// CAP-040 / R-AUDIT-001: a per-tick correlation UUID is synthesised and
-// passed through to every audit row that the cron path emits (CAP-051
-// attachment expiry now emits one row per expired upload; reclaim itself
-// does not write audit rows).
+// Scheduled maintenance: isolate failures, persist heartbeat and emit an overall result.
 import type { ScheduledController } from '@cloudflare/workers-types';
 import type { Env } from '../platform/env';
 import { reclaimStaleJobs } from '../modules/outbound-mail';
 import { expireAttachments } from '../modules/attachments';
 import { systemIds } from '../platform/ids';
 import { buildAppContext } from '../app-context';
-import { getAttachmentByteStore } from '../platform/cache';
+import { getAttachmentByteStore, getAttachmentObjectStore } from '../platform/cache';
+import { sweepOrphanedInboundObjects } from '../modules/messages';
+import { expireEditorAssets, sweepOrphanedEditorAssets } from '../modules/editor-assets';
+import { expireIdentityRecords, sweepPersonalAvatars } from '../modules/identity';
+import { logger } from '../platform/logger';
+
+import { runMaintenanceTasks } from '../platform/maintenance';
 
 export default {
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    // CAP-040 / R-AUDIT-001: one correlation UUID per cron tick. Held in a
-    // local variable so a future audit-emitting cron target (idempotency
-    // purge, credential rotation) can thread it through to its audit rows
-    // without re-synthesising.
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const requestId = systemIds.uuid();
-    // CAP-028: reclaim any existing worker jobs whose lease has expired and
-    // re-enqueue them onto the OUTBOUND queue. CRON cadence is
-    // `*/2 * * * *` (see apps/worker/wrangler.jsonc).
-    // The requestId is currently unused by reclaimStaleJobs (no audit
-    // emits); attachment expiry below consumes the same tick correlation.
-    await reclaimStaleJobs(env.DB, new Date(), env.OUTBOUND, requestId);
-
-    // CAP-051: remove expired, unconsumed upload bytes and atomically mark
-    // their Messages-owned D1 rows expired with one correlated audit event.
-    const ctx = buildAppContext(env);
-    await expireAttachments(
-      {
-        db: env.DB,
-        cache: getAttachmentByteStore(env),
-        auditEventWriter: ctx.auditEventWriter,
-      },
-      { requestId },
-    );
+    // Accept the former expression while Cloudflare propagates the trigger change.
+    if (controller.cron !== '*/5 * * * *' && controller.cron !== '*/2 * * * *')
+      throw new Error('Unknown maintenance schedule');
+    const runs = [
+      runMaintenanceTasks(env, requestId, [
+        {
+          name: 'outbound.reclaim',
+          run: () => reclaimStaleJobs(env.DB, new Date(), env.OUTBOUND, requestId),
+        },
+      ]),
+    ];
+    const due = new Date(controller.scheduledTime);
+    if (due.getUTCMinutes() === 0) {
+      runs.push(
+        runMaintenanceTasks(
+          env,
+          requestId,
+          [
+            {
+              name: 'attachments.expire',
+              run: async () => {
+                const result = await expireAttachments(
+                  {
+                    db: env.DB,
+                    cache: getAttachmentByteStore(env),
+                    objectStore: getAttachmentObjectStore(env),
+                    auditEventWriter: buildAppContext(env).auditEventWriter,
+                  },
+                  { requestId },
+                );
+                if (result.failed > 0) throw new Error('Attachment cleanup did not complete.');
+              },
+            },
+            {
+              name: 'editor-assets.expire',
+              run: () => expireEditorAssets(env.DB, env.ATTACHMENTS),
+            },
+          ],
+          'hourly',
+        ),
+      );
+    }
+    // Use the event's original time even when delivery is delayed.
+    if (due.getUTCHours() === 19 && due.getUTCMinutes() === 0) {
+      runs.push(
+        runMaintenanceTasks(
+          env,
+          requestId,
+          [
+            {
+              name: 'identity.expire',
+              run: () => expireIdentityRecords(env.DB),
+            },
+            {
+              name: 'editor-assets.sweep',
+              run: () => sweepOrphanedEditorAssets(env.DB, env.ATTACHMENTS, env.CACHE),
+            },
+            {
+              name: 'avatars.sweep',
+              run: () => sweepPersonalAvatars(env.DB, env.ATTACHMENTS, env.CACHE),
+            },
+            {
+              name: 'mail-objects.sweep',
+              run: async () => {
+                const result = await sweepOrphanedInboundObjects({
+                  db: env.DB,
+                  objectStore: env.ATTACHMENTS,
+                  cursorStore: env.CACHE,
+                });
+                if (result.deleted > 0 || result.failed > 0)
+                  logger.info({ event: 'inbound.r2_orphan_sweep', requestId }, { ...result });
+                if (result.failed > 0) throw new Error('Inbound object sweep did not complete.');
+              },
+            },
+          ],
+          'daily',
+        ),
+      );
+    }
+    const results = await Promise.allSettled(runs);
+    if (results.some((result) => result.status === 'rejected'))
+      throw new Error('Maintenance failed; inspect cadence heartbeats.');
   },
 };

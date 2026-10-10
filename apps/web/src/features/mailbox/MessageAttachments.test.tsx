@@ -3,9 +3,12 @@
 // download controls.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import type { MessageDetail } from '@unimailbox/contracts';
 import { MessageAttachments } from './MessageAttachments';
+import { ApiClientProvider } from '../../infrastructure/api/client-provider';
+import { createApiClient, type ApiClient } from '../../infrastructure/api/client';
 
 afterEach(() => {
   cleanup();
@@ -32,13 +35,21 @@ const SECOND_ATTACHMENT: Attachment = {
   contentId: 'cid-image',
 };
 
+const inertClient = createApiClient({ baseUrl: '', getSessionToken: () => null });
+
+function renderWithClient(ui: ReactElement, client: ApiClient = inertClient) {
+  return render(ui, {
+    wrapper: ({ children }) => <ApiClientProvider client={client}>{children}</ApiClientProvider>,
+  });
+}
+
 describe('MessageAttachments', () => {
   it('R-ATTACHMENT-001/R-ATTACHMENT-006 preserves API order and builds encoded download links', () => {
     const mailboxId = 'mailbox/with space';
     const attachmentId = 'attachment/id?from=api';
     const attachments = [{ ...FIRST_ATTACHMENT, id: attachmentId }, SECOND_ATTACHMENT];
 
-    render(<MessageAttachments mailboxId={mailboxId} attachments={attachments} />);
+    renderWithClient(<MessageAttachments mailboxId={mailboxId} attachments={attachments} />);
 
     const rows = screen.getAllByTestId('message-attachment');
     expect(rows).toHaveLength(2);
@@ -50,15 +61,9 @@ describe('MessageAttachments', () => {
     expect(rows[1]).toHaveTextContent('inline');
 
     const links = screen.getAllByTestId('message-attachment-download');
-    expect(links[0]).toHaveAttribute(
-      'href',
-      `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
-    );
+    expect(links[0]).toHaveAttribute('type', 'button');
     expect(links[0]).toHaveAccessibleName('Download first.txt');
-    expect(links[1]).toHaveAttribute(
-      'href',
-      `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/attachments/${encodeURIComponent(SECOND_ATTACHMENT.id)}/download`,
-    );
+    expect(links[1]).toHaveAttribute('type', 'button');
   });
 
   it('R-ATTACHMENT-001/R-ATTACHMENT-006 previews only allowed inline raster types and keeps every fallback downloadable', () => {
@@ -99,15 +104,19 @@ describe('MessageAttachments', () => {
     ];
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
-    render(<MessageAttachments mailboxId={mailboxId} attachments={[...allowed, ...fallback]} />);
+    const urls = new Map(allowed.map((attachment) => [attachment.id, `blob:${attachment.id}`]));
+    renderWithClient(
+      <MessageAttachments
+        mailboxId={mailboxId}
+        attachments={[...allowed, ...fallback]}
+        inlineImageUrls={urls}
+      />,
+    );
 
     const previews = screen.getAllByTestId('message-attachment-preview');
     expect(previews).toHaveLength(allowed.length);
     allowed.forEach((attachment, index) => {
-      expect(previews[index]).toHaveAttribute(
-        'src',
-        `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/attachments/${encodeURIComponent(attachment.id)}/download`,
-      );
+      expect(previews[index]).toHaveAttribute('src', `blob:${attachment.id}`);
       expect(previews[index]).toHaveAttribute('alt', attachment.filename);
     });
     expect(screen.getAllByTestId('message-attachment-download')).toHaveLength(
@@ -120,7 +129,9 @@ describe('MessageAttachments', () => {
   });
 
   it('R-API-001/R-API-002 handles empty and legacy attachment fields without throwing', () => {
-    const { rerender } = render(<MessageAttachments mailboxId="mailbox-1" attachments={[]} />);
+    const { rerender } = renderWithClient(
+      <MessageAttachments mailboxId="mailbox-1" attachments={[]} />,
+    );
     expect(screen.queryByTestId('message-attachments')).not.toBeInTheDocument();
 
     rerender(<MessageAttachments mailboxId="mailbox-1" attachments={undefined} />);
@@ -145,7 +156,7 @@ describe('MessageAttachments', () => {
       idempotencyKey: sensitiveValues.idempotencyKey,
     } as Attachment;
 
-    const { container } = render(
+    const { container } = renderWithClient(
       <MessageAttachments mailboxId="mailbox-1" attachments={[attachment]} />,
     );
 
@@ -156,5 +167,58 @@ describe('MessageAttachments', () => {
     expect(container.innerHTML).not.toContain(sensitiveValues.bytes);
     expect(container.innerHTML).not.toContain(sensitiveValues.idempotencyKey);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('downloads bytes through the authenticated API client instead of navigating to a Bearer-only URL', async () => {
+    const requests: { path: string; authorization: string | null }[] = [];
+    const bytes = new Uint8Array([1, 2, 3]);
+    const client = createApiClient({
+      baseUrl: '',
+      getSessionToken: () => 'memory-access-token',
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({
+          path: String(input),
+          authorization: new Headers(init?.headers).get('Authorization'),
+        });
+        return new Response(bytes.buffer, {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      }) as typeof fetch,
+    });
+    const originalCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:downloaded'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      renderWithClient(
+        <MessageAttachments
+          mailboxId="mailbox/1"
+          attachments={[{ ...SECOND_ATTACHMENT, sizeBytes: 3 }]}
+        />,
+        client,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Download inline-image.png' }));
+      await waitFor(() => expect(requests).toHaveLength(1));
+      expect(requests[0]).toEqual({
+        path: `/api/v1/mailboxes/${encodeURIComponent('mailbox/1')}/attachments/${SECOND_ATTACHMENT.id}/download`,
+        authorization: 'Bearer memory-access-token',
+      });
+      await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    } finally {
+      click.mockRestore();
+      if (originalCreate) Object.defineProperty(URL, 'createObjectURL', originalCreate);
+      else Reflect.deleteProperty(URL, 'createObjectURL');
+      if (originalRevoke) Object.defineProperty(URL, 'revokeObjectURL', originalRevoke);
+      else Reflect.deleteProperty(URL, 'revokeObjectURL');
+    }
   });
 });

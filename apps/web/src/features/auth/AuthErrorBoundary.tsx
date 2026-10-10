@@ -1,3 +1,5 @@
+import { translate } from '../../infrastructure/i18n/locale';
+import { errorMessage } from '../../infrastructure/i18n/error-messages';
 // apps/web — AuthErrorBoundary.
 //
 // CAP-042 (Batch 5) AC 20. Error boundary for the auth surface. Catches
@@ -37,12 +39,13 @@ export class AuthErrorBoundary extends Component<AuthErrorBoundaryProps, AuthErr
 
   override render(): ReactElement {
     if (this.state.error !== null) {
-      const message = this.state.error.message;
+      const message = errorMessage('INTERNAL');
       return (
         <main className="auth-page" data-testid="auth-error-boundary">
           <section className="card">
-            <h2 className="card-title">Something went wrong</h2>
+            <h2 className="card-title">{translate('Something went wrong')}</h2>
             <p className="card-description">{message}</p>
+            <span className="error-panel-code">INTERNAL</span>
             <div className="wizard-actions">
               <Button
                 type="button"
@@ -52,7 +55,7 @@ export class AuthErrorBoundary extends Component<AuthErrorBoundaryProps, AuthErr
                 }}
                 data-testid="auth-error-reset"
               >
-                Try again
+                {translate('Try again')}
               </Button>
             </div>
           </section>

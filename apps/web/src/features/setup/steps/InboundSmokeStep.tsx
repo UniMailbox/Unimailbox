@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — InboundSmokeStep.
 //
 // CAP-041 / step 6. Starts the inbound smoke test, then polls the
@@ -17,7 +18,7 @@
 // (an in-flight refetch after navigation would surface a stale
 // ErrorPanel during the route transition).
 import { useNavigate } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
@@ -27,26 +28,26 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import {
-  reclaimInstallationToken,
-  useSkipRemainingSetup,
-} from '../use-skip-remaining-setup';
+import { reclaimInstallationToken, useSkipRemainingSetup } from '../use-skip-remaining-setup';
 import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 interface StartResult {
   readonly smokeTestAddress: string;
+  readonly expiresAt?: string;
 }
 
 interface CheckResult {
-  readonly status: 'pending' | 'received';
+  readonly status: 'pending' | 'received' | 'expired';
 }
 
 export function InboundSmokeStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [pollingEnabled, setPollingEnabled] = useState(false);
+  const [expired, setExpired] = useState(false);
   const skipRemaining = useSkipRemainingSetup();
 
   const startQuery = useQuery({
@@ -64,33 +65,68 @@ export function InboundSmokeStep(): ReactElement {
   });
 
   const checkQuery = useQuery({
-    queryKey: [...setupQueryKeys.all, 'inbound-smoke-check'] as const,
+    queryKey: [
+      ...setupQueryKeys.all,
+      'inbound-smoke-check',
+      startQuery.data?.smokeTestAddress,
+    ] as const,
     queryFn: async () => {
       const response = await apiClient.fetch<{ data: CheckResult }>(
         '/api/v1/setup/inbound-smoke-test/check',
-        { method: 'POST', body: {} },
+        { method: 'GET' },
       );
       return response.data;
     },
     enabled: pollingEnabled && startQuery.data !== undefined,
-    refetchInterval: 5_000,
+    refetchInterval: (query) =>
+      !query.state.error && query.state.data?.status === 'pending' ? 5_000 : false,
     refetchOnWindowFocus: false,
     retry: false,
   });
 
-  useEffect(() => {
-    if (startQuery.isSuccess && !pollingEnabled) {
-      setPollingEnabled(true);
-    }
-  }, [startQuery.isSuccess, pollingEnabled]);
+  const confirmation = useMutation({
+    mutationFn: () =>
+      apiClient.fetch<{ data: CheckResult }>('/api/v1/setup/inbound-smoke-test/check', {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: async (response) => {
+      if (response.data.status !== 'received') {
+        setExpired(true);
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: setupQueryKeys.status() });
+      await navigate({ to: '/setup/brevo' });
+    },
+    retry: false,
+  });
 
   useEffect(() => {
-    if (checkQuery.data?.status === 'received') {
+    if (!startQuery.data) return;
+    const deadline = startQuery.data.expiresAt
+      ? Date.parse(startQuery.data.expiresAt)
+      : startQuery.dataUpdatedAt + 300_000;
+    const remaining = Number.isFinite(deadline) ? deadline - Date.now() : 0;
+    setExpired(remaining <= 0);
+    setPollingEnabled(remaining > 0);
+    if (remaining <= 0) return;
+    const timeout = setTimeout(() => {
+      setExpired(true);
       setPollingEnabled(false);
-      void queryClient.invalidateQueries({ queryKey: setupQueryKeys.status() });
-      void navigate({ to: '/setup/brevo' });
+    }, remaining);
+    return () => clearTimeout(timeout);
+  }, [startQuery.data, startQuery.dataUpdatedAt]);
+
+  useEffect(() => {
+    if (!expired && checkQuery.data?.status === 'received') {
+      setPollingEnabled(false);
+      if (confirmation.isIdle) confirmation.mutate();
+    } else if (checkQuery.data?.status === 'expired') {
+      setExpired(true);
+      setPollingEnabled(false);
     }
-  }, [checkQuery.data, navigate, queryClient]);
+    if (checkQuery.isError) setPollingEnabled(false);
+  }, [checkQuery.data, checkQuery.isError, confirmation.isIdle, confirmation.mutate, expired]);
 
   // HIGH 2 (CAP-041 fix): 401 → re-claim the installation token.
   const handleReclaim = (): void => {
@@ -104,7 +140,7 @@ export function InboundSmokeStep(): ReactElement {
         <ErrorPanel
           message={error.message}
           code={error.code}
-          retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          retryLabel={isUnauthorized ? t('Re-claim installation token') : t('Retry')}
           onRetry={isUnauthorized ? handleReclaim : retry}
         />
       );
@@ -114,8 +150,8 @@ export function InboundSmokeStep(): ReactElement {
 
   return (
     <Card
-      title="Inbound smoke test"
-      description="Send an email to the smoke test address to confirm routing."
+      title={t('Inbound smoke test')}
+      description={t('Send an email to the smoke test address to confirm routing.')}
     >
       <SetupGuidance
         purpose="Prove that an external email can travel through Cloudflare Email Routing into the Worker."
@@ -126,22 +162,23 @@ export function InboundSmokeStep(): ReactElement {
           'Wait for the status to become received, or select Check now.',
         ]}
         success="The inbound route is confirmed and the wizard moves to Brevo configuration."
-        note="The generated address expires after 5 minutes. If it expires, reload this step to generate a new address."
+        note="The generated address expires after 5 minutes. If it expires, restart the test to generate a new address."
       />
       <div role="status" aria-live="polite">
         {startQuery.isPending ? (
           <p data-testid="inbound-starting">
-            <Spinner label="Starting inbound smoke test" />
+            <Spinner label={t('Starting inbound smoke test')} />
           </p>
         ) : null}
         {startQuery.data !== undefined ? (
           <Alert variant="info" testId="inbound-address">
-            Send an email to: <code>{startQuery.data.smokeTestAddress}</code>
+            {t('Send an email to: ')}
+            <code>{startQuery.data.smokeTestAddress}</code>
           </Alert>
         ) : null}
         {checkQuery.isPending && startQuery.data !== undefined ? (
           <p data-testid="inbound-checking">
-            <Spinner label="Waiting for inbound message" />
+            <Spinner label={t('Waiting for inbound message')} />
           </p>
         ) : null}
       </div>
@@ -152,34 +189,49 @@ export function InboundSmokeStep(): ReactElement {
         : null}
       {checkQuery.isError && checkQuery.error !== null
         ? renderError(checkQuery.error, () => {
+            if (!expired) setPollingEnabled(true);
             void checkQuery.refetch();
           })
         : null}
+      {confirmation.isError ? renderError(confirmation.error, () => confirmation.mutate()) : null}
+      {expired ? (
+        <Alert variant="info" testId="inbound-expired">
+          {t('The test address has expired. Restart the test to generate a new address.')}
+        </Alert>
+      ) : null}
       <div className="wizard-actions">
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          disabled={checkQuery.isFetching}
+          disabled={checkQuery.isFetching || expired || !startQuery.data || confirmation.isPending}
           aria-busy={checkQuery.isFetching}
           onClick={() => {
             void checkQuery.refetch();
           }}
           data-testid="inbound-check-now"
         >
-          {checkQuery.isFetching ? <Spinner /> : 'Check now'}
+          {checkQuery.isFetching ? <Spinner /> : t('Check now')}
         </Button>
+        {expired ? (
+          <Button
+            type="button"
+            disabled={startQuery.isFetching}
+            onClick={() => {
+              confirmation.reset();
+              void startQuery.refetch();
+            }}
+          >
+            {t('Restart test')}
+          </Button>
+        ) : null}
       </div>
       {skipRemaining.error !== null ? (
         <ErrorPanel
           message={skipRemaining.error.message}
           code={skipRemaining.error.code}
-          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            skipRemaining.isUnauthorized
-              ? handleReclaim
-              : () => void skipRemaining.skip()
-          }
+          retryLabel={skipRemaining.isUnauthorized ? t('Re-claim installation token') : t('Retry')}
+          onRetry={skipRemaining.isUnauthorized ? handleReclaim : () => void skipRemaining.skip()}
         />
       ) : null}
       <SkipRemainingSetupButton

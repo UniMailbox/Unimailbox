@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — MailboxError.
 //
 // CAP-042 (Batch 5) AC 20. Shared error state for the authorized
@@ -18,14 +19,18 @@ export interface MailboxErrorProps {
 }
 
 export function MailboxError({ message, code, onRetry }: MailboxErrorProps): ReactElement {
+  const t = useT();
   return (
     <main className="auth-page" data-testid="mailbox-error">
-      <Card title="Could not load mailbox" description="The mailbox state is unavailable.">
+      <Card
+        title={t('Could not load mailbox')}
+        description={t('The mailbox state is unavailable.')}
+      >
         <ErrorPanel
           message={message}
           code={code}
           onRetry={onRetry}
-          retryLabel="Retry"
+          retryLabel={t('Retry')}
           testId="mailbox-error-panel"
         />
       </Card>

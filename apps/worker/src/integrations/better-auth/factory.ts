@@ -114,7 +114,13 @@ export async function createBetterAuth(
   config: PlatformConfig,
   options: CreateBetterAuthOptions = {},
 ): Promise<BetterAuthInstance> {
-  const secret = options.secretOverride ?? (await readSecret(env.BETTER_AUTH_SECRET));
+  const secretBinding = env.BETTER_AUTH_SECRET;
+  if (options.secretOverride === undefined && secretBinding === undefined) {
+    throw new Error('Better Auth compatibility adapter is not configured');
+  }
+  const secret =
+    options.secretOverride ??
+    (await readSecret(secretBinding as NonNullable<Env['BETTER_AUTH_SECRET']>));
   // `drizzle(env.DB, { schema })` is the canonical Workers + D1 setup;
   // `transaction: false` is required because D1 disallows SQL-level
   // BEGIN TRANSACTION (spike-evidence.md §D1 transaction and atomic

@@ -4,8 +4,7 @@
 //
 // Thin wrapper around `reclaimStaleOutboundJobs` (job-repository.ts) that
 // re-enqueues each reclaimed job onto the OUTBOUND queue, sweeps `queued`
-// rows whose enqueue was lost, and emits a single structured log line per
-// cron tick. The repository handles the SQL — this file is the orchestrator
+// rows whose enqueue was lost, and logs recovery counts only when work occurs. The repository handles the SQL — this file is the orchestrator
 // that the scheduled entrypoint calls.
 //
 // R-LOG-001: log lines must NOT include message bodies, attachment bytes,
@@ -14,11 +13,13 @@
 // logged). Counts are safe; reclaimed job IDs are intentionally omitted from
 // logs even though they cross this boundary (the caller passes them to the
 // queue, which is not a log sink).
+import { enqueueScheduledJob } from './enqueue-scheduled-job';
 import type { Database } from '../../platform/database';
 import { leaseCutoff, orphanSweepCutoff } from '../../platform/outbox-config';
+import { sqliteTimestamp } from '../../platform/idempotency';
 import { logger } from '../../platform/logger';
 import {
-  findOrphanedQueuedJobs,
+  claimOrphanedQueuedJobs,
   reclaimStaleOutboundJobs,
   type ReclaimResult,
 } from './job-repository';
@@ -34,7 +35,7 @@ import {
  * that the message was accepted, not the response payload.
  */
 export interface OutboundJobEnqueuer {
-  send(body: string): Promise<unknown>;
+  send(body: string, options?: { delaySeconds: number }): Promise<unknown>;
 }
 
 /**
@@ -59,11 +60,7 @@ export interface OutboundJobEnqueuer {
  *             Production calls pass `new Date()`; tests inject a fixed clock.
  * @param outbound — Queue producer (or structural equivalent) for the
  *             OUTBOUND queue.
- * @param requestId — CAP-040 / R-AUDIT-001: optional correlation UUID
- *             synthesised by the cron entrypoint. Currently unused (the
- *             reclaim path emits no audit rows); threaded through for
- *             forward compatibility — a future audit-emitting cron target
- *             will reuse it.
+ * @param requestId — optional Cron correlation UUID for the activity summary.
  */
 export async function reclaimStaleJobs(
   db: Database,
@@ -71,9 +68,6 @@ export async function reclaimStaleJobs(
   outbound: OutboundJobEnqueuer,
   requestId?: string,
 ): Promise<ReclaimResult> {
-  // Reference requestId so the lint does not flag an unused parameter;
-  // a future cron audit target will thread it through.
-  void requestId;
   const cutoff = leaseCutoff(now);
   const result = await reclaimStaleOutboundJobs(db, cutoff);
 
@@ -82,7 +76,7 @@ export async function reclaimStaleJobs(
     try {
       await outbound.send(JSON.stringify({ jobId }));
       enqueued += 1;
-    } catch (error) {
+    } catch {
       // R-LOG-001: no job ID here — the warn says what failed and why, not
       // which row. The row is already safely back in 'queued'; the orphan
       // sweep below re-drives it on a later tick once it has been queued
@@ -91,7 +85,7 @@ export async function reclaimStaleJobs(
         { event: 'outbound.reclaim_reenqueue_failed' },
         {
           source: 'reclaim-stale-jobs',
-          error: error instanceof Error ? error.message : String(error),
+          error: 'QUEUE_ENQUEUE_FAILED',
         },
       );
     }
@@ -107,12 +101,16 @@ export async function reclaimStaleJobs(
   // call carries the message ID as its idempotency key (R-OUTBOUND-004) so a
   // duplicate send cannot double-deliver.
   let enqueuedOrphans = 0;
-  const orphanedIds = await findOrphanedQueuedJobs(db, orphanSweepCutoff(now));
-  for (const jobId of orphanedIds) {
+  const orphanedIds = await claimOrphanedQueuedJobs(
+    db,
+    orphanSweepCutoff(now),
+    sqliteTimestamp(now),
+  );
+  for (const job of orphanedIds) {
     try {
-      await outbound.send(JSON.stringify({ jobId }));
+      await enqueueScheduledJob(db, outbound, job.id, job.scheduledAt, now);
       enqueuedOrphans += 1;
-    } catch (error) {
+    } catch {
       // R-LOG-001: same shape as the re-enqueue warn above — what failed and
       // why, never which row. The row stays `queued`; the next tick's sweep
       // retries it.
@@ -120,7 +118,7 @@ export async function reclaimStaleJobs(
         { event: 'outbound.orphan_sweep_reenqueue_failed' },
         {
           source: 'reclaim-stale-jobs',
-          error: error instanceof Error ? error.message : String(error),
+          error: 'QUEUE_ENQUEUE_FAILED',
         },
       );
     }
@@ -128,16 +126,17 @@ export async function reclaimStaleJobs(
 
   // R-LOG-001: counts only. No job IDs, no `locked_by`, no error bodies.
   // Counts ride in `context` (free-form) — `LogFields` is a closed shape.
-  logger.info(
-    { event: 'outbound.reclaim' },
-    {
-      source: 'reclaim-stale-jobs',
-      reclaimed: result.reclaimed,
-      terminal: result.terminal,
-      enqueued,
-      enqueuedOrphans,
-    },
-  );
+  if (result.reclaimed > 0 || result.terminal > 0 || enqueuedOrphans > 0)
+    logger.info(
+      { event: 'outbound.reclaim', ...(requestId ? { requestId } : {}) },
+      {
+        source: 'reclaim-stale-jobs',
+        reclaimed: result.reclaimed,
+        terminal: result.terminal,
+        enqueued,
+        enqueuedOrphans,
+      },
+    );
 
   return result;
 }

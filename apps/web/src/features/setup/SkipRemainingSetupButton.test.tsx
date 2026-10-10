@@ -19,8 +19,7 @@ describe('SkipRemainingSetupButton', () => {
     const button = screen.getByTestId('setup-skip-remaining');
     expect(button).toBeInTheDocument();
     expect(button.textContent).toBe('Skip remaining setup');
-    // The Button primitive uses variantClass['secondary'] === 'btn btn-secondary'.
-    expect(button.className).toContain('btn-secondary');
+    expect(button).toHaveAttribute('data-slot', 'button');
     // The Button primitive defaults type='button'.
     expect(button.getAttribute('type')).toBe('button');
     expect(button).toBeEnabled();
@@ -51,15 +50,15 @@ describe('SkipRemainingSetupButton', () => {
   it('does not invoke onSkip when disabled', async () => {
     const onSkip = vi.fn();
     const user = userEvent.setup();
-    render(
-      <SkipRemainingSetupButton onSkip={onSkip} submitting={false} disabled={true} />,
-    );
+    render(<SkipRemainingSetupButton onSkip={onSkip} submitting={false} disabled={true} />);
     await user.click(screen.getByTestId('setup-skip-remaining'));
     expect(onSkip).not.toHaveBeenCalled();
   });
 
   it('wraps the button in wizard-actions so the visual sits below the primary CTA', () => {
-    const { container } = render(<SkipRemainingSetupButton onSkip={() => undefined} submitting={false} />);
+    const { container } = render(
+      <SkipRemainingSetupButton onSkip={() => undefined} submitting={false} />,
+    );
     expect(container.querySelector('.wizard-actions')).not.toBeNull();
   });
 });

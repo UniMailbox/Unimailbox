@@ -12,6 +12,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CURRENT_SCHEMA_VERSION as CONTRACT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { migrationsDb } from './migrationsDb';
+import settingsRevisionVerification from '../../../migrations/0025_system_settings_revision.verify.sql?raw';
+import scheduledSendVerification from '../../../migrations/0033_scheduled_send.verify.sql?raw';
+import attachmentCleanupVerification from '../../../migrations/0032_attachment_cleanup.verify.sql?raw';
 
 const NEW_UUID = '00000000-0000-4000-8000-000000000001';
 const NOW = '2026-01-01 00:00:00';
@@ -47,10 +50,222 @@ describe('migrationsDb (worker pool)', () => {
     await reset();
   });
 
+  it('0033 adds nullable schedule fields and preserves existing outbox rows', async () => {
+    const db = await migrationsDb({ through: '0032_attachment_cleanup' });
+    const now = '2026-01-01 00:00:00';
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO encrypted_credentials(id,name,version,ciphertext,iv,auth_tag,created_at,updated_at) VALUES('credential','schedule-upgrade',1,x'00',zeroblob(12),zeroblob(16),?,?)`,
+        )
+        .bind(now, now),
+      db
+        .prepare(
+          `INSERT INTO provider_connections(id,provider_key,label,credential_id,status,created_at,updated_at) VALUES('connection','brevo','Upgrade','credential','active',?,?)`,
+        )
+        .bind(now, now),
+      db
+        .prepare(
+          `INSERT INTO messages(id,from_address,status,created_at,updated_at) VALUES('message','upgrade@example.com','queued',?,?)`,
+        )
+        .bind(now, now),
+      db
+        .prepare(
+          `INSERT INTO outbound_jobs(id,message_id,provider_connection_id,status,created_at,updated_at) VALUES('job','message','connection','queued',?,?)`,
+        )
+        .bind(now, now),
+    ]);
+    await migrationsDb();
+    expect(
+      await db
+        .prepare(
+          `SELECT status,scheduled_at,mailbox_id,schedule_revision FROM outbound_jobs WHERE id='job'`,
+        )
+        .first(),
+    ).toEqual({ status: 'queued', scheduled_at: null, mailbox_id: null, schedule_revision: 0 });
+    for (const sql of scheduledSendVerification
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean)) {
+      const results = await db.prepare(sql).all<{ pass?: number }>();
+      for (const row of results.results) expect(row.pass).toBe(1);
+    }
+  });
+
+  it('0032 preserves existing expired uploads and leaves cleanup retryable on upgrade', async () => {
+    const db = await migrationsDb({ through: '0031_user_preferences' });
+    const actor = crypto.randomUUID();
+    const domain = crypto.randomUUID();
+    const mailbox = crypto.randomUUID();
+    const upload = crypto.randomUUID();
+    await insertUser(db, actor, 'cleanup-upgrade@example.com');
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO managed_domains (id,name,status) VALUES (?,'cleanup.example.com','active')",
+        )
+        .bind(domain),
+      db
+        .prepare(
+          "INSERT INTO mailboxes (id,domain_id,owner_user_id,local_part,status) VALUES (?,?,?,'cleanup','active')",
+        )
+        .bind(mailbox, domain, actor),
+      db
+        .prepare(
+          `INSERT INTO attachment_uploads (id,owner_user_id,mailbox_id,kv_key,filename,content_type,size_bytes,status,expires_at,created_at)
+        VALUES (?,?,?,?,'old.txt','text/plain',1,'expired',?,?)`,
+        )
+        .bind(upload, actor, mailbox, `attachment:${upload}`, NOW, NOW),
+    ]);
+    const original = await db
+      .prepare('SELECT * FROM attachment_uploads WHERE id=?')
+      .bind(upload)
+      .first();
+    await migrationsDb();
+    expect(
+      await db.prepare('SELECT * FROM attachment_uploads WHERE id=?').bind(upload).first(),
+    ).toEqual({ ...original, cleanup_completed_at: null });
+    for (const sql of attachmentCleanupVerification
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)) {
+      const rows = await db.prepare(sql).all<{ pass: number }>();
+      for (const row of rows.results) expect(row.pass).toBe(1);
+    }
+    await migrationsDb();
+    expect(
+      await db
+        .prepare(
+          "SELECT count(*) AS count FROM d1_migrations WHERE name='0032_attachment_cleanup.sql'",
+        )
+        .first(),
+    ).toEqual({ count: 1 });
+  });
+
+  it('0030 preserves published capability metadata and usage foreign keys while raising the storage ceiling', async () => {
+    const db = await migrationsDb({ through: '0029_editor_assets' });
+    const actor = crypto.randomUUID();
+    const domain = crypto.randomUUID();
+    const mailbox = crypto.randomUUID();
+    const asset = crypto.randomUUID();
+    const resource = crypto.randomUUID();
+    await insertUser(db, actor, 'editor-upgrade@example.com');
+    await db.batch([
+      db
+        .prepare(
+          "INSERT INTO managed_domains (id,name,status) VALUES (?,'upgrade.example.com','active')",
+        )
+        .bind(domain),
+      db
+        .prepare(
+          "INSERT INTO mailboxes (id,domain_id,owner_user_id,local_part,status) VALUES (?,?,?,'upgrade','active')",
+        )
+        .bind(mailbox, domain, actor),
+      db
+        .prepare(
+          "INSERT INTO editor_assets (id,owner_user_id,mailbox_id,secret_hash,object_key,filename,content_type,size_bytes,kind,created_at,expires_at) VALUES (?,?,?,'hash','unchanged-key','file.pdf','application/pdf',12,'file',?,?)",
+        )
+        .bind(asset, actor, mailbox, NOW, NOW),
+      db
+        .prepare(
+          "INSERT INTO editor_asset_usages (asset_id,resource_type,resource_id) VALUES (?,'message',?)",
+        )
+        .bind(asset, resource),
+    ]);
+    const original = await db.prepare('SELECT * FROM editor_assets WHERE id=?').bind(asset).first();
+    await migrationsDb();
+    expect(await db.prepare('SELECT * FROM editor_assets WHERE id=?').bind(asset).first()).toEqual(
+      original,
+    );
+    expect(
+      await db.prepare('SELECT * FROM editor_asset_usages WHERE asset_id=?').bind(asset).first(),
+    ).toEqual({ asset_id: asset, resource_type: 'message', resource_id: resource });
+    expect((await db.prepare('PRAGMA foreign_key_check').all()).results).toEqual([]);
+    await expect(
+      db.prepare('DELETE FROM editor_assets WHERE id=?').bind(asset).run(),
+    ).rejects.toThrow();
+    await db
+      .prepare('UPDATE editor_assets SET size_bytes=? WHERE id=?')
+      .bind(100 * 1024 * 1024, asset)
+      .run();
+    await expect(
+      db
+        .prepare('UPDATE editor_assets SET size_bytes=? WHERE id=?')
+        .bind(100 * 1024 * 1024 + 1, asset)
+        .run(),
+    ).rejects.toThrow();
+    expect(
+      await db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='trigger' AND name='editor_assets_pending_quota'",
+        )
+        .first(),
+    ).not.toBeNull();
+  });
+
   it('R-DATA-004: PRAGMA foreign_keys is ON', async () => {
     const db = await migrationsDb();
     const row = await db.prepare('PRAGMA foreign_keys').first<{ foreign_keys: number }>();
     expect(row?.foreign_keys).toBe(1);
+  });
+
+  it('0027 backfills only existing Brevo webhook projections', async () => {
+    const db = await migrationsDb({ through: '0026_admin_user_lifecycle' });
+    const brevoConnection = crypto.randomUUID();
+    const otherConnection = crypto.randomUUID();
+    const credentialId = crypto.randomUUID();
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO encrypted_credentials (id, name, version, ciphertext, iv, auth_tag, created_at, updated_at)
+         VALUES (?, 'migration-credential', 1, X'00', X'000000000000000000000000', X'00000000000000000000000000000000', ?, ?)`,
+        )
+        .bind(credentialId, NOW, NOW),
+      db
+        .prepare(
+          `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+        )
+        .bind(brevoConnection, 'brevo', 'Brevo', credentialId, NOW, NOW),
+      db
+        .prepare(
+          `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+        )
+        .bind(otherConnection, 'other', 'Other', credentialId, NOW, NOW),
+      db
+        .prepare(
+          `INSERT INTO webhook_deliveries (id, connection_id, event_type, raw_payload, message_id, status, event_time, event_time_source, created_at)
+         VALUES (?, ?, 'bounce', ?, NULL, 'processed', 1760000000000, 'provider', ?)`,
+        )
+        .bind(crypto.randomUUID(), brevoConnection, '{"messageId":"brevo-old"}', NOW),
+      db
+        .prepare(
+          `INSERT INTO webhook_deliveries (id, connection_id, event_type, raw_payload, message_id, status, event_time, event_time_source, created_at)
+         VALUES (?, ?, 'delivered', ?, NULL, 'processed', 1760000000000, 'provider', ?)`,
+        )
+        .bind(crypto.randomUUID(), otherConnection, '{"messageId":"other-old"}', NOW),
+    ]);
+
+    await migrationsDb();
+    const rows = await db
+      .prepare(
+        `SELECT connection_id, verified_provider_message_id, message_status
+         FROM webhook_deliveries ORDER BY connection_id`,
+      )
+      .all<{
+        connection_id: string;
+        verified_provider_message_id: string | null;
+        message_status: string | null;
+      }>();
+    expect(rows.results.find((row) => row.connection_id === brevoConnection)).toMatchObject({
+      verified_provider_message_id: 'brevo-old',
+      message_status: 'bounced',
+    });
+    expect(rows.results.find((row) => row.connection_id === otherConnection)).toMatchObject({
+      verified_provider_message_id: null,
+      message_status: null,
+    });
   });
 
   it('ADR-006: users has the four PBKDF2 columns', async () => {
@@ -210,7 +425,7 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
     // CAP-069: 0025 seeds the internal system-settings revision row.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0025');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0033');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {
@@ -353,6 +568,31 @@ describe('migrationsDb (worker pool)', () => {
       .prepare(`SELECT value, updated_at FROM system_settings WHERE key = 'settings_revision'`)
       .first<{ value: string; updated_at: string }>();
     expect(revision).toEqual({ value: '1', updated_at: '1970-01-01 00:00:00' });
+  });
+
+  it('0025 live verification accepts settings updates and still rejects an invalid revision timestamp', async () => {
+    const db = await migrationsDb();
+    const statements = settingsRevisionVerification
+      .split(';')
+      .map((sql) => sql.trim())
+      .filter(Boolean);
+    await db
+      .prepare("UPDATE system_settings SET updated_at = ? WHERE key = 'settings_revision'")
+      .bind(NOW)
+      .run();
+    const valid = await db.batch(statements.map((sql) => db.prepare(sql)));
+    expect(valid.flatMap((result) => result.results)).toEqual([
+      { assertion: '0025_tracking_row_exists', pass: 1 },
+      { assertion: '0025_revision_row_shape', pass: 1 },
+    ]);
+    await db
+      .prepare("UPDATE system_settings SET updated_at = 'invalid' WHERE key = 'settings_revision'")
+      .run();
+    const invalid = await db.batch(statements.map((sql) => db.prepare(sql)));
+    expect(invalid.flatMap((result) => result.results)).toContainEqual({
+      assertion: '0025_revision_row_shape',
+      pass: 0,
+    });
   });
 
   it('CAP-044: upgrading an existing administrator grants audit.read', async () => {

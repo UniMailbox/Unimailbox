@@ -17,6 +17,7 @@
 import type { Database } from '../../platform/database';
 import type { Cache } from '../../platform/cache';
 import type { Clock } from '../../platform/clock';
+import { systemClock } from '../../platform/clock';
 import type { IdGenerator } from '../../platform/ids';
 import { DomainError } from '../../platform/errors';
 import { getManagedDomain } from '../tenancy';
@@ -34,6 +35,7 @@ export interface StartSmokeTestInput {
 
 export interface StartSmokeTestResult {
   readonly smokeTestAddress: string;
+  readonly expiresAt: string;
 }
 
 /**
@@ -50,7 +52,7 @@ export interface StartSmokeTestResult {
  */
 export async function startInboundSmokeTest(
   input: StartSmokeTestInput,
-  deps: { ids: IdGenerator },
+  deps: { ids: IdGenerator; clock?: Clock },
 ): Promise<StartSmokeTestResult> {
   const domain = await getManagedDomain(input.db);
   if (!domain) {
@@ -68,13 +70,26 @@ export async function startInboundSmokeTest(
   // Track the active token for the check endpoint
   await input.cache.put('smoke:active', token, { expirationTtl: SMOKE_TTL_SECONDS });
 
-  return { smokeTestAddress: `${SMOKE_PREFIX}${token}@${domain.name}` };
+  return {
+    smokeTestAddress: `${SMOKE_PREFIX}${token}@${domain.name}`,
+    expiresAt: new Date(
+      (deps.clock ?? systemClock).unixMs() + SMOKE_TTL_SECONDS * 1000,
+    ).toISOString(),
+  };
 }
 
 // --- Check ---
 
 export interface CheckSmokeTestResult {
-  readonly status: 'received' | 'pending';
+  readonly status: 'received' | 'pending' | 'expired';
+}
+
+/** Polling is read-only; only the explicit confirmation below advances setup. */
+export async function readInboundSmokeTestStatus(cache: Cache): Promise<CheckSmokeTestResult> {
+  const token = await cache.get('smoke:active');
+  if (!token) return { status: 'expired' };
+  const result = await cache.get(`smoke-result:${token}`);
+  return { status: result ? 'received' : 'pending' };
 }
 
 /**
@@ -89,15 +104,8 @@ export async function checkInboundSmokeTest(
   input: { db: Database; cache: Cache },
   deps: { clock: Clock },
 ): Promise<CheckSmokeTestResult> {
-  const token = await input.cache.get('smoke:active');
-  if (!token) {
-    return { status: 'pending' };
-  }
-
-  const result = await input.cache.get(`smoke-result:${token}`);
-  if (!result) {
-    return { status: 'pending' };
-  }
+  const result = await readInboundSmokeTestStatus(input.cache);
+  if (result.status !== 'received') return result;
 
   // Received! Advance step to 'brevo'.
   const now = deps.clock.now().toISOString().slice(0, 19).replace('T', ' ');

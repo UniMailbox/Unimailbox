@@ -836,10 +836,12 @@ export interface ComposeMessageInput {
   /** Already-normalised (trimmed, lower-cased) recipient addresses. */
   readonly to: ReadonlyArray<string>;
   readonly cc: ReadonlyArray<string>;
+  readonly bcc?: ReadonlyArray<string>;
   readonly subject: string;
   readonly textBody: string;
-  /** Always '' in Phase 2 — the composer is plain-text only (D-CAP-044-B). */
+  /** Sanitized rich HTML; files are hosted by the editor upload flow. */
   readonly htmlBody: string;
+  readonly scheduledAt?: string;
   /** RFC 5322 threading headers; present only on a reply (D-CAP-044-C). */
   readonly inReplyTo?: string;
   readonly references?: string;
@@ -883,8 +885,10 @@ export function useComposeMessageMutation() {
           body: {
             to: input.to.map((address) => ({ address })),
             cc: input.cc.map((address) => ({ address })),
+            ...(input.bcc?.length ? { bcc: input.bcc.map((address) => ({ address })) } : {}),
             subject: input.subject,
             htmlBody: input.htmlBody,
+            ...(input.scheduledAt ? { scheduledAt: input.scheduledAt } : {}),
             textBody: input.textBody,
             ...(input.inReplyTo !== undefined ? { inReplyTo: input.inReplyTo } : {}),
             ...(input.references !== undefined ? { references: input.references } : {}),

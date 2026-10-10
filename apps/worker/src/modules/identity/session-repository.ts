@@ -90,6 +90,23 @@ export async function findSessionByRefreshHash(
   return result ?? null;
 }
 
+/** Resolve a short-lived access token's session and enforce revocation/expiry. */
+export async function findActiveSessionById(
+  db: Database,
+  sessionId: string,
+  nowSeconds: number,
+): Promise<SessionRow | null> {
+  const result = await db
+    .prepare(
+      `SELECT id, user_id, refresh_token_hash, expires_at, ip, user_agent, created_at, revoked_at
+       FROM sessions
+       WHERE id = ? AND revoked_at IS NULL AND expires_at > ?`,
+    )
+    .bind(sessionId, nowSeconds)
+    .first<SessionRow>();
+  return result ?? null;
+}
+
 /**
  * Revoke a session by setting revoked_at.
  *
@@ -125,5 +142,15 @@ export async function revokeUserSessions(
        WHERE user_id = ? AND id != ? AND revoked_at IS NULL`,
     )
     .bind(userId, exceptSessionId)
+    .run();
+}
+
+/** Revoke every session for a user, including the current one. */
+export async function revokeAllUserSessions(db: Database, userId: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE sessions SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL`,
+    )
+    .bind(userId)
     .run();
 }

@@ -3,11 +3,20 @@
   "name": "unimailbox-staging",
   "account_id": "6f215b03c5ff77ef28410254e9701d67",
   "main": "src/worker.ts",
-  "compatibility_date": "2025-09-23",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-  "routes": [{ "pattern": "staging.unimailbox.tech", "custom_domain": true }],
-  "observability": { "enabled": true },
+  "routes": [
+    {
+      "pattern": "staging.unimailbox.tech",
+      "custom_domain": true,
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -15,22 +24,50 @@
       "database_id": "e33add2e-154b-4e16-9c03-058bbc52a077",
     },
   ],
-  "r2_buckets": [{ "binding": "ATTACHMENTS", "bucket_name": "unimailbox-staging-attachments" }],
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "unimailbox-staging-attachments",
+    },
+  ],
   "kv_namespaces": [
-    { "binding": "SETUP_SESSION", "id": "cec9af62338c4eefb34c1e04edd5ffd3" },
-    { "binding": "CACHE", "id": "058a382c046940aa8c24f37a066db803" },
+    {
+      "binding": "SETUP_SESSION",
+      "id": "cec9af62338c4eefb34c1e04edd5ffd3",
+    },
+    {
+      "binding": "CACHE",
+      "id": "058a382c046940aa8c24f37a066db803",
+    },
   ],
   "queues": {
-    "producers": [{ "binding": "OUTBOUND", "queue": "unimailbox-staging-outbound" }],
-    "consumers": [{ "queue": "unimailbox-staging-outbound", "max_retries": 5 }],
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "unimailbox-staging-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "unimailbox-staging-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "unimailbox-staging-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "unimailbox-staging-outbound-dlq",
+      },
+    ],
   },
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/healthz"],
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
   },
-  "triggers": { "crons": ["*/2 * * * *"] },
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
   "secrets_store_secrets": [
     {
       "binding": "INSTALLATION_TOKEN",
@@ -48,5 +85,13 @@
       "secret_name": "unimailbox-staging-cursor-signing-key",
     },
   ],
-  "vars": { "ENVIRONMENT": "staging" },
+  "vars": {
+    "ENVIRONMENT": "staging",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+    "APP_ORIGIN": "https://staging.unimailbox.tech",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
+  },
 }

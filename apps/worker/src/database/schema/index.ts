@@ -12,3 +12,4 @@ export * from './outbound-mail';
 export * from './tenancy';
 export * from './messages';
 export * from './attachments';
+export * from './editor-assets';

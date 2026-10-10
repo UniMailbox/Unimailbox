@@ -17,6 +17,7 @@
 // The legacy `createWebhookDelivery` is retained for tests but the route
 // handler no longer uses it.
 
+import type { MessageStatus } from '@unimailbox/contracts';
 import type { Database } from '../../platform/database';
 import { DomainError } from '../../platform/errors';
 
@@ -25,6 +26,8 @@ export interface WebhookDeliveryInput {
   readonly connectionId: string;
   readonly eventType: string;
   readonly rawPayload: string;
+  readonly providerMessageId: string | null;
+  readonly messageStatus: MessageStatus | null;
   readonly messageId: string | null;
   /**
    * Epoch-ms timestamp of the event per the provider (or server fallback).
@@ -79,13 +82,15 @@ export function prepareCreateWebhookDelivery(
 ): D1PreparedStatement {
   return db
     .prepare(
-      'INSERT INTO webhook_deliveries (id, connection_id, event_type, raw_payload, message_id, status, event_time, event_time_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO webhook_deliveries (id, connection_id, event_type, raw_payload, verified_provider_message_id, message_status, message_id, status, event_time, event_time_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
     .bind(
       input.id,
       input.connectionId,
       input.eventType,
       input.rawPayload,
+      input.providerMessageId,
+      input.messageStatus,
       input.messageId,
       'processed',
       input.eventTimeMs,
@@ -138,16 +143,15 @@ export async function getWebhookSecretForConnection(
 }
 
 /**
- * Row shape for unmatched webhook deliveries — provider message id is
- * present (parsed from raw_payload via the STORED generated column) but
- * `message_id` is NULL. Used by `reconcileWebhookDeliveries` to find rows
- * that the early-event path wrote before the queue consumer had finished
- * marking `outbound_jobs.provider_message_id`.
+ * Verified adapter projection for an early event with no message link yet.
  */
 export interface UnmatchedWebhookDeliveryRow {
   readonly id: string;
   readonly connection_id: string;
-  readonly provider_message_id: string;
+  readonly verified_provider_message_id: string;
+  readonly message_status: MessageStatus | null;
+  readonly event_time: number | null;
+  readonly created_at: string;
 }
 
 /**
@@ -156,21 +160,26 @@ export interface UnmatchedWebhookDeliveryRow {
  * `reconcileWebhookDeliveries` to back-fill `message_id` once the canonical
  * provider id becomes known on `outbound_jobs`.
  *
- * Scoped to a single `provider_message_id` so the result set is bounded
- * (small in practice — at most a handful of unmatched rows per job). The
- * lookup uses the composite index
- * `webhook_deliveries_provider_message_id_idx` (migration 0013) so it does
+ * Scoped to one connection and verified provider message id so collisions across
+ * provider accounts cannot link another tenant's delivery to this message.
+ * The result set is bounded (at most a handful of unmatched rows per job). The
+ * lookup uses the partial index
+ * `webhook_deliveries_verified_message_idx` (migration 0027) so it does
  * not table-scan.
  */
 export async function findUnmatchedDeliveriesByProviderMessageId(
   db: Database,
+  connectionId: string,
   providerMessageId: string,
 ): Promise<ReadonlyArray<UnmatchedWebhookDeliveryRow>> {
   const rows = await db
     .prepare(
-      'SELECT id, connection_id, provider_message_id FROM webhook_deliveries WHERE provider_message_id = ? AND message_id IS NULL',
+      `SELECT id, connection_id, verified_provider_message_id, message_status, event_time, created_at
+         FROM webhook_deliveries
+        WHERE connection_id = ? AND verified_provider_message_id = ? AND message_id IS NULL
+        ORDER BY event_time ASC, created_at ASC, id ASC`,
     )
-    .bind(providerMessageId)
+    .bind(connectionId, providerMessageId)
     .all<UnmatchedWebhookDeliveryRow>();
   return rows.results ?? [];
 }
@@ -188,11 +197,14 @@ export async function findUnmatchedDeliveriesByProviderMessageId(
 export function prepareBackfillDeliveryMessageId(
   db: Database,
   deliveryId: string,
+  connectionId: string,
   messageId: string,
 ): D1PreparedStatement {
   return db
-    .prepare('UPDATE webhook_deliveries SET message_id = ? WHERE id = ? AND message_id IS NULL')
-    .bind(messageId, deliveryId);
+    .prepare(
+      'UPDATE webhook_deliveries SET message_id = ? WHERE id = ? AND connection_id = ? AND message_id IS NULL',
+    )
+    .bind(messageId, deliveryId, connectionId);
 }
 
 /**

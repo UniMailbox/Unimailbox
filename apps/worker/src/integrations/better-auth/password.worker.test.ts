@@ -28,33 +28,33 @@ const CANONICAL_ENVELOPE_RE = /^pbkdf2-sha256\$600000\$[0-9a-f]{32}\$[0-9a-f]{64
 
 describe('encodeAdr006Password', () => {
   it('emits the canonical envelope from a legacy hashPassword fixture', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     const encoded = encodeAdr006Password(stored);
 
     expect(encoded).toMatch(CANONICAL_ENVELOPE_RE);
   });
 
   it('throws on a non-`pbkdf2-sha256` algorithm', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     expect(() =>
       encodeAdr006Password({ ...stored, algorithm: 'pbkdf2-sha512' as never }),
     ).toThrow();
   });
 
   it('throws when iterations differ from the ADR-006 minimum', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     expect(() => encodeAdr006Password({ ...stored, iterations: 1 })).toThrow();
     expect(() => encodeAdr006Password({ ...stored, iterations: 600_001 })).toThrow();
   });
 
   it('throws when the salt is not exactly 16 bytes', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     expect(() => encodeAdr006Password({ ...stored, salt: new Uint8Array(15) })).toThrow();
     expect(() => encodeAdr006Password({ ...stored, salt: new Uint8Array(17) })).toThrow();
   });
 
   it('throws when the hash is not exactly 32 bytes', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     expect(() => encodeAdr006Password({ ...stored, hash: new Uint8Array(31) })).toThrow();
     expect(() => encodeAdr006Password({ ...stored, hash: new Uint8Array(33) })).toThrow();
   });
@@ -79,7 +79,7 @@ describe('betterAuthPassword.hash', () => {
 
 describe('betterAuthPassword.verify', () => {
   it('returns true for a legacy-column-shaped fixture re-encoded and re-verified', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     const encoded = encodeAdr006Password(stored);
 
     const ok = await betterAuthPassword.verify({ password: PASSWORD, hash: encoded });
@@ -87,7 +87,7 @@ describe('betterAuthPassword.verify', () => {
   });
 
   it('returns false for the wrong password against a re-encoded fixture', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     const encoded = encodeAdr006Password(stored);
 
     const ok = await betterAuthPassword.verify({ password: WRONG_PASSWORD, hash: encoded });
@@ -95,7 +95,7 @@ describe('betterAuthPassword.verify', () => {
   });
 
   it('returns false (no throw) for a malformed algorithm segment', async () => {
-    const stored = await platformHashPassword(PASSWORD);
+    const stored = await platformHashPassword(PASSWORD, 600_000);
     const encoded = encodeAdr006Password(stored);
     // encoded is `pbkdf2-sha256$600000$<salt>$<hash>` — segments 2 and 3
     // are the salt and hash hex strings.

@@ -1,3 +1,5 @@
+import { useT } from '../../infrastructure/i18n/locale';
+import { Star } from 'lucide-react';
 // apps/web — StarButton.
 //
 // CAP-043 Slice 3 / AC 13 + AC 16. The inbox row's star toggle. The
@@ -25,6 +27,7 @@ export function StarButton({
   folder = 'inbox',
   message,
 }: StarButtonProps): ReactElement {
+  const t = useT();
   const toggleStar = useToggleMessageStarMutation();
   const isStarred = message.isStarred === 1;
   return (
@@ -34,13 +37,16 @@ export function StarButton({
       className="inbox-star-button"
       data-testid="inbox-star-button"
       aria-pressed={isStarred}
-      aria-label={isStarred ? 'Unstar message' : 'Star message'}
+      aria-label={isStarred ? t('Unstar message') : t('Star message')}
       disabled={toggleStar.isPending}
       onClick={() => {
         toggleStar.mutate({ mailboxId, messageId: message.id, folder });
       }}
     >
-      {isStarred ? '★' : '☆'}
+      <Star
+        className={isStarred ? 'fill-current text-amber-500' : 'text-muted-foreground'}
+        aria-hidden="true"
+      />
     </Button>
   );
 }

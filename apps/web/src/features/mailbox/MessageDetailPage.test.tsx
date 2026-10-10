@@ -38,6 +38,7 @@ import {
 import type { AnyRouter } from '@tanstack/react-router';
 import type { MessageListItem, MessageListResponse } from '@unimailbox/contracts';
 import { MessageDetailPage } from './MessageDetailPage';
+import { formatLocalDateTime } from '../../components/ui/LocalDateTime';
 import { mailboxQueryKeys } from './mailbox-queries';
 import { authQueryKeys } from '../auth/auth-queries';
 import { jsonResponse, errorResponse } from '../../test-utils';
@@ -175,7 +176,7 @@ function dispatchFetch(routes: ReadonlyArray<RouteHandler>): {
 
 function sessionRoute(options: { session: unknown }): RouteHandler {
   return {
-    match: (url) => url.includes('/api/v1/auth/better/get-session'),
+    match: (url) => url.includes('/api/v1/auth/me'),
     response: () => {
       if (options.session === null || options.session === undefined) {
         return jsonResponse({ data: { user: null, session: null } });
@@ -242,6 +243,7 @@ interface RenderDetailOptions {
   readonly session?: unknown;
   readonly seedInboxWithActiveMessage?: boolean;
   readonly initialPath?: string;
+  readonly accessToken?: string;
 }
 
 async function renderDetailPage(options: RenderDetailOptions): Promise<{
@@ -254,7 +256,7 @@ async function renderDetailPage(options: RenderDetailOptions): Promise<{
   const { fetchImpl, calls } = dispatchFetch(options.routes);
   const apiClient = createApiClient({
     baseUrl: '',
-    getSessionToken: () => null,
+    getSessionToken: () => options.accessToken ?? null,
     fetchImpl,
   });
   const queryClient = new QueryClient({
@@ -373,10 +375,69 @@ describe('MessageDetailPage', () => {
     });
     const row = screen.getByTestId('message-attachment');
     expect(row).toHaveTextContent('report.txt');
-    expect(screen.getByTestId('message-attachment-download')).toHaveAttribute(
-      'href',
-      `/api/v1/mailboxes/${encodeURIComponent(MAILBOX_ID)}/attachments/${encodeURIComponent(DETAIL_ATTACHMENT.id)}/download`,
-    );
+    expect(screen.getByTestId('message-attachment-download')).toHaveAttribute('type', 'button');
+  });
+
+  it('loads a MIME CID image with the in-memory Bearer token and renders no remote image', async () => {
+    const inline = {
+      ...DETAIL_ATTACHMENT,
+      contentType: 'image/png',
+      disposition: 'inline' as const,
+      contentId: '<logo@example.test>',
+      sizeBytes: 4,
+    };
+    const originalCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:authenticated-cid'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    try {
+      const { calls } = await renderDetailPage({
+        accessToken: 'memory-access-token',
+        routes: [
+          sessionRoute({ session: SESSION }),
+          detailRoute(() =>
+            jsonResponse({
+              data: {
+                ...DETAIL,
+                htmlBody:
+                  '<img src="cid:logo@example.test" alt="logo"><img src="https://remote.example/pixel" alt="remote">',
+                attachments: [inline],
+              },
+            }),
+          ),
+          threadRoute(),
+          markReadRoute(),
+          {
+            match: (url, method) =>
+              method === 'GET' &&
+              url === `/api/v1/mailboxes/${MAILBOX_ID}/attachments/${inline.id}/download`,
+            response: () => new Response(new Uint8Array([1, 2, 3, 4]).buffer),
+          },
+        ],
+      });
+      await waitFor(() => {
+        expect(screen.getByAltText('logo')).toHaveAttribute('src', 'blob:authenticated-cid');
+      });
+      expect(screen.getByAltText('remote')).not.toHaveAttribute('src');
+      const binaryRequest = calls.find((call) => call.url.endsWith(`/${inline.id}/download`));
+      expect(binaryRequest?.headers.authorization).toBe('Bearer memory-access-token');
+      expect(screen.getByTestId('message-attachment-preview')).toHaveAttribute(
+        'src',
+        'blob:authenticated-cid',
+      );
+    } finally {
+      cleanup();
+      if (originalCreate) Object.defineProperty(URL, 'createObjectURL', originalCreate);
+      else Reflect.deleteProperty(URL, 'createObjectURL');
+      if (originalRevoke) Object.defineProperty(URL, 'revokeObjectURL', originalRevoke);
+      else Reflect.deleteProperty(URL, 'revokeObjectURL');
+    }
   });
 
   it('renders subject, from, to, cc, date, body, and headers collapsed by default', async () => {
@@ -395,7 +456,9 @@ describe('MessageDetailPage', () => {
     expect(screen.getByTestId('message-from').textContent).toBe('Sender Name <sender@example.com>');
     expect(screen.getByTestId('message-to').textContent).toContain('me@example.com');
     expect(screen.getByTestId('message-cc').textContent).toContain('cc@example.com');
-    expect(screen.getByTestId('message-date').textContent).toBe('2026-02-02T00:00:00Z');
+    expect(screen.getByTestId('message-date').textContent).toBe(
+      formatLocalDateTime('2026-02-02T00:00:00Z'),
+    );
 
     // Headers section exists and is collapsed by default (AC 11).
     const headers = screen.getByTestId('message-headers');
@@ -764,7 +827,7 @@ describe('MessageDetailPage', () => {
         mailboxId: MAILBOX_ID,
         messageId: MESSAGE_ID,
         code: 'INTERNAL',
-        message: 'mark-read boom',
+        message: 'Something went wrong. Please try again.',
       });
       // No crash — the body is still rendered.
       expect(screen.getByTestId('message-body')).toBeInTheDocument();

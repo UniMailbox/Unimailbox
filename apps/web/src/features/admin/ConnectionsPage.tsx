@@ -1,3 +1,6 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — ConnectionsPage.
 //
 // CAP-044 Slice 3 (AC 20). The provider-connections view at
@@ -35,6 +38,7 @@ import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Button } from '../../components/ui/Button';
 import { AlertDialog } from '../../components/ui/AlertDialog';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import {
   adminConnectionsQuery,
   revealWebhookSecret,
@@ -48,7 +52,7 @@ export function ConnectionsPage(): ReactElement {
   if (sessionQuery.data === undefined) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -60,6 +64,7 @@ export function ConnectionsPage(): ReactElement {
 }
 
 function ConnectionsContent(): ReactElement {
+  const t = useT();
   const query = adminConnectionsQuery();
 
   const hasData = query.data !== undefined;
@@ -76,7 +81,7 @@ function ConnectionsContent(): ReactElement {
   if (!hasData && query.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -85,11 +90,11 @@ function ConnectionsContent(): ReactElement {
     return (
       <main className="admin-page" data-testid="admin-not-authorized" role="status">
         <Card
-          title="Administrator access required"
-          description="Your account does not have permission to read provider connections."
+          title={t('Administrator access required')}
+          description={t('Your account does not have permission to read provider connections.')}
         >
           <p data-testid="admin-not-authorized-message">
-            Ask an administrator if you need access to this area.
+            {t('Ask an administrator if you need access to this area.')}
           </p>
         </Card>
       </main>
@@ -99,12 +104,10 @@ function ConnectionsContent(): ReactElement {
   if (!hasData && apiError !== null) {
     return (
       <main className="admin-page" data-testid="admin-error">
-        <header className="admin-header">
-          <h1>Connections</h1>
-        </header>
+        <PageHeader title={t('Connections')} />
         <Card
-          title="Could not load connections"
-          description="Provider connections are unavailable."
+          title={t('Could not load connections')}
+          description={t('Provider connections are unavailable.')}
         >
           <ErrorPanel
             message={apiError.message}
@@ -112,7 +115,7 @@ function ConnectionsContent(): ReactElement {
             onRetry={() => {
               void query.refetch();
             }}
-            retryLabel="Retry"
+            retryLabel={t('Retry')}
             testId="admin-error-panel"
           />
         </Card>
@@ -124,16 +127,14 @@ function ConnectionsContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-connections-page">
-      <header className="admin-header">
-        <h1>Connections</h1>
-      </header>
-      <Card
-        title="Provider connections"
-        description="Outbound providers configured for this deployment."
-      >
+      <PageHeader title={t('Connections')} />
+      <Card title={t('Provider connections')}>
         {apiError !== null ? (
           <div className="admin-error-banner" role="alert" data-testid="connections-error-banner">
-            <p>Could not load connections: {apiError.message}</p>
+            <p>
+              {t('Could not load connections: ')}
+              {apiError.message}
+            </p>
             <Button
               type="button"
               variant="secondary"
@@ -142,12 +143,14 @@ function ConnectionsContent(): ReactElement {
                 void query.refetch();
               }}
             >
-              Retry
+              {t('Retry')}
             </Button>
           </div>
         ) : null}
         {items.length === 0 ? (
-          <p data-testid="admin-connections-empty">No provider connections are configured yet.</p>
+          <p data-testid="admin-connections-empty">
+            {t('No provider connections are configured yet.')}
+          </p>
         ) : (
           <ul className="admin-connection-list" data-testid="admin-connections-list">
             {items.map((item) => (
@@ -161,6 +164,7 @@ function ConnectionsContent(): ReactElement {
 }
 
 function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   // Transient, component-local reveal state (R-SECRET-003 — one-time
   // display; never cached, stored, or logged).
@@ -203,18 +207,24 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
       <div className="admin-connection-row-meta">
         <span className="admin-connection-row-provider">{item.providerKey}</span>
         <span className={`admin-connection-status admin-connection-status-${item.status}`}>
-          {item.status}
+          {t(item.status)}
         </span>
       </div>
       <div className="admin-connection-row-detail">
-        <span>label: {item.label}</span>
         <span>
-          webhook:{' '}
-          {item.webhookConfigured
-            ? `configured (${item.webhookUrl ?? 'no url'})`
-            : 'not configured'}
+          {t('label: ')}
+          {item.label}
         </span>
-        <span>created: {item.createdAt}</span>
+        <span>
+          {t('webhook:')}{' '}
+          {item.webhookConfigured
+            ? t('configured ({url})', { url: item.webhookUrl ?? t('no url') })
+            : t('not configured')}
+        </span>
+        <span>
+          {t('created: ')}
+          <LocalDateTime value={item.createdAt} />
+        </span>
       </div>
       <div className="admin-connection-row-actions">
         {item.webhookConfigured ? (
@@ -230,7 +240,7 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
               setConfirming(true);
             }}
           >
-            Reveal webhook secret
+            {t('Reveal webhook secret')}
           </Button>
         ) : null}
       </div>
@@ -240,7 +250,7 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
         // that the reveal was recorded in the audit trail.
         <div className="admin-secret-reveal" data-testid={`admin-secret-revealed-${item.id}`}>
           <p className="admin-secret-reveal-note">
-            Shown once — copy it now. Every reveal is recorded in the audit trail.
+            {t('Shown once — copy it now. Every reveal is recorded in the audit trail.')}
           </p>
           <code className="admin-secret-reveal-value">{revealed.webhookSecret}</code>
           <Button
@@ -252,16 +262,17 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
               setRevealed(null);
             }}
           >
-            Hide
+            {t('Hide')}
           </Button>
         </div>
       ) : null}
       <AlertDialog
         open={confirming}
-        name={`Reveal webhook secret for ${item.providerKey}`}
-        title="Reveal the webhook signing secret?"
-        confirmLabel="Reveal"
+        name={t('Reveal webhook secret for {value0}', { value0: item.providerKey })}
+        title={t('Reveal the webhook signing secret?')}
+        confirmLabel={t('Reveal')}
         confirmDisabled={revealMutation.isPending}
+        confirmBusy={revealMutation.isPending}
         error={revealError}
         onConfirm={() => {
           revealMutation.mutate(item.id);
@@ -271,8 +282,9 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
           setRevealError(null);
         }}
       >
-        The secret for <strong>{item.label}</strong> ({item.providerKey}) will be shown once. This
-        action is audited.
+        {t('The secret for ')}
+        <strong>{item.label}</strong> ({item.providerKey}
+        {t(') will be shown once. This action is audited. ')}
       </AlertDialog>
     </li>
   );

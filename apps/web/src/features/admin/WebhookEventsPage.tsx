@@ -1,3 +1,6 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
+import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — WebhookEventsPage.
 //
 // CAP-044 Slice 3 (AC 21). The webhook-delivery view at
@@ -18,6 +21,7 @@ import { ApiError } from '../../infrastructure/api/errors';
 import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Button } from '../../components/ui/Button';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import { webhookEventsQuery, type WebhookEventDelivery } from './admin-queries';
 
 export function WebhookEventsPage(): ReactElement {
@@ -26,7 +30,7 @@ export function WebhookEventsPage(): ReactElement {
   if (sessionQuery.data === undefined) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -38,6 +42,7 @@ export function WebhookEventsPage(): ReactElement {
 }
 
 function WebhookEventsContent(): ReactElement {
+  const t = useT();
   const query = webhookEventsQuery();
 
   const hasData = query.data !== undefined;
@@ -54,7 +59,7 @@ function WebhookEventsContent(): ReactElement {
   if (!hasData && query.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -63,11 +68,11 @@ function WebhookEventsContent(): ReactElement {
     return (
       <main className="admin-page" data-testid="admin-not-authorized" role="status">
         <Card
-          title="Administrator access required"
-          description="Your account does not have permission to read webhook events."
+          title={t('Administrator access required')}
+          description={t('Your account does not have permission to read webhook events.')}
         >
           <p data-testid="admin-not-authorized-message">
-            Ask an administrator if you need access to this area.
+            {t('Ask an administrator if you need access to this area.')}
           </p>
         </Card>
       </main>
@@ -77,12 +82,10 @@ function WebhookEventsContent(): ReactElement {
   if (!hasData && apiError !== null) {
     return (
       <main className="admin-page" data-testid="admin-error">
-        <header className="admin-header">
-          <h1>Webhook events</h1>
-        </header>
+        <PageHeader title={t('Webhook events')} />
         <Card
-          title="Could not load webhook events"
-          description="Webhook deliveries are unavailable."
+          title={t('Could not load webhook events')}
+          description={t('Webhook deliveries are unavailable.')}
         >
           <ErrorPanel
             message={apiError.message}
@@ -90,7 +93,7 @@ function WebhookEventsContent(): ReactElement {
             onRetry={() => {
               void query.refetch();
             }}
-            retryLabel="Retry"
+            retryLabel={t('Retry')}
             testId="admin-error-panel"
           />
         </Card>
@@ -102,20 +105,18 @@ function WebhookEventsContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-webhook-events-page">
-      <header className="admin-header">
-        <h1>Webhook events</h1>
-      </header>
-      <Card
-        title="Webhook deliveries"
-        description="Recent provider webhook deliveries, newest first."
-      >
+      <PageHeader title={t('Webhook events')} />
+      <Card title={t('Webhook deliveries')}>
         {apiError !== null ? (
           <div
             className="admin-error-banner"
             role="alert"
             data-testid="webhook-events-error-banner"
           >
-            <p>Could not load webhook events: {apiError.message}</p>
+            <p>
+              {t('Could not load webhook events: ')}
+              {apiError.message}
+            </p>
             <Button
               type="button"
               variant="secondary"
@@ -124,13 +125,13 @@ function WebhookEventsContent(): ReactElement {
                 void query.refetch();
               }}
             >
-              Retry
+              {t('Retry')}
             </Button>
           </div>
         ) : null}
         {items.length === 0 ? (
           <p data-testid="admin-webhook-events-empty">
-            No webhook deliveries have been recorded yet.
+            {t('No webhook deliveries have been recorded yet.')}
           </p>
         ) : (
           <ul className="admin-webhook-event-list" data-testid="admin-webhook-events-list">
@@ -145,6 +146,7 @@ function WebhookEventsContent(): ReactElement {
 }
 
 function WebhookEventRow({ item }: { readonly item: WebhookEventDelivery }): ReactElement {
+  const t = useT();
   return (
     <li
       className="admin-webhook-event-row"
@@ -154,13 +156,19 @@ function WebhookEventRow({ item }: { readonly item: WebhookEventDelivery }): Rea
       <div className="admin-webhook-event-row-meta">
         <span className="admin-webhook-event-row-type">{item.event_type}</span>
         <span className={`admin-webhook-event-status admin-webhook-event-status-${item.status}`}>
-          {item.status}
+          {t(item.status)}
         </span>
-        <span className="admin-webhook-event-row-date">{item.created_at}</span>
+        <LocalDateTime className="admin-webhook-event-row-date" value={item.created_at} />
       </div>
       <div className="admin-webhook-event-row-detail">
-        <span>connection: {item.connection_id}</span>
-        <span>message: {item.message_id ?? '—'}</span>
+        <span>
+          {t('connection: ')}
+          {item.connection_id}
+        </span>
+        <span>
+          {t('message: ')}
+          {item.message_id ?? '—'}
+        </span>
       </div>
     </li>
   );

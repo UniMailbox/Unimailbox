@@ -10,7 +10,7 @@
 // Security MEDIUM #4 (CAP-041 fix): Idempotency-Key now covers PUT, PATCH,
 // DELETE, POST — GET/HEAD stay free.
 //
-// Security MEDIUM #5 (CAP-041 fix): the client throws ApiError('PAYLOAD_TOO_LARGE')
+// Security MEDIUM #5 (CAP-041 fix): the client throws ApiError('BODY_TOO_LARGE')
 // before fetch for bodies > 1 MB.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiClient } from './client';
@@ -135,7 +135,7 @@ describe('createApiClient', () => {
       getSessionToken: () => null,
       fetchImpl,
     });
-    await client.fetch('/api/v1/auth/better/sign-in/email', {
+    await client.fetch('/api/v1/auth/login', {
       method: 'POST',
       body: { email: 'a@b', password: 'secret' },
     });
@@ -152,7 +152,7 @@ describe('createApiClient', () => {
       getSessionToken: () => null,
       fetchImpl,
     });
-    await client.fetch('/api/v1/auth/better/sign-in/email', {
+    await client.fetch('/api/v1/auth/login', {
       method: 'POST',
       body: { email: 'a@b', password: 'secret' },
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -181,7 +181,7 @@ describe('createApiClient', () => {
       getSessionToken: () => null,
       fetchImpl,
     });
-    await client.fetch('/api/v1/auth/better/sign-out', { method: 'POST' });
+    await client.fetch('/api/v1/auth/logout', { method: 'POST' });
     const headers = calls[0]?.init.headers as Headers;
     expect(headers.has('Content-Type')).toBe(false);
   });
@@ -354,7 +354,7 @@ describe('createApiClient', () => {
   // Security MEDIUM #5 (CAP-041 fix): the client enforces a 1 MB body
   // cap before fetch. Anything larger throws a typed ApiError. This
   // avoids a generic NetworkError from the browser.
-  it('throws PAYLOAD_TOO_LARGE before fetch when body exceeds 1 MB', async () => {
+  it('throws BODY_TOO_LARGE before fetch when body exceeds 1 MB', async () => {
     const fetchMock = vi.fn() as unknown as typeof fetch;
     const client = createApiClient({
       baseUrl: '',
@@ -373,10 +373,33 @@ describe('createApiClient', () => {
     }
     expect(caught).toBeInstanceOf(ApiError);
     if (caught instanceof ApiError) {
-      expect(caught.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(caught.code).toBe('BODY_TOO_LARGE');
       expect(caught.status).toBe(413);
     }
     // The cap fires BEFORE the fetch — the mock is not called.
     expect((fetchMock as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(0);
   });
+});
+
+it('sends editor uploads as binary with the existing auth and idempotency headers', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 201 }));
+  const client = createApiClient({
+    baseUrl: '',
+    getSessionToken: () => 'test-token',
+    fetchImpl: fetchMock,
+  });
+  const file = new Blob([new Uint8Array(2 * 1024 * 1024)], { type: 'application/pdf' });
+  await client.fetch('/api/v1/mailboxes/example/editor-assets', {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': 'application/pdf' },
+  });
+  const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+  expect(init.body).toBe(file);
+  expect(new Headers(init.headers).get('Content-Type')).toBe('application/pdf');
+  expect(new Headers(init.headers).get('Authorization')).toBe('Bearer test-token');
+  expect(new Headers(init.headers).get('Idempotency-Key')).toBeTruthy();
+  await expect(
+    client.fetch('/api/v1/admin/settings', { method: 'POST', body: file }),
+  ).rejects.toMatchObject({ code: 'BODY_TOO_LARGE' });
 });

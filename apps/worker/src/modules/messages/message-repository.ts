@@ -18,6 +18,7 @@ export interface CreateMessageInput {
   readonly receivedAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly rawObjectKey?: string | null;
 }
 
 export interface CreateRecipientInput {
@@ -53,8 +54,8 @@ export function prepareCreateMessage(db: Database, input: CreateMessageInput): D
       `INSERT INTO messages (
       id, from_address, from_name, subject, html_body, text_body,
       message_id_header, in_reply_to_header, references_header,
-      status, received_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?, ?)`,
+      status, raw_object_key, received_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'delivered', ?, ?, ?, ?)`,
     )
     .bind(
       input.id,
@@ -66,6 +67,7 @@ export function prepareCreateMessage(db: Database, input: CreateMessageInput): D
       input.parsed.messageId,
       input.parsed.inReplyTo,
       input.parsed.references,
+      input.rawObjectKey ?? null,
       input.receivedAt,
       input.createdAt,
       input.updatedAt,
@@ -199,6 +201,13 @@ export interface UpdateMessageStatusInput {
    */
   readonly sentAt?: string;
   /**
+   * Send-side acknowledgement may stamp `sent` before a provider webhook
+   * arrives. In that one path, preserve an event timestamp already written
+   * by a webhook and only accept the transition while the event clock is
+   * empty. Provider webhook/reconcile calls leave this false.
+   */
+  readonly preserveProviderEventTime?: boolean;
+  /**
    * SQLite datetime string ('YYYY-MM-DD HH:MM:SS' UTC). The caller controls
    * the clock so tests can drive deterministic timestamps.
    */
@@ -290,17 +299,21 @@ export function prepareUpdateMessageStatus(
     .prepare(
       `UPDATE messages
           SET status = ?,
-              provider_event_time = ?,
+              provider_event_time = CASE WHEN ? = 1 THEN provider_event_time ELSE ? END,
               sent_at = COALESCE(?, sent_at),
               updated_at = ?
         WHERE id = ?
           AND status IN (SELECT value FROM json_each(?))
           AND (
-            provider_event_time IS NULL
-            OR provider_event_time < ?
+            (? = 1 AND provider_event_time IS NULL)
             OR (
-              provider_event_time = ?
-              AND CASE status
+              ? = 0
+              AND (
+                provider_event_time IS NULL
+                OR provider_event_time < ?
+                OR (
+                  provider_event_time = ?
+                  AND CASE status
                     WHEN 'failed' THEN 100
                     WHEN 'bounced' THEN 100
                     WHEN 'complained' THEN 100
@@ -312,16 +325,21 @@ export function prepareUpdateMessageStatus(
                     WHEN 'draft' THEN 10
                     ELSE -1
                   END < ?
+                )
+              )
             )
           )`,
     )
     .bind(
       input.status,
+      input.preserveProviderEventTime ? 1 : 0,
       input.providerEventTimeMs,
       input.sentAt ?? null,
       input.now,
       input.messageId,
       allowedFromJson,
+      input.preserveProviderEventTime ? 1 : 0,
+      input.preserveProviderEventTime ? 1 : 0,
       input.providerEventTimeMs,
       input.providerEventTimeMs,
       newRank,

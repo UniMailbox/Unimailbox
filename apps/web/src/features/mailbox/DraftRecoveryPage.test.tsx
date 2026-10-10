@@ -96,7 +96,7 @@ function renderPage(
     const url = typeof input === 'string' ? input : input.toString();
     calls.push(url);
     requestLog.push({ url, init: init ?? {} });
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       return session === null
         ? jsonResponse({ data: { user: null, session: null } })
         : jsonResponse({

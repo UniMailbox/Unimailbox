@@ -1,4 +1,4 @@
-// apps/worker — workers project (@cloudflare/vitest-pool-workers).
+// apps/worker — workers project (@cloudflare/vitest-plugin).
 // Tests run inside workerd against real D1/R2/KV/Queue bindings sourced from
 // apps/worker/wrangler.test.jsonc. See .claude/rules/testing.md §Mocking — never
 // mock the database; mock outbound provider HTTP at the adapter boundary.
@@ -10,7 +10,7 @@
 // Uses wrangler.test.jsonc (not wrangler.jsonc) to avoid Secrets Store bindings,
 // which miniflare cannot populate with test values. Secrets are provided as
 // plain vars instead; readSecret() handles both forms.
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({

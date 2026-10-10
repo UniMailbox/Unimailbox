@@ -101,6 +101,7 @@ async function hashToken(token: string): Promise<string> {
 
 async function createSession(userId: string): Promise<string> {
   const accessToken = crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
   const refreshTokenHash = await hashToken(crypto.randomUUID());
   const expiresAt = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
@@ -108,10 +109,10 @@ async function createSession(userId: string): Promise<string> {
     `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
      VALUES (?, ?, ?, ?, ?)`,
   )
-    .bind(crypto.randomUUID(), userId, refreshTokenHash, expiresAt, new Date().toISOString())
+    .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
     .run();
 
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 15 * 60,
   });
 

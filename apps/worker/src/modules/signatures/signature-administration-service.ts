@@ -2,6 +2,7 @@
 // The route supplies transport parsing and the audit writer. This module
 // owns target resolution, sanitization, atomic D1 writes, and replay rules.
 
+import { prepareEditorAssetUsages } from '../editor-assets';
 import { signatureSchema } from '@unimailbox/contracts';
 import type {
   AuditEventWriter,
@@ -159,6 +160,14 @@ export async function createAdminSignature(
         createdAt: now,
         updatedAt: now,
       }),
+      ...(await prepareEditorAssetUsages(db, {
+        html: signature.htmlContent,
+        text: signature.textContent,
+        actorUserId: input.actorUserId,
+        scope: { domainId: signature.domainId },
+        resourceType: 'signature',
+        resourceId: signature.id,
+      })),
       auditStatement,
     ]);
   } catch (error) {
@@ -242,6 +251,14 @@ export async function updateAdminSignature(
         updatedAt: now,
       }),
       prepareRequireSignatureUpdated(db, signature.id),
+      ...(await prepareEditorAssetUsages(db, {
+        html: signature.htmlContent,
+        text: signature.textContent,
+        actorUserId: input.actorUserId,
+        scope: { domainId: signature.domainId },
+        resourceType: 'signature',
+        resourceId: signature.id,
+      })),
       auditStatement,
       prepareCreateIdempotencyRecord(db, {
         id: ids.uuid(),

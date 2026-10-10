@@ -129,7 +129,7 @@ function renderUsersPage(options: RenderOptions): {
   const { fetchImpl: sequentialFetch, calls } = spyFetch(options.resolvers);
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/auth/better/get-session')) {
+    if (url.includes('/api/v1/auth/me')) {
       calls.push({ url, method: 'GET' });
       return authSessionResolver();
     }
@@ -203,12 +203,21 @@ describe('UsersPage (CAP-044 Slice 3 / AC 19)', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('admin-user-row')).toHaveLength(3);
     });
+    expect(screen.getByRole('table', { name: 'Users' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Users table' })).toHaveAttribute('tabindex', '0');
+    expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      'Email',
+      'Name',
+      'Status',
+      'Created',
+      'Actions',
+    ]);
     const rows = screen.getAllByTestId('admin-user-row');
     expect(rows[0]?.getAttribute('data-user-id')).toBe('00000000-0000-4000-8000-000000000001');
     expect(rows[0]?.textContent).toContain('user-1@example.com');
     expect(rows[0]?.textContent).toContain('active');
     // A null displayName renders the em-dash sentinel, never "null".
-    expect(rows[1]?.textContent).toContain('name: —');
+    expect(rows[1]?.querySelectorAll('td')[1]?.textContent).toBe('—');
     expect(rows[1]?.textContent).toContain('banned');
     expect(rows[2]?.textContent).toContain('deleted');
     // R-SECRET-003 client mirror: the row markup carries only the five

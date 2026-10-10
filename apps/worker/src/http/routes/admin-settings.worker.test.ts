@@ -67,7 +67,16 @@ async function createUser(
 
 async function createToken(userId: string): Promise<string> {
   const token = crypto.randomUUID();
-  await env.CACHE.put(`auth:${token}`, JSON.stringify({ userId }), { expirationTtl: 900 });
+  const sessionId = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(sessionId, userId, crypto.randomUUID(), 2_000_000_000, new Date().toISOString())
+    .run();
+  await env.CACHE.put(`auth:${token}`, JSON.stringify({ userId, sessionId }), {
+    expirationTtl: 900,
+  });
   return token;
 }
 
@@ -203,6 +212,25 @@ describe('PATCH /api/v1/admin/settings', () => {
         { key: 'max_mailboxes_per_user', value: '20' },
       ]),
     });
+  });
+
+  it('keeps public registration disabled even when a legacy client sends true', async () => {
+    const token = await setup();
+    const response = await SELF.fetch(BASE, {
+      method: 'PATCH',
+      body: JSON.stringify({ ...DEFAULT_SYSTEM_SETTINGS, registrationEnabled: true }),
+      headers: {
+        ...jsonHeaders(token, 'settings-registration-closed'),
+        'If-Match': '1970-01-01 00:00:00',
+      },
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.settings.registrationEnabled).toBe(false);
+    expect(
+      await env.DB.prepare(
+        `SELECT value FROM system_settings WHERE key = 'registration_enabled' LIMIT 1`,
+      ).first(),
+    ).toEqual({ value: 'false' });
   });
 
   it('R-SETTINGS-004 rejects a reused key with a different request body', async () => {

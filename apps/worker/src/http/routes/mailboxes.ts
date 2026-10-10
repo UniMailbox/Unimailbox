@@ -4,8 +4,8 @@
 // R-AUTHZ-003: Two layers — global `requirePermission` middleware + per-request
 // scope checks. The two mailbox routes do not have a pre-existing mailbox to
 // scope against: `POST` creates a new mailbox (no target yet) and `GET` returns
-// mailboxes owned by the authenticated user (the SQL `WHERE owner_user_id = ?`
-// is the scope check). The mailbox-scoped `assertCan` authorizer is therefore
+// mailboxes owned by or explicitly shared with the authenticated user. The
+// mailbox-scoped `assertCan` authorizer is therefore
 // not applicable on these routes — it is exercised on routes that operate on
 // a specific mailbox by ID (see http/routes/messages.ts and compose.ts).
 // R-MAILBOX-003: Owner (the authenticated user) is implicitly a member.
@@ -20,7 +20,7 @@ import {
   uuidSchema,
 } from '@unimailbox/contracts';
 import {
-  listMailboxesByOwner,
+  listMailboxesByUser,
   assertCanManageMailboxMembers,
   addMailboxMember,
   listMailboxMembers,
@@ -285,10 +285,10 @@ export function mailboxRoutes(): Hono<AppEnv> {
   /**
    * GET /api/v1/mailboxes
    *
-   * List all mailboxes owned by the authenticated user.
+   * List mailboxes owned by or explicitly shared with the authenticated user.
    *
    * - Checks user has message.read permission (as a proxy for access)
-   * - Returns only mailboxes where user is the owner
+   * - Returns only mailboxes where user is the owner or an explicit member
    *
    * Returns 403 PERMISSION_DENIED if user lacks message.read permission.
    */
@@ -302,7 +302,7 @@ export function mailboxRoutes(): Hono<AppEnv> {
       });
     }
 
-    const mailboxes = await listMailboxesByOwner(c.env.DB, userId);
+    const mailboxes = await listMailboxesByUser(c.env.DB, userId);
 
     return c.json({ data: { items: mailboxes } });
   });

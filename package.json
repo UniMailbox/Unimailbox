@@ -5,12 +5,12 @@
   "description": "Unimailbox rebuild — modular monolith on Cloudflare Workers",
   "type": "module",
   "engines": {
-    "node": ">=20.11.0",
-    "pnpm": ">=9.0.0"
+    "node": ">=22.23.2 <23",
+    "pnpm": "11.20.0"
   },
   "packageManager": "pnpm@11.20.0",
   "scripts": {
-    "build": "pnpm --filter @unimailbox/web run build && pnpm --filter @unimailbox/worker run build",
+    "build": "pnpm --filter @unimailbox/contracts run build && pnpm --filter @unimailbox/web run build && pnpm --filter @unimailbox/worker run build",
     "build:worker": "pnpm --filter @unimailbox/worker run build",
     "build:web": "pnpm --filter @unimailbox/web run build",
     "lint": "eslint .",
@@ -18,13 +18,20 @@
     "clean": "pnpm --filter @unimailbox/worker run clean && pnpm --filter @unimailbox/web run clean",
     "dev:worker": "pnpm --filter @unimailbox/worker run dev",
     "dev:web": "pnpm --filter @unimailbox/web run dev",
-    "test": "vitest run",
-    "test:unit": "vitest run --project '!workers'",
-    "test:worker": "pnpm --filter @unimailbox/test-kit run build && vitest run --project workers --project test-kit-workers",
+    "test": "pnpm test:unit && pnpm test:worker",
+    "test:unit": "vitest run --project unit --project web --project contracts --project email-core --project config --project test-kit --project scripts",
+    "test:worker": "pnpm --filter @unimailbox/test-kit run build && vitest run --project workers && vitest run --project test-kit-workers",
     "test:watch": "vitest --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "scaffold": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/scaffold.ts"
+    "scaffold": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/scaffold.ts",
+    "wrangler": "node --experimental-strip-types --no-warnings=ExperimentalWarning -- scripts/wrangler.ts",
+    "verify": "pnpm scaffold doctor && pnpm types:check && pnpm lint && pnpm typecheck && pnpm test:unit && pnpm build && pnpm test:worker",
+    "deploy:staging": "pnpm scaffold deploy --environment staging",
+    "deploy:production": "pnpm scaffold deploy --environment production",
+    "ops:check": "pnpm scaffold operations",
+    "types:worker": "node --experimental-strip-types --no-warnings=ExperimentalWarning -- scripts/wrangler.ts types src/platform/worker-bindings.d.ts --config wrangler.staging.jsonc --env-interface RuntimeBindings --include-runtime false --strict-vars false --env-file ../../scripts/types.env",
+    "types:check": "node --experimental-strip-types --no-warnings=ExperimentalWarning -- scripts/wrangler.ts types src/platform/worker-bindings.d.ts --config wrangler.staging.jsonc --env-interface RuntimeBindings --include-runtime false --strict-vars false --env-file ../../scripts/types.env --check"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
@@ -38,5 +45,8 @@
     "typescript": "5.5.4",
     "typescript-eslint": "8.46.4",
     "vitest": "4.1.10"
+  },
+  "imports": {
+    "#scripts/*": "./scripts/*.ts"
   }
 }

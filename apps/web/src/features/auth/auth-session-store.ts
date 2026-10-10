@@ -1,66 +1,63 @@
 // apps/web — auth session descriptor store.
 //
-// CAP-042 (Batch 5) / R-SECRET-003: the browser never holds an access,
-// refresh, or session token. The Better Auth cookie (`unimailbox.session_token`)
-// is HttpOnly — the JavaScript runtime cannot read it. This store carries
-// only the *descriptor* the UI needs: who is signed in and what they are
-// called. The cookie is set automatically by Better Auth's sign-in
-// response and sent automatically with every `credentials: 'include'`
-// fetch (the existing `ApiClient` already does this through the browser's
-// default `fetch` behavior — see `infrastructure/api/client.ts`).
+// The application access token is kept in memory only. It is never written to
+// browser storage or a JavaScript-readable cookie. The Worker keeps the
+// refresh token in an HttpOnly cookie so a hard reload can recover a session
+// without exposing that credential to this store.
 //
 // AC 21: this file MUST NOT import or reference `localStorage`,
 // `sessionStorage`, or `indexedDB`. A reviewer should be able to read the
 // source and see no `persist` middleware. `auth-session-storage.test.ts`
 // enforces the same invariant across the whole `features/auth/**` tree.
 //
-// A hard reload discards the descriptor. The user is not forcibly signed
-// out — the cookie persists — but the UI is unaware of them until
-// `authSessionQuery` re-fetches via the cookie. That is the
-// cache-backed-router path (D-CAP-041-1): the `/mailbox` `beforeLoad`
-// calls `queryClient.ensureQueryData({ queryKey: authQueryKeys.session() })`
-// so the next mount repopulates the descriptor from a single GET.
+// A hard reload discards the descriptor. The `/mailbox` `beforeLoad` calls
+// `fetchAuthSession`, which first probes `/me` and then performs one cookie-
+// backed refresh when the in-memory access token is absent or expired. The
+// recovered descriptor is written back to this memory-only store.
 import { create } from 'zustand';
 
 /**
- * AuthSessionDescriptor — the non-secret summary of the signed-in user.
- * Mirrors the union of the canonical `users` row and the Better Auth
- * `auth_sessions` row. We never store a token here; the only thing that
- * can prove identity is the HttpOnly cookie the browser holds.
- *
- * Better Auth's response shape is owned by the framework and confined
- * to this auth boundary (per CAP-042 ADR-008 / spike-evidence.md).
- * `parseSessionResponse` in `auth-queries.ts` is the single parser that
- * narrows `unknown` into this typed descriptor.
+ * AuthSessionDescriptor is the public session summary. `accessToken` is
+ * memory-only and is stripped from the descriptor before it is rendered.
  */
 export interface AuthSessionDescriptor {
   readonly userId: string;
   readonly email: string;
   readonly displayName: string | null;
   readonly expiresAt: string;
+  readonly mustChangePassword?: boolean;
+  readonly canAccessAdmin?: boolean;
+  readonly accessToken?: string;
 }
 
 export interface AuthSessionState {
   readonly session: AuthSessionDescriptor | null;
+  readonly accessToken: string | null;
 }
 
 export interface AuthSessionActions {
   readonly setAuthSession: (session: AuthSessionDescriptor) => void;
+  readonly setAccessToken: (accessToken: string) => void;
   readonly clearAuthSession: () => void;
 }
 
 export type AuthSessionStore = AuthSessionState & AuthSessionActions;
 
-const initialState: AuthSessionState = { session: null };
+const initialState: AuthSessionState = { session: null, accessToken: null };
 
 export const useAuthSession = create<AuthSessionStore>((set) => ({
   ...initialState,
-  setAuthSession: (session) => set({ session }),
-  clearAuthSession: () => set({ session: null }),
+  setAuthSession: (session) => set({ session, accessToken: session.accessToken ?? null }),
+  setAccessToken: (accessToken) => set({ accessToken }),
+  clearAuthSession: () => set(initialState),
 }));
 
 export function setAuthSession(session: AuthSessionDescriptor): void {
   useAuthSession.getState().setAuthSession(session);
+}
+
+export function setAccessToken(accessToken: string): void {
+  useAuthSession.getState().setAccessToken(accessToken);
 }
 
 export function clearAuthSession(): void {
@@ -73,5 +70,5 @@ export function clearAuthSession(): void {
  * per-feature unit tests.
  */
 export function resetAuthSessionForTesting(): void {
-  useAuthSession.setState({ session: null });
+  useAuthSession.setState(initialState);
 }

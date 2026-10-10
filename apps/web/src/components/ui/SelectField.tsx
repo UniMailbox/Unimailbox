@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 import type { ReactElement } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './shadcn/select';
 export interface SelectOption {
@@ -23,6 +24,8 @@ export function SelectField({
   disabled?: boolean;
   label?: string;
 }): ReactElement {
+  const t = useT();
+  const selected = options.find((option) => option.value === value);
   return (
     <Select
       value={value === '' ? '__empty__' : value}
@@ -32,9 +35,11 @@ export function SelectField({
       <SelectTrigger
         className="w-full min-w-0"
         {...(id === undefined ? {} : { id })}
-        {...(label === undefined ? {} : { 'aria-label': label })}
+        {...(label === undefined ? {} : { 'aria-label': t(label) })}
       >
-        <SelectValue {...(placeholder === undefined ? {} : { placeholder })} />
+        <SelectValue {...(placeholder === undefined ? {} : { placeholder: t(placeholder) })}>
+          {selected ? t(selected.label) : undefined}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (
@@ -43,7 +48,7 @@ export function SelectField({
             value={option.value === '' ? '__empty__' : option.value}
             {...(option.disabled === undefined ? {} : { disabled: option.disabled })}
           >
-            {option.label}
+            {t(option.label)}
           </SelectItem>
         ))}
       </SelectContent>

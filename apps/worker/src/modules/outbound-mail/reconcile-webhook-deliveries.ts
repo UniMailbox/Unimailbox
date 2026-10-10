@@ -13,18 +13,17 @@
 //
 // To prevent losing the event when the join misses, the processor persists
 // the `webhook_deliveries` row with `message_id = NULL` (so the row is
-// durable) and reconciliation back-fills `message_id` once the canonical
-// provider id becomes known. `processOutboundJob` calls
+// durable) and reconciliation back-fills `message_id` and replays its status
+// once the canonical provider id becomes known. `processOutboundJob` calls
 // `reconcileWebhookDeliveries` AFTER `markOutboundJobSent`.
 //
 // The use case is split in two:
 //   - `prepareReconciliationStatements` builds the batch statements for the
-//     caller to fold into a D1 batch (the audit row + the per-delivery
-//     back-fill UPDATEs). Returning prepared statements keeps the contract
+//     caller to fold into a D1 batch (the audit row, per-delivery link and
+//     status UPDATEs). Returning prepared statements keeps the contract
 //     atomic — the reconciliation either fully applies or fully fails.
-//   - The plain `reconcileWebhookDeliveries` runs the statements and emits
-//     the audit row separately, for callers that do not need a custom
-//     audit pipeline.
+//   - The plain `reconcileWebhookDeliveries` runs those statements in one
+//     D1 batch for callers without a larger transaction.
 //
 // The reconciliation is idempotent: the `WHERE message_id IS NULL`
 // predicate on each UPDATE means a second reconciliation pass finds nothing
@@ -41,13 +40,13 @@
 // UPDATEs. If the batch fails, neither the back-fills nor the audit row
 // land (R-AUDIT-001 is satisfied — the audit reflects reality, not the
 // attempt). Callers that batch this with their own writes inherit the same
-// atomicity. The standalone `reconcileWebhookDeliveries` wrapper below runs
-// the audit row as a separate `db.run`, which is best-effort for the audit
-// but commits the back-fills atomically regardless.
+// atomicity. The standalone `reconcileWebhookDeliveries` wrapper below also
+// includes the audit row in that batch.
 
 import type { Database } from '../../platform/database';
 import type { AuditEventWriter } from '@unimailbox/contracts';
 import { systemIds } from '../../platform/ids';
+import { prepareUpdateMessageStatus } from '../messages';
 import {
   findUnmatchedDeliveriesByProviderMessageId,
   prepareBackfillDeliveryMessageId,
@@ -90,12 +89,29 @@ export async function prepareReconciliationStatements(
   readonly statements: ReadonlyArray<D1PreparedStatement>;
   readonly backfilledIds: ReadonlyArray<string>;
 }> {
-  const unmatched = await findUnmatchedDeliveriesByProviderMessageId(db, params.providerMessageId);
+  const unmatched = await findUnmatchedDeliveriesByProviderMessageId(
+    db,
+    params.connectionId,
+    params.providerMessageId,
+  );
 
   const statements: D1PreparedStatement[] = [];
   const backfilledIds: string[] = [];
   for (const row of unmatched) {
-    statements.push(prepareBackfillDeliveryMessageId(db, row.id, params.messageId));
+    statements.push(
+      prepareBackfillDeliveryMessageId(db, row.id, params.connectionId, params.messageId),
+    );
+    const status = row.message_status;
+    if (status !== null && row.event_time !== null) {
+      statements.push(
+        prepareUpdateMessageStatus(db, {
+          messageId: params.messageId,
+          status,
+          providerEventTimeMs: row.event_time,
+          now: params.createdAt,
+        }),
+      );
+    }
     backfilledIds.push(row.id);
   }
 

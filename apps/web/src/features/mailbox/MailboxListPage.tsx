@@ -1,3 +1,6 @@
+import { useT } from '../../infrastructure/i18n/locale';
+import { Mail, ChevronRight } from 'lucide-react';
+import { useInAppShell } from '../../components/layouts/AppShell';
 // apps/web — MailboxListPage.
 //
 // CAP-043 Slice 1 (AC 7). Replaces the placeholder `/mailbox` shell with
@@ -30,12 +33,15 @@ import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import type { MailboxListItem } from './mailbox-queries';
 import { mailboxListQuery } from './mailbox-queries';
+import { MailboxListSkeleton } from './MailboxListSkeleton';
 import { MailboxLoading } from './MailboxLoading';
 import { MailboxError } from './MailboxError';
 import { Card } from '../../components/ui/Card';
 import { AppNav } from '../../components/AppNav';
 
 export function MailboxListPage(): ReactElement {
+  const t = useT();
+  const inShell = useInAppShell();
   const navigate = useNavigate();
   const sessionQuery = authSessionQuery();
   const query = mailboxListQuery();
@@ -55,8 +61,8 @@ export function MailboxListPage(): ReactElement {
     return <Unauthorized variant="expired" />;
   }
 
-  if (query.data === undefined && query.error === null) {
-    return <MailboxLoading />;
+  if (query.data === undefined && query.isPending) {
+    return <MailboxListSkeleton />;
   }
 
   if (query.error !== null) {
@@ -76,16 +82,14 @@ export function MailboxListPage(): ReactElement {
   return (
     <main className="mailbox-shell" data-testid="mailbox-list-page">
       <header className="mailbox-header">
-        <h1 className="mailbox-title">Mailboxes</h1>
+        <h1 className="mailbox-title">{t('Mailboxes')}</h1>
         {/* CAP-044 Slice 3 (D-CAP-044-K): the admin link, rendered only
             when the nav probe succeeds (member → nothing). */}
-        <div className="mailbox-header-meta">
-          <AppNav />
-        </div>
+        <div className="mailbox-header-meta">{!inShell ? <AppNav /> : null}</div>
       </header>
-      <Card title="Your mailboxes" description="Pick a mailbox to open its inbox.">
+      <Card>
         {items.length === 0 ? (
-          <p data-testid="mailbox-list-empty">No mailboxes yet.</p>
+          <p data-testid="mailbox-list-empty">{t('No mailboxes yet.')}</p>
         ) : (
           <ul className="mailbox-list" data-testid="mailbox-list">
             {items.map((item) => (
@@ -118,10 +122,16 @@ function MailboxListRow({ mailbox, onOpen }: MailboxListRowProps): ReactElement 
         data-testid="mailbox-list-row-button"
         onClick={onOpen}
       >
-        <span className="mailbox-list-row-address">{mailbox.address}</span>
-        {mailbox.displayName !== '' ? (
-          <span className="mailbox-list-row-display-name">{mailbox.displayName}</span>
-        ) : null}
+        <span className="mailbox-list-icon">
+          <Mail aria-hidden="true" />
+        </span>
+        <span className="mailbox-list-row-text">
+          <span className="mailbox-list-row-address">{mailbox.address}</span>
+          {mailbox.displayName !== '' ? (
+            <span className="mailbox-list-row-display-name">{mailbox.displayName}</span>
+          ) : null}
+        </span>
+        <ChevronRight className="mailbox-list-chevron" aria-hidden="true" />
       </button>
     </li>
   );

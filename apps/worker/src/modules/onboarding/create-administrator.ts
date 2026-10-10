@@ -48,7 +48,7 @@ const UNIQUE_EMAIL_VIOLATION = 'UNIQUE constraint failed: users.email';
  * Creates the administrator user and advances the installation step to 'domain'.
  *
  * R-AUTH-002: users.status is 'active' for the new administrator.
- * ADR-006: Password is hashed with PBKDF2-SHA256, 600k iterations.
+ * ADR-006: Password is hashed with PBKDF2-SHA256, 100k iterations (operator-approved hosted Workers compatibility).
  *
  * @throws DomainError SETUP_ADMINISTRATOR_EXISTS (409) if a user already exists.
  * @throws DomainError USER_EMAIL_TAKEN (409) on race-condition duplicate email.

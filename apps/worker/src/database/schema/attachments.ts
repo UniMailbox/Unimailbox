@@ -2,6 +2,7 @@
 // The SQL migration is the deployment authority; this file is typing only.
 
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import { users } from './identity';
 import { mailboxes } from './tenancy';
 import { messages } from './messages';
@@ -26,6 +27,7 @@ export const attachmentUploads = sqliteTable(
     status: text('status', { enum: ['uploaded', 'consumed', 'expired'] }).notNull(),
     expiresAt: text('expires_at').notNull(),
     consumedAt: text('consumed_at'),
+    cleanupCompletedAt: text('cleanup_completed_at'),
     createdAt: text('created_at').notNull(),
   },
   (table) => ({
@@ -33,6 +35,11 @@ export const attachmentUploads = sqliteTable(
     ownerIdx: index('attachment_uploads_owner_idx').on(table.ownerUserId),
     mailboxIdx: index('attachment_uploads_mailbox_idx').on(table.mailboxId),
     expiresAtIdx: index('attachment_uploads_expires_at_idx').on(table.expiresAt),
+    cleanupPendingIdx: index('attachment_uploads_cleanup_pending_idx')
+      .on(table.expiresAt, table.id)
+      .where(
+        sql`${table.cleanupCompletedAt} IS NULL AND ${table.status} IN ('uploaded', 'expired')`,
+      ),
   }),
 );
 

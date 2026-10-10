@@ -43,7 +43,7 @@ describe('setup-gate middleware', () => {
       const response = await SELF.fetch('http://localhost/healthz');
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body).toEqual({ ok: true, surface: 'router' });
+      expect(body).toMatchObject({ ok: true, surface: 'router', tree: 'development' });
     });
   });
 
@@ -69,7 +69,7 @@ describe('setup-gate middleware', () => {
       const response = await SELF.fetch('http://localhost/healthz');
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body).toEqual({ ok: true, surface: 'router' });
+      expect(body).toMatchObject({ ok: true, surface: 'router', tree: 'development' });
     });
 
     it('/setup is exempt — returns 200 HTML app shell (SPA fallback)', async () => {
@@ -146,7 +146,7 @@ describe('setup-gate middleware', () => {
       const response = await SELF.fetch('http://localhost/healthz');
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body).toEqual({ ok: true, surface: 'router' });
+      expect(body).toMatchObject({ ok: true, surface: 'router', tree: 'development' });
     });
 
     it('/setup is still exempt — returns 200 HTML app shell (SPA fallback)', async () => {

@@ -1,3 +1,5 @@
+import { errorMessage } from '../../infrastructure/i18n/error-messages';
+import { useLanguage, translate } from '../../infrastructure/i18n/locale';
 // ErrorPanel — composes Alert + Retry button.
 // R-API-002: the human message comes first, the machine code is shown
 // as a sub-line. AC #15: no auto-retry on 4xx other than 409/429; the
@@ -21,9 +23,16 @@ export function ErrorPanel({
   retryLabel = 'Retry',
   testId,
 }: ErrorPanelProps): ReactElement {
+  const locale = useLanguage();
   return (
     <div className="error-panel" role="alert" data-testid={testId ?? 'error-panel'}>
-      <p className="error-panel-message">{message}</p>
+      <p className="error-panel-message">
+        {code
+          ? errorMessage(code, locale)
+          : typeof message === 'string'
+            ? translate(message, locale)
+            : message}
+      </p>
       {code !== undefined ? (
         <span className="error-panel-code" data-testid="error-code">
           {code}
@@ -32,7 +41,7 @@ export function ErrorPanel({
       {onRetry !== undefined ? (
         <div className="error-panel-actions">
           <Button type="button" onClick={onRetry} variant="ghost">
-            {retryLabel}
+            {translate(retryLabel, locale)}
           </Button>
         </div>
       ) : null}

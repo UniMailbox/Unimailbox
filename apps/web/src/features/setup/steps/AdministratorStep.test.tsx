@@ -32,9 +32,7 @@ afterEach(() => {
 // CAP-063 / D-CAP-063-2: the gating tests need the QueryClient (to seed
 // the setup-status cache the way the router's `requireSetupStep` does).
 // `renderStep` exposes neither, so these mount through `mountAppRouter`.
-async function mountSkipHarness(options: {
-  fetchImpl: typeof fetch;
-}): Promise<{
+async function mountSkipHarness(options: { fetchImpl: typeof fetch }): Promise<{
   history: Awaited<ReturnType<typeof mountAppRouter>>['history'];
   queryClient: QueryClient;
 }> {
@@ -117,7 +115,6 @@ describe('AdministratorStep', () => {
       screen.getByRole('button', { name: /re-claim installation token/i }),
     ).toBeInTheDocument();
   });
-
 
   // CAP-063 AC-1 / D-CAP-063-2.
   it('renders the skip button disabled on initial render (AC-1)', async () => {

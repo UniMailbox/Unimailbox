@@ -22,6 +22,8 @@ export interface CreateJobInput {
   readonly providerConnectionId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly scheduledAt?: string;
+  readonly mailboxId?: string;
 }
 
 /**
@@ -39,6 +41,9 @@ export interface OutboundJobRow {
   readonly message_id: string;
   readonly provider_connection_id: string;
   readonly status: 'queued' | 'sending' | 'sent' | 'delayed' | 'bounced' | 'complained' | 'failed';
+  readonly scheduled_at: string | null;
+  readonly mailbox_id: string | null;
+  readonly schedule_revision: number;
   readonly attempts: number;
   readonly max_attempts: number;
   readonly locked_at: string | null;
@@ -75,10 +80,18 @@ export function isJobTerminal(status: OutboundJobRow['status']): boolean {
 export function prepareCreateOutboundJob(db: Database, input: CreateJobInput): D1PreparedStatement {
   return db
     .prepare(
-      `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, 'queued', 0, 3, ?, ?)`,
+      `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, created_at, updated_at, scheduled_at, mailbox_id)
+     VALUES (?, ?, ?, 'queued', 0, 3, ?, ?, ?, ?)`,
     )
-    .bind(input.id, input.messageId, input.providerConnectionId, input.createdAt, input.updatedAt);
+    .bind(
+      input.id,
+      input.messageId,
+      input.providerConnectionId,
+      input.createdAt,
+      input.updatedAt,
+      input.scheduledAt ?? null,
+      input.mailboxId ?? null,
+    );
 }
 
 /**
@@ -235,6 +248,7 @@ export async function claimOutboundJob(
   jobId: string,
   lockedBy: string,
   leaseUntil: string,
+  now = sqliteTimestamp(new Date()),
 ): Promise<OutboundJobRow | null> {
   // The WHERE clause is the invariant. It enforces three things in one UPDATE:
   //   1. status='queued' — not already in flight or terminal
@@ -251,7 +265,6 @@ export async function claimOutboundJob(
   // future widening (e.g. adding 'delayed' as a legal FROM-state for 'sending'
   // to support a deferred-claim path) MUST update the direction table in the
   // same change so the policy stays in one place.
-  const now = sqliteTimestamp(new Date());
   const result = await db
     .prepare(
       `UPDATE outbound_jobs
@@ -261,9 +274,10 @@ export async function claimOutboundJob(
              updated_at = ?
        WHERE id = ?
          AND status = 'queued'
+         AND (scheduled_at IS NULL OR scheduled_at <= ?)
          AND (locked_at IS NULL OR locked_at < ?)`,
     )
-    .bind(leaseUntil, lockedBy, now, jobId, leaseUntil)
+    .bind(leaseUntil, lockedBy, now, jobId, now, leaseUntil)
     .run();
 
   if (!result.meta || result.meta.changes === undefined || result.meta.changes === 0) {
@@ -432,7 +446,7 @@ export interface ReclaimResult {
 }
 
 /**
- * Scheduled reclaim. Selects every row whose lease has expired and either
+ * Scheduled reclaim. Selects at most 100 expired leases and either
  * resets it to `queued` for another attempt or marks it `failed` if the
  * row has hit `max_attempts`.
  *
@@ -464,7 +478,8 @@ export async function reclaimStaleOutboundJobs(
          FROM outbound_jobs
         WHERE status = 'sending'
           AND locked_at IS NOT NULL
-          AND locked_at < ?`,
+          AND locked_at < ?
+        ORDER BY locked_at, id LIMIT 100`,
     )
     .bind(leaseCutoffSql)
     .all<ReclaimCandidate>();
@@ -524,7 +539,7 @@ export async function reclaimStaleOutboundJobs(
 }
 
 /**
- * Orphaned-`queued` sweep (CAP-028 F1). Returns the IDs of rows sitting in
+ * Orphaned-`queued` sweep (CAP-028 F1). Reserves at most 100 rows sitting in
  * `queued` whose `updated_at` is older than the cutoff — rows whose queue
  * message was likely lost (a failed post-reclaim re-enqueue, or a
  * compose-path enqueue outage), so nothing will ever re-drive them without
@@ -539,12 +554,29 @@ export async function reclaimStaleOutboundJobs(
  * the queue consumer parses.
  *
  * @param db — Database instance
+ * The atomic timestamp update suppresses concurrent/repeated enqueue while
+ * preserving status and send attempts. A crash or send failure becomes eligible
+ * again after the grace period. Monitoring measures total delivery age from
+ * created_at, so these retry reservations cannot hide a stalled delivery.
+ *
  * @param cutoffSql — SQLite datetime string from `orphanSweepCutoff(now)`
+ * @param nowSql — start of the durable retry window.
  */
-export async function findOrphanedQueuedJobs(db: Database, cutoffSql: string): Promise<string[]> {
+export async function claimOrphanedQueuedJobs(
+  db: Database,
+  cutoffSql: string,
+  nowSql: string,
+): Promise<ReadonlyArray<{ id: string; scheduledAt: string | null }>> {
   const orphans = await db
-    .prepare(`SELECT id FROM outbound_jobs WHERE status = 'queued' AND updated_at < ?`)
-    .bind(cutoffSql)
-    .all<{ id: string }>();
-  return (orphans.results ?? []).map((row) => row.id);
+    .prepare(
+      `UPDATE outbound_jobs SET updated_at = ?
+       WHERE (scheduled_at IS NULL OR scheduled_at <= datetime(?, '+24 hours')) AND status = 'queued' AND updated_at < ? AND id IN (
+         SELECT id FROM outbound_jobs WHERE status = 'queued' AND updated_at < ?
+         AND (scheduled_at IS NULL OR scheduled_at <= datetime(?, '+24 hours'))
+         ORDER BY updated_at, id LIMIT 100
+       ) RETURNING id, scheduled_at`,
+    )
+    .bind(nowSql, nowSql, cutoffSql, cutoffSql, nowSql)
+    .all<{ id: string; scheduled_at: string | null }>();
+  return (orphans.results ?? []).map((row) => ({ id: row.id, scheduledAt: row.scheduled_at }));
 }

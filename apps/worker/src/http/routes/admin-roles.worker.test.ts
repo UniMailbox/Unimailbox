@@ -37,7 +37,16 @@ async function createUser(roleId: 'administrator' | 'member', email: string): Pr
 
 async function createToken(userId: string): Promise<string> {
   const token = crypto.randomUUID();
-  await env.CACHE.put(`auth:${token}`, JSON.stringify({ userId }), { expirationTtl: 900 });
+  const sessionId = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO sessions (id, user_id, refresh_token_hash, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(sessionId, userId, crypto.randomUUID(), 2_000_000_000, new Date().toISOString())
+    .run();
+  await env.CACHE.put(`auth:${token}`, JSON.stringify({ userId, sessionId }), {
+    expirationTtl: 900,
+  });
   return token;
 }
 

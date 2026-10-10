@@ -2,6 +2,7 @@ import { useRef, type ReactElement, type ReactNode } from 'react';
 import * as Dialog from './shadcn/alert-dialog';
 import { Alert } from './Alert';
 import { Button } from './Button';
+import { useT } from '../../infrastructure/i18n/locale';
 export interface AlertDialogProps {
   readonly open: boolean;
   /** Accessible name for the alertdialog (aria-label). Plain string. */
@@ -12,6 +13,7 @@ export interface AlertDialogProps {
   readonly cancelLabel?: string;
   /** H8: disable Confirm while the operation is pending. */
   readonly confirmDisabled?: boolean | undefined;
+  readonly confirmBusy?: boolean | undefined;
   /** H8: inline failure message; rendered as a danger Alert in the dialog. */
   readonly error?: ReactNode | undefined;
   readonly onConfirm: () => void;
@@ -26,10 +28,12 @@ export function AlertDialog({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   confirmDisabled,
+  confirmBusy,
   error,
   onConfirm,
   onCancel,
 }: AlertDialogProps): ReactElement {
+  const t = useT();
   const restoreFocus = useRef<HTMLElement | null>(null);
   return (
     <Dialog.AlertDialog
@@ -39,7 +43,7 @@ export function AlertDialog({
       }}
     >
       <Dialog.AlertDialogContent
-        aria-label={name}
+        aria-label={t(name)}
         aria-modal="true"
         data-testid="alert-dialog"
         onKeyDown={(event) => {
@@ -71,7 +75,9 @@ export function AlertDialog({
         }}
       >
         <Dialog.AlertDialogHeader>
-          <Dialog.AlertDialogTitle>{title}</Dialog.AlertDialogTitle>
+          <Dialog.AlertDialogTitle>
+            {typeof title === 'string' ? t(title) : title}
+          </Dialog.AlertDialogTitle>
           <Dialog.AlertDialogDescription asChild>
             <div>{children}</div>
           </Dialog.AlertDialogDescription>
@@ -83,15 +89,16 @@ export function AlertDialog({
         ) : null}
         <Dialog.AlertDialogFooter>
           <Dialog.AlertDialogCancel data-testid="alert-dialog-cancel">
-            {cancelLabel}
+            {t(cancelLabel)}
           </Dialog.AlertDialogCancel>
           <Button
             variant="danger"
             onClick={onConfirm}
             disabled={confirmDisabled}
+            loading={confirmBusy ?? false}
             data-testid="alert-dialog-confirm"
           >
-            {confirmLabel}
+            {t(confirmLabel)}
           </Button>
         </Dialog.AlertDialogFooter>
       </Dialog.AlertDialogContent>

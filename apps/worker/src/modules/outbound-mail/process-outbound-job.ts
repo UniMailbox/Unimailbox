@@ -26,19 +26,22 @@
 // (steps 10–11) are deliberately OUTSIDE that catch — see the comment at the
 // post-send block (CAP-028 F2).
 //
-// The adapter is supplied by the caller (dependency inversion) so tests can
-// pass a mock without reaching into module internals.
+// The caller supplies an adapter resolver (or a direct test adapter) through
+// the provider-neutral contract. Registry lookup happens after the claim.
 
+import { scheduleDelaySeconds, QUEUE_DELAY_MAX_SECONDS } from './schedule-time';
+import { prepareScheduledMessageSentFolder } from '../messages';
 import type { Database } from '../../platform/database';
 import type {
   AuditEventWriter,
   OutboundProviderAdapter,
   ProviderAttachment,
   ProviderRuntimeContext,
+  ProviderKey,
   SendProviderMessage,
 } from '@unimailbox/contracts';
-import { TerminalProviderError } from '@unimailbox/contracts';
-import type { AttachmentByteStore } from '../../platform/cache';
+import { parseProviderKey, TerminalProviderError } from '@unimailbox/contracts';
+import type { AttachmentByteStore, AttachmentObjectStore } from '../../platform/cache';
 import { DomainError } from '../../platform/errors';
 import { systemIds } from '../../platform/ids';
 import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
@@ -47,12 +50,14 @@ import { importEncryptionKey, decrypt } from '../../platform/crypto';
 import { systemClock, type Clock } from '../../platform/clock';
 import { logger } from '../../platform/logger';
 import { listMessageAttachmentsForSend, updateMessageStatus } from '../messages';
+import { listHostedMessageObjectKeys } from '../editor-assets';
 import {
   claimOutboundJob,
   getOutboundJob,
   markOutboundJobRetryable,
   markOutboundJobSent,
   markOutboundJobTerminal,
+  isJobTerminal,
   type OutboundJobRow,
 } from './job-repository';
 import { reconcileWebhookDeliveries } from './reconcile-webhook-deliveries';
@@ -60,7 +65,10 @@ import { reconcileWebhookDeliveries } from './reconcile-webhook-deliveries';
 export interface ProcessJobDeps {
   readonly db: Database;
   readonly encryptionKey: string;
-  readonly adapter: OutboundProviderAdapter;
+  /** Legacy direct injection for focused tests and setup smoke sends. */
+  readonly adapter?: OutboundProviderAdapter;
+  /** Resolve the job's provider after claiming it, so failures are recorded. */
+  readonly resolveAdapter?: (key: ProviderKey) => OutboundProviderAdapter | undefined;
   /**
    * Per-invocation UUID stamping the lock. Optional — when the queue
    * consumer does not pass one, `processOutboundJob` generates a fresh
@@ -98,6 +106,8 @@ export interface ProcessJobDeps {
    * SEND_FAILED, exactly like a missing credential.
    */
   readonly attachmentByteStore?: AttachmentByteStore;
+  /** Persistent R2 bytes; CACHE remains a compatibility fallback for staged jobs. */
+  readonly attachmentObjectStore?: AttachmentObjectStore;
 }
 
 /** Message columns read from the messages table for sending. */
@@ -121,6 +131,7 @@ interface RecipientRow {
 interface ConnectionRow {
   readonly credential_id: string;
   readonly provider_key: string;
+  readonly status: 'active' | 'disabled' | 'invalid';
 }
 
 interface CredentialRow {
@@ -135,7 +146,7 @@ interface CredentialRow {
  * via a lock-holding write.
  *
  * @param jobId — UUID of the outbound_jobs row
- * @param deps — db, the decrypted CREDENTIAL_ENCRYPTION_KEY, the adapter, and
+ * @param deps — db, the decrypted CREDENTIAL_ENCRYPTION_KEY, an adapter resolver, and
  *              optional per-invocation `lockedBy` UUID (defaults to a
  *              freshly-generated UUID) and `clock` (defaults to `systemClock`)
  * @throws DomainError(LOCK_CONTENTION) if the row is not in 'queued' status
@@ -145,26 +156,42 @@ interface CredentialRow {
  * @throws the underlying provider or pre-send error after recording it on
  *         the job (retryable path; the terminal path resolves instead)
  */
-export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): Promise<void> {
-  const { db, encryptionKey, adapter } = deps;
+export async function processOutboundJob(
+  jobId: string,
+  deps: ProcessJobDeps,
+): Promise<void | { delaySeconds: number }> {
+  const { db, encryptionKey } = deps;
   const lockedBy = deps.lockedBy ?? systemIds.uuid();
   const clock = deps.clock ?? systemClock;
 
-  // 1. Read job. A job that is already 'sent' is a redelivery — skip silently.
-  // This keeps the consumer idempotent under at-least-once delivery (R-OUTBOUND-009).
+  // 1. Read job. Terminal jobs are redeliveries — skip silently so the
+  // queue can ack them under at-least-once delivery (R-OUTBOUND-009).
   const precheckJob = await getOutboundJob(db, jobId);
   if (!precheckJob) {
     throw new Error(`Outbound job not found: ${jobId}`);
   }
-  if (precheckJob.status === 'sent') {
+  if (isJobTerminal(precheckJob.status)) {
     return;
+  }
+
+  const delaySeconds = scheduleDelaySeconds(precheckJob.scheduled_at, clock.now());
+  if (delaySeconds > 0) {
+    // A moved far-future task will be picked up by recovery within 24h.
+    if (delaySeconds > QUEUE_DELAY_MAX_SECONDS) return;
+    return { delaySeconds };
   }
 
   // 2. Claim the row atomically (R-OUTBOUND-007). The lease expiry is
   // computed from the injected clock so the claim and any later comparison
   // against it use the same instant.
   const leaseUntil = sqliteTimestamp(new Date(clock.unixMs() + OUTBOX_LEASE_TTL_MS));
-  const claimed: OutboundJobRow | null = await claimOutboundJob(db, jobId, lockedBy, leaseUntil);
+  const claimed: OutboundJobRow | null = await claimOutboundJob(
+    db,
+    jobId,
+    lockedBy,
+    leaseUntil,
+    sqliteTimestamp(clock.now()),
+  );
   if (!claimed) {
     // Either another worker holds a live lease (LOCK_CONTENTION — the queue's
     // msg.retry() is the right backoff) or the row is already in a terminal
@@ -182,6 +209,8 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
   // stranded in 'sending' with a held lease and no attempts increment.
   let sendResult: Awaited<ReturnType<OutboundProviderAdapter['send']>>;
   try {
+    if (claimed.scheduled_at && claimed.mailbox_id)
+      await prepareScheduledMessageSentFolder(db, claimed.message_id, claimed.mailbox_id).run();
     // 3. Read message. We only select the columns we need to build the send.
     const msg = await db
       .prepare(
@@ -193,12 +222,10 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
       throw new Error(`Message not found: ${claimed.message_id}`);
     }
 
-    // 4. Read recipients. bcc is intentionally not loaded — outbound providers
-    // strip it anyway and we never want to leak bcc addresses to 'to'/'cc'
-    // recipients via the provider payload.
+    // Blind recipients belong only in the provider's Bcc envelope, never To/Cc.
     const recipientsResult = await db
       .prepare(
-        "SELECT address, display_name, type FROM message_recipients WHERE message_id = ? AND type IN ('to', 'cc')",
+        "SELECT address, display_name, type FROM message_recipients WHERE message_id = ? AND type IN ('to', 'cc', 'bcc')",
       )
       .bind(claimed.message_id)
       .all<RecipientRow>();
@@ -206,11 +233,30 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
 
     // 5. Read provider connection.
     const conn = await db
-      .prepare('SELECT credential_id, provider_key FROM provider_connections WHERE id = ?')
+      .prepare('SELECT credential_id, provider_key, status FROM provider_connections WHERE id = ?')
       .bind(claimed.provider_connection_id)
       .first<ConnectionRow>();
     if (!conn) {
-      throw new Error(`Provider connection not found: ${claimed.provider_connection_id}`);
+      throw new TerminalProviderError({
+        message: `Provider connection not found: ${claimed.provider_connection_id}`,
+      });
+    }
+    if (conn.status !== 'active') {
+      throw new TerminalProviderError({
+        message: `Provider connection is ${conn.status}: ${claimed.provider_connection_id}`,
+      });
+    }
+    const providerKey = parseProviderKey(conn.provider_key);
+    const adapter = deps.resolveAdapter?.(providerKey) ?? deps.adapter;
+    if (!adapter) {
+      throw new TerminalProviderError({
+        message: `Provider adapter not registered: ${conn.provider_key}`,
+      });
+    }
+    if (adapter.key !== providerKey) {
+      throw new TerminalProviderError({
+        message: `Provider adapter mismatch for connection ${claimed.provider_connection_id}`,
+      });
     }
 
     // 6. Read encrypted credential by ID.
@@ -250,13 +296,17 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
       messageId: claimed.message_id,
     });
     const providerAttachments: ProviderAttachment[] = [];
+    const hostedObjectKeys = await listHostedMessageObjectKeys(db, claimed.message_id);
     for (const row of attachmentRows) {
+      if (hostedObjectKeys.has(row.objectKey)) continue;
       if (!deps.attachmentByteStore) {
         throw new Error(
           `Attachment byte store not provided but message ${claimed.message_id} has ${row.uploadId}`,
         );
       }
-      const bytes = await deps.attachmentByteStore.get(row.objectKey);
+      const bytes =
+        (await deps.attachmentObjectStore?.get(row.objectKey)) ??
+        (await deps.attachmentByteStore?.get(row.objectKey));
       if (!bytes) {
         throw new Error(`Attachment bytes missing for upload ${row.uploadId}`);
       }
@@ -291,7 +341,12 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
         address: r.address,
         ...(r.display_name ? { displayName: r.display_name } : {}),
       })),
-      bcc: [],
+      bcc: recipients
+        .filter((r) => r.type === 'bcc')
+        .map((r) => ({
+          address: r.address,
+          ...(r.display_name ? { displayName: r.display_name } : {}),
+        })),
       subject: msg.subject ?? '',
       html: msg.html_body ?? '',
       text: msg.text_body ?? '',
@@ -301,7 +356,14 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
       attachments: providerAttachments,
     };
 
-    const ctx: ProviderRuntimeContext = { env: { BREVO_API_KEY: apiKey } };
+    const ctx: ProviderRuntimeContext = {
+      env: {
+        // Provider-neutral adapters consume this key. BREVO_API_KEY remains
+        // as a compatibility alias for the existing Brevo adapter contract.
+        PROVIDER_API_KEY: apiKey,
+        ...(conn.provider_key === 'brevo' ? { BREVO_API_KEY: apiKey } : {}),
+      },
+    };
 
     // 9. Send. Declared outside the try so the success writes below can read
     // it without widening the steps-3–9 catch to cover them.
@@ -370,6 +432,7 @@ export async function processOutboundJob(jobId: string, deps: ProcessJobDeps): P
       status: 'sent',
       providerEventTimeMs: nowMs,
       sentAt: now,
+      preserveProviderEventTime: true,
       now,
     });
 

@@ -42,6 +42,8 @@ pnpm-debug.log*
 
 # --- disposable agent scratch, see .claude/rules/documentation.md ---
 /.tmp/
+**/.tmp/
+.pnpm-store/
 /.tmp/claude-hooks/
 
 # --- coverage ---

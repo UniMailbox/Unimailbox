@@ -90,7 +90,7 @@ function hexToBytes(hex: string): Uint8Array {
  */
 export const betterAuthPassword: BetterAuthEmailPasswordOption = {
   async hash(password: string): Promise<string> {
-    const stored = await platformHashPassword(password);
+    const stored = await platformHashPassword(password, ADR006_ITERATIONS);
     return encodeAdr006Password(stored);
   },
 

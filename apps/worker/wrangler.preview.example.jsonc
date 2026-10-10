@@ -1,0 +1,98 @@
+// Local/test topology mirrors deployment configs. Select an explicit environment for releases.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unimailbox-preview",
+  "account_id": "REPLACE_WITH_ACCOUNT_ID",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "REPLACE_WITH_PREVIEW_HOST",
+      "custom_domain": true,
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "unimailbox-preview-db",
+      "database_id": "PROVISION",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "unimailbox-preview-attachments",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SETUP_SESSION",
+      "id": "PROVISION",
+    },
+    {
+      "binding": "CACHE",
+      "id": "PROVISION",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "unimailbox-preview-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "unimailbox-preview-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "unimailbox-preview-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "unimailbox-preview-outbound-dlq",
+      },
+    ],
+  },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "secrets_store_secrets": [
+    {
+      "binding": "INSTALLATION_TOKEN",
+      "store_id": "PROVISION",
+      "secret_name": "unimailbox-preview-installation-token",
+    },
+    {
+      "binding": "CREDENTIAL_ENCRYPTION_KEY",
+      "store_id": "PROVISION",
+      "secret_name": "unimailbox-preview-credential-encryption-key",
+    },
+    {
+      "binding": "CURSOR_SIGNING_KEY",
+      "store_id": "PROVISION",
+      "secret_name": "unimailbox-preview-cursor-signing-key",
+    },
+  ],
+  "vars": {
+    "ENVIRONMENT": "preview",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+    "APP_ORIGIN": "https://REPLACE_WITH_PREVIEW_HOST",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
+  },
+}

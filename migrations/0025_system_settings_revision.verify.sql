@@ -9,4 +9,7 @@ SELECT '0025_revision_row_shape' AS assertion,
 FROM system_settings
 WHERE key = 'settings_revision'
   AND value = '1'
-  AND updated_at = '1970-01-01 00:00:00';
+  -- Settings updates advance this compare-and-swap timestamp. The seed
+  -- timestamp is only an initial-state expectation, not a live invariant.
+  AND datetime(updated_at) IS NOT NULL
+  AND updated_at >= '1970-01-01 00:00:00';

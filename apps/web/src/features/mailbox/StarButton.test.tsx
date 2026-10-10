@@ -163,7 +163,7 @@ describe('StarButton', () => {
 
       const button = await screen.findByTestId('inbox-star-button');
       expect(button).toHaveAttribute('aria-pressed', 'false');
-      expect(button.textContent).toBe('☆');
+      expect(button).toHaveAttribute('aria-pressed', 'false');
 
       const user = userEvent.setup();
       await user.click(button);
@@ -172,7 +172,7 @@ describe('StarButton', () => {
       await waitFor(() => {
         expect(screen.getByTestId('inbox-star-button')).toHaveAttribute('aria-pressed', 'true');
       });
-      expect(screen.getByTestId('inbox-star-button').textContent).toBe('★');
+      expect(screen.getByTestId('inbox-star-button')).toHaveAttribute('aria-pressed', 'true');
 
       // The request went out once, to the star endpoint, with a
       // client-minted UUID Idempotency-Key (D-CAP-041-2 — the component
@@ -218,7 +218,7 @@ describe('StarButton', () => {
       await waitFor(() => {
         expect(screen.getByTestId('inbox-star-button')).toHaveAttribute('aria-pressed', 'false');
       });
-      expect(screen.getByTestId('inbox-star-button').textContent).toBe('☆');
+      expect(screen.getByTestId('inbox-star-button')).toHaveAttribute('aria-pressed', 'false');
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         'toggle-message-star failed',

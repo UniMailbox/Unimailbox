@@ -15,6 +15,9 @@ import type {
   ProviderSendResult,
 } from '@unimailbox/contracts';
 import {
+  estimateEmailBytes,
+  OUTBOUND_SAFE_MAX_BYTES,
+  OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES,
   parseProviderKey,
   RetryableProviderError,
   TerminalProviderError,
@@ -55,7 +58,7 @@ export const brevoAdapter: OutboundProviderAdapter = {
    * @throws {DomainError} with code PROVIDER_CONFIG_ERROR (500) if the key is missing
    */
   async validateConnection(ctx: ProviderRuntimeContext): Promise<void> {
-    const apiKey = ctx.env.BREVO_API_KEY;
+    const apiKey = ctx.env.PROVIDER_API_KEY ?? ctx.env.BREVO_API_KEY;
     if (typeof apiKey !== 'string') {
       throw new DomainError({
         code: 'PROVIDER_CONFIG_ERROR',
@@ -95,7 +98,7 @@ export const brevoAdapter: OutboundProviderAdapter = {
    * @throws {RetryableProviderError} on 5xx, network failure, or malformed response
    */
   async send(ctx: ProviderRuntimeContext, msg: SendProviderMessage): Promise<ProviderSendResult> {
-    const apiKey = ctx.env.BREVO_API_KEY;
+    const apiKey = ctx.env.PROVIDER_API_KEY ?? ctx.env.BREVO_API_KEY;
     if (typeof apiKey !== 'string') {
       // Missing config is terminal — operator error, not a transient failure.
       // Provider errors carry httpStatus=undefined; the queue consumer's
@@ -105,6 +108,20 @@ export const brevoAdapter: OutboundProviderAdapter = {
       });
     }
 
+    const emailBytes = estimateEmailBytes(
+      msg.html,
+      msg.text,
+      msg.subject,
+      msg.attachments.map((file) => file.content.byteLength),
+    );
+    if (
+      emailBytes > OUTBOUND_SAFE_MAX_BYTES ||
+      (msg.attachments.length > 0 && emailBytes > OUTBOUND_LARGE_ATTACHMENT_THRESHOLD_BYTES)
+    ) {
+      throw new TerminalProviderError({
+        message: 'Email exceeds the safe Brevo size limit; use hosted file links.',
+      });
+    }
     // Map provider-neutral MailAddress to Brevo format
     const formatAddress = (addr: { address: string; displayName?: string }) => ({
       email: addr.address,
@@ -119,11 +136,15 @@ export const brevoAdapter: OutboundProviderAdapter = {
       subject: msg.subject,
       htmlContent: msg.html,
       textContent: msg.text,
-      attachment: msg.attachments.map((a) => ({
-        name: a.filename ?? 'attachment',
-        content: Buffer.from(a.content).toString('base64'),
-        contentType: a.contentType,
-      })),
+      ...(msg.attachments.length > 0
+        ? {
+            attachment: msg.attachments.map((a) => ({
+              name: a.filename ?? 'attachment',
+              content: Buffer.from(a.content).toString('base64'),
+              contentType: a.contentType,
+            })),
+          }
+        : {}),
       // R-OUTBOUND-004: provider idempotency is sent as a JSON body header.
       // Brevo's sendTransacEmail contract (developers.brevo.com/reference/sendtransacemail)
       // accepts `headers` as part of the JSON body; Idempotency-Key belongs there, NOT in

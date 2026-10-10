@@ -25,3 +25,24 @@ describe('sanitizeSignatureHtml (CAP-068)', () => {
     expect(sanitizeSignatureHtml('<a href="java\u0000script:alert(1)">x</a>')).toBe('<a>x</a>');
   });
 });
+
+it('preserves hosted images and entities without accepting embedded or executable images', () => {
+  const html = sanitizeSignatureHtml(
+    '<p>A &amp; B</p><img src="https://mail.example.com/image" alt="Logo" onerror="x"><img src="data:image/svg+xml,x"><img src="//evil.test/a"><img src="javascript:x">',
+  );
+  expect(html).toContain('<p>A &amp; B</p>');
+  expect(html).toContain('src="https://mail.example.com/image"');
+  expect(html).toContain('alt="Logo"');
+  expect(html).not.toMatch(/data:|evil|javascript|onerror/);
+});
+
+it('keeps bounded mail formatting while removing arbitrary CSS and CSS URLs', () => {
+  const html = sanitizeSignatureHtml(
+    '<h2 style="margin-left:32px;text-align:center;line-height:2;position:fixed;background:url(https://evil.test/x)"><span style="font-size:24px;color:red">Heading</span></h2><p style="margin-left:9999px;line-height:99"><span style="font-size:999px">Body</span></p>',
+  );
+  expect(html).toContain('margin-left:32px');
+  expect(html).toContain('text-align:center');
+  expect(html).toContain('line-height:2');
+  expect(html).toContain('font-size:24px');
+  expect(html).not.toMatch(/position|background|url|evil|color|999|99/);
+});

@@ -232,11 +232,7 @@ describe('parseAdditionalTrustedOrigins', () => {
         'http://localhost:5173 , https://preview.example.com,http://localhost:4173',
         'local',
       ),
-    ).toEqual([
-      'http://localhost:5173',
-      'https://preview.example.com',
-      'http://localhost:4173',
-    ]);
+    ).toEqual(['http://localhost:5173', 'https://preview.example.com', 'http://localhost:4173']);
   });
 
   it('dedupes entries (case-sensitive on the canonical origin)', () => {
@@ -244,10 +240,7 @@ describe('parseAdditionalTrustedOrigins', () => {
     // inputs that differ only in path fragment or trailing slash
     // collapse to the same canonical form.
     expect(
-      parseAdditionalTrustedOrigins(
-        'http://localhost:5173,http://localhost:5173',
-        'local',
-      ),
+      parseAdditionalTrustedOrigins('http://localhost:5173,http://localhost:5173', 'local'),
     ).toEqual(['http://localhost:5173']);
   });
 
@@ -264,24 +257,24 @@ describe('parseAdditionalTrustedOrigins', () => {
   });
 
   it('rejects an origin with credentials (userinfo) with INVALID_BETTER_AUTH_URL', () => {
-    expect(() =>
-      parseAdditionalTrustedOrigins('http://attacker:pw@example.com', 'local'),
-    ).toThrow(/credentials/);
+    expect(() => parseAdditionalTrustedOrigins('http://attacker:pw@example.com', 'local')).toThrow(
+      /credentials/,
+    );
   });
 
   it('rejects an origin with a query string with INVALID_BETTER_AUTH_URL', () => {
-    expect(() =>
-      parseAdditionalTrustedOrigins('http://localhost:5173?token=x', 'local'),
-    ).toThrow(/query/);
+    expect(() => parseAdditionalTrustedOrigins('http://localhost:5173?token=x', 'local')).toThrow(
+      /query/,
+    );
   });
 
   it('requires https for non-local environments', () => {
-    expect(() =>
-      parseAdditionalTrustedOrigins('http://preview.example.com', 'preview'),
-    ).toThrow(/https/);
-    expect(
-      parseAdditionalTrustedOrigins('https://preview.example.com', 'preview'),
-    ).toEqual(['https://preview.example.com']);
+    expect(() => parseAdditionalTrustedOrigins('http://preview.example.com', 'preview')).toThrow(
+      /https/,
+    );
+    expect(parseAdditionalTrustedOrigins('https://preview.example.com', 'preview')).toEqual([
+      'https://preview.example.com',
+    ]);
   });
 });
 

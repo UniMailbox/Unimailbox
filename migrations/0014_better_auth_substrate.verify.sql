@@ -76,6 +76,7 @@ WHERE type = 'trigger'
     'cap042_registration_keys_used_count_guard'
   );
 
+-- BEGIN LOCAL BEHAVIOR CHECKS
 -- Behavior smoke fixtures. Reserved verify IDs are removed before and after use.
 DELETE FROM auth_verifications WHERE id = 'verify-cap042-verification';
 DELETE FROM auth_sessions WHERE user_id IN ('verify-cap042-user-a', 'verify-cap042-user-b');

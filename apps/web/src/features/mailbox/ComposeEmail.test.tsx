@@ -56,6 +56,36 @@ import { resetAuthSessionForTesting } from '../auth/auth-session-store';
 import { ApiClientProvider } from '../../infrastructure/api/client-provider';
 import { createApiClient } from '../../infrastructure/api/client';
 
+// Compose tests exercise recipient validation, threading and send lifecycle.
+// The shared editor's real ProseMirror/input/upload behavior is covered separately.
+vi.mock('../../components/editor/RichTextEditor', () => ({
+  RichTextEditor: ({
+    id,
+    label,
+    value,
+    onChange,
+    error,
+  }: {
+    id: string;
+    label: string;
+    value: string;
+    onChange: (html: string, text: string) => void;
+    error?: string;
+  }) => (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <textarea
+        id={id}
+        value={value.replace(/^<p>|<\/p>$/g, '')}
+        onChange={(event) =>
+          onChange(event.target.value ? `<p>${event.target.value}</p>` : '', event.target.value)
+        }
+      />
+      {error ? <span role="alert">{error}</span> : null}
+    </div>
+  ),
+}));
+
 afterEach(() => {
   cleanup();
   resetAuthSessionForTesting();
@@ -148,7 +178,7 @@ function dispatchFetch(routes: ReadonlyArray<RouteHandler>): {
 
 function sessionRoute(): RouteHandler {
   return {
-    match: (url) => url.includes('/api/v1/auth/better/get-session'),
+    match: (url) => url.includes('/api/v1/auth/me'),
     response: () =>
       jsonResponse({
         data: {
@@ -294,13 +324,20 @@ function postCalls(calls: ReadonlyArray<CapturedRequest>): CapturedRequest[] {
 /** Types the four fields and submits — the shared "valid form" action. */
 async function fillAndSubmit(
   user: ReturnType<typeof userEvent.setup>,
-  fields: { to?: string; cc?: string; subject?: string; body?: string },
+  fields: { to?: string; cc?: string; bcc?: string; subject?: string; body?: string },
 ): Promise<void> {
   if (fields.to !== undefined) {
     await user.type(screen.getByLabelText('To'), fields.to);
   }
   if (fields.cc !== undefined) {
+    if (!screen.queryByLabelText('Cc'))
+      await user.click(screen.getByRole('button', { name: 'Add Cc' }));
     await user.type(screen.getByLabelText('Cc'), fields.cc);
+  }
+  if (fields.bcc !== undefined) {
+    if (!screen.queryByLabelText('Bcc'))
+      await user.click(screen.getByRole('button', { name: 'Add Bcc' }));
+    await user.type(screen.getByLabelText('Bcc'), fields.bcc);
   }
   if (fields.subject !== undefined) {
     await user.type(screen.getByLabelText('Subject'), fields.subject);
@@ -322,7 +359,7 @@ describe('ComposeEmail — validation (AC 2)', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(screen.getByText('At least one email address is required.')).toBeInTheDocument();
+      expect(screen.getByText('This field is required.')).toBeInTheDocument();
     });
     expect(postCalls(calls)).toHaveLength(0);
     // First erroring field (To, field order) receives focus.
@@ -338,7 +375,7 @@ describe('ComposeEmail — validation (AC 2)', () => {
     await fillAndSubmit(user, { to: 'a@b.test, not-an-email', subject: 'Hi' });
 
     await waitFor(() => {
-      expect(screen.getByText('"not-an-email" is not a valid email address.')).toBeInTheDocument();
+      expect(screen.getByText('Enter a valid email address.')).toBeInTheDocument();
     });
     expect(postCalls(calls)).toHaveLength(0);
   });
@@ -354,7 +391,7 @@ describe('ComposeEmail — validation (AC 2)', () => {
     await fillAndSubmit(user, { to: 'a@b.test', cc: 'x@y.test, nope', subject: 'Hi' });
 
     await waitFor(() => {
-      expect(screen.getByText('"nope" is not a valid email address.')).toBeInTheDocument();
+      expect(screen.getByText('Enter a valid email address.')).toBeInTheDocument();
     });
     expect(postCalls(calls)).toHaveLength(0);
   });
@@ -369,7 +406,7 @@ describe('ComposeEmail — validation (AC 2)', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Subject is required.')).toBeInTheDocument();
+      expect(screen.getByText('This field is required.')).toBeInTheDocument();
     });
     expect(postCalls(calls)).toHaveLength(0);
     // To is valid, so the FIRST error is the subject.
@@ -401,7 +438,7 @@ describe('ComposeEmail — validation (AC 2)', () => {
     await fillAndSubmit(user, { to: 'a@b.test', subject: '   ' });
 
     await waitFor(() => {
-      expect(screen.getByText('Subject is required.')).toBeInTheDocument();
+      expect(screen.getByText('This field is required.')).toBeInTheDocument();
     });
     expect(postCalls(calls)).toHaveLength(0);
   });
@@ -434,14 +471,19 @@ describe('ComposeEmail — a11y (AC 2)', () => {
 
     // Programmatic labels: getByLabelText resolves to the control.
     expect(screen.getByLabelText('To')).toBeInstanceOf(HTMLInputElement);
+    expect(screen.queryByLabelText('Cc')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Bcc')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add Cc' }));
+    await user.click(screen.getByRole('button', { name: 'Add Bcc' }));
     expect(screen.getByLabelText('Cc')).toBeInstanceOf(HTMLInputElement);
+    expect(screen.getByLabelText('Bcc')).toBeInstanceOf(HTMLInputElement);
     expect(screen.getByLabelText('Subject')).toBeInstanceOf(HTMLInputElement);
     expect(screen.getByLabelText('Body')).toBeInstanceOf(HTMLTextAreaElement);
 
     // Submit empty → To + Subject errors appear.
     await user.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => {
-      expect(screen.getByText('At least one email address is required.')).toBeInTheDocument();
+      expect(screen.getAllByText('This field is required.')).toHaveLength(2);
     });
 
     // Each error is announced: the input is aria-invalid and its
@@ -488,7 +530,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
       to: [{ address: 'user@example.com' }, { address: 'second@example.com' }],
       cc: [{ address: 'cc@example.com' }],
       subject: 'Hello there',
-      htmlBody: '',
+      htmlBody: '<p>Line one</p>',
       textBody: 'Line one',
     });
     // A fresh compose carries NO threading headers at all.
@@ -543,7 +585,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
     expect(confirmation.textContent).toContain(SENT_MESSAGE_ID);
     // The form reset: every field blank, no error text.
     expect(screen.getByLabelText('To')).toHaveValue('');
-    expect(screen.getByLabelText('Cc')).toHaveValue('');
+    if (screen.queryByLabelText('Cc')) expect(screen.getByLabelText('Cc')).toHaveValue('');
     expect(screen.getByLabelText('Subject')).toHaveValue('');
     expect(screen.getByLabelText('Body')).toHaveValue('');
     expect(postCalls(calls)).toHaveLength(1);
@@ -568,7 +610,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
     const errorRegion = screen.getByTestId('compose-send-error');
     expect(errorRegion.getAttribute('role')).toBe('alert');
     expect(within(errorRegion).getByText('PROVIDER_CONNECTION_NOT_FOUND')).toBeInTheDocument();
-    expect(errorRegion.textContent).toContain('No active provider connection');
+    expect(errorRegion.textContent).toContain('Email service connection not found.');
     // The form KEEPS its values.
     expect(screen.getByLabelText('To')).toHaveValue('a@b.test');
     expect(screen.getByLabelText('Subject')).toHaveValue('Hello');
@@ -630,7 +672,7 @@ describe('ComposeEmail — send mutation (AC 4 + AC 7)', () => {
     });
     const errorRegion = screen.getByTestId('compose-send-error');
     expect(within(errorRegion).getByText('MAILBOX_ACCESS_DENIED')).toBeInTheDocument();
-    expect(errorRegion.textContent).toContain('You cannot send from this mailbox.');
+    expect(errorRegion.textContent).toContain('You do not have access to this mailbox.');
     // The form KEEPS its values — the user can go back and fix context.
     expect(screen.getByLabelText('To')).toHaveValue('a@b.test');
     expect(screen.getByLabelText('Subject')).toHaveValue('Hello');
@@ -728,7 +770,7 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
       to: [{ address: 'sender@example.com' }],
       cc: [],
       subject: 'Re: Quarterly report',
-      htmlBody: '',
+      htmlBody: '<p>Here is the reply.</p>',
       textBody: 'Here is the reply.',
       inReplyTo: '<reply-1@example.com>',
       references: '<root@example.com> <reply-1@example.com>',
@@ -944,7 +986,7 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
     await renderCompose({
       routes: [
         {
-          match: (url) => url.includes('/api/v1/auth/better/get-session'),
+          match: (url) => url.includes('/api/v1/auth/me'),
           response: () => pendingSession as unknown as Response,
         },
       ],
@@ -960,5 +1002,82 @@ describe('ComposeEmail — reply prefill (AC 5 + AC 6 + AC 7)', () => {
       expect(screen.getByTestId('expired-session')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('compose-form')).not.toBeInTheDocument();
+  });
+});
+
+it('R-DATA-001 sends Bcc separately after explicitly revealing the hidden field', async () => {
+  const { calls } = await renderBlankComposer([
+    sessionRoute(),
+    sendRoute({ responses: [sendAccepted()] }),
+  ]);
+  expect(screen.queryByLabelText('Bcc')).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Back to inbox' })).not.toBeInTheDocument();
+  await fillAndSubmit(userEvent.setup(), {
+    to: 'to@example.com',
+    bcc: ' HIDDEN@Example.com ',
+    subject: 'Private copy',
+  });
+  await waitFor(() => expect(postCalls(calls)).toHaveLength(1));
+  expect(postCalls(calls)[0]?.body).toMatchObject({
+    to: [{ address: 'to@example.com' }],
+    cc: [],
+    bcc: [{ address: 'hidden@example.com' }],
+  });
+});
+it('rejects invalid Bcc before sending', async () => {
+  const { calls } = await renderBlankComposer([
+    sessionRoute(),
+    sendRoute({ responses: [sendAccepted()] }),
+  ]);
+  await fillAndSubmit(userEvent.setup(), {
+    to: 'to@example.com',
+    bcc: 'invalid',
+    subject: 'Private copy',
+  });
+  expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
+  expect(postCalls(calls)).toHaveLength(0);
+});
+
+describe('ComposeEmail — schedule send', () => {
+  it('submits a future instant in UTC and displays a scheduling confirmation', async () => {
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('To'), 'to@example.com');
+    await user.type(screen.getByLabelText('Subject'), 'Later');
+    await user.click(screen.getByRole('button', { name: 'Schedule send' }));
+    const date = new Date(Date.now() + 2 * 3600_000);
+    date.setSeconds(0, 0);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 16);
+    fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: local } });
+    await user.click(screen.getByRole('button', { name: 'Confirm schedule' }));
+    await waitFor(() => expect(postCalls(calls)).toHaveLength(1));
+    expect(postCalls(calls)[0]?.body).toMatchObject({
+      scheduledAt: date.toISOString(),
+      subject: 'Later',
+    });
+    expect(await screen.findByText('Scheduled for')).toBeInTheDocument();
+  });
+  it('rejects a past time without sending or destroying the typed message', async () => {
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      sendRoute({ responses: [sendAccepted()] }),
+    ]);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('To'), 'to@example.com');
+    await user.type(screen.getByLabelText('Subject'), 'Keep draft');
+    await user.click(screen.getByRole('button', { name: 'Schedule send' }));
+    fireEvent.change(screen.getByLabelText('Date and time'), {
+      target: { value: '2000-01-01T08:00' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Confirm schedule' }));
+    expect(postCalls(calls)).toHaveLength(0);
+    expect(await screen.findByText('Choose a future time within one year.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByLabelText('Subject')).toHaveValue('Keep draft');
   });
 });

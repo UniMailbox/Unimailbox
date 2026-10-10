@@ -115,7 +115,7 @@ async function createSession(userId: string): Promise<string> {
     .bind(sessionId, userId, refreshTokenHash, expiresAt, new Date().toISOString())
     .run();
 
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 15 * 60,
   });
 
@@ -265,6 +265,29 @@ describe('GET /api/v1/mailboxes/:mailboxId/messages', () => {
     expect(response.status).toBe(403);
     const body = await response.json();
     expect(body.error.code).toBe('MAILBOX_ACCESS_DENIED');
+  });
+
+  it('requires an explicit mailbox grant even when the user is a global administrator', async () => {
+    const ownerId = await createUserWithRole('member', 'owner-admin-boundary@example.com');
+    const adminId = await createUserWithRole('administrator', 'admin-boundary@example.com');
+    const adminToken = await createSession(adminId);
+    const domainId = await createDomain();
+    const mailboxId = await createMailbox(domainId, ownerId);
+    await insertMessage(mailboxId, { subject: 'Private inbox message' });
+    const url = `http://localhost/api/v1/mailboxes/${mailboxId}/messages`;
+
+    const denied = await SELF.fetch(url, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error.code).toBe('MAILBOX_ACCESS_DENIED');
+
+    await addMailboxMember(mailboxId, adminId, 'viewer');
+    const granted = await SELF.fetch(url, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(granted.status).toBe(200);
+    expect((await granted.json()).data.items[0].subject).toBe('Private inbox message');
   });
 
   it('returns empty page for a new mailbox', async () => {

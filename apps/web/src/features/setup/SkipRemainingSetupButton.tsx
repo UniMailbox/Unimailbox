@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — SkipRemainingSetupButton.
 //
 // CAP-063: the shared visual for the wizard's "Skip remaining setup"
@@ -35,6 +36,7 @@ export function SkipRemainingSetupButton({
   submitting,
   disabled = false,
 }: SkipRemainingSetupButtonProps): ReactElement {
+  const t = useT();
   return (
     <div className="wizard-actions">
       <Button
@@ -45,7 +47,7 @@ export function SkipRemainingSetupButton({
         onClick={() => void onSkip()}
         data-testid="setup-skip-remaining"
       >
-        {submitting ? <Spinner /> : 'Skip remaining setup'}
+        {submitting ? <Spinner /> : t('Skip remaining setup')}
       </Button>
     </div>
   );

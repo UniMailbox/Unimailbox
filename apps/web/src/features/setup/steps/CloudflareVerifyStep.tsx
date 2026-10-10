@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — CloudflareVerifyStep.
 //
 // CAP-041 / step 5. On mount, asks the Worker for the Cloudflare dashboard
@@ -29,14 +30,12 @@ import { Alert } from '../../../components/ui/Alert';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import {
-  reclaimInstallationToken,
-  useSkipRemainingSetup,
-} from '../use-skip-remaining-setup';
+import { reclaimInstallationToken, useSkipRemainingSetup } from '../use-skip-remaining-setup';
 import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function CloudflareVerifyStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -148,8 +147,8 @@ export function CloudflareVerifyStep(): ReactElement {
 
   return (
     <Card
-      title="Verify Cloudflare Email Routing"
-      description="Open the Cloudflare dashboard, configure Email Routing, then continue."
+      title={t('Verify Cloudflare Email Routing')}
+      description={t('Open the Cloudflare dashboard, configure Email Routing, then continue.')}
     >
       <SetupGuidance
         purpose="Connect the managed domain to Cloudflare Email Routing so inbound messages can reach the Worker."
@@ -164,7 +163,7 @@ export function CloudflareVerifyStep(): ReactElement {
       />
       {linkLoading ? (
         <p data-testid="cloudflare-loading">
-          <Spinner label="Opening Cloudflare dashboard" />
+          <Spinner label={t('Opening Cloudflare dashboard')} />
         </p>
       ) : null}
       {linkError !== null ? (
@@ -181,20 +180,21 @@ export function CloudflareVerifyStep(): ReactElement {
       ) : null}
       {popupBlocked ? (
         <Alert variant="warning" testId="cloudflare-popup-blocked">
-          The browser blocked the popup. Allow popups for this site, then re-open the dashboard link
-          below.
+          {t(
+            'The browser blocked the popup. Allow popups for this site, then re-open the dashboard link below.',
+          )}
         </Alert>
       ) : null}
       {linkLoaded && !popupBlocked ? (
         <p className="wizard-subtitle" data-testid="cloudflare-opened">
-          A new tab was opened with the Cloudflare dashboard.
+          {t('A new tab was opened with the Cloudflare dashboard.')}
         </p>
       ) : null}
       {verifyError !== null ? (
         <ErrorPanel
           message={verifyErrorMessage}
           code={verifyErrorCode}
-          retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+          retryLabel={isUnauthorized ? t('Re-claim installation token') : t('Retry')}
           onRetry={isUnauthorized ? handleReclaim : () => void onConfirm()}
         />
       ) : null}
@@ -207,7 +207,7 @@ export function CloudflareVerifyStep(): ReactElement {
           onClick={() => void fetchLink()}
           data-testid="cloudflare-reopen"
         >
-          Re-open dashboard link
+          {t('Re-open dashboard link')}
         </Button>
         <Button
           type="button"
@@ -217,19 +217,15 @@ export function CloudflareVerifyStep(): ReactElement {
           aria-busy={verifying}
           data-testid="cloudflare-confirm"
         >
-          {verifying ? <Spinner /> : 'I have configured email routing'}
+          {verifying ? <Spinner /> : t('I have configured email routing')}
         </Button>
       </div>
       {skipRemaining.error !== null ? (
         <ErrorPanel
           message={skipRemaining.error.message}
           code={skipRemaining.error.code}
-          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            skipRemaining.isUnauthorized
-              ? handleReclaim
-              : () => void skipRemaining.skip()
-          }
+          retryLabel={skipRemaining.isUnauthorized ? t('Re-claim installation token') : t('Retry')}
+          onRetry={skipRemaining.isUnauthorized ? handleReclaim : () => void skipRemaining.skip()}
         />
       ) : null}
       <SkipRemainingSetupButton

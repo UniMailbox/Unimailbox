@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — Unauthorized.
 //
 // CAP-042 (Batch 5) AC 20. The shared 401 / expired-session view. Used
@@ -21,22 +22,23 @@ export interface UnauthorizedProps {
 }
 
 export function Unauthorized({ variant = 'unauthorized' }: UnauthorizedProps): ReactElement {
+  const t = useT();
   const navigate = useNavigate();
   const isExpired = variant === 'expired';
   return (
     <main className="auth-page" data-testid={isExpired ? 'expired-session' : 'unauthorized-page'}>
       <Card
-        title={isExpired ? 'Session expired' : 'Sign in required'}
+        title={isExpired ? t('Session expired') : t('Sign in required')}
         description={
           isExpired
-            ? 'Your session ended. Sign in again to continue.'
-            : 'Sign in to access the mailbox.'
+            ? t('Your session ended. Sign in again to continue.')
+            : t('Sign in to access the mailbox.')
         }
       >
         <p data-testid="unauthorized-message">
           {isExpired
-            ? 'For your security, sessions end after a period of inactivity.'
-            : 'You need to be signed in to view this page.'}
+            ? t('For your security, sessions end after a period of inactivity.')
+            : t('You need to be signed in to view this page.')}
         </p>
         <div className="wizard-actions">
           <Button
@@ -47,7 +49,7 @@ export function Unauthorized({ variant = 'unauthorized' }: UnauthorizedProps): R
               void navigate({ to: '/login' });
             }}
           >
-            Sign in
+            {t('Sign in')}
           </Button>
         </div>
       </Card>

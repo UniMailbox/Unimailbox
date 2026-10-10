@@ -1,3 +1,5 @@
+import { errorMessage } from '../../infrastructure/i18n/error-messages';
+import { useT } from '../../infrastructure/i18n/locale';
 import { useState, type InputHTMLAttributes, type ReactElement, type ReactNode } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { Input as Primitive } from './shadcn/input';
@@ -8,6 +10,7 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   readonly error?: ReactNode;
   readonly help?: ReactNode;
   readonly id: string;
+  readonly endAdornment?: ReactNode;
 }
 /** RHF remains the source of truth; password visibility follows the reference PasswordInput. */
 export function Input({
@@ -17,8 +20,10 @@ export function Input({
   id,
   type,
   className,
+  endAdornment,
   ...rest
 }: InputProps): ReactElement {
+  const t = useT();
   const [visible, setVisible] = useState(false);
   const describedBy = [
     rest['aria-describedby'],
@@ -29,7 +34,9 @@ export function Input({
     .join(' ');
   return (
     <div className="wizard-field">
-      {label !== undefined ? <Label htmlFor={id}>{label}</Label> : null}
+      {label !== undefined ? (
+        <Label htmlFor={id}>{typeof label === 'string' ? t(label) : label}</Label>
+      ) : null}
       <div className="relative">
         <Primitive
           {...rest}
@@ -39,6 +46,9 @@ export function Input({
           aria-invalid={error !== undefined || rest['aria-invalid']}
           aria-describedby={describedBy || undefined}
         />
+        {endAdornment ? (
+          <div className="absolute end-1 top-1/2 flex -translate-y-1/2 gap-0.5">{endAdornment}</div>
+        ) : null}
         {type === 'password' ? (
           <Button
             type="button"
@@ -46,7 +56,7 @@ export function Input({
             size="icon"
             className="absolute end-1 top-1/2 size-7 -translate-y-1/2"
             disabled={rest.disabled}
-            aria-label={`${visible ? 'Hide' : 'Show'} password`}
+            aria-label={t(visible ? 'Hide password' : 'Show password')}
             aria-pressed={visible}
             onClick={() => setVisible(!visible)}
           >
@@ -56,12 +66,16 @@ export function Input({
       </div>
       {error !== undefined ? (
         <span id={`${id}-error`} className="input-error" role="alert">
-          {error}
+          {typeof error === 'string'
+            ? /^[A-Z_]+$/.test(error)
+              ? errorMessage(error)
+              : t(error)
+            : error}
         </span>
       ) : null}
       {help !== undefined ? (
         <span id={`${id}-help`} className="input-help">
-          {help}
+          {typeof help === 'string' ? t(help) : help}
         </span>
       ) : null}
     </div>

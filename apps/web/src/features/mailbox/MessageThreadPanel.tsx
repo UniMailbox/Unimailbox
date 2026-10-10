@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — MessageThreadPanel.
 //
 // CAP-043 Slice 2 (AC 11). Lists the thread's messages oldest-first
@@ -8,6 +9,7 @@
 import type { ReactElement } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import type { MessageListItem } from '@unimailbox/contracts';
+import { LocalDateTime } from '../../components/ui/LocalDateTime';
 
 export interface MessageThreadPanelProps {
   readonly mailboxId: string;
@@ -20,11 +22,15 @@ export function MessageThreadPanel({
   items,
   activeMessageId,
 }: MessageThreadPanelProps): ReactElement {
+  const t = useT();
   const navigate = useNavigate();
 
   return (
     <section className="message-thread-panel" data-testid="message-thread-panel">
-      <h2 className="message-thread-title">Thread ({items.length})</h2>
+      <h2 className="message-thread-title">
+        {t('Thread (')}
+        {items.length})
+      </h2>
       <ul className="message-thread-list" data-testid="message-thread-list">
         {items.map((item) => {
           const isActive = item.id === activeMessageId;
@@ -55,7 +61,7 @@ export function MessageThreadPanel({
                     ? `${item.fromName} <${item.fromAddress}>`
                     : item.fromAddress}
                   {' · '}
-                  {item.createdAt}
+                  <LocalDateTime value={item.createdAt} />
                 </span>
               </button>
             </li>

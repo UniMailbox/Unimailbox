@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — PreflightStep.
 //
 // CAP-041 / step 2. Calls POST /api/v1/setup/preflight and renders each
@@ -23,13 +24,14 @@ import { setupPreflightQuery } from '../setup-queries';
 import { SetupGuidance } from '../setup-guidance';
 
 export function PreflightStep(): ReactElement {
+  const t = useT();
   const navigate = useNavigate();
   const query = setupPreflightQuery();
 
   if (query.isPending) {
     return (
-      <Card title="Preflight">
-        <Spinner label="Running preflight" />
+      <Card title={t('Preflight')}>
+        <Spinner label={t('Running preflight')} />
       </Card>
     );
   }
@@ -39,7 +41,7 @@ export function PreflightStep(): ReactElement {
     const message = error instanceof ApiError ? error.message : 'Preflight failed';
     const code = error instanceof ApiError ? error.code : 'UNEXPECTED_ERROR';
     return (
-      <Card title="Preflight">
+      <Card title={t('Preflight')}>
         <ErrorPanel
           message={message}
           code={code}
@@ -61,8 +63,8 @@ export function PreflightStep(): ReactElement {
 
   return (
     <Card
-      title="Preflight"
-      description="Confirm the platform bindings are reachable before continuing."
+      title={t('Preflight')}
+      description={t('Confirm the platform bindings are reachable before continuing.')}
     >
       <SetupGuidance
         purpose="Verify that the Worker has the resources and schema required by the setup flow."
@@ -76,19 +78,23 @@ export function PreflightStep(): ReactElement {
         note="Binding presence confirms configuration; it is not a deep health check of every remote service."
       />
       <p data-testid="schema-version" className="wizard-subtitle">
-        Schema version: <code>{data.schemaVersion}</code>
+        {t('Schema version: ')}
+        <code>{data.schemaVersion}</code>
         {schemaOk ? null : (
           <>
             {' '}
-            (expected <code>{CURRENT_SCHEMA_VERSION}</code>)
+            {t('(expected ')}
+            <code>{CURRENT_SCHEMA_VERSION}</code>)
           </>
         )}
       </p>
       {!schemaOk ? (
         <Alert variant="warning" testId="schema-drift">
-          The deployment is on schema version <code>{data.schemaVersion}</code>
-          but this client expects <code>{CURRENT_SCHEMA_VERSION}</code>. Run pending migrations
-          before continuing.
+          {t('The deployment is on schema version ')}
+          <code>{data.schemaVersion}</code>
+          {t('but this client expects ')}
+          <code>{CURRENT_SCHEMA_VERSION}</code>
+          {t('. Run pending migrations before continuing. ')}
         </Alert>
       ) : null}
       <ul className="binding-list" data-testid="binding-list">
@@ -100,13 +106,13 @@ export function PreflightStep(): ReactElement {
             data-testid={`binding-${name}`}
           >
             <span className="binding-name">{name}</span>
-            <span className="binding-status">{present ? 'present' : 'missing'}</span>
+            <span className="binding-status">{present ? t('present') : t('missing')}</span>
           </li>
         ))}
       </ul>
       {!allPresent ? (
         <p className="wizard-subtitle" data-testid="bindings-incomplete">
-          All bindings must be present to continue.
+          {t('All bindings must be present to continue.')}
         </p>
       ) : null}
       <div className="wizard-actions">
@@ -119,7 +125,7 @@ export function PreflightStep(): ReactElement {
           }}
           data-testid="preflight-continue"
         >
-          Continue
+          {t('Continue')}
         </Button>
       </div>
     </Card>

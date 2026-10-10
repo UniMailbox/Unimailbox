@@ -16,7 +16,8 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
-import type { AuditEventInput } from '@unimailbox/contracts';
+import { parseProviderKey, type AuditEventInput } from '@unimailbox/contracts';
+import { providerRegistry } from '../../integrations/providers/provider-registry';
 
 const WEBHOOK_SECRET = 'a'.repeat(64); // 64-char hex secret, matches production entropy.
 const PROVIDER_MESSAGE_ID = '<202601011200.abc@example.com>';
@@ -29,7 +30,7 @@ const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[
  * Computes HMAC-SHA256(body, secret) as a lowercase hex string — the exact
  * shape webhook-processor recomputes and constant-time compares against.
  */
-async function computeHmac(body: string, secret: string): Promise<string> {
+async function computeHmac(body: string | Uint8Array, secret: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
@@ -37,9 +38,13 @@ async function computeHmac(body: string, secret: string): Promise<string> {
     false,
     ['sign'],
   );
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+  const sig = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    typeof body === 'string' ? new TextEncoder().encode(body) : body,
+  );
   return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, '0'))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 }
 
@@ -104,6 +109,37 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     await resetAndMigrate();
   });
 
+  it('accepts a real-shape Brevo Bearer callback and atomically links its message and audit', async () => {
+    const { connectionId, messageId } = await seedConnectionAndMessage();
+    const body = JSON.stringify({ event: 'delivered', 'message-id': PROVIDER_MESSAGE_ID });
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: { Authorization: `Bearer ${WEBHOOK_SECRET}`, 'Content-Type': 'application/json' },
+    });
+    expect(response.status).toBe(200);
+    const message = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
+      .bind(messageId)
+      .first<{ status: string }>();
+    expect(message?.status).toBe('delivered');
+    const delivery = await env.DB.prepare(
+      'SELECT message_id FROM webhook_deliveries WHERE connection_id = ?',
+    )
+      .bind(connectionId)
+      .first<{ message_id: string }>();
+    expect(delivery?.message_id).toBe(messageId);
+    const audit = await env.DB.prepare(
+      "SELECT resource_id FROM audit_events WHERE action = 'webhook.delivered'",
+    ).first<{ resource_id: string }>();
+    expect(audit?.resource_id).toBe(messageId);
+    const rejected = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: { Authorization: 'Bearer incorrect', 'Content-Type': 'application/json' },
+    });
+    expect(rejected.status).toBe(401);
+  });
+
   it('valid signature → 200, message updated to delivered, delivery row stored', async () => {
     const { connectionId, messageId } = await seedConnectionAndMessage();
 
@@ -142,6 +178,57 @@ describe('POST /api/v1/webhooks/:providerKey/:connectionId', () => {
     expect(delivery?.raw_payload).toBe(body);
     expect(delivery?.message_id).toBe(messageId);
     expect(delivery?.status).toBe('processed');
+  });
+
+  it('rejects a provider URL that does not match the connection', async () => {
+    const { connectionId, messageId } = await seedConnectionAndMessage();
+    const body = JSON.stringify({ event: 'delivered', messageId: PROVIDER_MESSAGE_ID });
+    const signature = await computeHmac(body, WEBHOOK_SECRET);
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/resend/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: { 'X-Webhook-Signature': signature },
+    });
+    expect(response.status).toBe(404);
+    const message = await env.DB.prepare('SELECT status FROM messages WHERE id = ?')
+      .bind(messageId)
+      .first<{ status: string }>();
+    expect(message?.status).toBe('sent');
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM webhook_deliveries WHERE connection_id = ?',
+    )
+      .bind(connectionId)
+      .first<{ n: number }>();
+    expect(count?.n).toBe(0);
+  });
+
+  it('rejects an oversized webhook body before persisting it', async () => {
+    const { connectionId } = await seedConnectionAndMessage();
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body: 'x'.repeat(65_537),
+      headers: { 'X-Webhook-Signature': 'unused' },
+    });
+    expect(response.status).toBe(413);
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM webhook_deliveries').first<{
+      n: number;
+    }>();
+    expect(count?.n).toBe(0);
+  });
+
+  it('verifies original bytes before rejecting malformed JSON', async () => {
+    const { connectionId } = await seedConnectionAndMessage();
+    const body = '{"event":';
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: { 'X-Webhook-Signature': await computeHmac(body, WEBHOOK_SECRET) },
+    });
+    expect(response.status).toBe(400);
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM webhook_deliveries').first<{
+      n: number;
+    }>();
+    expect(count?.n).toBe(0);
   });
 
   it('invalid signature → 401 WEBHOOK_SIGNATURE_INVALID', async () => {
@@ -649,7 +736,7 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
    * queue consumer has claimed the job but has not yet received the
    * provider's id back.
    */
-  async function seedEarlyJob(): Promise<{
+  async function seedEarlyJob(providerKey = 'brevo'): Promise<{
     connectionId: string;
     messageId: string;
     jobId: string;
@@ -672,8 +759,16 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
       ).bind(credentialId, `cred-${connectionId}`, now, now),
       env.DB.prepare(
         `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, webhook_secret, created_at, updated_at)
-           VALUES (?, 'brevo', ?, ?, 'active', ?, ?, ?)`,
-      ).bind(connectionId, `conn-${connectionId}`, credentialId, WEBHOOK_SECRET, now, now),
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+      ).bind(
+        connectionId,
+        providerKey,
+        `conn-${connectionId}`,
+        credentialId,
+        WEBHOOK_SECRET,
+        now,
+        now,
+      ),
       env.DB.prepare(
         `INSERT INTO messages (id, from_address, from_name, subject, html_body, text_body, references_header, status, created_at, updated_at)
            VALUES (?, 'sender@example.com', 'Sender', 'early', '', '', '', 'sending', ?, ?)`,
@@ -954,5 +1049,188 @@ describe('CAP-040 — webhook delivery durability + audit atomicity', () => {
       providerMessageId: string;
     };
     expect(meta.providerMessageId).toBe(orphanId);
+  });
+
+  it('replays an early delivery after provider acceptance without replacing the provider event time', async () => {
+    const { connectionId, messageId, jobId } = await seedEarlyJob();
+    const providerMessageId = '<early-delivered@example.com>';
+    const eventTimeSeconds = 1_761_000_000;
+    const body = JSON.stringify({
+      event: 'delivered',
+      messageId: providerMessageId,
+      ts: eventTimeSeconds,
+    });
+    const response = await SELF.fetch(`http://localhost/api/v1/webhooks/brevo/${connectionId}`, {
+      method: 'POST',
+      body,
+      headers: { 'X-Webhook-Signature': await computeHmac(body, WEBHOOK_SECRET) },
+    });
+    expect(response.status).toBe(200);
+
+    const { updateMessageStatus } = await import('../../modules/messages');
+    const accepted = await updateMessageStatus(env.DB, {
+      messageId,
+      status: 'sent',
+      providerEventTimeMs: Date.now(),
+      sentAt: '2026-10-04 00:00:00',
+      preserveProviderEventTime: true,
+      now: '2026-10-04 00:00:00',
+    });
+    expect(accepted).toBe(true);
+    await env.DB.prepare('UPDATE outbound_jobs SET provider_message_id = ? WHERE id = ?')
+      .bind(providerMessageId, jobId)
+      .run();
+
+    const { reconcileWebhookDeliveries } = await import(
+      '../../modules/outbound-mail/reconcile-webhook-deliveries'
+    );
+    const { buildAppContext } = await import('../../app-context');
+    const result = await reconcileWebhookDeliveries(env.DB, {
+      connectionId,
+      providerMessageId,
+      messageId,
+      actorUserId: null,
+      requestId: null,
+      createdAt: '2026-10-04 00:00:00',
+      auditEventWriter: buildAppContext(env).auditEventWriter,
+    });
+    expect(result.backfilled).toBe(1);
+    const message = await env.DB.prepare(
+      'SELECT status, provider_event_time FROM messages WHERE id = ?',
+    )
+      .bind(messageId)
+      .first<{ status: string; provider_event_time: number | null }>();
+    expect(message).toEqual({ status: 'delivered', provider_event_time: eventTimeSeconds * 1000 });
+  });
+
+  it('replays a non-Brevo event from verified projections without parsing its raw JSON shape', async () => {
+    const providerKey = 'projection-test-provider';
+    providerRegistry.registerWebhook({
+      key: parseProviderKey(providerKey),
+      async verifyAndParse({ rawBody, signatureHeader, secret }) {
+        if (signatureHeader !== (await computeHmac(rawBody, secret))) {
+          throw new Error('Test provider signature invalid');
+        }
+        const rawPayload = new TextDecoder().decode(rawBody);
+        const payload = JSON.parse(rawPayload) as { deliveryKey: string; observedAt: string };
+        return {
+          eventType: 'accepted-by-test-provider',
+          providerMessageId: payload.deliveryKey,
+          status: 'delivered',
+          eventTimeMs: Date.parse(payload.observedAt),
+          eventTimeSource: 'provider',
+          rawPayload,
+        };
+      },
+    });
+
+    const { connectionId, messageId, jobId } = await seedEarlyJob(providerKey);
+    const providerMessageId = 'test-provider-message-1';
+    const eventTimeMs = Date.parse('2026-10-04T01:02:03.000Z');
+    const body = JSON.stringify({
+      deliveryKey: providerMessageId,
+      observedAt: '2026-10-04T01:02:03.000Z',
+    });
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/webhooks/${providerKey}/${connectionId}`,
+      {
+        method: 'POST',
+        body,
+        headers: { 'X-Webhook-Signature': await computeHmac(body, WEBHOOK_SECRET) },
+      },
+    );
+    expect(response.status).toBe(200);
+    const delivery = await env.DB.prepare(
+      `SELECT provider_message_id, verified_provider_message_id, message_status, message_id
+         FROM webhook_deliveries WHERE connection_id = ?`,
+    )
+      .bind(connectionId)
+      .first<{
+        provider_message_id: string | null;
+        verified_provider_message_id: string | null;
+        message_status: string | null;
+        message_id: string | null;
+      }>();
+    expect(delivery).toEqual({
+      provider_message_id: null,
+      verified_provider_message_id: providerMessageId,
+      message_status: 'delivered',
+      message_id: null,
+    });
+
+    await env.DB.batch([
+      env.DB.prepare('UPDATE messages SET status = ? WHERE id = ?').bind('sent', messageId),
+      env.DB.prepare('UPDATE outbound_jobs SET provider_message_id = ? WHERE id = ?').bind(
+        providerMessageId,
+        jobId,
+      ),
+    ]);
+    const { reconcileWebhookDeliveries } = await import(
+      '../../modules/outbound-mail/reconcile-webhook-deliveries'
+    );
+    const { buildAppContext } = await import('../../app-context');
+    const result = await reconcileWebhookDeliveries(env.DB, {
+      connectionId,
+      providerMessageId,
+      messageId,
+      actorUserId: null,
+      requestId: null,
+      createdAt: '2026-10-04 01:03:00',
+      auditEventWriter: buildAppContext(env).auditEventWriter,
+    });
+    expect(result.backfilled).toBe(1);
+    const message = await env.DB.prepare(
+      'SELECT status, provider_event_time FROM messages WHERE id = ?',
+    )
+      .bind(messageId)
+      .first<{ status: string; provider_event_time: number | null }>();
+    expect(message).toEqual({ status: 'delivered', provider_event_time: eventTimeMs });
+  });
+
+  it('does not reconcile a different connection with the same provider message id', async () => {
+    const first = await seedEarlyJob();
+    const second = await seedEarlyJob();
+    const providerMessageId = '<same-id-different-connection@example.com>';
+    const body = JSON.stringify({ event: 'delivered', messageId: providerMessageId });
+    const response = await SELF.fetch(
+      `http://localhost/api/v1/webhooks/brevo/${first.connectionId}`,
+      {
+        method: 'POST',
+        body,
+        headers: { 'X-Webhook-Signature': await computeHmac(body, WEBHOOK_SECRET) },
+      },
+    );
+    expect(response.status).toBe(200);
+
+    const { reconcileWebhookDeliveries } = await import(
+      '../../modules/outbound-mail/reconcile-webhook-deliveries'
+    );
+    const { buildAppContext } = await import('../../app-context');
+    const auditEventWriter = buildAppContext(env).auditEventWriter;
+    const params = {
+      providerMessageId,
+      actorUserId: null,
+      requestId: null,
+      createdAt: '2026-10-04 00:00:00',
+      auditEventWriter,
+    } as const;
+    const wrong = await reconcileWebhookDeliveries(env.DB, {
+      ...params,
+      connectionId: second.connectionId,
+      messageId: second.messageId,
+    });
+    expect(wrong.backfilled).toBe(0);
+    const right = await reconcileWebhookDeliveries(env.DB, {
+      ...params,
+      connectionId: first.connectionId,
+      messageId: first.messageId,
+    });
+    expect(right.backfilled).toBe(1);
+    const delivery = await env.DB.prepare(
+      'SELECT connection_id, message_id FROM webhook_deliveries WHERE provider_message_id = ?',
+    )
+      .bind(providerMessageId)
+      .first<{ connection_id: string; message_id: string | null }>();
+    expect(delivery).toEqual({ connection_id: first.connectionId, message_id: first.messageId });
   });
 });

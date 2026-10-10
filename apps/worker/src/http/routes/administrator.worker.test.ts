@@ -104,7 +104,7 @@ describe('POST /api/v1/setup/administrator', () => {
       expect(user?.display_name).toBe('Admin User');
       expect(user?.status).toBe('active');
       expect(user?.password_algorithm).toBe('pbkdf2-sha256');
-      expect(user?.password_iterations).toBe(600000);
+      expect(user?.password_iterations).toBe(100000);
 
       // BLOB columns are non-empty
       expect(user?.password_salt).not.toBeNull();
@@ -164,7 +164,7 @@ describe('POST /api/v1/setup/administrator', () => {
         }>();
 
       expect(user?.password_algorithm).toBe('pbkdf2-sha256');
-      expect(user?.password_iterations).toBe(600000);
+      expect(user?.password_iterations).toBe(100000);
 
       // Salt should be 16 bytes (ADR-006)
       const salt = new Uint8Array(user?.password_salt ?? new ArrayBuffer(0));

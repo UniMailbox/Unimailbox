@@ -40,12 +40,13 @@ const ENCRYPTION_KEY = 'a'.repeat(64);
 
 function makeMockAdapter(
   sendImpl: () => Promise<{ providerMessageId: string; acceptedAt: string }>,
+  providerKey = 'brevo',
 ): OutboundProviderAdapter & { sendCalls: { count: number } } {
   // Counter rides on a mutable object so the assertion sees the live count
   // (Object.assign would snapshot a primitive).
   const sendCalls = { count: 0 };
   const adapter: OutboundProviderAdapter = {
-    key: parseProviderKey('brevo'),
+    key: parseProviderKey(providerKey),
     validateConnection: async () => {},
     async send(_ctx, _msg) {
       sendCalls.count += 1;
@@ -64,10 +65,16 @@ interface SeedOptions {
   readonly maxAttempts?: number;
   readonly lockedAt?: string | null;
   readonly lockedBy?: string | null;
+  readonly providerKey?: string;
+  readonly connectionStatus?: 'active' | 'disabled' | 'invalid';
 }
 
 /** Seeds a message + recipients + credential + connection + job in one batch. */
-async function seedJob(opts: SeedOptions = {}): Promise<{ jobId: string; messageId: string }> {
+async function seedJob(opts: SeedOptions = {}): Promise<{
+  jobId: string;
+  messageId: string;
+  connectionId: string;
+}> {
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const messageId = crypto.randomUUID();
   const jobId = crypto.randomUUID();
@@ -92,8 +99,15 @@ async function seedJob(opts: SeedOptions = {}): Promise<{ jobId: string; message
     ).bind(credentialId, encrypted.ciphertext, encrypted.iv, encrypted.authTag, now, now),
     env.DB.prepare(
       `INSERT INTO provider_connections (id, provider_key, label, credential_id, status, created_at, updated_at)
-       VALUES (?, 'brevo', 'Brevo', ?, 'active', ?, ?)`,
-    ).bind(connectionId, credentialId, now, now),
+       VALUES (?, ?, 'Test connection', ?, ?, ?, ?)`,
+    ).bind(
+      connectionId,
+      opts.providerKey ?? 'brevo',
+      credentialId,
+      opts.connectionStatus ?? 'active',
+      now,
+      now,
+    ),
     env.DB.prepare(
       `INSERT INTO outbound_jobs (id, message_id, provider_connection_id, status, attempts, max_attempts, locked_at, locked_by, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -111,7 +125,7 @@ async function seedJob(opts: SeedOptions = {}): Promise<{ jobId: string; message
     ),
   ]);
 
-  return { jobId, messageId };
+  return { jobId, messageId, connectionId };
 }
 
 function fetchJob(jobId: string) {
@@ -135,6 +149,62 @@ describe('processOutboundJob (AC2 — claim-first, R-OUTBOUND-007/009)', () => {
     await seedInstallationState({ status: 'complete', currentStep: 'complete' });
   });
 
+  it('R-OUTBOUND-004 delivers blind recipients only through the separate Bcc envelope', async () => {
+    const { jobId, messageId } = await seedJob();
+    await env.DB.prepare(
+      `INSERT INTO message_recipients (id, message_id, address, display_name, type, created_at) VALUES (?, ?, 'hidden@example.com', 'Hidden', 'bcc', datetime('now'))`,
+    )
+      .bind(crypto.randomUUID(), messageId)
+      .run();
+    const adapter = makeMockAdapter(async () => ({
+      providerMessageId: 'bcc-ok',
+      acceptedAt: new Date().toISOString(),
+    }));
+    const send = vi.spyOn(adapter, 'send');
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      adapter,
+      lockedBy: 'worker-bcc',
+    });
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      to: [{ address: 'to@example.com' }],
+      cc: [],
+      bcc: [{ address: 'hidden@example.com', displayName: 'Hidden' }],
+    });
+  });
+
+  it('calls the provider only when the authoritative scheduled time is due', async () => {
+    const { jobId } = await seedJob();
+    const now = new Date();
+    const time = new Date(now.getTime() + 3600_000).toISOString().slice(0, 19).replace('T', ' ');
+    await env.DB.prepare('UPDATE outbound_jobs SET scheduled_at=? WHERE id=?')
+      .bind(time, jobId)
+      .run();
+    const adapter = makeMockAdapter(async () => ({
+      providerMessageId: 'scheduled-ok',
+      acceptedAt: new Date().toISOString(),
+    }));
+    expect(
+      await processOutboundJob(jobId, {
+        db: env.DB,
+        encryptionKey: ENCRYPTION_KEY,
+        adapter,
+        clock: { now: () => now, unixMs: () => now.getTime() },
+      }),
+    ).toMatchObject({ delaySeconds: expect.any(Number) });
+    expect(adapter.sendCalls.count).toBe(0);
+    const due = new Date(now.getTime() + 3600_000);
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      adapter,
+      clock: { now: () => due, unixMs: () => due.getTime() },
+    });
+    expect(adapter.sendCalls.count).toBe(1);
+    expect(await fetchJob(jobId)).toMatchObject({ status: 'sent' });
+  });
+
   it('sends successfully and marks the job sent under its own lease', async () => {
     const { jobId } = await seedJob();
     const adapter = makeMockAdapter(async () => ({
@@ -153,6 +223,88 @@ describe('processOutboundJob (AC2 — claim-first, R-OUTBOUND-007/009)', () => {
     const job = await fetchJob(jobId);
     expect(job?.status).toBe('sent');
     expect(job?.locked_by).toBeNull(); // lock released on success
+  });
+
+  it('R-OUTBOUND-007 resolves the adapter from the claimed job connection', async () => {
+    const { jobId } = await seedJob({ providerKey: 'smtp-test' });
+    const adapter = makeMockAdapter(
+      async () => ({ providerMessageId: 'smtp-ok', acceptedAt: new Date().toISOString() }),
+      'smtp-test',
+    );
+    const resolvedKeys: string[] = [];
+
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      resolveAdapter: (key) => {
+        resolvedKeys.push(key);
+        return key === adapter.key ? adapter : undefined;
+      },
+    });
+
+    expect(resolvedKeys).toEqual(['smtp-test']);
+    expect(adapter.sendCalls.count).toBe(1);
+    expect((await fetchJob(jobId))?.status).toBe('sent');
+  });
+
+  it.each(['disabled', 'invalid'] as const)(
+    'R-OUTBOUND-008 records a %s connection as terminal after claim',
+    async (connectionStatus) => {
+      const { jobId } = await seedJob({ connectionStatus });
+      const resolveAdapter = vi.fn(() =>
+        makeMockAdapter(async () => ({
+          providerMessageId: 'must-not-send',
+          acceptedAt: new Date().toISOString(),
+        })),
+      );
+
+      await processOutboundJob(jobId, {
+        db: env.DB,
+        encryptionKey: ENCRYPTION_KEY,
+        resolveAdapter,
+      });
+
+      expect(resolveAdapter).not.toHaveBeenCalled();
+      expect(await fetchJob(jobId)).toMatchObject({
+        status: 'failed',
+        attempts: 0,
+        error_code: 'TERMINAL_PROVIDER_ERROR',
+        locked_by: null,
+      });
+    },
+  );
+
+  it('R-OUTBOUND-008 records an unregistered provider as terminal after claim', async () => {
+    const { jobId } = await seedJob({ providerKey: 'smtp-test' });
+    const resolveAdapter = vi.fn(() => undefined);
+
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      resolveAdapter,
+    });
+
+    expect(resolveAdapter).toHaveBeenCalledWith(parseProviderKey('smtp-test'));
+    expect(await fetchJob(jobId)).toMatchObject({
+      status: 'failed',
+      attempts: 0,
+      error_code: 'TERMINAL_PROVIDER_ERROR',
+      locked_by: null,
+    });
+  });
+
+  it('R-OUTBOUND-009 skips a failed redelivery before resolving the adapter', async () => {
+    const { jobId } = await seedJob({ status: 'failed' });
+    const resolveAdapter = vi.fn(() => undefined);
+
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      resolveAdapter,
+    });
+
+    expect(resolveAdapter).not.toHaveBeenCalled();
+    expect((await fetchJob(jobId))?.status).toBe('failed');
   });
 
   it('throws DomainError(LOCK_CONTENTION) without a provider call when another worker holds a live lease', async () => {
@@ -187,27 +339,19 @@ describe('processOutboundJob (AC2 — claim-first, R-OUTBOUND-007/009)', () => {
     expect(job?.locked_by).toBe('worker-b'); // untouched
   });
 
-  it('throws DomainError(LOCK_CONTENTION) for a failed row (terminal, not claimable — R-OUTBOUND-009)', async () => {
+  it('R-OUTBOUND-009 skips a failed row without calling the provider', async () => {
     const { jobId } = await seedJob({ status: 'failed', attempts: 3 });
     const adapter = makeMockAdapter(async () => ({
       providerMessageId: 'must-not-happen',
       acceptedAt: new Date().toISOString(),
     }));
 
-    let caught: unknown;
-    try {
-      await processOutboundJob(jobId, {
-        db: env.DB,
-        encryptionKey: ENCRYPTION_KEY,
-        adapter,
-        lockedBy: 'worker-a',
-      });
-    } catch (e) {
-      caught = e;
-    }
-
-    expect(caught).toBeInstanceOf(DomainError);
-    expect((caught as DomainError).code).toBe('LOCK_CONTENTION');
+    await processOutboundJob(jobId, {
+      db: env.DB,
+      encryptionKey: ENCRYPTION_KEY,
+      adapter,
+      lockedBy: 'worker-a',
+    });
     expect(adapter.sendCalls.count).toBe(0);
     expect((await fetchJob(jobId))?.status).toBe('failed');
   });
@@ -689,17 +833,21 @@ describe('processOutboundJob post-send write failure (CAP-028 F2 — R-OUTBOUND-
     // match. Update this constant when `updateMessageStatus` is refactored.
     const UPDATE_MESSAGE_STATUS_SQL = `UPDATE messages
           SET status = ?,
-              provider_event_time = ?,
+              provider_event_time = CASE WHEN ? = 1 THEN provider_event_time ELSE ? END,
               sent_at = COALESCE(?, sent_at),
               updated_at = ?
         WHERE id = ?
           AND status IN (SELECT value FROM json_each(?))
           AND (
-            provider_event_time IS NULL
-            OR provider_event_time < ?
+            (? = 1 AND provider_event_time IS NULL)
             OR (
-              provider_event_time = ?
-              AND CASE status
+              ? = 0
+              AND (
+                provider_event_time IS NULL
+                OR provider_event_time < ?
+                OR (
+                  provider_event_time = ?
+                  AND CASE status
                     WHEN 'failed' THEN 100
                     WHEN 'bounced' THEN 100
                     WHEN 'complained' THEN 100
@@ -711,6 +859,8 @@ describe('processOutboundJob post-send write failure (CAP-028 F2 — R-OUTBOUND-
                     WHEN 'draft' THEN 10
                     ELSE -1
                   END < ?
+                )
+              )
             )
           )`;
 

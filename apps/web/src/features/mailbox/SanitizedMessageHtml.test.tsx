@@ -28,8 +28,6 @@ const ATTACHMENT_ONLY_IMAGE: Attachment = {
   contentId: 'ordinary@example.test',
 };
 
-const MAILBOX_ID = 'mailbox/id?with space';
-
 function parseSanitizedHtml(html: string): HTMLDivElement {
   const container = document.createElement('div');
   container.innerHTML = html;
@@ -37,6 +35,21 @@ function parseSanitizedHtml(html: string): HTMLDivElement {
 }
 
 describe('SanitizedMessageHtml', () => {
+  it('preserves an authorized CID image at the start of an HTML body', () => {
+    const html = sanitizeMessageHtml({
+      htmlBody:
+        '<img src="cid:logo@example.test" alt="logo"><img src="https://remote.example/pixel" alt="remote">',
+      attachments: [INLINE_ATTACHMENT],
+      inlineImageUrls: new Map([[INLINE_ATTACHMENT.id, 'blob:authorized-logo']]),
+    });
+    const container = parseSanitizedHtml(html);
+    expect(container.querySelector('img[alt="logo"]')).toHaveAttribute(
+      'src',
+      'blob:authorized-logo',
+    );
+    expect(container.querySelector('img[alt="remote"]')).not.toHaveAttribute('src');
+  });
+
   it('R-ATTACHMENT-001/R-ATTACHMENT-006/R-ATTACHMENT-008 resolves only a normalized known inline raster CID', () => {
     const html = sanitizeMessageHtml({
       htmlBody: `
@@ -46,17 +59,14 @@ describe('SanitizedMessageHtml', () => {
         <img src="https://remote.example/logo.png" alt="remote" />
         <img src="cid:ordinary@example.test" alt="ordinary" />
       `,
-      mailboxId: MAILBOX_ID,
       attachments: [INLINE_ATTACHMENT, ATTACHMENT_ONLY_IMAGE],
+      inlineImageUrls: new Map([[INLINE_ATTACHMENT.id, 'blob:authorized-logo']]),
     });
     const container = parseSanitizedHtml(html);
     const images = [...container.querySelectorAll('img')];
 
     expect(images).toHaveLength(4);
-    expect(images[0]).toHaveAttribute(
-      'src',
-      `/api/v1/mailboxes/${encodeURIComponent(MAILBOX_ID)}/attachments/${encodeURIComponent(INLINE_ATTACHMENT.id)}/download`,
-    );
+    expect(images[0]).toHaveAttribute('src', 'blob:authorized-logo');
     expect(images[0]).toHaveAttribute('alt', 'logo');
     expect(images[0]).toHaveAttribute('width', '24');
     expect(images.slice(1).every((image) => !image.hasAttribute('src'))).toBe(true);
@@ -85,7 +95,6 @@ describe('SanitizedMessageHtml', () => {
           <a href="java\t\nscript:alert(1)">bad-obfuscated-js</a>
           <a href="java&#x09;script:alert(1)">bad-entity-js</a>
         `,
-        mailboxId: 'mailbox-1',
         attachments: [],
       }),
     );
@@ -144,7 +153,6 @@ describe('SanitizedMessageHtml', () => {
     const container = parseSanitizedHtml(
       sanitizeMessageHtml({
         htmlBody: '<center><p>Wrapped safe text</p></center>',
-        mailboxId: 'mailbox-1',
         attachments: [],
       }),
     );
@@ -158,7 +166,6 @@ describe('SanitizedMessageHtml', () => {
     const container = parseSanitizedHtml(
       sanitizeMessageHtml({
         htmlBody: '<p><img src="cid:logo@example.test" alt="ambiguous" /></p>',
-        mailboxId: 'mailbox-1',
         attachments: [INLINE_ATTACHMENT, duplicate],
       }),
     );
@@ -180,7 +187,6 @@ describe('SanitizedMessageHtml', () => {
         <embed src="https://remote.example/embed" />
         <form><input value="nope" /></form>
       `,
-      mailboxId: 'mailbox-1',
       attachments: [],
     });
 
@@ -214,7 +220,6 @@ describe('SanitizedMessageHtml', () => {
 
     render(
       <SanitizedMessageHtml
-        mailboxId="mailbox-1"
         htmlBody={`
           <img src="https://remote.example/remote.png" alt="remote" />
           <img src="data:image/png;base64,unsafe" alt="data" />

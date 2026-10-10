@@ -1,3 +1,4 @@
+import { useT } from '../../infrastructure/i18n/locale';
 // apps/web — shared setup-step guidance.
 //
 // The setup wizard is an operator workflow, not just a collection of forms.
@@ -23,37 +24,40 @@ export function SetupGuidance({
   note,
   testId = 'setup-guidance',
 }: SetupGuidanceProps): ReactElement {
+  const t = useT();
   return (
-    <aside className="setup-guidance" data-testid={testId} aria-label="Step instructions">
+    <aside className="setup-guidance" data-testid={testId} aria-label={t('Step instructions')}>
       <div className="setup-guidance-header">
-        <span className="setup-guidance-kicker">Operator guide</span>
-        <h3 className="setup-guidance-title">Complete this step</h3>
+        <span className="setup-guidance-kicker">{t('Operator guide')}</span>
+        <h3 className="setup-guidance-title">{t('Complete this step')}</h3>
       </div>
       <div className="setup-guidance-sections">
         <section className="setup-guidance-section">
-          <h4>Purpose</h4>
-          <p>{purpose}</p>
+          <h4>{t('Purpose')}</h4>
+          <p>{typeof purpose === 'string' ? t(purpose) : purpose}</p>
         </section>
         {prepare !== undefined ? (
           <section className="setup-guidance-section">
-            <h4>Prepare</h4>
-            <p>{prepare}</p>
+            <h4>{t('Prepare')}</h4>
+            <p>{typeof prepare === 'string' ? t(prepare) : prepare}</p>
           </section>
         ) : null}
         <section className="setup-guidance-section setup-guidance-actions">
-          <h4>What to do</h4>
+          <h4>{t('What to do')}</h4>
           <ol>
             {steps.map((step, index) => (
-              <li key={index}>{step}</li>
+              <li key={index}>{typeof step === 'string' ? t(step) : step}</li>
             ))}
           </ol>
         </section>
         <section className="setup-guidance-section">
-          <h4>After success</h4>
-          <p>{success}</p>
+          <h4>{t('After success')}</h4>
+          <p>{typeof success === 'string' ? t(success) : success}</p>
         </section>
       </div>
-      {note !== undefined ? <p className="setup-guidance-note">{note}</p> : null}
+      {note !== undefined ? (
+        <p className="setup-guidance-note">{typeof note === 'string' ? t(note) : note}</p>
+      ) : null}
     </aside>
   );
 }

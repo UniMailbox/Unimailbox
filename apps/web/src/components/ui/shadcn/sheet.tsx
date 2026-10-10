@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 /* Adapted from satnaing/shadcn-admin, e16c87f213a5ba5e45964e9b67c792105ec74d26.
  * Copyright (c) 2024 Sat Naing. MIT: docs/rebuild/licenses/shadcn-admin-MIT.txt. */
 import * as React from 'react';
@@ -45,6 +46,7 @@ function SheetContent({
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: 'top' | 'right' | 'bottom' | 'left';
 }) {
+  const t = useT();
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -67,7 +69,7 @@ function SheetContent({
         {children}
         <SheetPrimitive.Close className="absolute inset-e-4 top-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-secondary">
           <XIcon className="size-4" />
-          <span className="sr-only">Close</span>
+          <span className="sr-only">{t('Close')}</span>
         </SheetPrimitive.Close>
       </SheetPrimitive.Content>
     </SheetPortal>

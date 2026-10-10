@@ -73,7 +73,13 @@ export async function updateAdminSystemSettings(
   dependencies: SettingsAdministrationServiceDependencies,
   input: UpdateAdminSystemSettingsInput,
 ): Promise<SettingsAdministrationServiceResult> {
-  const request = updateSystemSettingsRequestSchema.parse(input.request);
+  const parsedRequest = updateSystemSettingsRequestSchema.parse(input.request);
+  // Registration is admin-managed only. Accept the historical field in the
+  // wire contract for compatibility, but force the stored policy off.
+  const request: UpdateSystemSettingsRequest = {
+    ...parsedRequest,
+    registrationEnabled: false,
+  };
   const replay = await replayIfPresent(
     dependencies.db,
     input.actorUserId,

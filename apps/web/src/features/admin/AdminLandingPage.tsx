@@ -1,3 +1,5 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
 import { useState, type ReactElement } from 'react';
 import { Link } from '@tanstack/react-router';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -9,6 +11,7 @@ import { adminDomainsQuery, adminOverviewQuery } from './admin-queries';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 export function AdminLandingPage(): ReactElement {
+  const t = useT();
   const session = authSessionQuery();
   const [domainId, setDomainId] = useState('');
   const domainsQuery = adminDomainsQuery();
@@ -17,7 +20,7 @@ export function AdminLandingPage(): ReactElement {
   if (session.data === undefined || overviewQuery.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="overview" />
       </main>
     );
   }
@@ -30,19 +33,16 @@ export function AdminLandingPage(): ReactElement {
   ];
   return (
     <main className="admin-page" data-testid="admin-landing">
-      <PageHeader title="Overview" description="Monitor mailbox activity across your domains." />
-      <Card
-        title="Mailbox overview"
-        description="Message totals update for the selected domain or the whole installation."
-      >
+      <PageHeader title={t('Overview')} />
+      <Card title={t('Mailbox overview')}>
         <div className="overview-toolbar">
           <div className="overview-scope-field">
             <label className="input-label" htmlFor="overview-domain">
-              Domain scope
+              {t('Domain scope')}
             </label>
             <SelectField
               id="overview-domain"
-              label="Domain scope"
+              label={t('Domain scope')}
               value={domainId}
               onValueChange={setDomainId}
               options={domainOptions}
@@ -50,7 +50,7 @@ export function AdminLandingPage(): ReactElement {
           </div>
           {domainsQuery.isError ? (
             <span className="configuration-help">
-              Domain list unavailable. Showing all domains.
+              {t('Domain list unavailable. Showing all domains.')}
             </span>
           ) : null}
         </div>
@@ -65,17 +65,20 @@ export function AdminLandingPage(): ReactElement {
           />
         ) : overviewQuery.data !== undefined ? (
           <div className="overview-stat-grid" data-testid="admin-overview-stats">
-            <OverviewStat label="Total messages" value={overviewQuery.data.stats.totalMessages} />
             <OverviewStat
-              label="Unread"
+              label={t('Total messages')}
+              value={overviewQuery.data.stats.totalMessages}
+            />
+            <OverviewStat
+              label={t('Unread')}
               value={overviewQuery.data.stats.unreadMessages}
               accent="warning"
             />
-            <OverviewStat label="Received" value={overviewQuery.data.stats.receivedMessages} />
-            <OverviewStat label="Sent" value={overviewQuery.data.stats.sentMessages} />
-            <OverviewStat label="Drafts" value={overviewQuery.data.stats.draftMessages} />
-            <OverviewStat label="Mailboxes" value={overviewQuery.data.stats.mailboxCount} />
-            <OverviewStat label="Domains" value={overviewQuery.data.stats.domainCount} />
+            <OverviewStat label={t('Received')} value={overviewQuery.data.stats.receivedMessages} />
+            <OverviewStat label={t('Sent')} value={overviewQuery.data.stats.sentMessages} />
+            <OverviewStat label={t('Drafts')} value={overviewQuery.data.stats.draftMessages} />
+            <OverviewStat label={t('Mailboxes')} value={overviewQuery.data.stats.mailboxCount} />
+            <OverviewStat label={t('Domains')} value={overviewQuery.data.stats.domainCount} />
           </div>
         ) : null}
       </Card>
@@ -83,9 +86,9 @@ export function AdminLandingPage(): ReactElement {
       <section className="admin-overview-links" aria-labelledby="admin-overview-manage">
         <div className="resource-row-header">
           <div>
-            <h2 id="admin-overview-manage">Manage</h2>
+            <h2 id="admin-overview-manage">{t('Manage')}</h2>
             <p className="resource-row-description">
-              Configure the installation and delivery workflow.
+              {t('Configure the installation and delivery workflow.')}
             </p>
           </div>
         </div>
@@ -96,8 +99,8 @@ export function AdminLandingPage(): ReactElement {
               <li key={item.to}>
                 <Link to={item.to} data-testid={`admin-${item.to.split('/').at(-1)}-link`}>
                   <item.icon aria-hidden="true" />
-                  <h2>{item.label}</h2>
-                  <p>{item.description}</p>
+                  <h2>{t(item.label)}</h2>
+                  <p>{t(item.description)}</p>
                 </Link>
               </li>
             ))}

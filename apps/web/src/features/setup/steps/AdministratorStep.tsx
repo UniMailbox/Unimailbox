@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — AdministratorStep.
 //
 // CAP-041 / step 3. Creates the initial administrator. R-AUTH-002: the
@@ -27,10 +28,7 @@ import { ErrorPanel } from '../../../components/ui/ErrorPanel';
 import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { setupQueryKeys } from '../setup-queries';
-import {
-  reclaimInstallationToken,
-  useSkipRemainingSetup,
-} from '../use-skip-remaining-setup';
+import { reclaimInstallationToken, useSkipRemainingSetup } from '../use-skip-remaining-setup';
 import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SetupGuidance } from '../setup-guidance';
@@ -41,12 +39,11 @@ import { SetupGuidance } from '../setup-guidance';
 // the set. `administrator` itself is excluded — the server only advances
 // past it once the user row is committed.
 const STEPS_IMPLYING_ADMINISTRATOR_EXISTS: ReadonlySet<string> = new Set(
-  installationStepSchema.options.slice(
-    installationStepSchema.options.indexOf('administrator') + 1,
-  ),
+  installationStepSchema.options.slice(installationStepSchema.options.indexOf('administrator') + 1),
 );
 
 export function AdministratorStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -122,8 +119,8 @@ export function AdministratorStep(): ReactElement {
 
   return (
     <Card
-      title="Create administrator"
-      description="The first user becomes the initial administrator."
+      title={t('Create administrator')}
+      description={t('The first user becomes the initial administrator.')}
     >
       <SetupGuidance
         purpose="Create the first active user who will administer this installation."
@@ -141,7 +138,7 @@ export function AdministratorStep(): ReactElement {
           id="admin-email"
           type="email"
           autoComplete="username"
-          label="Email"
+          label={t('Email')}
           error={errors.email?.message}
           {...register('email')}
         />
@@ -149,8 +146,8 @@ export function AdministratorStep(): ReactElement {
           id="admin-password"
           type="password"
           autoComplete="new-password"
-          label="Password"
-          help="6–30 characters."
+          label={t('Password')}
+          help={t('6–30 characters.')}
           error={errors.password?.message}
           {...register('password')}
         />
@@ -158,7 +155,7 @@ export function AdministratorStep(): ReactElement {
           id="admin-display-name"
           type="text"
           autoComplete="name"
-          label="Display name (optional)"
+          label={t('Display name (optional)')}
           error={errors.displayName?.message}
           {...register('displayName')}
         />
@@ -166,7 +163,7 @@ export function AdministratorStep(): ReactElement {
           <ErrorPanel
             message={submitErrorMessage}
             code={submitErrorCode}
-            retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+            retryLabel={isUnauthorized ? t('Re-claim installation token') : t('Retry')}
             onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
           />
         ) : null}
@@ -178,7 +175,7 @@ export function AdministratorStep(): ReactElement {
             aria-busy={isSubmitting}
             data-testid="administrator-submit"
           >
-            {isSubmitting ? <Spinner /> : 'Create administrator'}
+            {isSubmitting ? <Spinner /> : t('Create administrator')}
           </Button>
         </div>
       </form>
@@ -186,12 +183,8 @@ export function AdministratorStep(): ReactElement {
         <ErrorPanel
           message={skipRemaining.error.message}
           code={skipRemaining.error.code}
-          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            skipRemaining.isUnauthorized
-              ? handleReclaim
-              : () => void skipRemaining.skip()
-          }
+          retryLabel={skipRemaining.isUnauthorized ? t('Re-claim installation token') : t('Retry')}
+          onRetry={skipRemaining.isUnauthorized ? handleReclaim : () => void skipRemaining.skip()}
         />
       ) : null}
       <SkipRemainingSetupButton

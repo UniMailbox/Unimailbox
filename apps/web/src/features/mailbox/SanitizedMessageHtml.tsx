@@ -4,17 +4,21 @@ import { sanitizeMessageHtml } from './sanitize-message-html';
 
 export interface SanitizedMessageHtmlProps {
   readonly htmlBody: string;
-  readonly mailboxId: string;
   readonly attachments: MessageDetail['attachments'];
+  readonly inlineImageUrls?: ReadonlyMap<string, string>;
 }
 
 /** The sole HTML insertion boundary for the sanitized message body. */
 export function SanitizedMessageHtml({
   htmlBody,
-  mailboxId,
   attachments,
+  inlineImageUrls,
 }: SanitizedMessageHtmlProps): ReactElement {
-  const sanitizedHtml = sanitizeMessageHtml({ htmlBody, mailboxId, attachments });
+  const sanitizedHtml = sanitizeMessageHtml({
+    htmlBody,
+    attachments,
+    inlineImageUrls,
+  });
   return (
     <div
       className="message-detail-html-body"

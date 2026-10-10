@@ -96,9 +96,12 @@ import {
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan, findMailboxById } from '../../modules/tenancy';
-import { checkPermission, prepareCreateAuditEvent } from '../../modules/admin';
+import { prepareCreateAuditEvent } from '../../modules/admin';
 import { createMessageWithRelations, prepareQueueDraftForSend } from '../../modules/messages';
-import { prepareCreateOutboundJobGuarded } from '../../modules/outbound-mail';
+import {
+  findActiveOutboundConnectionForMailbox,
+  prepareCreateOutboundJobGuarded,
+} from '../../modules/outbound-mail';
 import { systemIds } from '../../platform/ids';
 import { systemClock } from '../../platform/clock';
 import { DomainError } from '../../platform/errors';
@@ -326,11 +329,8 @@ export function draftRoutes(): Hono<AppEnv> {
 
       const mailboxId = c.req.param('mailboxId');
 
-      // R-AUTHZ-003: global permission already checked by middleware; now the
-      // mailbox-scoped check. R-AUTHZ-005: admin bypass flows through
-      // checkPermission('role.manage').
-      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
-      await assertCan(c.env.DB, userId, mailboxId, 'send', isAdmin);
+      // Global permission and mailbox membership are independent checks.
+      await assertCan(c.env.DB, userId, mailboxId, 'send');
 
       // Read the raw body so the SHA-256 hash is computed over the bytes
       // the client actually sent (a JSON re-serialise would change whitespace
@@ -617,11 +617,10 @@ export function draftRoutes(): Hono<AppEnv> {
         });
       }
 
-      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
       let authorizedMailboxId: string | null = null;
       for (const association of associationRows) {
         try {
-          await assertCan(c.env.DB, userId, association.mailbox_id, 'send', isAdmin);
+          await assertCan(c.env.DB, userId, association.mailbox_id, 'send');
           authorizedMailboxId = association.mailbox_id;
           break;
         } catch (error) {
@@ -641,12 +640,12 @@ export function draftRoutes(): Hono<AppEnv> {
         });
       }
 
-      // Match the existing compose selection rule. The route only records the
-      // provider connection; decryption and the provider HTTP call belong to
-      // the queue consumer after this transaction commits.
-      const connection = await c.env.DB.prepare(
-        "SELECT id FROM provider_connections WHERE status = 'active' ORDER BY created_at ASC LIMIT 1",
-      ).first<{ id: string }>();
+      // Use the connection assigned to the authorized mailbox's managed
+      // domain. A global first-active fallback would cross domain boundaries.
+      const connection = await findActiveOutboundConnectionForMailbox(
+        c.env.DB,
+        authorizedMailboxId,
+      );
       if (!connection) {
         throw new DomainError({
           code: 'PROVIDER_CONNECTION_NOT_FOUND',
@@ -791,7 +790,7 @@ export function draftRoutes(): Hono<AppEnv> {
    *
    * Authorization layering:
    *   1. `requirePermission('message.read')` middleware — global gate.
-   *   2. `assertCan(actorUserId, resolvedMailboxId, 'read', isAdmin)`
+   *   2. `assertCan(actorUserId, resolvedMailboxId, 'read')`
    *      inside the handler, called once per resolved mailbox until one
    *      succeeds. R-AUTHZ-004: the mailboxId comes from the row, never
    *      the request.
@@ -883,18 +882,17 @@ export function draftRoutes(): Hono<AppEnv> {
 
     // R-AUTHZ-004: assert against each resolved mailbox, never a
     // client-supplied value. Foreign actors (no membership, not the
-    // owner, not a global admin) would normally get 403
+    // owner without membership) would normally get 403
     // MAILBOX_ACCESS_DENIED — but for THIS route a 403 would leak the
     // draft's existence in the target mailbox. Every negative
     // outcome (MAILBOX_ACCESS_DENIED, MAILBOX_NOT_FOUND) collapses to
     // a 404 MESSAGE_NOT_FOUND on the way out — the foreign envelope is
     // observationally identical to the missing-ID envelope regardless
     // of how many associations exist on disk.
-    const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
     let authorizedMailboxId: string | null = null;
     for (const assoc of associationRows) {
       try {
-        await assertCan(c.env.DB, userId, assoc.mailbox_id, 'read', isAdmin);
+        await assertCan(c.env.DB, userId, assoc.mailbox_id, 'read');
         authorizedMailboxId = assoc.mailbox_id;
         break;
       } catch (error) {
@@ -1030,7 +1028,7 @@ export function draftRoutes(): Hono<AppEnv> {
    *
    * Authorization layering:
    *   1. `requirePermission('message.send')` middleware — global gate.
-   *   2. `assertCan(actorUserId, resolvedMailboxId, 'send', isAdmin)`
+   *   2. `assertCan(actorUserId, resolvedMailboxId, 'send')`
    *      inside the handler, iterated over every association. The first
    *      association the actor may send from wins.
    *
@@ -1143,16 +1141,15 @@ export function draftRoutes(): Hono<AppEnv> {
 
       // R-AUTHZ-004: assert against each resolved mailbox, never a
       // client-supplied value. Foreign actors (no membership, not the
-      // owner, not a global admin) would normally get 403
+      // owner without membership) would normally get 403
       // MAILBOX_ACCESS_DENIED — but for THIS route a 403 would leak the
       // draft's existence in the target mailbox. Every negative
       // outcome (MAILBOX_ACCESS_DENIED, MAILBOX_NOT_FOUND) collapses to
       // a 404 MESSAGE_NOT_FOUND on the way out.
-      const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
       let authorizedMailboxId: string | null = null;
       for (const assoc of associationRows) {
         try {
-          await assertCan(c.env.DB, userId, assoc.mailbox_id, 'send', isAdmin);
+          await assertCan(c.env.DB, userId, assoc.mailbox_id, 'send');
           authorizedMailboxId = assoc.mailbox_id;
           break;
         } catch (error) {

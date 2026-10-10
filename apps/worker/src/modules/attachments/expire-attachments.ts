@@ -8,12 +8,13 @@
 import type { AuditEventWriter } from '@unimailbox/contracts';
 import {
   findAttachmentUploadStatus,
+  completeAttachmentCleanup,
   listExpiredAttachmentUploads,
   prepareExpireAttachmentUpload,
   prepareRequireAttachmentExpiryTransition,
 } from '../messages';
 import type { Database } from '../../platform/database';
-import type { AttachmentByteStore } from '../../platform/cache';
+import type { AttachmentByteStore, AttachmentObjectStore } from '../../platform/cache';
 import type { Clock } from '../../platform/clock';
 import { systemClock } from '../../platform/clock';
 import type { IdGenerator } from '../../platform/ids';
@@ -28,6 +29,7 @@ export interface ExpireAttachmentsInput {
 export interface ExpireAttachmentsDependencies {
   readonly db: Database;
   readonly cache: AttachmentByteStore;
+  readonly objectStore?: AttachmentObjectStore;
   readonly auditEventWriter: AuditEventWriter;
   readonly clock?: Clock;
   readonly ids?: IdGenerator;
@@ -119,6 +121,16 @@ export async function expireAttachments(
       if (bytes !== null) {
         await dependencies.cache.delete(upload.kvKey);
       }
+      if (dependencies.objectStore) {
+        const object = await dependencies.objectStore.get(upload.kvKey);
+        if (object !== null) {
+          await dependencies.objectStore.delete(upload.kvKey);
+        }
+      }
+      await completeAttachmentCleanup(dependencies.db, {
+        uploadId: upload.uploadId,
+        now: nowSqlite,
+      });
     } catch {
       // Never log attachment key, filename, bytes, or raw provider/runtime
       // error text. The row remains expired and is selected for a later

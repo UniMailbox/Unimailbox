@@ -4,7 +4,7 @@
 // (CAP-058 star state; CAP-043 Slice 3 soft delete).
 //
 // R-AUTHZ-003: Two layers — requirePermission('message.read') on every route,
-// then mailbox-scoped assertCan(..., 'read', isAdmin) inside the handler.
+// then mailbox-scoped assertCan(..., 'read') inside the handler.
 // R-AUTHZ-004: assertCan authorises against the path's mailboxId, never a
 // client body value.
 // R-MESSAGE-005: isRead and isStarred resolve per requesting user (see
@@ -35,7 +35,6 @@ import { Hono, type Context } from 'hono';
 import { requirePermission } from '../middleware/authz';
 import { requireIdempotencyKey } from '../middleware/idempotency';
 import { assertCan } from '../../modules/tenancy';
-import { checkPermission } from '../../modules/admin';
 import {
   listMessagesByMailbox,
   getMessageDetail,
@@ -73,7 +72,7 @@ const MAX_LIMIT = 50;
 
 // ---------------------------------------------------------------------------
 // Shared authz stanza (gate 3). Every route in this file authorises the
-// same way: authenticated user → admin flag → mailbox-scoped assertCan on
+// same way: authenticated user → mailbox-scoped assertCan on
 // the PATH's mailboxId.
 // ---------------------------------------------------------------------------
 
@@ -99,9 +98,7 @@ async function requireMailboxReadAccess(c: Context<AppEnv>, mailboxId: string): 
     });
   }
 
-  // R-AUTHZ-005: admin bypass flows through checkPermission('role.manage').
-  const isAdmin = await checkPermission(c.env.DB, userId, 'role.manage');
-  await assertCan(c.env.DB, userId, mailboxId, 'read', isAdmin);
+  await assertCan(c.env.DB, userId, mailboxId, 'read');
 
   return userId;
 }

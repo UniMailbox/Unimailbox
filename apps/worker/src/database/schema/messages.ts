@@ -67,6 +67,30 @@ export const messages = sqliteTable(
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 
+export const inboundMessageAttachments = sqliteTable(
+  'inbound_message_attachments',
+  {
+    id: text('id').primaryKey(),
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    objectKey: text('object_key').notNull().unique(),
+    filename: text('filename').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    disposition: text('disposition', { enum: ['attachment', 'inline'] }).notNull(),
+    contentId: text('content_id'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    messageIdx: index('inbound_message_attachments_message_idx').on(
+      table.messageId,
+      table.createdAt,
+      table.id,
+    ),
+  }),
+);
+
 // message_recipients — CAP-021
 export const messageRecipients = sqliteTable(
   'message_recipients',

@@ -15,6 +15,7 @@ export { getCloudflareDashboardLink } from './cloudflare-dashboard-link';
 export { verifyCloudflareEmailRouting } from './cloudflare-verify';
 export {
   startInboundSmokeTest,
+  readInboundSmokeTestStatus,
   checkInboundSmokeTest,
   handleSmokeTestMessage,
 } from './inbound-smoke-test';

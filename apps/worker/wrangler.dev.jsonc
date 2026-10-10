@@ -1,84 +1,73 @@
-// apps/worker/wrangler.dev.jsonc — local-dev wrangler config.
-//
-// Production wrangler.jsonc declares the four credentials as
-// `secrets_store_secrets` bindings backed by Cloudflare Secrets Store,
-// which wrangler dev does not emulate locally and does NOT read from
-// .dev.vars (that file only feeds the legacy `secrets` mechanism).
-//
-// This file mirrors the production binding topology (D1 / R2 / KV /
-// Queue / Assets / cron) but substitutes plain `vars` for the four
-// secrets so `pnpm dev:worker` boots without a Secrets Store.
-//
-// The vitest-pool-workers project keeps using wrangler.test.jsonc,
-// which serves the same role for tests.
+// Local/test topology mirrors deployment configs. Select an explicit environment for releases.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unimailbox-worker-dev",
   "main": "src/worker.ts",
-  "compatibility_date": "2025-09-23",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-
-  "observability": { "enabled": true },
-
-  // ---- D1 ----
-  // No database_id — wrangler dev auto-provisions a local D1 under
-  // .wrangler/state, which is also where scripts/db-migrate.ts persists.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "unimailbox-db",
     },
   ],
-
-  // ---- R2 ----
   "r2_buckets": [
     {
       "binding": "ATTACHMENTS",
       "bucket_name": "unimailbox-attachments",
     },
   ],
-
-  // ---- KV ----
-  // No namespace id — wrangler dev auto-provisions locally.
   "kv_namespaces": [
-    { "binding": "SETUP_SESSION" },
-    { "binding": "CACHE" },
+    {
+      "binding": "SETUP_SESSION",
+    },
+    {
+      "binding": "CACHE",
+    },
   ],
-
-  // ---- Queue ----
   "queues": {
-    "producers": [{ "binding": "OUTBOUND", "queue": "unimailbox-outbound" }],
-    "consumers": [{ "queue": "unimailbox-outbound", "max_retries": 5 }],
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "unimailbox-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "unimailbox-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "unimailbox-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "unimailbox-outbound-dlq",
+      },
+    ],
   },
-
-  // ---- Assets ----
-  // Mirror production's SPA fallback so any direct :8787 hit on a
-  // browser path returns the web shell. Browser development goes
-  // through Vite on :5173 (vite proxies /api/* here), so this only
-  // matters for hitting :8787 directly without Vite. Requires
-  // `pnpm build:web` once if you want the asset bundle present.
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
   },
-
-  // ---- Triggers ----
-  "triggers": { "crons": ["*/2 * * * *"] },
-
-  // ---- Vars (substitute for production secrets_store_secrets) ----
-  // Flip AUTH_PROVIDER to "dual" or "better-auth" when testing the
-  // newer sign-in flows; "legacy" mirrors the production default.
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
   "vars": {
     "ENVIRONMENT": "local",
-    "BETTER_AUTH_URL": "http://localhost:8787",
-    "BETTER_AUTH_ADDITIONAL_TRUSTED_ORIGINS": "http://localhost:5173",
-    "AUTH_PROVIDER": "dual",
-    "INSTALLATION_TOKEN": "local-installation-token",
-    "CREDENTIAL_ENCRYPTION_KEY": "381213oasniasuni121n1io21",
-    "BETTER_AUTH_SECRET": "1029291299naosinasnia",
-    "CURSOR_SIGNING_KEY": "1io21io@akask1",
+    "INSTALLATION_TOKEN": "local-installation-token-for-unimailbox-dev-only",
+    "CREDENTIAL_ENCRYPTION_KEY": "7f3c9a1e5d8b2c6f0a4e9d7b1c8f5a2e6d0b3f9c4a7e1d8b5c2f6a0e9d3b7c1",
+    "CURSOR_SIGNING_KEY": "2c8f5a1e7d3b9c0f6a4e1d8b5c2f7a0e9d6b3c1f8a5e2d7b4c0f6a9e3d1b8c5",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
   },
 }

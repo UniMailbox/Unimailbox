@@ -257,6 +257,7 @@ interface BrevoSendPayload {
   readonly subject?: string;
   readonly htmlContent?: string;
   readonly textContent?: string;
+  readonly attachment?: ReadonlyArray<unknown>;
   readonly headers?: Record<string, string | undefined>;
 }
 
@@ -285,7 +286,7 @@ describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', ()
         from: { address: 'sender@example.com', displayName: 'Sender' },
         to: [{ address: 'recipient@example.com' }],
         cc: [],
-        bcc: [],
+        bcc: [{ address: 'hidden@example.com' }],
         subject: 'hello',
         html: '<p>html body</p>',
         text: 'text body',
@@ -316,9 +317,12 @@ describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', ()
     expect(body.sender?.email).toBe('sender@example.com');
     expect(body.sender?.name).toBe('Sender');
     expect(body.to?.[0]?.email).toBe('recipient@example.com');
+    expect(body.bcc).toEqual([{ email: 'hidden@example.com' }]);
+    expect(body.to).not.toContainEqual({ email: 'hidden@example.com' });
     expect(body.subject).toBe('hello');
     expect(body.htmlContent).toBe('<p>html body</p>');
     expect(body.textContent).toBe('text body');
+    expect(body).not.toHaveProperty('attachment');
   });
 
   it('Idempotency-Key remains present when msg.messageId is undefined', async () => {
@@ -403,3 +407,34 @@ describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', ()
     expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-cc');
   });
 });
+
+it.each([8, 14])(
+  'rejects %i MiB attachments above the 10 MB mode threshold before base64 encoding or calling Brevo',
+  async (size) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    await expect(
+      brevoAdapter.send(
+        { env: { BREVO_API_KEY: 'test-key' } },
+        {
+          idempotencyKey: 'size-test',
+          from: { address: 'from@example.com' },
+          to: [{ address: 'to@example.com' }],
+          cc: [],
+          bcc: [],
+          subject: 'Large file',
+          html: '<p>hello</p>',
+          text: 'hello',
+          attachments: [
+            {
+              filename: 'big.bin',
+              contentType: 'application/octet-stream',
+              disposition: 'attachment',
+              content: new Uint8Array(size * 1024 * 1024).buffer,
+            },
+          ],
+        },
+      ),
+    ).rejects.toBeInstanceOf(TerminalProviderError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);

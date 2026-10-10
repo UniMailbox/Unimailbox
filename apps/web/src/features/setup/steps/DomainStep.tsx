@@ -1,3 +1,4 @@
+import { useT } from '../../../infrastructure/i18n/locale';
 // apps/web — DomainStep.
 //
 // CAP-041 / step 4. Collects the managed domain. R-DATA-001: the wizard
@@ -27,14 +28,12 @@ import { ApiError } from '../../../infrastructure/api/errors';
 import { useApiClient } from '../../../infrastructure/api/client-provider';
 import { useQueryClient } from '@tanstack/react-query';
 import { setupQueryKeys } from '../setup-queries';
-import {
-  reclaimInstallationToken,
-  useSkipRemainingSetup,
-} from '../use-skip-remaining-setup';
+import { reclaimInstallationToken, useSkipRemainingSetup } from '../use-skip-remaining-setup';
 import { SkipRemainingSetupButton } from '../SkipRemainingSetupButton';
 import { SetupGuidance } from '../setup-guidance';
 
 export function DomainStep(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -105,8 +104,8 @@ export function DomainStep(): ReactElement {
 
   return (
     <Card
-      title="Add managed domain"
-      description="The domain that will receive mail for this deployment."
+      title={t('Add managed domain')}
+      description={t('The domain that will receive mail for this deployment.')}
     >
       <SetupGuidance
         purpose="Tell Unimailbox which domain should receive inbound mail."
@@ -124,21 +123,22 @@ export function DomainStep(): ReactElement {
           id="domain-name"
           type="text"
           autoComplete="off"
-          label="Domain"
-          help="e.g. mail.example.com"
+          label={t('Domain')}
+          help={t('e.g. mail.example.com')}
           error={errors.name?.message}
           {...register('name')}
         />
         {previewed !== null ? (
           <p data-testid="domain-normalized" className="wizard-subtitle">
-            Will be stored as: <code>{previewed}</code>
+            {t('Will be stored as: ')}
+            <code>{previewed}</code>
           </p>
         ) : null}
         {submitError !== null ? (
           <ErrorPanel
             message={submitErrorMessage}
             code={submitErrorCode}
-            retryLabel={isUnauthorized ? 'Re-claim installation token' : 'Retry'}
+            retryLabel={isUnauthorized ? t('Re-claim installation token') : t('Retry')}
             onRetry={isUnauthorized ? handleReclaim : () => void onSubmit()}
           />
         ) : null}
@@ -150,7 +150,7 @@ export function DomainStep(): ReactElement {
             aria-busy={isSubmitting}
             data-testid="domain-submit"
           >
-            {isSubmitting ? <Spinner /> : 'Add domain'}
+            {isSubmitting ? <Spinner /> : t('Add domain')}
           </Button>
         </div>
       </form>
@@ -158,12 +158,8 @@ export function DomainStep(): ReactElement {
         <ErrorPanel
           message={skipRemaining.error.message}
           code={skipRemaining.error.code}
-          retryLabel={skipRemaining.isUnauthorized ? 'Re-claim installation token' : 'Retry'}
-          onRetry={
-            skipRemaining.isUnauthorized
-              ? handleReclaim
-              : () => void skipRemaining.skip()
-          }
+          retryLabel={skipRemaining.isUnauthorized ? t('Re-claim installation token') : t('Retry')}
+          onRetry={skipRemaining.isUnauthorized ? handleReclaim : () => void skipRemaining.skip()}
         />
       ) : null}
       <SkipRemainingSetupButton

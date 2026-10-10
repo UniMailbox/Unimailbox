@@ -30,6 +30,9 @@ async function completeSetup(): Promise<void> {
     env.DB.prepare(
       `INSERT OR IGNORE INTO permissions (id, key, description, created_at) VALUES ('message.read', 'message.read', 'Read messages', datetime('now'))`,
     ),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO permissions (id, key, description, created_at) VALUES ('mailbox.manage', 'mailbox.manage', 'Manage mailboxes', datetime('now'))`,
+    ),
     // Then roles
     env.DB.prepare(
       `INSERT OR IGNORE INTO roles (id, name, description, is_system, created_at) VALUES ('administrator', 'administrator', 'Full system access', 1, datetime('now'))`,
@@ -43,6 +46,9 @@ async function completeSetup(): Promise<void> {
     ),
     env.DB.prepare(
       `INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES ('member', 'message.read', datetime('now'))`,
+    ),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES ('member', 'mailbox.manage', datetime('now'))`,
     ),
   ]);
 }
@@ -77,72 +83,6 @@ async function createAdminUser(): Promise<string> {
   return userId;
 }
 
-// Helper: create a registration key
-async function createRegistrationKey(options: {
-  maxUses?: number;
-  expiresInHours?: number | null;
-  createdBy?: string;
-}): Promise<string> {
-  const codeBytes = crypto.getRandomValues(new Uint8Array(32));
-  const code = Array.from(codeBytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  const codeHash = await hashToken(code);
-
-  let expiresAt: string | null = null;
-  if (options.expiresInHours) {
-    const expiryDate = new Date(Date.now() + options.expiresInHours * 60 * 60 * 1000);
-    expiresAt = expiryDate.toISOString();
-  }
-
-  // Use the provided createdBy or create a test admin user
-  let createdBy = options.createdBy;
-  if (!createdBy) {
-    // Create a minimal admin user for FK constraint
-    const adminId = crypto.randomUUID();
-    const passwordHash = await hashPassword('testPassword123');
-    const now = new Date().toISOString();
-
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO users (id, email, display_name, status, password_algorithm, password_iterations, password_salt, password_hash, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        adminId,
-        'test-admin@example.com',
-        'Test Admin',
-        'active',
-        passwordHash.algorithm,
-        passwordHash.iterations,
-        passwordHash.salt,
-        passwordHash.hash,
-        now,
-        now,
-      ),
-      env.DB.prepare(
-        `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, 'administrator', ?)`,
-      ).bind(adminId, now),
-    ]);
-    createdBy = adminId;
-  }
-
-  await env.DB.prepare(
-    `INSERT INTO registration_keys (id, code_hash, role_id, max_uses, used_count, expires_at, revoked_at, created_by, created_at)
-     VALUES (?, ?, NULL, ?, 0, ?, NULL, ?, ?)`,
-  )
-    .bind(
-      crypto.randomUUID(),
-      codeHash,
-      options.maxUses ?? 1,
-      expiresAt,
-      createdBy,
-      new Date().toISOString(),
-    )
-    .run();
-
-  return code;
-}
-
 // Helper: create a session for a user
 async function createSession(userId: string): Promise<string> {
   const refreshToken = crypto.randomUUID();
@@ -166,356 +106,39 @@ describe('POST /api/v1/auth/register', () => {
     await completeSetup();
   });
 
-  describe('valid code and email', () => {
-    it('returns 200 with user info', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'newuser@example.com',
-          password: 'securePassword123',
-          displayName: 'New User',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(200);
-      const body = await response.json();
-      expect(body).toHaveProperty('data');
-      expect(body.data).toHaveProperty('user');
-      expect(body.data.user).toHaveProperty('id');
-      expect(body.data.user).toHaveProperty('email', 'newuser@example.com');
-      expect(body.data.user).toHaveProperty('displayName', 'New User');
-    });
-
-    it('creates user with PBKDF2 password hash', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'pbkdf2test@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      const user = await env.DB.prepare(
-        `SELECT id, password_algorithm, password_iterations FROM users WHERE email = ?`,
-      )
-        .bind('pbkdf2test@example.com')
-        .first();
-
-      expect(user).toBeDefined();
-      expect(user?.password_algorithm).toBe('pbkdf2-sha256');
-      expect(user?.password_iterations).toBe(600000);
-    });
-
-    it('assigns member role to new user', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'memberuser@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      const body = await response.json();
-      const userId = body.data.user.id;
-
-      const userRole = await env.DB.prepare(
-        `SELECT r.id, r.name FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE ur.user_id = ?`,
-      )
-        .bind(userId)
-        .first();
-
-      expect(userRole).toBeDefined();
-      expect(userRole?.name).toBe('member');
-    });
-
-    it('increments key usage', async () => {
-      const code = await createRegistrationKey({ maxUses: 2 });
-
-      await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'user1@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      const key = await env.DB.prepare(
-        `SELECT used_count FROM registration_keys WHERE code_hash = ?`,
-      )
-        .bind(await hashToken(code))
-        .first();
-
-      expect(key?.used_count).toBe(1);
-    });
-
-    it('allows optional displayName', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'nodisplay@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(200);
-      const body = await response.json();
-      expect(body.data.user.displayName).toBeNull();
-    });
-  });
-
-  describe('invalid code', () => {
-    it('returns 409 REGISTRATION_CODE_INVALID for non-existent code', async () => {
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code: 'a'.repeat(64), // Valid hex but doesn't exist
-          email: 'user@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(409);
-      const body = await response.json();
-      expect(body.error.code).toBe('REGISTRATION_CODE_INVALID');
-    });
-
-    it('returns 409 REGISTRATION_CODE_EXPIRED for expired code', async () => {
-      const code = await createRegistrationKey({ expiresInHours: -1 }); // Expired 1 hour ago
-
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'user@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(409);
-      const body = await response.json();
-      expect(body.error.code).toBe('REGISTRATION_CODE_EXPIRED');
-    });
-
-    it('returns 409 REGISTRATION_CODE_REVOKED for revoked code', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      // Revoke the key
-      await env.DB.prepare(
-        `UPDATE registration_keys SET revoked_at = datetime('now') WHERE code_hash = ?`,
-      )
-        .bind(await hashToken(code))
-        .run();
-
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'user@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(409);
-      const body = await response.json();
-      expect(body.error.code).toBe('REGISTRATION_CODE_REVOKED');
-    });
-
-    it('returns 409 REGISTRATION_CODE_EXHAUSTED for fully-used code', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      // First registration succeeds
-      await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'user1@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      // Second registration should fail
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'user2@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(409);
-      const body = await response.json();
-      expect(body.error.code).toBe('REGISTRATION_CODE_EXHAUSTED');
-    });
-  });
-
-  describe('duplicate email', () => {
-    it('returns 409 USER_EMAIL_TAKEN', async () => {
-      const code = await createRegistrationKey({ maxUses: 2 });
-
-      // First registration
-      await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'duplicate@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      // Second registration with same email
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'duplicate@example.com',
-          password: 'differentPassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(409);
-      const body = await response.json();
-      expect(body.error.code).toBe('USER_EMAIL_TAKEN');
-    });
-  });
-
-  describe('validation errors', () => {
-    it('returns 400 VALIDATION_ERROR for invalid code length', async () => {
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code: 'tooshort',
-          email: 'user@example.com',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(400);
-    });
-
-    it('returns 400 VALIDATION_ERROR for invalid email', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'notanemail',
-          password: 'securePassword123',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(400);
-    });
-
-    it('returns 400 VALIDATION_ERROR for short password', async () => {
-      const code = await createRegistrationKey({ maxUses: 1 });
-
-      const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          code,
-          email: 'user@example.com',
-          password: 'short',
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': 'test-key-' + crypto.randomUUID(),
-        },
-      });
-
-      expect(response.status).toBe(400);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // CAP-031 / R-INPUT-002: malformed JSON returns 400 INVALID_JSON
-  // (the local try/catch in /api/v1/auth/* — D-CAP-031-C — not the helper,
-  // because the helper would force schema validation before the replay
-  // lookup and break Fix 9 from CAP-027).
-  // -----------------------------------------------------------------------
-  it('returns 400 INVALID_JSON when body is malformed JSON', async () => {
+  it('is disabled because administrators own account creation', async () => {
     const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
       method: 'POST',
-      body: '{not valid json',
+      body: JSON.stringify({
+        code: 'legacy-registration-code',
+        email: 'newuser@example.com',
+        password: 'securePassword123',
+      }),
       headers: {
         'Content-Type': 'application/json',
-        'Idempotency-Key': 'auth-register-invalid-json-' + crypto.randomUUID(),
+        'Idempotency-Key': 'registration-disabled-' + crypto.randomUUID(),
       },
     });
 
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error.code).toBe('INVALID_JSON');
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error?: { code?: unknown } };
+    expect(body.error?.code).toBe('REGISTRATION_DISABLED');
+    const user = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
+      .bind('newuser@example.com')
+      .first();
+    expect(user).toBeNull();
+  });
+
+  it('does not validate or consume legacy invite codes', async () => {
+    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
+      method: 'POST',
+      body: '{not valid json',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error?: { code?: unknown } };
+    expect(body.error?.code).toBe('REGISTRATION_DISABLED');
   });
 });
 
@@ -554,6 +177,59 @@ describe('POST /api/v1/auth/login', () => {
       expect(body.data).toHaveProperty('user');
       expect(body.data.user).toHaveProperty('id', userId);
       expect(body.data.user).toHaveProperty('email', 'admin@example.com');
+      expect(body.data.canAccessAdmin).toBe(true);
+      expect(response.headers.get('set-cookie')).toContain('unimailbox_refresh=');
+      expect(response.headers.get('set-cookie')).toContain('HttpOnly');
+      expect(response.headers.get('set-cookie')).toContain('Path=/api/v1/auth');
+    });
+
+    it('refreshes after a hard reload using the HttpOnly cookie without a token body', async () => {
+      const login = await SELF.fetch('http://localhost/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'admin@example.com',
+          password: 'adminPassword123',
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'cookie-login-' + crypto.randomUUID(),
+        },
+      });
+      expect(login.status).toBe(200);
+      const cookie = login.headers.get('set-cookie');
+      expect(cookie).toBeTruthy();
+
+      const refresh = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+        method: 'POST',
+        body: '{}',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookie ?? '',
+          'Idempotency-Key': 'cookie-refresh-' + crypto.randomUUID(),
+        },
+      });
+      expect(refresh.status).toBe(200);
+      expect((await refresh.json()).data.accessToken).toEqual(expect.any(String));
+    });
+
+    it('clears the refresh cookie even when the access token is already gone', async () => {
+      const login = await SELF.fetch('http://localhost/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: 'admin@example.com', password: 'adminPassword123' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'logout-cookie-login-' + crypto.randomUUID(),
+        },
+      });
+      const cookie = login.headers.get('set-cookie');
+      expect(cookie).toBeTruthy();
+
+      const logout = await SELF.fetch('http://localhost/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { Cookie: cookie ?? '' },
+      });
+      expect(logout.status).toBe(204);
+      expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
     });
 
     it('stores access token in KV with 15-minute TTL', async () => {
@@ -921,6 +597,52 @@ describe('GET /api/v1/auth/me', () => {
       expect(body.data).toHaveProperty('user');
       expect(body.data.user).toHaveProperty('id', userId);
       expect(body.data.user).toHaveProperty('email', 'admin@example.com');
+      expect(body.data.canAccessAdmin).toBe(true);
+    });
+
+    it('does not classify the ordinary member mailbox role as admin access', async () => {
+      const memberId = crypto.randomUUID();
+      const passwordHash = await hashPassword('memberPassword123');
+      const now = new Date().toISOString();
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO users (id, email, display_name, status, password_algorithm,
+           password_iterations, password_salt, password_hash, created_at, updated_at)
+           VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          memberId,
+          'member@example.com',
+          'Member User',
+          passwordHash.algorithm,
+          passwordHash.iterations,
+          passwordHash.salt,
+          passwordHash.hash,
+          now,
+          now,
+        ),
+        env.DB.prepare(
+          `INSERT INTO user_roles (user_id, role_id, granted_at) VALUES (?, 'member', ?)`,
+        ).bind(memberId, now),
+      ]);
+      const login = await SELF.fetch('http://localhost/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: 'member@example.com', password: 'memberPassword123' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'member-login-' + crypto.randomUUID(),
+        },
+      });
+      expect(login.status).toBe(200);
+      const loginBody = (await login.json()) as {
+        data: { accessToken: string; canAccessAdmin: boolean };
+      };
+      expect(loginBody.data.canAccessAdmin).toBe(false);
+      const response = await SELF.fetch('http://localhost/api/v1/auth/me', {
+        headers: { Authorization: `Bearer ${loginBody.data.accessToken}` },
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { data: { canAccessAdmin: boolean } };
+      expect(body.data.canAccessAdmin).toBe(false);
     });
   });
 
@@ -950,6 +672,72 @@ describe('GET /api/v1/auth/me', () => {
 
       expect(response.status).toBe(401);
     });
+
+    it('R-AUTH-005 rejects a cached user-only token without a D1 session', async () => {
+      const legacyToken = crypto.randomUUID();
+      await env.CACHE.put(`auth:${legacyToken}`, JSON.stringify({ userId }), {
+        expirationTtl: 900,
+      });
+
+      const response = await SELF.fetch('http://localhost/api/v1/auth/me', {
+        headers: { Authorization: `Bearer ${legacyToken}` },
+      });
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error.code).toBe('AUTHENTICATION_REQUIRED');
+    });
+
+    it('R-AUTH-005 rejects a token after its D1 session is revoked', async () => {
+      const tokenPayload = await env.CACHE.get(`auth:${accessToken}`);
+      expect(tokenPayload).not.toBeNull();
+      const { sessionId } = JSON.parse(tokenPayload ?? '{}') as { sessionId?: string };
+      expect(sessionId).toBeTruthy();
+      await env.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ?')
+        .bind(new Date().toISOString(), sessionId)
+        .run();
+
+      const response = await SELF.fetch('http://localhost/api/v1/auth/me', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error.code).toBe('AUTHENTICATION_REQUIRED');
+    });
+
+    it('R-AUTH-005 rejects a token whose user ID does not own its D1 session', async () => {
+      const tokenPayload = await env.CACHE.get(`auth:${accessToken}`);
+      expect(tokenPayload).not.toBeNull();
+      const { sessionId } = JSON.parse(tokenPayload ?? '{}') as { sessionId?: string };
+      expect(sessionId).toBeTruthy();
+      await env.CACHE.put(
+        `auth:${accessToken}`,
+        JSON.stringify({ userId: crypto.randomUUID(), sessionId }),
+        { expirationTtl: 900 },
+      );
+
+      const response = await SELF.fetch('http://localhost/api/v1/auth/me', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error.code).toBe('AUTHENTICATION_REQUIRED');
+    });
+
+    it('ignores Cloudflare Access identity headers without an application token', async () => {
+      const response = await SELF.fetch('http://localhost/api/v1/auth/me', {
+        headers: {
+          'Cf-Access-Jwt-Assertion': 'untrusted-assertion',
+          'Cf-Access-Authenticated-User-Email': 'admin@example.com',
+        },
+      });
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error.code).toBe('AUTHENTICATION_REQUIRED');
+    });
   });
 });
 
@@ -957,176 +745,22 @@ describe('GET /api/v1/auth/me', () => {
 // CAP-027 Idempotency tests
 // ---------------------------------------------------------------------------
 
-describe('POST /api/v1/auth/register — idempotency', () => {
+describe('POST /api/v1/auth/register — closed registration contract', () => {
   beforeEach(async () => {
     await resetAndMigrate();
     await completeSetup();
   });
 
-  it('returns 400 IDEMPOTENCY_KEY_REQUIRED when header missing', async () => {
-    const code = await createRegistrationKey({ maxUses: 1 });
-
+  it('returns REGISTRATION_DISABLED even without an Idempotency-Key', async () => {
     const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
       method: 'POST',
-      body: JSON.stringify({
-        code,
-        email: 'user@example.com',
-        password: 'securePassword123',
-      }),
-      headers: { 'Content-Type': 'application/json' }, // No Idempotency-Key
+      body: JSON.stringify({ email: 'user@example.com', password: 'securePassword123' }),
+      headers: { 'Content-Type': 'application/json' },
     });
 
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
-  });
-
-  it('returns 400 IDEMPOTENCY_KEY_INVALID for malformed key', async () => {
-    const code = await createRegistrationKey({ maxUses: 1 });
-
-    const response = await SELF.fetch('http://localhost/api/v1/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        code,
-        email: 'user@example.com',
-        password: 'securePassword123',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': 'short', // Too short (< 8 chars)
-      },
-    });
-
-    expect(response.status).toBe(400);
-    const body = await response.json();
-    expect(body.error.code).toBe('IDEMPOTENCY_KEY_INVALID');
-  });
-
-  it('replays response when same key and body', async () => {
-    const code = await createRegistrationKey({ maxUses: 2 });
-    const idempotencyKey = 'replay-test-' + crypto.randomUUID();
-    const requestBody = JSON.stringify({
-      code,
-      email: 'user@example.com',
-      password: 'securePassword123',
-    });
-
-    // First request
-    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
-      method: 'POST',
-      body: requestBody,
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-
-    expect(firstResponse.status).toBe(200);
-    const firstBody = await firstResponse.json();
-    const userId = firstBody.data.user.id;
-
-    // Second request with same key and body should replay
-    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
-      method: 'POST',
-      body: requestBody,
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-
-    expect(secondResponse.status).toBe(200);
-    const secondBody = await secondResponse.json();
-    expect(secondBody.data.user.id).toBe(userId); // Same user replayed
-
-    // Verify only one user was created
-    const userCount = await env.DB.prepare(`SELECT COUNT(*) as count FROM users WHERE email = ?`)
-      .bind('user@example.com')
-      .first<{ count: number }>();
-    expect(userCount?.count).toBe(1);
-  });
-
-  it('returns 409 IDEMPOTENCY_KEY_REUSED when same key and code but different email', async () => {
-    // Use a code with maxUses: 2 so both requests could succeed if not for idempotency
-    const code = await createRegistrationKey({ maxUses: 2 });
-    const idempotencyKey = 'reuse-same-code-' + crypto.randomUUID();
-
-    // First request with the code
-    const firstResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        code,
-        email: 'user1@example.com',
-        password: 'securePassword123',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-
-    expect(firstResponse.status).toBe(200);
-
-    // Second request with same key and code but different email
-    const secondResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        code,
-        email: 'user2@example.com', // Different email
-        password: 'securePassword123',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-
-    expect(secondResponse.status).toBe(409);
-    const body = await secondResponse.json();
-    expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED');
-  });
-
-  // -----------------------------------------------------------------------
-  // CAP-031 / R-INPUT-002 / AC11: a malformed body must NOT persist an
-  // idempotency_records row — the helper throws INVALID_JSON before the
-  // D1 batch, so a corrected retry with the same Idempotency-Key succeeds.
-  // -----------------------------------------------------------------------
-  it('allows corrected retry with same Idempotency-Key after malformed body', async () => {
-    const code = await createRegistrationKey({ maxUses: 1 });
-    const idempotencyKey = 'auth-retry-after-invalid-' + crypto.randomUUID();
-
-    // First attempt: malformed JSON — must return 400 INVALID_JSON and
-    // must NOT write an idempotency_records row.
-    const malformedResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
-      method: 'POST',
-      body: '{not valid json',
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-
-    expect(malformedResponse.status).toBe(400);
-    const malformedBody = await malformedResponse.json();
-    expect(malformedBody.error.code).toBe('INVALID_JSON');
-
-    // Second attempt: valid body, same Idempotency-Key — must succeed.
-    // If the first attempt had written a record with the malformed body
-    // hash, this would 409 IDEMPOTENCY_KEY_REUSED.
-    const validResponse = await SELF.fetch('http://localhost/api/v1/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        code,
-        email: 'retry@example.com',
-        password: 'securePassword123',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-
-    expect(validResponse.status).toBe(200);
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error?: { code?: unknown } };
+    expect(body.error?.code).toBe('REGISTRATION_DISABLED');
   });
 });
 
@@ -1359,153 +993,29 @@ describe('POST /api/v1/auth/refresh — idempotency', () => {
 });
 
 // ---------------------------------------------------------------------------
-// CAP-042 AC 23 — AUTH_PROVIDER cutover matrix for POST /api/v1/auth/login.
-//
-// The route layer in `apps/worker/src/http/routes/auth.ts` short-circuits
-// with 401 AUTHENTICATION_REQUIRED when `c.var.config.authProvider ===
-// 'better-auth'`. The gate runs BEFORE `requireIdempotencyKey` so it
-// short-circuits before any body parsing or idempotency lookup. These
-// tests prove three things:
-//
-//   1. `better-auth` mode — POST /api/v1/auth/login returns 401 with
-//      the canonical envelope, no Bearer token is issued, and no
-//      `idempotency_records` row is written. A stale idempotency
-//      record from a previous run cannot re-issue a token.
-//   2. `dual` mode — the legacy issuance path still works (200,
-//      tokens issued). Regression coverage that the gate only fires
-//      for the `better-auth` value.
-//   3. `legacy` mode — the legacy issuance path still works (200,
-//      tokens issued). Regression coverage that the gate does not
-//      affect the existing CAP-019 surface.
-//
-// `env.AUTH_PROVIDER` is read by `parsePlatformConfig(c.env)` on every
-// request (`http/middleware/config.ts`), so this in-test mutation takes
-// effect on the next `SELF.fetch` without a Worker restart.
-// ---------------------------------------------------------------------------
-
-/**
- * Force `AUTH_PROVIDER` for the current test. The committed
- * `wrangler.test.jsonc` defaults to `'dual'`; each test in this block
- * overrides to the mode under test in-line. The same pattern lives in
- * `better-auth.worker.test.ts` and `authn.worker.test.ts`; the helper
- * is duplicated here to avoid a cross-file test import.
- */
-function forceAuthProvider(provider: 'legacy' | 'dual' | 'better-auth'): void {
-  (env as { AUTH_PROVIDER?: string }).AUTH_PROVIDER = provider;
-}
-
-describe('CAP-042 AC 23 — POST /api/v1/auth/login mode gating', () => {
+// Better Auth and Cloudflare Access are not runtime authentication authorities.
+// The application-owned login route remains available regardless of any
+// migration-only AUTH_PROVIDER value left in local configuration.
+describe('POST /api/v1/auth/login — application-owned authority', () => {
   beforeEach(async () => {
     await resetAndMigrate();
     await completeSetup();
     await createAdminUser();
-    // The default in wrangler.test.jsonc is `dual`; each test below
-    // overrides to the mode under test in-line so the cutover matrix
-    // is exercised cleanly within a single file.
   });
 
-  it('better-auth mode: returns 401 AUTHENTICATION_REQUIRED with no Bearer token issued', async () => {
-    forceAuthProvider('better-auth');
-
+  it('issues the application Bearer token even when migration config names better-auth', async () => {
+    (env as { AUTH_PROVIDER?: string }).AUTH_PROVIDER = 'better-auth';
     const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
       method: 'POST',
-      body: JSON.stringify({
-        email: 'admin@example.com',
-        password: 'adminPassword123',
-      }),
+      body: JSON.stringify({ email: 'admin@example.com', password: 'adminPassword123' }),
       headers: {
         'Content-Type': 'application/json',
-        'Idempotency-Key': 'cap042-ac23-login-better-' + crypto.randomUUID(),
-      },
-    });
-
-    expect(response.status).toBe(401);
-    const body = (await response.json()) as {
-      error?: { code?: unknown; message?: unknown };
-    };
-    expect(body.error?.code).toBe('AUTHENTICATION_REQUIRED');
-    // The canonical envelope is `{ error: { code, message, requestId } }`
-    // — mirror of the better-auth.ts gate. We assert the presence of
-    // the inner error keys; the message is human-readable and may vary.
-    expect(typeof body.error?.message).toBe('string');
-
-    // Authoritative proof the gate ran BEFORE requireIdempotencyKey:
-    // no `idempotency_records` row was written. If the gate had run
-    // after requireIdempotencyKey, a previous-run record would have
-    // been re-executed and the route would have minted fresh tokens.
-    const idempotencyCount = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM idempotency_records WHERE operation = ?`,
-    )
-      .bind('POST /api/v1/auth/login')
-      .first<{ n: number }>();
-    expect(idempotencyCount?.n ?? 0).toBe(0);
-  });
-
-  it('better-auth mode: gate fires before requireIdempotencyKey (no body required)', async () => {
-    forceAuthProvider('better-auth');
-
-    // Send NO Idempotency-Key. In dual/legacy mode this would 400
-    // IDEMPOTENCY_KEY_REQUIRED. The gate must short-circuit before
-    // requireIdempotencyKey runs, so a missing header still produces
-    // 401 AUTHENTICATION_REQUIRED (not 400).
-    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: 'admin@example.com',
-        password: 'adminPassword123',
-      }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    expect(response.status).toBe(401);
-    const body = (await response.json()) as { error?: { code?: unknown } };
-    expect(body.error?.code).toBe('AUTHENTICATION_REQUIRED');
-  });
-
-  it('dual mode: legacy issuance path still works (200 with tokens)', async () => {
-    forceAuthProvider('dual');
-
-    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: 'admin@example.com',
-        password: 'adminPassword123',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': 'cap042-ac23-login-dual-' + crypto.randomUUID(),
+        'Idempotency-Key': 'application-auth-' + crypto.randomUUID(),
       },
     });
 
     expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data?: { accessToken?: unknown; refreshToken?: unknown; user?: { id?: unknown } };
-    };
+    const body = (await response.json()) as { data?: { accessToken?: unknown } };
     expect(body.data?.accessToken).toBeTruthy();
-    expect(body.data?.refreshToken).toBeTruthy();
-    expect(body.data?.user?.id).toBeTruthy();
-  });
-
-  it('legacy mode: legacy issuance path still works (200 with tokens, no gate interference)', async () => {
-    forceAuthProvider('legacy');
-
-    const response = await SELF.fetch('http://localhost/api/v1/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: 'admin@example.com',
-        password: 'adminPassword123',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Idempotency-Key': 'cap042-ac23-login-legacy-' + crypto.randomUUID(),
-      },
-    });
-
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      data?: { accessToken?: unknown; refreshToken?: unknown; user?: { id?: unknown } };
-    };
-    expect(body.data?.accessToken).toBeTruthy();
-    expect(body.data?.refreshToken).toBeTruthy();
   });
 });

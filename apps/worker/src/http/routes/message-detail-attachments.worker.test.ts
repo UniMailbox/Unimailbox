@@ -81,6 +81,7 @@ async function createUser(email: string): Promise<string> {
 
 async function createSession(userId: string): Promise<string> {
   const accessToken = crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
   const refreshToken = crypto.randomUUID();
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(refreshToken));
   const refreshTokenHash = Array.from(new Uint8Array(digest), (byte) =>
@@ -91,14 +92,14 @@ async function createSession(userId: string): Promise<string> {
      VALUES (?, ?, ?, ?, ?)`,
   )
     .bind(
-      crypto.randomUUID(),
+      sessionId,
       userId,
       refreshTokenHash,
       Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
       new Date().toISOString(),
     )
     .run();
-  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId }), {
+  await env.CACHE.put(`auth:${accessToken}`, JSON.stringify({ userId, sessionId }), {
     expirationTtl: 15 * 60,
   });
   return accessToken;

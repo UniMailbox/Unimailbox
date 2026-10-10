@@ -97,7 +97,7 @@ function dispatchFetch(routes: ReadonlyArray<RouteHandler>): {
 
 function sessionRoute(): RouteHandler {
   return {
-    match: (url) => url.includes('/api/v1/auth/better/get-session'),
+    match: (url) => url.includes('/api/v1/auth/me'),
     response: () =>
       jsonResponse({
         data: {
@@ -213,12 +213,12 @@ function getCalls(calls: ReadonlyArray<CapturedRequest>, method: string): Captur
 }
 
 describe('MailboxMembersPage — CAP-065', () => {
-  it('renders the shared loading state while the member list is pending', async () => {
+  it('renders a busy skeleton while the member list is pending', async () => {
     await renderMembers({
       routes: [membersRoute(() => new Promise<Response>(() => {}))],
     });
 
-    expect(screen.getByTestId('mailbox-loading')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading…' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByTestId('mailbox-member-form')).not.toBeInTheDocument();
   });
 
@@ -261,13 +261,13 @@ describe('MailboxMembersPage — CAP-065', () => {
     expect(screen.getByTestId('mailbox-members-error')).not.toHaveTextContent('member@example.com');
   });
 
-  it('R-API-002 normalizes a network failure to the stable UNKNOWN error code', async () => {
+  it('R-API-002 normalizes a network failure to the stable NETWORK_ERROR error code', async () => {
     await renderMembers({
       routes: [membersRoute(() => Promise.reject(new TypeError('Failed to fetch')))],
     });
 
     await waitFor(() => expect(screen.getByTestId('mailbox-members-error')).toBeInTheDocument());
-    expect(screen.getByTestId('error-code')).toHaveTextContent('UNKNOWN');
+    expect(screen.getByTestId('error-code')).toHaveTextContent('NETWORK_ERROR');
   });
 
   it('keeps loaded members visible when a background refetch fails and offers retry', async () => {

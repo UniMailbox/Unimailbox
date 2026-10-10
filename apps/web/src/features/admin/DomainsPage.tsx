@@ -1,3 +1,5 @@
+import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
+import { useT } from '../../infrastructure/i18n/locale';
 import { SelectField } from '../../components/ui/SelectField';
 import { Input as PrimitiveInput } from '../../components/ui/shadcn/input';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -35,7 +37,7 @@ export function DomainsPage(): ReactElement {
   if (sessionQuery.data === undefined) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -46,6 +48,7 @@ export function DomainsPage(): ReactElement {
 }
 
 function DomainsContent(): ReactElement {
+  const t = useT();
   const apiClient = useApiClient();
   const queryClient = useQueryClient();
   const session = authSessionQuery().data;
@@ -74,7 +77,7 @@ function DomainsContent(): ReactElement {
         ...(current ?? []),
       ]);
       setName('');
-      setNotice(`Added ${domain.name}.`);
+      setNotice(t('Added {value0}.', { value0: domain.name }));
     },
     onError: (error) => {
       setAddError(normalizeApiError(error));
@@ -92,7 +95,7 @@ function DomainsContent(): ReactElement {
       if (confirmed !== undefined) {
         setRoutingConfirmed((current) => new Set(current).add(confirmed.id));
       }
-      setNotice(`Operator confirmation recorded for ${result.domain}.`);
+      setNotice(t('Operator confirmation recorded for {value0}.', { value0: result.domain }));
     },
     onError: (error) => {
       setActionError(normalizeApiError(error));
@@ -111,7 +114,7 @@ function DomainsContent(): ReactElement {
         (current ?? []).filter((domain) => domain.id !== result.id),
       );
       setDeleteTarget(null);
-      setNotice('Domain deleted.');
+      setNotice(t('Domain deleted.'));
     },
     onError: (error) => {
       setActionError(normalizeApiError(error));
@@ -136,7 +139,7 @@ function DomainsContent(): ReactElement {
       queryClient.setQueryData<ManagedDomain[]>(domainsKey, (current) =>
         (current ?? []).map((domain) => (domain.id === updated.id ? updated : domain)),
       );
-      setNotice(`Outbound connection updated for ${updated.name}.`);
+      setNotice(t('Outbound connection updated for {value0}.', { value0: updated.name }));
     },
     onError: (error) => {
       setActionError(normalizeApiError(error));
@@ -167,7 +170,7 @@ function DomainsContent(): ReactElement {
   if (!hasData && query.isPending) {
     return (
       <main className="admin-page" data-testid="admin-loading">
-        <p>Loading…</p>
+        <ContentSkeleton variant="list" />
       </main>
     );
   }
@@ -175,10 +178,10 @@ function DomainsContent(): ReactElement {
     return (
       <main className="admin-page" data-testid="admin-not-authorized" role="status">
         <Card
-          title="Administrator access required"
-          description="Your account does not have permission to read managed domains."
+          title={t('Administrator access required')}
+          description={t('Your account does not have permission to read managed domains.')}
         >
-          <p>Ask an administrator if you need access to this area.</p>
+          <p>{t('Ask an administrator if you need access to this area.')}</p>
         </Card>
       </main>
     );
@@ -186,8 +189,11 @@ function DomainsContent(): ReactElement {
   if (!hasData && queryError !== null) {
     return (
       <main className="admin-page" data-testid="admin-error">
-        <PageHeader title="Domains" description="Configure receiving domains and routing." />
-        <Card title="Could not load domains" description="Managed domains are unavailable.">
+        <PageHeader title={t('Domains')} />
+        <Card
+          title={t('Could not load domains')}
+          description={t('Managed domains are unavailable.')}
+        >
           <ErrorPanel
             message={queryError.message}
             code={queryError.code}
@@ -203,17 +209,19 @@ function DomainsContent(): ReactElement {
   const connections = connectionsQuery.data ?? [];
   return (
     <main className="admin-page" data-testid="admin-domains-page">
-      <PageHeader title="Domains" description="Configure receiving domains and routing." />
+      <PageHeader title={t('Domains')} />
       <Card
-        title="Connect Cloudflare Email Routing"
-        description="Point inbound mail for each managed domain to this Worker."
+        title={t('Connect Cloudflare Email Routing')}
+        description={t('Point inbound mail for each managed domain to this Worker.')}
       >
         <div className="cloudflare-flow" data-testid="cloudflare-routing-flow">
           <div className="cloudflare-flow-step">
             <span className="cloudflare-flow-index">1</span>
             <div>
-              <strong>Open Cloudflare</strong>
-              <p>In Email Routing, choose the managed domain and route mail to this Worker.</p>
+              <strong>{t('Open Cloudflare')}</strong>
+              <p>
+                {t('In Email Routing, choose the managed domain and route mail to this Worker.')}
+              </p>
               <a
                 className="btn btn-secondary cloudflare-dashboard-link"
                 href="https://dash.cloudflare.com"
@@ -221,7 +229,7 @@ function DomainsContent(): ReactElement {
                 rel="noreferrer"
               >
                 <Cloud aria-hidden="true" />
-                Open Cloudflare dashboard
+                {t('Open Cloudflare dashboard ')}
                 <ExternalLink aria-hidden="true" />
               </a>
             </div>
@@ -229,25 +237,23 @@ function DomainsContent(): ReactElement {
           <div className="cloudflare-flow-step">
             <span className="cloudflare-flow-index">2</span>
             <div>
-              <strong>Confirm the routing rule</strong>
-              <p>After saving the rule, confirm it beside the matching domain below.</p>
+              <strong>{t('Confirm the routing rule')}</strong>
+              <p>{t('After saving the rule, confirm it beside the matching domain below.')}</p>
             </div>
           </div>
           <p className="configuration-note">
-            Confirmation records the operator action. Delivery is proven when an inbound test email
-            arrives.
+            {t(
+              'Confirmation records the operator action. Delivery is proven when an inbound test email arrives.',
+            )}
           </p>
         </div>
       </Card>
-      <Card
-        title="Managed domains"
-        description="Add domains that this deployment owns for mailbox addresses."
-      >
+      <Card title={t('Managed domains')}>
         <p className="configuration-note" data-testid="domain-verify-note">
-          Verification records your confirmation; DNS and delivery are not tested.
+          {t('Verification records your confirmation; DNS and delivery are not tested.')}
         </p>
         <form onSubmit={submitAdd} className="admin-form" noValidate>
-          <label htmlFor="managed-domain-name">Domain name</label>
+          <label htmlFor="managed-domain-name">{t('Domain name')}</label>
           <div className="admin-form-row">
             <PrimitiveInput
               id="managed-domain-name"
@@ -259,8 +265,8 @@ function DomainsContent(): ReactElement {
               onChange={(event) => setName(event.target.value)}
               aria-describedby={addError === null ? undefined : 'domain-add-error'}
             />
-            <Button type="submit" disabled={addMutation.isPending}>
-              {addMutation.isPending ? 'Adding…' : 'Add domain'}
+            <Button type="submit" loading={addMutation.isPending} disabled={addMutation.isPending}>
+              {addMutation.isPending ? t('Adding…') : t('Add domain')}
             </Button>
           </div>
           {addError !== null ? (
@@ -281,15 +287,18 @@ function DomainsContent(): ReactElement {
         ) : null}
         {queryError !== null ? (
           <div className="admin-error-banner" role="alert" data-testid="domains-query-error">
-            <span>Could not refresh domains: {queryError.message}</span>{' '}
+            <span>
+              {t('Could not refresh domains: ')}
+              {queryError.message}
+            </span>{' '}
             <span>{queryError.code}</span>
             <Button type="button" variant="secondary" onClick={() => void query.refetch()}>
-              Retry
+              {t('Retry')}
             </Button>
           </div>
         ) : null}
         {domains.length === 0 ? (
-          <p data-testid="admin-domains-empty">No managed domains exist yet.</p>
+          <p data-testid="admin-domains-empty">{t('No managed domains exist yet.')}</p>
         ) : (
           <ul className="admin-domain-list" data-testid="admin-domains-list">
             {domains.map((domain) => (
@@ -302,16 +311,17 @@ function DomainsContent(): ReactElement {
                 <div>
                   <strong>{domain.name}</strong>
                   <span className={`admin-domain-status admin-domain-status-${domain.status}`}>
-                    {domain.status}
+                    {t(domain.status)}
                   </span>
                   <small>
-                    Updated <LocalDateTime value={domain.updatedAt} />
+                    {t('Updated ')}
+                    <LocalDateTime value={domain.updatedAt} />
                   </small>
                 </div>
                 <label className="admin-domain-connection-field">
-                  <span>Outbound connection</span>
+                  <span>{t('Outbound connection')}</span>
                   <SelectField
-                    label={`Outbound connection for ${domain.name}`}
+                    label={t('Outbound connection for {value0}', { value0: domain.name })}
                     value={domain.outboundConnectionId ?? ''}
                     disabled={connectionsQuery.isPending || outboundMutation.isPending}
                     onValueChange={(value) =>
@@ -326,10 +336,10 @@ function DomainsContent(): ReactElement {
                       })),
                     ]}
                   />
-                  <small className="configuration-help">Saves automatically.</small>
+                  <small className="configuration-help">{t('Saves automatically.')}</small>
                   {connectionsQuery.error !== null ? (
                     <small data-testid="domain-connections-unavailable">
-                      Provider connections are unavailable.
+                      {t('Provider connections are unavailable.')}
                     </small>
                   ) : null}
                 </label>
@@ -338,21 +348,22 @@ function DomainsContent(): ReactElement {
                     type="button"
                     variant="secondary"
                     onClick={() => verifyMutation.mutate(domain.id)}
+                    loading={verifyMutation.isPending}
                     disabled={
                       verifyMutation.isPending ||
                       deleteMutation.isPending ||
                       routingConfirmed.has(domain.id)
                     }
-                    aria-label={`Verify ${domain.name}`}
+                    aria-label={t('Verify {value0}', { value0: domain.name })}
                   >
                     {routingConfirmed.has(domain.id) ? (
                       <>
-                        <CheckCircle2 aria-hidden="true" /> Routing confirmed
+                        <CheckCircle2 aria-hidden="true" /> {t('Routing confirmed ')}
                       </>
                     ) : verifyMutation.isPending ? (
-                      'Confirming…'
+                      t('Confirming…')
                     ) : (
-                      'Confirm routing'
+                      t('Confirm routing')
                     )}
                   </Button>
                   <Button
@@ -360,9 +371,9 @@ function DomainsContent(): ReactElement {
                     variant="danger"
                     onClick={() => setDeleteTarget(domain)}
                     disabled={deleteMutation.isPending || verifyMutation.isPending}
-                    aria-label={`Delete ${domain.name}`}
+                    aria-label={t('Delete {value0}', { value0: domain.name })}
                   >
-                    Delete
+                    {t('Delete')}
                   </Button>
                 </div>
               </li>
@@ -373,9 +384,10 @@ function DomainsContent(): ReactElement {
       <AlertDialog
         open={deleteTarget !== null}
         name="Delete managed domain"
-        title="Delete this managed domain?"
-        confirmLabel={deleteMutation.isPending ? 'Deleting…' : 'Delete domain'}
+        title={t('Delete this managed domain?')}
+        confirmLabel={deleteMutation.isPending ? t('Deleting…') : t('Delete domain')}
         confirmDisabled={deleteMutation.isPending}
+        confirmBusy={deleteMutation.isPending}
         error={actionError === null ? undefined : `${actionError.message} (${actionError.code})`}
         onCancel={() => {
           if (!deleteMutation.isPending) setDeleteTarget(null);
@@ -384,7 +396,7 @@ function DomainsContent(): ReactElement {
           if (deleteTarget !== null) deleteMutation.mutate(deleteTarget.id);
         }}
       >
-        <p>This cannot be undone. Domains that still have mailboxes cannot be deleted.</p>
+        <p>{t('This cannot be undone. Domains that still have mailboxes cannot be deleted.')}</p>
       </AlertDialog>
     </main>
   );

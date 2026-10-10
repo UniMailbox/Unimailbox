@@ -1,10 +1,6 @@
 import DOMPurify, { type Config, type UponSanitizeElementHook } from 'dompurify';
 import type { MessageDetail } from '@unimailbox/contracts';
-import {
-  attachmentDownloadHref,
-  isPreviewableInlineRaster,
-  type MessageAttachment,
-} from './message-attachment-media';
+import { isPreviewableInlineRaster, type MessageAttachment } from './message-attachment-media';
 
 const ALLOWED_TAGS = [
   'a',
@@ -53,8 +49,7 @@ const SANITIZE_CONFIG: Config = {
   ALLOWED_ATTR: [...ALLOWED_ATTR],
   ALLOW_ARIA_ATTR: false,
   ALLOW_DATA_ATTR: false,
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|\/(?!\/)|[?#]|[^:\s])[\S]*$/i,
-  FORCE_BODY: true,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|blob):|\/(?!\/)|[?#]|[^:\s])[\S]*$/i,
   FORBID_ATTR: ['style'],
   FORBID_TAGS: ['embed', 'form', 'iframe', 'object', 'script', 'style', 'svg'],
 };
@@ -64,20 +59,21 @@ const LINK_PROTOCOL_PATTERN = /^[a-z][a-z\d+.-]*:/i;
 
 export interface SanitizeMessageHtmlInput {
   readonly htmlBody: string;
-  readonly mailboxId: string;
   readonly attachments: MessageDetail['attachments'];
+  /** Object URLs created from authorized binary fetches in this document. */
+  readonly inlineImageUrls?: ReadonlyMap<string, string> | undefined;
 }
 
 /**
- * Sanitizes message HTML and resolves only known consumed inline raster CIDs.
+ * Sanitizes message HTML and resolves only known authorized inline raster CIDs.
  * DOMPurify owns HTML parsing. Its element hook applies the attachment and
  * link URL policy during the same sanitation walk, before the result can be
  * inserted into the live document.
  */
 export function sanitizeMessageHtml({
   htmlBody,
-  mailboxId,
   attachments,
+  inlineImageUrls,
 }: SanitizeMessageHtmlInput): string {
   const purifier = DOMPurify;
   const attachmentByContentId = indexInlineRasterAttachments(attachments);
@@ -94,10 +90,11 @@ export function sanitizeMessageHtml({
       }
       const contentId = contentIdFromSource(source);
       const attachment = contentId === null ? undefined : attachmentByContentId.get(contentId);
-      if (attachment === undefined || attachment === null) {
+      const objectUrl = attachment ? inlineImageUrls?.get(attachment.id) : undefined;
+      if (objectUrl === undefined || !objectUrl.startsWith('blob:')) {
         element.removeAttribute('src');
       } else {
-        element.setAttribute('src', attachmentDownloadHref(mailboxId, attachment.id));
+        element.setAttribute('src', objectUrl);
         rewrittenImages.add(element);
       }
     } else if (tagName === 'a') {
@@ -121,7 +118,9 @@ export function sanitizeMessageHtml({
     if (!purifier.isSupported) {
       return '';
     }
-    const sanitizedFragment = purifier.sanitize(htmlBody, {
+    // DOMPurify's document parser can move a leading <img> into the head
+    // and drop it. A body wrapper keeps top-level MIME content in place.
+    const sanitizedFragment = purifier.sanitize(`<div>${htmlBody}</div>`, {
       ...SANITIZE_CONFIG,
       RETURN_DOM_FRAGMENT: true,
     }) as unknown as DocumentFragment;

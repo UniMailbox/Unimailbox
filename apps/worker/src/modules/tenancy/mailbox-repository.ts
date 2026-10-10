@@ -210,7 +210,7 @@ export async function findMailboxByAddress(
 
   // Find the domain by name (case-insensitive)
   const domain = await db
-    .prepare('SELECT id, name FROM managed_domains WHERE name = ? LIMIT 1')
+    .prepare("SELECT id, name FROM managed_domains WHERE name = ? AND status = 'active' LIMIT 1")
     .bind(domainName.toLowerCase())
     .first<{ id: string; name: string }>();
 
@@ -223,7 +223,7 @@ export async function findMailboxByAddress(
     .prepare(
       `SELECT id, domain_id, owner_user_id, local_part, display_name, status
        FROM mailboxes
-       WHERE domain_id = ? AND local_part = ?
+       WHERE domain_id = ? AND local_part = ? COLLATE NOCASE AND status = 'active'
        LIMIT 1`,
     )
     .bind(domain.id, localPart)
@@ -252,7 +252,7 @@ export async function findMailboxByAddress(
 }
 
 /**
- * Lists all mailboxes owned by a user.
+ * Lists all mailboxes accessible to a user through ownership or membership.
  *
  * Returns mailboxes with full addresses. Includes mailboxes where the user
  * is the owner or a member (via mailbox_members table).
@@ -275,51 +275,6 @@ export async function listMailboxesByUser(db: Database, userId: string): Promise
        ORDER BY m.created_at DESC`,
     )
     .bind(userId, userId)
-    .all<{
-      id: string;
-      domain_id: string;
-      owner_user_id: string;
-      local_part: string;
-      display_name: string;
-      status: string;
-      domain_name: string;
-    }>();
-
-  return (
-    results.results?.map((r) => ({
-      id: r.id,
-      address: `${r.local_part}@${r.domain_name}`,
-      displayName: r.display_name,
-      status: r.status,
-      domainId: r.domain_id,
-      localPart: r.local_part,
-      ownerUserId: r.owner_user_id,
-    })) ?? []
-  );
-}
-
-/**
- * Lists all mailboxes owned by a user (where owner_user_id = userId).
- *
- * Returns only mailboxes where the user is the explicit owner.
- */
-export async function listMailboxesByOwner(db: Database, userId: string): Promise<MailboxInfo[]> {
-  const results = await db
-    .prepare(
-      `SELECT
-        m.id,
-        m.domain_id,
-        m.owner_user_id,
-        m.local_part,
-        m.display_name,
-        m.status,
-        d.name as domain_name
-       FROM mailboxes m
-       JOIN managed_domains d ON m.domain_id = d.id
-       WHERE m.owner_user_id = ?
-       ORDER BY m.created_at DESC`,
-    )
-    .bind(userId)
     .all<{
       id: string;
       domain_id: string;

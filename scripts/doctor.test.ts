@@ -8,7 +8,7 @@
 // also keeps `pnpm scaffold doctor` exit-0 coverage current.
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { evaluatePreviewGateSuitePresent } from './doctor';
+import { evaluatePreviewGateSuitePresent, evaluateWebAssetsBinding } from './doctor';
 import { FORBIDDEN_LOG_PATTERNS } from './redaction-patterns';
 
 const REPO = new URL('..', import.meta.url).pathname;
@@ -21,6 +21,48 @@ describe('pnpm scaffold doctor', () => {
       env: { ...process.env, NODE_NO_WARNINGS: '1' },
     });
     expect(result.status, result.stderr || result.stdout).toBe(0);
+  });
+});
+
+describe('CAP-039 — web-assets worker-first routing', () => {
+  const passing: Record<string, unknown> = {
+    assets: {
+      directory: '../web/dist',
+      binding: 'ASSETS',
+      not_found_handling: 'none',
+      run_worker_first: ['/api', '/api/*', '/healthz', '/healthz/*', '/readyz'],
+    },
+  };
+
+  it('requires the API and health check to reach the Worker before SPA fallback', () => {
+    expect(evaluateWebAssetsBinding(passing, REPO)).toEqual({
+      name: 'web-assets-binding',
+      ok: true,
+    });
+  });
+
+  it('rejects a config that lets /healthz fall through to the SPA shell', () => {
+    const r = evaluateWebAssetsBinding(
+      {
+        ...passing,
+        assets: { ...(passing.assets as Record<string, unknown>), run_worker_first: ['/api/*'] },
+      },
+      REPO,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('/healthz');
+  });
+
+  it('rejects a config without an explicit worker-first list', () => {
+    const r = evaluateWebAssetsBinding(
+      {
+        ...passing,
+        assets: { ...(passing.assets as Record<string, unknown>), run_worker_first: undefined },
+      },
+      REPO,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('run_worker_first');
   });
 });
 
