@@ -2,6 +2,18 @@
 
 This folder contains the complete analysis, design, and roadmap for rebuilding Cloud Mail. The rebuild happens in a **new repository** from scratch — this folder is the **requirements and design specification** for that new repo, derived from an analysis of the current codebase.
 
+**Current Unimailbox direction (2026-10-04):** Read
+[`12-cloud-mail-agentic-inbox-integration-plan.md`](./12-cloud-mail-agentic-inbox-integration-plan.md)
+and [`13-shadcn-admin-kit-adoption.md`](./13-shadcn-admin-kit-adoption.md) before using the
+historical phase and CAP descriptions below. They record the current decisions for UTC storage,
+admin-created users, self-hosted sessions without Cloudflare Access, D1/R2/Queue storage and the
+shadcn-admin-kit UI base. The phase table below is historical provenance, not the active work queue.
+
+**Acceptance QA (2026-10-06):** Use the [完整验收测试用例](../qa/acceptance-test-cases.md)
+and matching [执行记录 CSV](../qa/acceptance-execution.csv) to check the current implementation.
+They distinguish implemented test surfaces, preview requirements, and remaining product gaps;
+they are test plans, not evidence of a completed acceptance run.
+
 ## How to read this
 
 **Start here:**
@@ -22,6 +34,13 @@ This folder contains the complete analysis, design, and roadmap for rebuilding C
 - `10-open-questions.md` — questions still needing operator input.
 - `11-agentic-inbox-adaptation.md` — pinned upstream implementation patterns and what this project
   adopts, adapts, or rejects.
+- `12-cloud-mail-agentic-inbox-integration-plan.md` — current Unimailbox integration plan, including
+  UTC persistence, admin-managed users, self-hosted authentication, Durable Object boundaries, and
+  the shadcn-admin-kit UI foundation (pinned to `78e32b93174937f0871877b3ddaf2ddd4d71ea16`; upstream MIT license).
+- `13-shadcn-admin-kit-adoption.md` — the concrete UI adoption boundary, migration order, source
+  tracking, and CAP-A2 exit evidence for the fixed shadcn-admin-kit commit.
+- `14-durable-object-mailbox-adr.md` — the accepted V1 D1/R2/Queue storage decision, the
+  coordinator-only Durable Object boundary, and the evidence required before adding a DO.
 - `execution-plan.md` — the ordered recovery and implementation plan.
 
 **Top-level deliverables:**

@@ -86,12 +86,16 @@ export function buildAppContext(env: Env, ctx: ExecutionContext): AppContext {
 | `tenancy` | `identity`, `platform/*`, `contracts/*` |
 | `messages` | `tenancy`, `platform/*`, `contracts/*` |
 | `inbound-mail` | `tenancy`, `messages`, `platform/*`, `contracts/*`, `email-core/*` |
-| `outbound-mail` | `tenancy`, `messages`, `integrations/providers/*`, `platform/*`, `contracts/*`, `email-core/*` |
+| `outbound-mail` | `tenancy`, `messages`, `editor-assets`, `integrations/providers/*`, `platform/*`, `contracts/*`, `email-core/*` |
 | `provider-sync` | `messages`, `integrations/providers/*`, `platform/*`, `contracts/*` |
 | `attachments` | `messages`, `tenancy`, `platform/*`, `contracts/*` |
-| `signatures` | `tenancy`, `platform/*`, `contracts/*` |
+| `editor-assets` | `platform/*`, `contracts/*` |
+| `signatures` | `tenancy`, `editor-assets`, `platform/*`, `contracts/*` |
 | `admin` | `identity`, `tenancy`, `messages`, `outbound-mail`, `platform/*`, `contracts/*` |
 | `installation` | `identity`, `tenancy`, `admin`, `platform/*`, `contracts/*` |
 | `maintenance` | `messages`, `tenancy`, `attachments`, `platform/*`, `contracts/*` |
 
 **No cycles.** Each module's dependencies are unidirectional.
+## Editor assets (2026-10-07)
+
+`editor-assets` owns editor_assets/editor_asset_usages metadata and resource publication. It depends on platform/contracts; signatures and compose use its public prepareEditorAssetUsages function to batch durable references with the owning resource. Streaming R2 writes stay in platform/editor-upload-store; transport authorization stays at the existing mailbox/domain route boundaries. See [email editor storage](../16-email-editor-storage.md).

@@ -9,13 +9,13 @@ is a blocking finding, never a follow-up ticket.
 
 ## Passwords — ADR-006
 
-- `PBKDF2` with `hash: 'SHA-256'`, **600,000 iterations**, 256 derived bits.
+- `PBKDF2` with `hash: 'SHA-256'`, **100,000 iterations** for new application passwords, 256 derived bits. The operator approved this hosted Workers compatibility adjustment on 2026-10-06; existing hashes retain their stored iteration count. The quarantined Better Auth envelope remains at 600,000.
 - Per-user random salt of **≥16 bytes** from `crypto.getRandomValues`.
 - Store `{ algorithm: 'pbkdf2-sha256', iterations, salt, hash }` — the iteration count is stored so
   it can be raised later. Rehash on next successful login when the count increases.
 - Verify with a **constant-time** compare (`crypto.subtle.timingSafeEqual`). Never `===`.
 - Argon2 / scrypt / bcrypt are rejected — not native to Web Crypto (would require WASM).
-- ~600ms per hash is expected and acceptable. Do not "optimize" it away.
+- Use native Web Crypto for new passwords; preserve standard derivation for existing higher-work-factor hashes, subject to the deployed Worker CPU limit.
 
 ## Secrets — ADR-007
 
@@ -40,6 +40,11 @@ Two independent layers; **both** must pass, and there is no implicit bypass (`R-
    `analytics.read` · `audit.read` (added by CAP-044 for the audit-event query API).
    The enum is closed — adding a key is a deliberate change, not an ad-hoc string.
 2. **Mailbox-scoped** — `mailboxes.assertCan(userId, mailboxId, op)` at use-case entry.
+
+The `admin` column below is the **mailbox membership role**, not the global
+`administrator` role. Global administration permits user/domain/grant management
+through its own audited APIs; it does not grant message, draft, send or attachment
+access without ownership or an explicit mailbox membership.
 
 | op | owner | viewer | sender | admin |
 |---|:-:|:-:|:-:|:-:|

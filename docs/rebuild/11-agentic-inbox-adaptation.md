@@ -10,8 +10,8 @@ It is a pattern source, not a product specification and not a codebase to copy w
 |---|---|
 | Repository | `https://github.com/cloudflare/agentic-inbox` |
 | Branch inspected | `main` |
-| Commit inspected | `48039bb6785af34e592c2966f87cde2b255c4c80` |
-| Inspected on | 2026-08-19 |
+| Commit inspected | `6fb4c528d98d014068434da9edd08f6b81f2905e` |
+| Inspected on | 2026-10-04 |
 | License | Apache-2.0 |
 
 Every capability that relies on this reference records the commit and the specific upstream files
@@ -53,7 +53,7 @@ ADRs, capability contracts, security rules, and preview-deployment evidence.
 | Email handler rethrows processing failures | Adopt | Preserve retry semantics and structured redacted logging; do not acknowledge an inbound message before the durable write succeeds. |
 | Cloudflare Email Sending binding | Defer | Add as a provider adapter in Phase 5; Brevo remains the current provider. No business use case may branch on provider. |
 | One Durable Object with SQLite per mailbox | Reject for current architecture | Unimailbox uses D1, durable outbox records, explicit module ownership, and per-user mailbox authorization. Changing persistence topology requires an ADR and migration plan. |
-| Cloudflare Access grants every admitted teammate access to every mailbox | Reject | Unimailbox keeps its own authn, DB-backed permissions, mailbox roles, IDOR protection, and per-request authorization checks. |
+| Cloudflare Access as an application identity boundary | Remove | Unimailbox uses only its own D1-backed users, sessions, mailbox roles, IDOR protection, and per-request authorization checks. |
 | Mailbox metadata stored as JSON in R2 | Reject | Identity, tenancy, settings, and audit metadata remain typed D1 data. R2 stores attachment bytes, not authorization truth. |
 | Send is persisted as `sent` before deferred delivery completes | Reject | Unimailbox keeps `queued -> sending -> sent/failed` plus durable outbox, retry classification, idempotency, and recovery. |
 | AI agent and MCP surfaces | Defer | Phase 5 only, opt-in, after the core mail loop is verified and authorization/audit boundaries are specified. |
@@ -82,4 +82,3 @@ is viable; it is never sufficient evidence that the pattern is correct for this 
 | CAP-044 | `app/components/ComposeEmail.tsx`, `app/hooks/useComposeForm.ts`, `app/components/RichTextEditor.tsx` | Compose/reply interaction and mutation lifecycle adapted to durable outbox and idempotency |
 | Phase 3 attachments | `workers/lib/attachments.ts`, `app/components/EmailAttachmentList.tsx` | R2 naming/sanitization and attachment presentation adapted to presigned upload ownership rules |
 | Phase 5 provider | `workers/email-sender.ts`, `wrangler.jsonc` | Cloudflare Email Sending adapter behind the existing provider registry |
-

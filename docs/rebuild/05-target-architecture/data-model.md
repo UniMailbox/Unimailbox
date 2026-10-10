@@ -14,7 +14,7 @@ See `../E-proposed-domain-model.md` for full schemas. This document captures the
 
 | Module | Tables owned |
 |---|---|
-| `identity` | `users`, `sessions`, `idempotency_records`, `oauth_accounts` |
+| `identity` | `users`, `sessions`, `idempotency_records`, `oauth_accounts`, `user_preferences` |
 | `onboarding` | `installation_state`, `registration_keys` |
 | `tenancy` | `managed_domains`, `mailboxes`, `mailbox_members`, `domain_signatures` (Phase 3) |
 | `messages` | `messages`, `message_recipients`, `mailbox_messages`, `message_user_state`, `message_attachments`, `attachment_uploads` |
@@ -87,6 +87,9 @@ Each `.md` documents:
 
 - Canonical data in D1.
 - Binary data (raw MIME, attachments) in R2.
+- Own-account avatars are private R2 objects under `user-avatars/<userId>/<version>`.
+  `user_preferences` stores relational language/theme/density/reading-pane/default-mailbox
+  fields and the avatar reference. No opaque profile JSON or public avatar URL is stored.
 - Cached config / sessions / state in KV.
 - Encryption keys in Cloudflare Secrets Store.
 - Outbound jobs dispatched via Cloudflare Queue.
@@ -98,3 +101,12 @@ Each `.md` documents:
 - Plaintext webhook signing secrets.
 - Plaintext session refresh tokens (only hashes).
 - Message body in error messages / logs.
+
+## Attachment cleanup checkpoint (0032)
+
+`attachment_uploads.cleanup_completed_at` is nullable and independent of the
+`uploaded`/`consumed`/`expired` lifecycle. Only successful storage cleanup of an
+expired upload sets it; existing rows start null. A partial index covers pending
+cleanup in expiry/ID order, and each sweep handles at most 100 rows. Consumed
+uploads are excluded. See [maintenance operations](../../operations/deploy.md#monitoring-dlq-and-safe-redrive)
+for cadence, retry and storage compatibility details.

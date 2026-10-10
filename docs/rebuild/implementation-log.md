@@ -10,6 +10,79 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-04 — CAP-A1 mailbox authorization boundary corrected
+
+The mailbox authorizer no longer accepts a global-administrator bypass. A `role.manage` grant
+alone cannot read messages or drafts, send from a mailbox, or download/upload its attachments;
+the user must own the mailbox or have an explicit role in `mailbox_members`. The mailbox list now
+uses the existing owner-or-member query, so shared mailboxes appear for their members while an
+ungranted administrator sees none. Admin-only grant management remains a separate audited API.
+The admin user-status route also rejects self-deactivation and self-deletion to prevent the
+current administrator from locking themselves out.
+
+Worker HTTP tests cover ungranted versus granted administrator access for inbox, drafts, send,
+attachments and mailbox listing. The full local suite passed after these changes: 1186 non-Worker,
+852 Worker and 17 test-kit Worker tests. Typecheck, lint, format, doctor 14/14, `git diff --check`
+and root build passed. The build retains its existing large-chunk warning and Wrangler reports
+a local log-file EPERM while its dry-run exits successfully. Browser and real Cloudflare preview
+authorization remain unverified. No deploy, commit or push was performed.
+
+---
+
+## 2026-10-04 — CAP-A1 admin user lifecycle transaction boundary
+
+The self-hosted administrator create, password-reset and status routes now batch each business
+write with its D1 idempotency record and audit event. Create and reset return an initial password
+once; the replay record contains a redacted placeholder, and same-key retries return 409 instead
+of repeating the secret. Password reset and deactivation revoke existing D1 sessions. Production
+and local-development Wrangler bindings, preflight and the active deploy secret flow no longer
+require Better Auth. Migration-only adapter code and compatibility logic for old deploy fixtures
+remain in the repository; Cloudflare Access headers are not an identity source.
+
+The full `pnpm test` run before the final audit-rollback case passed 1186 non-Worker, 846 Worker
+and 17 test-kit Worker tests. After that case was added, the focused administrator lifecycle
+Worker file passed 5/5, including audit-failure rollback; the full suite has not been repeated.
+Typecheck, lint, format, doctor 14/14 and root build passed in the earlier run. Browser account
+flows and a real Cloudflare preview remain unverified. No deploy, commit or push was performed.
+
+---
+
+## 2026-10-04 — CAP-A2 admin-kit Table adoption
+
+Pinned `marmelab/shadcn-admin-kit` Table source at `78e32b9` was adapted into a local
+semantic table primitive without importing Ra-Core, React Router, Tailwind, or a second
+data/authorization layer. `/admin/users` now uses labeled columns and retains the existing
+user-scoped cursor query, status actions, one-time password display, error behavior and UTC-to-local
+timestamp rendering. The horizontal scroll container has a named keyboard focus target. Source,
+MIT attribution and the Web build snapshot are recorded in `13-shadcn-admin-kit-adoption.md`.
+
+Focused UsersPage 9/9, full Web 435/435, typecheck, lint and Web build passed. Build output was
+CSS 29.05 kB (gzip 4.71 kB) and main JS 673.27 kB (gzip 199.24 kB), with the existing Vite
+500 kB warning. Browser desktop/narrow-screen/dark-mode/keyboard behavior and remote preview
+remain unverified; the other admin-kit components have not yet been migrated. No deploy, commit
+or push was performed.
+
+---
+
+## 2026-10-04 — CAP-A1 browser session recovery boundary
+
+The self-hosted login route now issues the 30-day refresh token as an HttpOnly, same-site cookie
+scoped to `/api/v1/auth`; the short-lived access token remains memory-only in the Web app. The
+refresh endpoint accepts the cookie when the request body has no token, and logout expires the
+cookie. `fetchAuthSession` probes `/me` and performs one cookie-backed refresh after a 401, then
+stores the new access token only in the in-memory Zustand store. This keeps hard reload recovery
+possible without localStorage/sessionStorage or a JavaScript-readable refresh token. The login JSON
+still includes the legacy refresh-token field for API compatibility; the Web client ignores it.
+
+The draft recovery back link now uses a TanStack Router Link in production, while retaining a
+plain-anchor fallback for focused component tests mounted without a RouterProvider. Web auth and
+draft recovery focused tests pass 30/30; Worker auth tests pass 38/38, including cookie-only
+refresh and logout after access-token expiry. The final full suite then passed 1188 non-Worker,
+854 Worker and 17 test-kit Worker tests. Full browser reload, real cookie policy on the preview
+origin, and remote preview remain unverified. No deploy, commit or push was performed.
+
+---
+
 ## 2026-08-31 — CAP-064 existing-draft editor autosave and PATCH integration
 
 CAP-064 extends the existing authenticated draft-recovery route into a bounded
@@ -3558,3 +3631,460 @@ Brevo/outbound test token, `pnpm scaffold doctor` 14/14, lint, typecheck, format
 and root build passed. Build retained the existing Vite bundle-size warning only. No preview
 verification, deploy, push, or provider/token change was performed. Cleanup: 0 promoted,
 1 archived, 0 deleted.
+
+## 2026-10-04 — CAP-A1 D1 session-bound access tokens
+
+The current self-hosted authentication middleware still accepted a KV access-token payload with a
+valid user ID but no D1 session ID. A new Worker regression test first demonstrated a 200 response
+from `/api/v1/auth/me` for that payload. The middleware now requires both IDs and confirms that the
+session is active, unexpired, unrevoked, and owned by that user before setting the request identity.
+Tests also cover revoked and mismatched sessions and ignored Cloudflare Access identity headers.
+
+Sixteen older Worker test files seeded user-only KV tokens. Their fixtures now bind tokens to D1
+sessions, so business-route tests continue exercising real authorization. The test scripts now run
+non-Worker projects and the two Worker projects sequentially; concurrent Worker startup had caused
+`listen EPERM 127.0.0.1` locally. `pnpm test` passes 1186 non-Worker, 845 Worker, and 17 test-kit
+Worker tests. Typecheck, lint, format, doctor 14/14, build, and diff check pass. Wrangler dry-run
+still reports a local log-write EPERM while exiting 0. No remote preview, real mail delivery,
+deployment, commit, or push was performed. CAP-A1 remains open for legacy auth configuration,
+administrator audit, browser and preview evidence.
+
+## 2026-10-04 — CAP-A1 local browser session and CAP-A2 UI checks
+
+The local Vite → Worker browser run exposed two session-recovery defects. With no refresh cookie,
+`/auth/refresh` returns the Worker's `400 VALIDATION_ERROR` for a missing token; the Web router had
+shown a route error instead of the login page. After a successful cookie refresh, the Web also
+called `/auth/me` before installing the new access token in its memory store, causing a second 401.
+The Web now treats only the specific missing-refresh-token validation response as an unauthenticated
+state, installs the refreshed access token before verifying `/me`, and clears it if verification
+fails. Focused auth regression tests cover both boundaries.
+
+Final source review found that the first-password-change mutation also replaced the in-memory
+session with a token-free query-cache descriptor. It now preserves the current in-memory Bearer
+token while clearing the password-change flag; a focused regression test covers that transition.
+
+In a fresh local browser session, admin login reached `/mailbox`; a hard reload produced an initial
+`/auth/me` 401, `/auth/refresh` 200, then `/auth/me` 200 with the new Bearer token. Logout returned
+to `/login`, and a subsequent cookie-backed refresh attempt failed because the cookie had been
+cleared. SPA navigation reached `/admin`, and `/admin/users` created an admin-managed test account
+with an initial password shown once. A 390px dark-mode check found no document-wide horizontal
+overflow; the user table scrolled horizontally after keyboard focus and ArrowRight. The independent
+browser session reported no page errors. A separate browser session then confirmed that the
+admin-created member reaches `/change-password` on first login and enters `/mailbox` after changing
+the password. That run exposed that the member could still render the `/admin` shell. `/auth/login`
+and `/auth/me` now return a D1-derived `canAccessAdmin` UI hint; every admin route refreshes `/me`
+before rendering the shell, and the regular member role's mailbox permissions do not qualify.
+Local browser checks confirmed that `/admin` and `/admin/users` redirect the member to `/mailbox`,
+while the administrator can still enter `/admin`. API authorization remains per-request. Focused
+Worker auth 39/39 and Web router/auth/nav 74/74 tests passed after this fix. Full mailbox operations
+and remote preview remain open. No deploy, commit, or push was performed.
+
+## 2026-10-04 — Provider webhook isolation and inbound raw MIME persistence
+
+The outbound webhook path now checks that the URL provider key matches the
+stored connection and that the connection is active before verifying or
+persisting an event. Webhook bodies are read as original bytes, capped at 64
+KiB, HMAC-verified before UTF-8/JSON parsing, and malformed JSON returns the
+stable `INVALID_JSON` error. Early-event reconciliation is scoped by both
+connection and provider message ID, and replays the saved event status through
+the rank-aware message state writer while preserving the provider event UTC
+timestamp. Regression coverage includes provider mismatch, size limit,
+malformed payload, cross-connection collisions, event replay, and 67 focused
+Worker tests.
+
+Cloudflare Email Routing now reads the raw message once as bytes, writes the
+verbatim MIME object to R2 under an opaque `raw-mime/<message-id>` key, and
+stores only that key in `messages.raw_object_key` before the D1 message batch.
+This preserves raw headers and future attachment bytes while parsed text stays
+available for the existing inbox path. The inbound R2 readback is covered by
+the Worker suite.
+
+Validation after this slice: unit/web/contracts/email-core/config/test-kit
+1194/1194, Worker 860/860, test-kit Worker 17/17, focused inbound/provider
+77/77, TypeScript build, ESLint, Prettier, and `git diff --check` pass. These
+are local evidence only; real Email Routing, Queue consumption, R2 lifecycle,
+Brevo delivery, and preview deployment remain unverified.
+
+## 2026-10-04 — Envelope routing follow-up and validation boundary
+
+Inbound routing now selects only the active mailbox named by Cloudflare's
+`message.to` envelope recipient. Sender-authored MIME To/Cc cannot cause a
+second local mailbox delivery; an envelope Bcc recipient can receive a message
+without appearing in To/Cc. The sender policy input uses the normalized SMTP
+envelope sender `message.from`, while the declared RFC From remains the stored
+display value. Focused regression cases cover forged MIME To, Bcc routing,
+multiple local To addresses, and forged RFC From. TypeScript, focused ESLint,
+Prettier and `git diff --check` passed after these edits.
+
+The final Worker re-run after the `preserveProviderEventTime` test adjustment
+and envelope routing edits did not execute: automatic approval review rejected
+the local Worker test process because the review usage limit was reached. The
+latest fully passing Worker suite above predates these final edits. Worker
+runtime behavior for this final state and live Email Routing remain unverified.
+The non-Worker suite was rerun after the final edits: 1194/1194 tests passed;
+the Web production build, TypeScript build, focused ESLint, Prettier, and
+`git diff --check` also passed. These checks do not replace Worker execution.
+
+## 2026-10-04 — Brevo webhook adapter boundary
+
+Brevo raw-byte HMAC verification, JSON parsing, event-to-message-status mapping,
+and provider timestamp normalization now live in
+`integrations/providers/brevo-webhook.ts`. The registry exposes a webhook
+adapter separately from its outbound send adapter. The outbound-mail processor
+loads an active connection, invokes the matching adapter, scopes job lookup by
+connection, and prepares the D1 status/delivery writes for the route's atomic
+audit batch. A signed timestamp string must have an explicit timezone before
+it is converted to UTC epoch milliseconds; ambiguous local-clock strings use
+the server-time fallback.
+
+Node adapter tests cover exact-byte signatures, missing/invalid signatures,
+verify-before-parse, malformed and non-object JSON, invalid UTF-8, known and
+unknown event mapping, seconds/milliseconds, explicit UTC/offset timestamps,
+and server fallback. The new focused suite passed 24/24; the complete
+non-Worker suite passed 1218/1218 across 87 files. TypeScript, focused ESLint,
+focused Prettier, `git diff --check`, and the Worker Wrangler dry-run build
+passed. Wrangler reported an EPERM warning while trying to write its local
+log under `~/Library/Preferences/.wrangler/logs`, but still completed the
+dry-run with exit code 0 and listed the expected bindings. The Worker suite
+has not been rerun after the
+envelope-routing and webhook-adapter edits: the previous attempt was rejected
+by automatic approval review when its usage limit was reached. The last
+passing Worker count predates these edits and is not evidence for this state.
+
+Provider-neutral early-event reconciliation remains open because the current
+D1 generated column extracts Brevo's `messageId` from `raw_payload`, and the
+reconcile use case still calls the Brevo status mapper. Event-level
+idempotency, a second send provider/SMTP adapter, full inbound MIME attachment
+extraction, and independent preview delivery evidence also remain open. No
+commit, push, or deploy was performed.
+
+## 2026-10-04 — Provider-neutral early webhook replay projection
+
+Migration 0027 adds `verified_provider_message_id` and `message_status` to
+`webhook_deliveries`. It backfills existing Brevo rows from the legacy generated
+`provider_message_id` and Brevo event-name mapping, leaving other provider
+rows untouched. New deliveries store the verified adapter's provider message
+ID and normalized status in typed columns. Reconciliation now queries those
+columns by connection and provider message ID; it no longer imports the Brevo
+status mapper or reads provider-specific JSON. The old generated column stays
+in place for schema compatibility.
+
+A new Worker test exercises a synthetic provider whose payload has no Brevo
+`messageId` or event name, from public webhook route through early-event
+reconciliation. Another Worker test covers the 0026-to-0027 backfill boundary.
+Those Worker tests have not run because the local Worker test process remains
+subject to the automatic approval review usage limit. A separate local SQLite
+3.51 check applied the full migration chain through 0027, confirmed the
+Brevo-only backfill and verified the new partial index is selected for the
+reconciliation lookup. Non-Worker tests passed 1218/1218, forced TypeScript
+build, focused ESLint, `git diff --check`, scaffold doctor 14/14, and Wrangler
+Worker dry-run passed.
+Wrangler still reports a non-fatal EPERM warning for its local log file.
+Event-level idempotency, a real second provider/SMTP adapter, Worker runtime
+verification and preview delivery remain open. No commit, push or deploy.
+
+## 2026-10-04 — Inbound MIME attachment persistence
+
+Inbound Email Routing now parses the original MIME bytes with postal-mime
+2.4.4, retaining the verbatim raw object in R2. Nested multipart bodies and
+base64/quoted-printable parts are decoded; each attachment is stored under an
+opaque `inbound-attachment/<message-id>/<attachment-id>` R2 key. Migration
+0028 adds an inbound-only metadata table, separate from the outbound upload
+consume lifecycle. The metadata INSERTs join the message, recipients,
+mailbox association and audit row in one D1 batch. On an R2 or D1 failure the
+handler attempts to delete objects written for that attempt, then rethrows so
+Email Routing can retry. R2 deletion failures can still leave orphaned bytes;
+an object reconciliation lifecycle remains to be built.
+
+Message detail now includes inbound attachment metadata. The existing
+download use case checks mailbox read access, soft-delete state, and R2 byte
+length before returning content; a foreign user receives no attachment. The
+mailbox lookup explicitly applies NOCASE to the envelope local part, matching
+its unique index and the address normalization rule. The MIME adapter trims
+body-edge whitespace to preserve the prior inbox display contract.
+
+Validation: email-core 17/17, focused Worker inbound/webhook/attachment tests
+59/59, test-kit Worker migrations 18/18, complete non-Worker suite 1219/1219,
+forced TypeScript build, focused ESLint, scaffold doctor 14/14, diff check,
+and full Web/Worker dry-run build passed. The full parallel Worker suite first
+reported 863 passed and two 5-second timeouts with a local "Network connection
+lost" error. The affected Brevo and outbound smoke-test files passed on
+separate reruns (19/19 and 12/12, the latter with a 20-second test timeout).
+An ensuing full Worker rerun with a 20-second per-test timeout passed 865/865
+across 51 files; the separate test-kit Worker run passed 18/18. The initial
+5-second run remains recorded as a load-sensitive failure. Wrangler still
+prints a non-fatal EPERM warning when opening its local log file. Real Email Routing, preview R2,
+attachment lifecycle cleanup and safe inline CID rendering remain unverified.
+No commit, push or deploy.
+
+## 2026-10-05 — Authenticated inline MIME media and inbound R2 orphan sweep
+
+The attachment URL accepted only an in-memory Bearer token. A plain browser
+`<img src>` or download link cannot send that header, so CID substitution
+alone left inline images and direct downloads unauthorized. The Web API client
+now supports binary responses with the same Bearer, request ID, retry and
+error handling as JSON. Message detail fetches allowlisted inline raster
+parts through that client, checks the byte length, and uses short-lived Blob
+URLs for both sanitized CID HTML and the attachment preview. Object URLs are
+revoked when the detail view changes or unmounts. Download controls fetch
+through the same client before saving a file. Remote/data/blob image sources
+from untrusted HTML remain blocked; a leading CID image is preserved by
+sanitizing inside a body wrapper. Direct attachment responses always use
+`Content-Disposition: attachment` plus `nosniff`, `no-store`, and sandbox
+headers, including when MIME metadata claims an inline disposition.
+
+The scheduled Worker now scans one 100-object page per tick for each of the
+`raw-mime/` and `inbound-attachment/` R2 prefixes. It waits 24 hours after
+upload and checks D1 canonical references before deletion. KV stores the
+last scanned key so large buckets progress without a long cron invocation;
+deletion and KV cursor retries are repeat-safe. D1 lookup failure stops
+deletion. This closes the rollback/orphan-byte gap for inbound writes after
+the grace period, while leaving referenced message bytes intact. A separate
+policy for deleting associated objects after canonical message deletion is
+still open.
+
+Validation: focused Web 46/46, focused Worker attachment 11/11 and sweep/
+scheduled 7/7, complete non-Worker 1222/1222, complete Worker 868/868 with
+20-second per-test timeout, TypeScript, focused ESLint and `git diff --check`
+passed. The production Web build and Worker Wrangler dry-run also passed;
+the Web bundle retains its existing size warning and Wrangler still prints
+a non-fatal local log-write EPERM. The first Worker test attempt hit local
+loopback `listen EPERM`; the approved local retry and full run passed. No real Email Routing delivery,
+preview R2 lifecycle, Brevo send, commit, push or deploy occurred.
+
+## 2026-10-07 — satnaing/shadcn-admin UI and configuration follow-through
+
+Corrected the reference to the user-requested satnaing/shadcn-admin, pinned at
+`e16c87f213a5ba5e45964e9b67c792105ec74d26`, and retained its MIT license and
+source manifest. Actual upstream Sidebar/Sheet, theme, auth layout and UI
+primitives now serve the existing product routes. One authenticated shell
+owns navigation and session actions; route chunks load on demand. Settings
+uses grouped standard fields and a save bar; role/signature editors open on
+demand from compact lists. Domain and audit selectors use the same Select.
+Cancel restores editor values; signature If-Match is captured when editing
+starts; default epoch settings metadata displays Not saved yet. Success
+messages track the latest save/delete and row actions are less visually
+prominent. Existing API permissions, raw values, cursor pagination and MIME
+attachment authorization remain authoritative.
+
+A real signature form left open beyond 15 minutes exposed expired-access-token
+save failure. Protected requests now share one HttpOnly-cookie refresh and
+replay once with the same mutation body and Idempotency-Key. Auth/setup and
+403 are excluded; a logout during refresh prevents token installation/replay.
+The natural-expiry staging check observed POST 401 → refresh 200 → POST 201
+with the original form values. A malformed audit action left by the earlier
+staging password rehash helper was backed up and corrected with its original
+metadata retained; no audit row was deleted and no validator loosened.
+
+Validation: Web 462/462 across 59 files, workspace TypeScript, Web ESLint,
+focused Prettier and production build pass. One prior full Web run stalled
+for roughly 17 minutes and failed with test/worker-start timeouts; its log is
+preserved and a controlled two-worker full rerun passed in 18.18 seconds.
+Build: initial main 428.81 kB, separate React 185.69 kB, CSS 97.08 kB; heavy
+routes load separately. This is a chunk-distribution comparison, not a claim
+that total transferred JavaScript decreased. Wrangler staging version
+`5899903e-51d7-4391-a1b2-8f275fa75214` deployed successfully. Real browser
+configuration CRUD, responsive layouts and theme/keyboard checks are recorded
+in `docs/qa/ui-redesign-2026-10-07.md`. Temporary role and disabled signature
+were deleted and D1 confirmed no residual test resources. No commit or push;
+this UI run does not claim the original 175-case or full Worker acceptance.
+
+
+## 2026-10-07 — Compose window, recipients and formatting
+
+Replaced duplicate compose navigation with the sidebar's top button and a persistent fullscreen/bottom-left compose window. The draft remains bound to its From mailbox across navigation/zoom/hide; auth changes clear it and successful send releases it. To now reveals optional Cc/Bcc; Bcc is validated, stored and delivered through its own provider envelope, while read projections retain their To/Cc-only privacy boundary. Added paragraph/headings, font sizes, indentation/alignment/spacing and bounded inline style sanitization. Official MIT Tiptap TextStyle/FontSize is the only new dependency. Fixed stored font marks across block operations and tiny upload size labels.
+
+Final staging `4e6c1f92-1284-4c60-a6e5-cfe710b77497`; local non-Worker 1270, Worker 879 and test-kit Worker 18 pass, with typecheck/lint/format/doctor/build. Desktop/mobile window acceptance and two actual To/Cc/Bcc deliveries pass, including raw MIME privacy and delivered formatting. Recipient link metadata/prefix and tiny-file hashes pass; a new complete 21 MiB recipient hash is not claimed because local proxy transfers stalled. See `docs/qa/compose-window-2026-10-07.md` for evidence and scope. No migration, configuration, commit or push.
+
+
+## 2026-10-07 — Compose right dock and settings-driven upload limits
+
+Corrected the docked composer to bottom-right, including scrollbar-aware mobile width. Shared compose/signature upload help and browser validation read a safe authenticated policy derived from system maxAttachmentBytes; uploads refresh policy and the Worker checks it independently. Settings saves invalidate the editor query. Migration 0030 aligns metadata ceiling with the existing 100 MB settings range while preserving capability links, usages and pending quotas.
+
+Final staging version `bbfc4198-549d-4d6a-844f-c30085555d92`; original 64 MB configuration restored after 64 → 63 → 64 browser acceptance. D1 backup taken and all 18 assets/16 usages verified unchanged; old published file download still matches. Local 1,273 unit, 882 Worker and 19 migration tests passed. Types/source lint/format/doctor, final web build and prebuilt Worker dry-run passed. Root build's Wrangler dry-run remained alive after producing its bundle; documented process-exit limitation and used explicit no-bundle validation, without changing build scripts. Real deployment exited successfully. No commit/push, production operation or required manual configuration. See docs/qa/compose-settings-2026-10-07.md.
+
+
+## 2026-10-07 — Personal settings, bilingual UI and error codes
+
+Replaced account dropdown with the shared right quick-settings panel. Users can
+upload/remove a private R2 avatar, change password, choose a persistent default
+mailbox and adjust language, theme, list density and reading pane. Login resolves
+the saved default against current permissions and falls back if access is lost.
+Migration 0031 adds relational identity-owned preferences; audited, idempotent
+writes are atomic. Added live English/Simplified Chinese UI and a shared exhaustive
+error-code catalog; frontend display and auth recovery no longer depend on server
+English. Browser acceptance caught selected-label caching and several dynamic
+translation omissions; fixed them and added a closed-select locale regression.
+
+Final local non-Worker 1,279, binding-backed Worker 888 and test-kit Worker 19
+passed; TypeScript, source ESLint, doctor 14/14, web build and explicit staging
+Worker deployment passed. D1 backup and all 0031 assertions/FKs verified. Real
+API/browser covered persistence, private avatar, default mailbox/revocation,
+bilingual errors, draft retention, reading panes and mobile bounds. A dedicated
+six-character-password QA user proved current-session retention and other-session
+revocation, then was deleted. Original account settings/avatar and temporary
+sharing were restored. No manual configuration, new email, commit or push.
+Deployment version, acceptance boundaries and lint scratch exclusion are recorded
+in [the QA record](../qa/personal-settings-2026-10-07.md).
+
+## 2026-10-07 — Shared language and theme icon controls
+
+Placed adjacent language/theme icon buttons in auth/setup and mailbox/admin
+headers and reused them under Appearance in quick settings. Removed the login
+language row and separate panel language/theme fields. Account choices retain
+server persistence; anonymous choices retain browser preferences. Failed writes
+keep the saved value and menu open with localized errors. Real browser acceptance
+found the portaled menu below the settings rail; corrected its layer and verified
+actual pointer selection and saved values.
+
+Staging version `9a946919-ee50-43c8-a357-f08c4c7238c7` deployed successfully.
+Local 1,280 unit tests, TypeScript, source lint, doctor and web build passed;
+focused tests/lint/build passed again after the layer correction. Desktop/mobile,
+reload persistence and administrator login passed. Original member preferences
+were restored; administrator preferences and password were unchanged. No new
+migration, email, commit or push. See [follow-up QA](../qa/appearance-controls-2026-10-07.md).
+
+## 2026-10-07 — Routine page content cleanup
+
+Removed the duplicate All mailboxes folder-menu entry, redundant shared-header
+titles and routine page/list introductions. The switcher retains All mailboxes;
+its list page keeps folder navigation to the resolved mailbox. Inbox context is
+under the folder title and empty folders show one status without a nested card.
+Login and quick settings have less persistent helper copy, while assistive
+description, constraints, errors and configuration limitations remain.
+
+Local 1,280 unit tests, TypeScript, source lint, doctor and web build passed.
+Staging version `f9128075-81db-4d73-9e3e-92b92dcaadc8` deployed successfully;
+desktop/mobile switcher navigation, empty folders and all nine admin routes
+passed browser acceptance. No account preferences, email or configuration were
+changed. No migration, commit or push. See [QA record](../qa/ui-copy-cleanup-2026-10-07.md).
+
+## 2026-10-07 — Loading feedback
+
+Replaced text-only content waits with list/form/overview/compose and mail-detail
+skeletons; route fallbacks follow page type. Short actions keep their text with a
+busy spinner and prevent repeated submission. Preferences wait for server values;
+message refresh errors keep cached content and an inline retry. Skeletons respect
+reduced motion and mail placeholder rows have no hover response.
+
+Local 1,283 unit tests, TypeScript, source lint, changed-source formatting, web
+build and doctor passed. Staging version `8255eaef-5ce3-4392-aacc-0244df482f8f`
+passed delayed-response desktop/mobile loading checks. No email or configuration
+writes were needed. See [QA record](../qa/loading-feedback-2026-10-07.md).
+
+
+## 2026-10-08 — Deployment hardening (D-01 through D-11)
+
+Unified staging/production release entry around explicit environment/account
+validation, separate bootstrap and named secret rotation, strict migration
+failures and all-history verification, prepared source/assets identity, mandatory
+custom-domain smoke and release recovery metadata. Added static/API security
+headers, sourcemap exclusion, immutable hashed assets and real missing-file/API
+404; independent DLQ and isolated maintenance tasks with heartbeat monitoring.
+Pinned the verified toolchain and generated bindings, and added CI/operations
+workflows plus deployment/recovery procedures. Historical provider route tests
+now use deterministic HTTP fixtures with real D1/KV. Live verification corrected
+a settings-revision companion that incorrectly required its seed timestamp.
+
+Full local gate: doctor 14/14, generated types, lint, TypeScript, builds and
+2,169 tests passed. All 31 staging migration companions passed with no pending
+SQL. Version `c10f5148-8735-47e5-a6ec-5fa324779044` passed custom-domain smoke,
+authenticated inbox/compose/settings checks and a real successful five-task Cron
+run. Remote consumer metadata confirms DLQ association. A separate temporary D1
+database recovered a deleted synthetic row and was then deleted. No existing
+secret was rotated or application database restored; no commit or push.
+External CI activation and independent R2/key backup custody still require
+operator configuration; production, live mail and DLQ redrive acceptance remain
+separate. See [deployment hardening QA](../qa/deployment-hardening-2026-10-08.md).
+
+
+## 2026-10-09 — KV maintenance reduction
+
+Removed absent avatar/editor cursor deletes, split temporary editor expiry from
+R2 scanning, and moved avatar/editor/inbound/legacy attachment orphan scanning
+to the 19:00 UTC tick (03:00 Asia/Shanghai) of the existing two-minute Cron.
+This avoids the account's full Cron quota without extra per-tick KV reads.
+Added independent cadence heartbeats, isolated failures, and migration 0032's
+bounded attachment cleanup checkpoint. Daily legacy R2 scanning handles copies
+that can land after expiry was checkpointed, while protecting live references.
+
+Full release gate passed 2,182 tests plus doctor, generated types, lint,
+TypeScript and builds. All 32 staging migration companions and publication smoke
+passed; version `ed2bff67-a2f0-4d8b-95c2-c2b0dcf631f5` passed health/ready/maintenance
+checks and a real successful frequent Cron. Daily cloud execution is first due
+2026-10-10 03:00 Asia/Shanghai and remains unobserved. Idle scan expectations are
+5 cursor reads/day and zero empty cursor deletes; full-day analytics remains
+unmeasured. Preserved unrelated work and index; no production, secret rotation,
+commit or push. See [KV maintenance QA](../qa/kv-maintenance-2026-10-09.md).
+
+## 2026-10-09 — Resource reduction and legacy Cron retirement
+
+The operator confirmed legacy retirement. Removed all three legacy Cron triggers
+and retained its Worker/domain/history for gradual replacement. Current recovery
+now runs every five minutes, temporary upload expiry hourly and identity TTL
+cleanup plus avatar/orphan scans daily at 03:00 Asia/Shanghai. Cadence heartbeats
+and failure isolation remain independent. Reduced empty success logs, bounded
+recovery batches and reserved queued retries to avoid repeated enqueue. Setup
+status uses read-only GET polling that stops on expiry/error; editor replays hash
+without R2 writes and known aggregate-quota failures reject before upload. The
+optional Operations workflow now runs every 15 minutes; remote activation is
+unestablished. BBY configuration is unchanged.
+
+The full release gate passed 2,191 tests, doctor, generated types, lint, TypeScript
+and builds. All 32 staging schema companions and publication smoke passed on
+version `be27f319-59aa-4947-b4ae-faaaceb1e303`; live health/ready/maintenance were
+healthy and cloud schedule reads confirmed the new topology. A bookmarked,
+bounded one-time purge deleted 331 expired idempotency rows and 38 expired/revoked
+sessions while retaining 39 active sessions and 25 messages. Three natural
+frequent runs on the new version passed with one aggregate log each; they still
+carried the former expression during propagation, so natural five-minute event
+confirmation remains pending. Full-day savings and natural hourly/daily
+execution remain separate acceptance. See
+[resource reduction QA](../qa/resource-reduction-2026-10-09.md).
+
+
+## 2026-10-09 — Scheduled send
+
+Added a compact local-time picker beside Send and a Scheduled mailbox view
+with signed-cursor pagination, change-time and cancellation. Cancellation
+restores the persisted message to an editable server draft. The additive 0033
+migration preserves immediate jobs; scheduled work reuses the D1 outbox,
+24-hour Queue delay and existing five-minute recovery, without new bindings,
+Cron, KV operations or browser polling. Due-time claims, revision CAS, atomic
+audit/replay and durable R2 references protect queued content and races.
+Native date input and dialog class extraction issues found in browser
+acceptance were fixed and verified on the final build.
+
+The final gate passed doctor 14/14, generated types, lint, TypeScript, builds
+and 2,214 tests. All 33 live migration companions and publication smoke passed
+on staging version `155d261d-c109-454b-91ab-440b59d3b07e`. Health, ready and
+maintenance passed; a natural five-minute Cron passed on the initial feature
+release. Real self-mail scheduled for 14:58 Asia/Shanghai sent at 14:58:08,
+arrived once, and its R2 attachment downloaded with identical bytes. Far-future
+cancellation and editable draft recovery passed in the browser. Multi-day
+recovery uses controlled-clock binding tests rather than a multi-day live wait.
+Preserved unrelated work and index; no production, commit or push. See
+[scheduled-send QA](../qa/scheduled-send-2026-10-09.md).
+
+
+## 2026-10-10 — Consolidate staging source and Git identity
+
+Consolidated the current mailbox/admin UI, rich editor and R2 attachment storage,
+personal settings/localization, scheduled send, resource reductions and deployment
+tooling together with their migrations, tests, design decisions and acceptance records.
+Completed editor/navigation and scheduled-send contracts moved from `work/active/`
+to `work/archive/2026-10/`; the broader integration-plan gaps remain as recorded.
+
+Before consolidation, the deployment source digest matched the verified staging release
+`155d261d-c109-454b-91ab-440b59d3b07e` exactly:
+`5174dbd67d70bbaac8e541f5941701bf0e071a8ae55968e89390b2f813f7128d`.
+That source had passed doctor 14/14, generated binding checks, lint, TypeScript,
+builds and 2,214 tests. This consolidation changes documentation and Git metadata;
+application source remains unchanged. Staged content is checked for whitespace,
+accidental credentials, generated output and exact agreement with the reviewed files.
+
+Author and committer identity for both local branches and their 152 existing commits
+is normalized to `JohnJiang <johnjiang@leanda.tech>`, preserving each original
+commit tree, message, timestamps and parent topology. Original history and dirty
+files were backed up under the ignored `.tmp/commit-identity-20261010/` directory
+before changes. No remote is configured; consolidation does not publish or deploy.

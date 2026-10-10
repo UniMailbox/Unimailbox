@@ -24,7 +24,7 @@ scripts/
 entrypoints/    http.ts | inbound-email.ts | queue.ts | scheduled.ts   — thin shells
 http/           router.ts, middleware/{authn,authz,error,request-id}, errors.ts
 modules/        identity onboarding tenancy messages inbound-mail outbound-mail
-                provider-sync attachments signatures admin installation maintenance
+                provider-sync attachments editor-assets signatures admin installation maintenance
 integrations/   providers/{provider-registry.ts,brevo,resend,cf-sendmail}
                 cloudflare/{control-plane.ts,oauth.ts}
 platform/       config database object-store cache crypto logger clock ids errors
@@ -45,11 +45,12 @@ entrypoints ──▶ modules ──▶ domain ◀── integrations (via contr
 | `onboarding` | `identity` |
 | `tenancy` | `identity` |
 | `messages` | `tenancy` |
+| `editor-assets` | `platform/*`, `contracts/*` (owns R2 upload metadata and durable resource usages) |
 | `inbound-mail` | `tenancy`, `messages`, `email-core/*`, `admin` (read-only, via `contracts/*`) |
-| `outbound-mail` | `tenancy`, `messages`, `integrations/providers/*`, `email-core/*` |
+| `outbound-mail` | `tenancy`, `messages`, `editor-assets`, `integrations/providers/*`, `email-core/*` |
 | `provider-sync` | `messages`, `integrations/providers/*` |
 | `attachments` | `messages`, `tenancy` |
-| `signatures` | `tenancy` |
+| `signatures` | `tenancy`, `editor-assets` |
 | `admin` | `identity`, `tenancy`, `messages`, `outbound-mail` |
 | `installation` | `identity`, `tenancy`, `admin` |
 | `maintenance` | `messages`, `tenancy`, `attachments` |
@@ -109,6 +110,7 @@ A table has exactly one owning module. Cross-module reads go through the owner's
 | identity | `users`, `sessions`, `idempotency_records` |
 | onboarding | `installation_state`, `registration_keys` |
 | tenancy | `managed_domains`, `signatures`, `mailboxes`, `mailbox_members` |
+| editor-assets | `editor_assets`, `editor_asset_usages` |
 | messages | `messages`, `message_recipients`, `mailbox_messages`, `message_user_state`, `message_attachments`, `attachment_uploads`, `drafts` |
 | outbound | `outbound_jobs`, `provider_connections`, `encrypted_credentials`, `webhook_deliveries`, `provider_message_state`, `webhook_events` |
 | admin | `roles`, `permissions`, `role_permissions`, `user_roles`, `system_settings`, `audit_events`, `maintenance_jobs`, `blocklist_entries`, `role_policies` |

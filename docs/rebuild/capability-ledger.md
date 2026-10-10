@@ -22,15 +22,45 @@ is broken — fix it before writing more code.
 `Implemented` requires only that the code is complete and reviewed. `Verified` requires an
 observed end-to-end run. Never mark either from a subagent's unverified claim.
 
+## 2026-10-03 current-plan override
+
+For the Unimailbox multi-user/multi-domain direction, read
+[`12-cloud-mail-agentic-inbox-integration-plan.md`](./12-cloud-mail-agentic-inbox-integration-plan.md)
+before using the historical CAP rows below. That plan supersedes the older invite-registration and
+Cloudflare Access assumptions: accounts are admin-created, authentication is the application-owned
+D1 user/session module, all persisted timestamps are UTC, and Cloudflare Access is not a runtime
+identity source. The historical rows remain useful provenance but are not current product decisions.
+
 ## Current state
 
 | | |
 |---|---|
-| **Phase** | 2 — Reliable Business Loop (**Implemented; CAP-054 preview verification pending**, 2026-08-28) |
-| **Active capability** | None — CAP-069 general settings administration is complete locally; the next planned work is setup re-entry / Phase 4 operations. |
-| **Next capability** | Setup wizard re-entry / Phase 4 operations. |
-| **Blocked** | Preview verification of CAP-054 is still required before Phase 2 can be called `Verified` or any Phase 3 slice can be preview-verified. Local CAP-049 work is allowed by the operator decision to defer deployment and temporarily use KV for bounded attachment staging. |
-| **Repository state** | Local branch `cap/CAP-065-mailbox-sharing-ui` contains CAP-049 through CAP-069 code plus closure documentation; CAP-059 is the backend half and CAP-060 the Web half of folder views, while CAP-061/062 provide the browser-local draft cache and read/recovery surface. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1; migrations through 0025 are registered and companion verification passes. Latest local gates: doctor 14/14; lint/typecheck/format/diff clean; unit 1203/1203; focused CAP-069 SettingsPage 6/6, Worker 10/10, migration 17/17; full Worker 925/925; build clean except the existing Vite bundle-size warning. Brevo account validation and setup/outbound route tests use the live local test token; adapter mocks remain only for deterministic provider error and wire-shape coverage. The Vite server proxies `/api/*` to a validated loopback Worker target, local Better Auth uses the Vite origin for cookie scoping, all application routes refresh setup status before auth, and every setup step exposes operator guidance. The setup route tree is verified to render the step child inside the `/setup` layout on direct browser navigation. The Web `/` entrypoint redirects into the authenticated mailbox shell; unauthenticated navigation still resolves to `/login`. Phase 2 remains pending a preview provider-idempotency observation. No push or deploy. |
+| **Phase** | Current multi-user/multi-domain consolidation; historical Phase 2 local implementation is not preview-verified. |
+| **Active capability** | CAP-A1 identity consolidation. D1 session-bound Bearer authentication and atomic admin lifecycle audit are complete locally; browser login/reload/logout have been checked locally. Migration-only Better Auth compatibility, broader browser permissions and preview verification remain. |
+| **Next capability** | Finish CAP-A1 permissions, concurrency and browser/preview boundary; maintain the CAP-A2 satnaing/shadcn-admin adaptation and CAP-A3 webhook Worker verification, event-level idempotency and SMTP adapter. See the current integration plan. |
+| **Verification gap** | Current layered local runs pass: 1188 non-Worker, 854 Worker and 17 test-kit Worker tests, plus typecheck, lint, format, build and doctor 14/14. Preview Email Routing, Queue, Brevo and browser mail flow remain unverified. |
+| **Repository state** | Local branch `cap/CAP-065-mailbox-sharing-ui` contains CAP-049 through CAP-069 code plus closure documentation; CAP-059 is the backend half and CAP-060 the Web half of folder views, while CAP-061/062 provide the browser-local draft cache and read/recovery surface. No Git remote/upstream is configured. Better Auth and its Drizzle adapter remain pinned at 1.7.1 as migration-compatibility material only; runtime authentication is the application-owned D1 user/session module. Migrations through 0026 are registered and companion verification passes. Current focused gates include Web 57 files/435 tests, admin settings Worker 11/11, typecheck, lint, format, and build; the existing Vite bundle-size warning remains. Brevo account validation and setup/outbound route tests use the live local test token; adapter mocks remain only for deterministic provider error and wire-shape coverage. The Vite server proxies `/api/*` to a validated loopback Worker target, all application routes refresh setup status before auth, and the Worker login now sets an HttpOnly refresh cookie while Web access tokens stay in memory. The setup route tree is verified to render the step child on direct browser navigation; SPA draft navigation no longer forces a reload. The Web `/` entrypoint redirects into the authenticated mailbox shell; unauthenticated navigation still resolves to `/login`. Preview provider-idempotency, real cookie behavior and email flow remain pending. No push or deploy. |
+
+### 2026-10-04 current-plan implementation overlay
+
+The table above preserves historical CAP provenance. For the current multi-user/multi-domain
+Unimailbox direction, the active implementation state is:
+
+| Capability | Status | Evidence / next boundary |
+|---|---|---|
+| CAP-A1 self-hosted identity and admin-managed users | In Progress locally | D1 users/sessions, admin create/reset/disable/restore, first-login password change and public-registration rejection have local Worker/Web coverage. `authn.ts` requires a matching, active D1 session for every KV Bearer token. Create/reset/status writes, idempotency and audit share one D1 batch; initial passwords are redacted from audit/replay. Global `role.manage` no longer bypasses mailbox membership for mail, drafts, sending or attachments; shared mailboxes appear only after explicit grant; self-deactivation is denied. Production/dev Wrangler bindings no longer require Better Auth, but migration-only adapter/deploy fixture logic remains. Local browser verified admin login, cookie-backed hard reload, logout cookie clearing, account creation, first password change and member/admin layout isolation; `/me` derives `canAccessAdmin` from D1 for UI routing while each admin API retains its own permission gate. Remaining: broader mailbox permission matrix, concurrency audit and preview behavior. |
+| CAP-A2 satnaing/shadcn-admin UI adaptation | Implemented for current product routes; staging UI validation | Reference corrected to the user-requested `satnaing/shadcn-admin`, pinned at `e16c87f213a5ba5e45964e9b67c792105ec74d26` with MIT license and source manifest. Actual Sidebar/Sheet, auth layout and shared primitives now serve admin/mailbox/setup; Settings is grouped, role/signature editors open on demand, and tables stack labeled rows on mobile. Long-lived protected saves recover an expired access token once with the original Idempotency-Key. Web 462/462, workspace TypeScript, Web ESLint and build pass. Initial main JS 428.81 kB + React 185.69 kB; CSS 97.08 kB, route chunks load on demand. Staging browser and mutation evidence: `docs/qa/ui-redesign-2026-10-07.md`. This does not mark the full 175-case acceptance plan complete. |
+| CAP-A3 provider routing | In Progress | Compose/draft resolve the mailbox domain binding; Queue resolves the job `provider_key` after claim and records disabled/unregistered connections as terminal. Admin binding API/UI validates active domain/connection, uses `If-Match` + idempotency, and writes audit evidence. Brevo webhook parsing uses a registry adapter; migration 0027 stores verified provider message ID and normalized status for provider-neutral early-event replay, with old Brevo rows backfilled. Focused webhook Worker tests passed in the latest 59/59 run. Event-level idempotency, SMTP adapter, full sync contract and preview evidence remain. |
+| Durable Object boundary | Implemented as a decision | V1 remains D1 + R2 + Queue; no mailbox DO binding or DO primary storage. Reconsider only with load/realtime evidence. |
+| Next implementation slice | In Progress | Compose consumption copies bytes to R2; downloads/Queue prefer R2 and expiry removes both stores. Inbound raw MIME and decoded MIME attachments persist to R2 with separate D1 metadata and mailbox authorization. HTML CID images and downloads use Bearer-authorized binary fetches; direct attachment navigation is forced to download. Cron scans bounded R2 pages and removes only old, unreferenced inbound objects. Local non-Worker 1222/1222 and full Worker 868/868 passed with a 20-second single-test timeout; test-kit Worker 18/18 last passed before this slice. SMTP adapter, event-level webhook idempotency, associated-object deletion policy and real preview closed loop remain. |
+
+### 2026-10-07 personal settings and localization
+
+| Follow-up | Status | Evidence |
+|---|---|---|
+| CAP-A1 / CAP-A2 own-account settings and bilingual UI | Verified on staging | Right settings panel; private R2 avatar; password form; persistent default mailbox, theme, density, reading pane and English/Simplified Chinese. Shared error-code catalog replaces backend-message display/comparison. Migration 0031 verified. Local and staging acceptance/cleanup: [QA record](../qa/personal-settings-2026-10-07.md). Adjacent language/theme icon controls and panel menu-layer correction: [follow-up QA](../qa/appearance-controls-2026-10-07.md). This does not close the broader integration plan or its original 175-case acceptance. |
+| CAP-A2 routine page content cleanup | Verified on staging | Removed duplicate All mailboxes folder navigation and repetitive page/list copy. Switcher access, folder return navigation, desktop/mobile empty states and all nine admin routes verified. [QA record](../qa/ui-copy-cleanup-2026-10-07.md). |
+| CAP-A2 loading feedback | Verified on staging | Content skeletons, busy action spinners, preference hydration and cached-message refresh feedback. Delayed real-response desktop/mobile checks and local regression evidence: [QA record](../qa/loading-feedback-2026-10-07.md). |
 
 ## Phase progress
 
@@ -210,7 +240,7 @@ produces IDs that no longer match the work by the time it starts.
 | CAP-063 | Setup wizard `Skip remaining setup` affordance (lite) | Implemented locally | CAP-041, CAP-017, CAP-046 | Contract archived at `work/archive/2026-08/CAP-063/task.md`. Adds the secondary `Skip remaining setup` button to all six post-claim steps, gates it on administrator creation at the Administrator step, reuses `POST /api/v1/setup/complete`, invalidates setup status, navigates to `/`, and documents existing admin URLs plus the four deferred admin-page gaps. Focused CAP-063 Web tests and the existing `/complete` Worker round-trip pass. Local gates are green: doctor 14/14, lint/typecheck/format/build clean, unit 1111/1111, Web 362/362, contracts 383/383, Worker 886/886. Independent review completed with no findings. |
 | CAP-064 | Draft editor autosave and PATCH integration | Implemented locally | CAP-047, CAP-061, CAP-062 | Contract archived at `work/archive/2026-08/CAP-064-draft-editor/task.md`. Extends the authenticated existing-draft route with editable To/Cc/Bcc/Subject/plain-text Body controls, explicit local-recovery gating, 500 ms Dexie + server autosave, strict response/resource validation, optimistic `If-Match`, API-client idempotency, serialized same-draft saves, route-generation cancellation, retryable API errors, and explicit stale-version refresh before local deletion. Focused DraftRecoveryPage 21/21, full unit 1122/1122, Worker 886/886, doctor 14/14, lint/typecheck/format/build/diff clean. Independent final subagent review completed with no findings. No Worker/migration/provider/deployment changes. |
 | CAP-065 | Mailbox sharing and member-management UI | Implemented locally | CAP-057, CAP-043, CAP-042 | Contract archived at `work/archive/2026-08/CAP-065-mailbox-sharing-ui/task.md`. Adds the authenticated mailbox members route and inbox link, user/mailbox-scoped TanStack Query list/add/remove operations, strict safe projection parsing, normalized existing-user add form, explicit remove confirmation, retryable loading/error/empty states, stale-refetch cancellation, live success announcements, and keyboard-focus restoration. Focused Web 85/85, unit 1142/1142, Worker 886/886, doctor 14/14, typecheck/lint/format/build/diff clean. Independent architecture, QA, security, code, and frontend reviews completed with no findings after re-review. No Worker/migration/contract/provider/deployment changes. |
-| CAP-066 | Managed-domain administration | Implemented locally | CAP-011, CAP-017, CAP-026, CAP-027, CAP-044 | Contract archived at `work/archive/2026-08/CAP-066-domain-administration/task.md`. Adds the safe managed-domain list, normalized add, operator-confirmation verify, mailbox-protected delete, request-hash idempotent replay, atomic audit records, strict UUID/contract validation, `/admin/domains` routing, and session/permission-aware Web UI. Same-key create/delete races, last-row delete guards, revoked-read cache hiding, query cancellation, and dialog focus behavior are covered. Focused Web/admin/router 59/59, full unit 1159/1159, Worker 897/897, doctor 14/14, typecheck/lint/format/build/diff clean. Independent Worker and Web reviews have no unresolved blocker/high/medium findings. No deploy, commit, or push. |
+| CAP-066 | Managed-domain administration | Implemented locally | CAP-011, CAP-017, CAP-026, CAP-027, CAP-044 | Extends the safe managed-domain list with the selected outbound connection id and adds `PATCH /admin/domains/:id/outbound-connection`. The mutation enforces `domain.manage`, active-domain/active-connection checks, `If-Match`, request-hash idempotency, atomic D1 binding + audit, and safe error outcomes; Domains UI selects from Connections. Binding Worker 13/13 and Domains Web 8/8 pass. Existing create/delete races, mailbox guard, revoked-read cache hiding, and focus behavior remain covered. No deploy, commit, or push. |
 | CAP-067 | Role administration | Implemented locally | CAP-017, CAP-026, CAP-027, CAP-044 | Contract archived at `work/archive/2026-08/CAP-067-role-administration/task.md`. Adds the exact closed permission catalog, safe system/custom role projections, atomic custom-role create/full-replace/delete use cases, stable auth/validation/conflict errors, request-hash idempotency, audit events, `/admin/roles` routing and Web management UI. System roles remain read-only; assigned custom roles cannot be deleted; user-role assignment remains separate. Focused contracts/Web/router 446/446, role Worker 7/7, full unit 1174/1174, full Worker 904/904, doctor 14/14, lint/typecheck/format/build/diff clean. Independent Web/QA findings were fixed; direct security/architecture audit found no unresolved blocker/high/medium. No preview verification or deploy. |
 | CAP-068 | Signature administration | Implemented locally | CAP-011, CAP-017, CAP-026, CAP-027, CAP-044 | Contract archived at `work/archive/2026-09/CAP-068-signature-administration/task.md`. Adds one sanitized, auditable signature per managed domain through the Worker/API and `/admin/signatures`; PATCH uses `If-Match` to reject stale concurrent writes; outbound compose/reply injection remains a separate follow-up. Focused contracts/Web/router 61/61 plus contracts 386/386, focused Worker 9/9, full unit 1189/1189, full Worker 913/913, doctor 14/14, lint/typecheck/format/build/diff clean. A bounded independent review finding on concurrent updates was fixed; the final follow-up review timed out without a conclusion. No preview verification or deploy. |
 | CAP-069 | General settings administration | Implemented locally | CAP-063, CAP-067, CAP-068 | Contract archived at `work/archive/2026-09/CAP-069-general-settings-administration/task.md`. Adds the typed, allowlisted `/admin/settings` projection over the existing `system_settings` table, a repeat-safe 0025 revision seed, runtime environment metadata, independent `settings.read`/`settings.manage` permissions, atomic audit/idempotency, strict `If-Match` concurrency, user-scoped Web state, and explicit stored-policy boundaries. Focused SettingsPage 6/6, Worker 10/10, migration 17/17; full unit 1203/1203, full Worker 925/925, doctor 14/14, lint/typecheck/format/diff clean, build clean except the existing Vite bundle-size warning. Independent final subagent review: `NO FINDINGS`; intermediate concurrency, refresh-recovery, and migration-normalization findings were fixed and re-reviewed. Runtime enforcement and retention cleanup remain Phase 4 scope; no preview verification, deploy, or push. |
@@ -259,7 +289,7 @@ with a reason. An unrecorded deferral is a dropped finding.
 | D-CAP-027-A | Route-level idempotency orchestration is copy-pasted ~18× across route handlers (raw-body read → hash → replay → handler → write record). The mailboxes create route also owns raw batch INSERT SQL (mailbox + audit_events + record) instead of a tenancy-module batch API, mirroring the compose precedent loosely. | CAP-027 | Follow-up | Functionally correct and fully tested, but the pattern is duplicated per route and one route bypasses its module's public interface. A follow-up capability introduces shared middleware/HOC for the replay/write pattern and moves the mailboxes batch into `modules/tenancy`. Doing it inside CAP-027 would have crossed the fix round's file ownership. |
 | D-CAP-031-A | `enforceBodySize` is wired in `router.ts` BEFORE the `/api/v1/webhooks/:providerKey/:connectionId` mount, so webhook payloads are exempt from the 1 MB cap. | CAP-031 | Follow-up (provider adapter phase) | Provider payloads routinely exceed 1 MB (attachments in MIME, raw RFC 5322 with base64). The 1 MB cap is the right default for `/api/v1/*` business routes — a generic edge cap for webhooks would either reject legitimate provider traffic or invite provider-specific middleware in `router.ts`, which violates the architecture rule (router knows nothing about integrations). The fix lives in `integrations/providers/*`: each provider adapter reads its own `Content-Length` and rejects/accepts against the provider's published limits. Captured so the deferred work has an owner. |
 | D-CAP-032-B | `ERROR_CODES.INVALID_REQUEST` in `apps/worker/src/platform/errors.ts` is deprecated but the entry itself is still reachable via `keyof typeof ERROR_CODES` (the `envelope()` `EmittableErrorCode` type excludes it, but the catalog key remains). | CAP-032 | CAP-038 | Without a scheduled removal, the deprecation comment becomes a permanent fixture and the "deprecated" tag loses meaning (`.claude/rules/coding.md` §Abstraction discipline corollaries). `CAP-038` reserves the capability that deletes the deprecation comment, the entry, and any test reference. |
-| D-CAP-032-A | The three reclassified `auth.ts` sites (`auth.ts:127, 336, 542`) return the generic `VALIDATION_ERROR` rather than finer-grained codes like `EMAIL_REQUIRED`, `REGISTER_CODE_REQUIRED`, `REFRESH_TOKEN_REQUIRED`. | CAP-032 | — | **In-scope decision** (per QA M2): the messages in each branch carry the field context ("Registration code required", "Email required", "Refresh token required"), so the user experience is fine. Machine-readable differentiation is lost today, but the catalog stays small. If a future capability needs finer-grained input-error codes (e.g. for client-side field highlighting), CAP-034 or a dedicated "input-error granularity" capability is the natural owner. Not a follow-up today. |
+| D-CAP-032-A | The three reclassified `auth.ts` sites (`auth.ts:127, 336, 542`) return the generic `VALIDATION_ERROR` rather than finer-grained codes like `EMAIL_REQUIRED`, `REGISTER_CODE_REQUIRED`, `REFRESH_TOKEN_REQUIRED`. | CAP-032 | — | **In-scope decision** (per QA M2): the messages in each branch carry the field context ("Registration code required", "Email required", "Refresh token required"), so the user experience is fine. Machine-readable differentiation is lost today, but the catalog stays small. If a future capability needs finer-grained input-error codes (e.g. for client-side field highlighting), CAP-034 or a dedicated "input-error granularity" capability is the natural owner. Not a follow-up today. **2026-10-07 partial resolution:** missing refresh credentials now use 401 / REFRESH_TOKEN_REQUIRED, and frontend localization uses shared machine codes rather than message text. Email/registration validation retains VALIDATION_ERROR. |
 | D-CAP-037-A | `INVALID_JSON` guard does not write an `idempotency_records` row on the 400 path (both `admin-role-policies.ts:132-151` and `admin-blocklist.ts:89-108`). | CAP-037 | CAP-031 | Intentional per ADR-004 — the malformed body has no usable `requestHash`; storing `sha256(rawBody)` and replaying it on the same Idempotency-Key would block corrected retries with `409 IDEMPOTENCY_KEY_REUSED`. CAP-031 (request validation + 1 MB body limit) is the natural owner — it touches every POST/PUT/DELETE route and can codify "do not write idempotency record on client-side validation failures" as a route-level policy. Until CAP-031 lands, document the gap so a future contributor does not "fix" it the wrong way. |
 | D-CAP-028-A | Adapter error taxonomy — CAP-028 routes retryable-vs-terminal by attempts exhaustion only; no adapter throws a typed `RetryableError`/`TerminalError` classification. | CAP-028 | CAP-029 | CAP-029 (webhook ordering) owns the provider-error surface and is the natural place to classify adapter errors (permanent 4xx → terminal immediately; transient 5xx/429 → retryable) rather than burning all `max_attempts` on an obvious 4xx. Adjudicated at CAP-028 review triage; the `TERMINAL_FAILURE` sentinel that motivated this was deleted as dead. |
 | D-CAP-028-B | `reclaimStaleOutboundJobs` does per-row sequential UPDATEs (N+1 writes per cron tick). | CAP-028 | — | Code-review M3. Reclaim candidate sets are small in practice (rows whose lease expired), and the WHERE re-check per row is what defeats the TOCTOU with the atomic claim — batching would need `db.batch()` with the same per-row predicates. Revisit when a real workload shows tick latency; correctness first. |
@@ -358,6 +388,55 @@ are the ones that constrain future capabilities.
 | D-CAP-063-D | Signature management admin page. The `signatures` table exists (CAP-007) but the operator has no admin page to author / edit signatures; only the legacy wizard step. | CAP-063 lite-path scope | **RESOLVED 2026-09-01 by CAP-068** — `/admin/signatures` now provides the bounded signature administration surface; compose/reply injection remains a separate outbound capability. |
 | D-CAP-063-E | General settings admin page (system-wide knobs — environment, audit retention, etc.). Only D1 access today. | CAP-063 lite-path scope | **RESOLVED 2026-09-01 by CAP-069** — `/admin/settings` now provides typed, permissioned, audited administration; retention values remain stored policy until Phase 4 cleanup consumers exist. |
 
+## Deployment hardening follow-up — 2026-10-08
+
+D-01 through D-11 from the deployment review have implementation and staging
+evidence in [deployment hardening QA](../qa/deployment-hardening-2026-10-08.md):
+explicit environment/account isolation, separate resource bootstrap and safe
+named secret rotation, fail-closed migration orchestration with repeated schema
+verification, one checked release path, custom-domain smoke/release identity,
+recovery procedures, static/API headers and routing, DLQ/maintenance monitoring
+and pinned/generated tooling. The 2,169-test gate and all 31 live schema companions
+passed; staging version `c10f5148-8735-47e5-a6ec-5fa324779044` passed HTTP/browser
+and actual Cron checks. An independent temporary D1 restore drill passed.
+
+This follow-up does not close unrelated capability acceptance. Remote GitHub CI
+activation, independent R2/key backup custody, production mail/load acceptance and
+DLQ poison-message/redrive proof remain outstanding operator/acceptance work.
+
+## KV maintenance follow-up — 2026-10-09
+
+Implemented and deployed the approved maintenance changes: daily avatar/orphan
+scans through the existing two-minute trigger, absent-cursor delete guards,
+bounded attachment cleanup checkpoints (0032), and independent cadence failure
+monitoring. The 2,182-test release gate, all 32 live schema companions, staging
+HTTP smoke and a real frequent Cron passed on version
+`ed2bff67-a2f0-4d8b-95c2-c2b0dcf631f5`. First natural daily execution is due
+2026-10-10 03:00 Asia/Shanghai and is not yet observed; full-day KV analytics
+remains separate. See [KV maintenance QA](../qa/kv-maintenance-2026-10-09.md).
+This follow-up does not close unrelated capability acceptance.
+
+## Resource reduction follow-up — 2026-10-09
+
+The operator authorized legacy retirement and the resource-review repairs. All
+three legacy Cron triggers are removed with history preserved. Current recovery
+uses five-minute scheduling, upload expiry is hourly, and identity TTL cleanup
+joins the daily avatar/orphan group. Reduced empty logs and duplicate queue/R2
+work; setup status polling is read-only and stops on expiry/error. Independent
+cadence monitoring and stalled-delivery detection remain enabled. The optional
+Operations workflow cadence is 15 minutes; remote activation is unestablished.
+BBY configuration is unchanged.
+
+The 2,191-test full release gate, all 32 live schema companions, mandatory
+publication smoke and subsequent health/ready/maintenance checks passed on
+staging version `be27f319-59aa-4947-b4ae-faaaceb1e303`. Cloud schedules were read
+back, and a bookmarked one-time TTL purge retained all 39 active sessions and
+25 messages. Three natural frequent runs passed with one aggregate log each;
+their former expression remained in propagation. Natural five-minute events,
+hourly/daily execution and full-day cost reductions are not yet established.
+See [resource reduction QA](../qa/resource-reduction-2026-10-09.md).
+This follow-up does not close unrelated capability acceptance.
+
 ## Known documentation discrepancies
 
 Found while building this ledger. Each needs an owner decision before the affected phase closes;
@@ -381,3 +460,27 @@ none is a blocker for Phase 0.
 - IDs are allocated at the start of a phase, from this ledger, by the orchestrator.
 - A capability with no `Depends on` entry may start as soon as its phase is open.
 - Evidence is a test path, a `file:line`, or a command and its output. Never "the implementer said so".
+
+
+## 2026-10-09 — Scheduled send
+
+Added a compact local-time picker beside Send and a Scheduled mailbox view
+with signed-cursor pagination, change-time and cancellation. Cancellation
+restores the persisted message to an editable server draft. The additive 0033
+migration preserves immediate jobs; scheduled work reuses the D1 outbox,
+24-hour Queue delay and existing five-minute recovery, without new bindings,
+Cron, KV operations or browser polling. Due-time claims, revision CAS, atomic
+audit/replay and durable R2 references protect queued content and races.
+Native date input and dialog class extraction issues found in browser
+acceptance were fixed and verified on the final build.
+
+The final gate passed doctor 14/14, generated types, lint, TypeScript, builds
+and 2,214 tests. All 33 live migration companions and publication smoke passed
+on staging version `155d261d-c109-454b-91ab-440b59d3b07e`. Health, ready and
+maintenance passed; a natural five-minute Cron passed on the initial feature
+release. Real self-mail scheduled for 14:58 Asia/Shanghai sent at 14:58:08,
+arrived once, and its R2 attachment downloaded with identical bytes. Far-future
+cancellation and editable draft recovery passed in the browser. Multi-day
+recovery uses controlled-clock binding tests rather than a multi-day live wait.
+Preserved unrelated work and index; no production, commit or push. See
+[scheduled-send QA](../qa/scheduled-send-2026-10-09.md).

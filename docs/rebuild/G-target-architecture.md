@@ -494,7 +494,7 @@ The in-progress `mail-react/` package becomes `apps/web/`:
 See `E-proposed-domain-model.md` for full schemas. Summary:
 
 ```text
-identity      → users, sessions, idempotency_records
+identity      → users, sessions, idempotency_records, user_preferences
 onboarding    → installation_state, registration_keys
 tenancy       → managed_domains, signatures, mailboxes, mailbox_members
 messages      → messages, message_recipients, mailbox_messages, message_user_state,

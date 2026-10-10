@@ -43,7 +43,7 @@ DELETE /api/v1/messages/:id                 # delete
 | `Authorization: Bearer <accessToken>` | All non-public routes | Authentication |
 | `Idempotency-Key: <uuid>` | All mutating routes | Replay safety |
 | `If-Match: <updatedAt>` | Draft update + draft send | Optimistic concurrency |
-| `Accept-Language: en \| zh` | All routes | i18n |
+| `Accept-Language: en \| zh-CN` | Application requests | Client locale hint; errors are translated by code in the frontend |
 
 ## Response envelope
 
@@ -56,12 +56,25 @@ or on error:
 ```json
 {
   "error": {
-    "code": "MESSAGE_SEND_FAILED",
-    "message": "Provider rejected the message: 401 invalid api key",
+    "code": "PROVIDER_SEND_FAILED",
+    "message": "Email provider rejected the message",
     "requestId": "uuid-v4"
   }
 }
 ```
+
+`packages/contracts/src/errors.ts` is the closed machine-code catalog shared by
+Worker and web. Worker `DomainError` uses this type; the frontend maps every
+catalog entry to English and Simplified Chinese. Backend `message` is not UI
+copy. Unknown codes and unrecognized responses show a localized generic error;
+network and form-validation failures also use stable codes. Keep raw codes,
+request IDs and API enum values unchanged when translating display text.
+
+Own-account preferences use `GET/PATCH /api/v1/auth/me/preferences`. Own avatar
+uses `GET/POST/DELETE /api/v1/auth/me/avatar`; POST is raw PNG/JPEG/WebP bytes,
+at most 2 MiB. All writes require an Idempotency-Key. These endpoints require
+authentication and completed password setup, without administrator permission.
+See `../17-personal-settings-localization.md` for persistence and UI behavior.
 
 ## Status codes
 
