@@ -1,0 +1,194 @@
+title = "Unimailbox public repository secret checks"
+
+[extend]
+useDefault = true
+
+# Exact synthetic values AND exact fixture paths only; never ignore whole tests/docs.
+# Local development keys are public fixtures, forbidden for deployed environments.
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/web/src/features/admin/ConnectionsPage.test.tsx"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/web/src/features/admin/ConnectionsPage\.test\.tsx$''']
+regexes = [
+  '''^whsec_live_never_logged_a73b$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/brevo.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/brevo\.worker\.test\.ts$''']
+regexes = [
+  '''^test\-api\-key\-12345$''',
+  '''^test\-brevo\-401\-key$''',
+  '''^test\-brevo\-403\-key$''',
+  '''^test\-brevo\-key\-abc123$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/claim.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/claim\.worker\.test\.ts$''']
+regexes = [
+  '''^test\-idempotency\-key\-abc123$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/cloudflare.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/cloudflare\.worker\.test\.ts$''']
+regexes = [
+  '''^test\-verify\-key\-abc123$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/compose-attachments.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/compose\-attachments\.worker\.test\.ts$''']
+regexes = [
+  '''^cap\-050\-double\-consume\-second$''',
+  '''^cap\-050\-no\-attachments\-001$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/compose.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/compose\.worker\.test\.ts$''']
+regexes = [
+  '''^test\-idem\-key\-compose01$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/inbound-smoke-test.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/inbound\-smoke\-test\.worker\.test\.ts$''']
+regexes = [
+  '''^test\-inbound\-smoke\-key\-abc123$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/outbound-smoke-test.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/outbound\-smoke\-test\.worker\.test\.ts$''']
+regexes = [
+  '''^test\-outbound\-smoke\-key\-abc123$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/http/routes/r-auth.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/http/routes/r\-auth\.worker\.test\.ts$''']
+regexes = [
+  '''^ac17\-duplicate\-$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/src/integrations/providers/brevo.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/src/integrations/providers/brevo\.test\.ts$''']
+regexes = [
+  '''^canonical\-msg\-id\-uuid\-1$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/test/attachments.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/test/attachments\.worker\.test\.ts$''']
+regexes = [
+  '''^attachment\-d1\-failure$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/test/unit/providers-extra.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/test/unit/providers\-extra\.test\.ts$''']
+regexes = [
+  '''^xkeysib\-1234$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in apps/worker/wrangler.dev.jsonc"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)apps/worker/wrangler\.dev\.jsonc$''']
+regexes = [
+  '''^2c8f5a1e7d3b9c0f6a4e1d8b5c2f7a0e9d6b3c1f8a5e2d7b4c0f6a9e3d1b8c5$''',
+  '''^7f3c9a1e5d8b2c6f0a4e9d7b1c8f5a2e6d0b3f9c4a7e1d8b5c2f6a0e9d3b7c1$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in migrations/0014_better_auth_substrate.verify.sql"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)migrations/0014_better_auth_substrate\.verify\.sql$''']
+regexes = [
+  '''^verify\-cap042\-key$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in packages/contracts/src/index.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)packages/contracts/src/index\.test\.ts$''']
+regexes = [
+  '''^xkeysib\-abc123def456$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in packages/contracts/test/contracts.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)packages/contracts/test/contracts\.test\.ts$''']
+regexes = [
+  '''^secret\-12345678$''',
+  '''^xkeysib\-12345678$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in packages/test-kit/src/migrationsDb.worker.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)packages/test\-kit/src/migrationsDb\.worker\.test\.ts$''']
+regexes = [
+  '''^exhausted\-key\-0014$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture values in scripts/doctor.test.ts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)scripts/doctor\.test\.ts$''']
+regexes = [
+  '''^abc123def456$''',
+  '''^eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.abcdefg$''',
+]

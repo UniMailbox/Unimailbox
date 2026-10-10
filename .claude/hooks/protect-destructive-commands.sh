@@ -24,17 +24,16 @@ if [ -z "${command}" ]; then
   exit 0
 fi
 
-# Normalise: collapse whitespace for matching, but keep the original command for the
-# reason text. The collapse prevents trivial bypasses like "rm  -rf  /" or a leading
+# Normalise whitespace for matching. Never persist or echo the command: arguments
+# and environment assignments can contain credentials. This also handles a leading
 # newline.
 norm="$(printf '%s' "${command}" | tr -s '[:space:]' ' ')"
 
 block() {
   # The reason ends up in the model's context via the hook's stderr. Be specific: name
   # what was matched, not just "denied".
-  hook_log "destructive-guard" "BLOCKED: $1 :: ${command}"
+  hook_log "destructive-guard" "BLOCKED: $1"
   printf 'BLOCKED by protect-destructive-commands: %s\n' "$1" >&2
-  printf 'Command: %s\n' "${command}" >&2
   printf 'If this is intentional, narrow the command (e.g. `rm -rf ./build`, not `rm -rf .`) and re-run.\n' >&2
   exit 2
 }
@@ -108,5 +107,5 @@ if printf '%s' "${norm}" | grep -qiE '(^|[^A-Za-z0-9_])drop[[:space:]]+(database
 fi
 
 # Allow.
-hook_log "destructive-guard" "allowed: ${command}"
+hook_log "destructive-guard" "allowed"
 exit 0

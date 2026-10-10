@@ -36,9 +36,17 @@ pnpm-debug.log*
 
 # --- secrets (never commit) ---
 .dev.vars
+.dev.vars.*
+!.dev.vars.example
 .env
 .env.*
 !.env.example
+.envrc
+/.claude/settings.local.json
+/.claude/memory/
+/.claude/projects/
+*.pem
+*.key
 
 # --- disposable agent scratch, see .claude/rules/documentation.md ---
 /.tmp/

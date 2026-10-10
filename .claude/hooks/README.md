@@ -1,6 +1,8 @@
 # Claude Code Hooks
 
-Deterministic guardrails around the AI agent lifecycle. Hooks do not duplicate the rules in
+Claude Code guardrails around its agent lifecycle. These hooks run only in hosts
+that support `.claude/settings.json`; they are not a complete security sandbox
+and do not authorize delegation or external actions. Hooks do not duplicate the rules in
 `.claude/rules/` or `CLAUDE.md` — they reference and enforce them. If a rule changes there,
 update any matching logic here too.
 
@@ -115,3 +117,11 @@ Replace `/path/to/repo` with the absolute path of the repository root.
 - Re-run the test list above for the script you touched.
 - Update this README if the script's purpose or blocking behaviour changes.
 - Update `docs/rebuild/implementation-log.md`.
+
+## Sensitive data
+
+Hook logs are ignored local scratch with a 0700 directory and 0600 log file.
+The destructive-command guard records only the decision and matched rule; it
+never logs or echoes the raw shell command, including on rejection. Do not
+upload hook logs or transcripts. Existing logs created by older hook versions
+may contain command arguments; inspect or dispose of them privately.

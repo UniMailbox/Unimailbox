@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.sh\"",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/protect-destructive-commands.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-destructive-commands.sh\"",
             "timeout": 5
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/protect-root-pollution.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-root-pollution.sh\"",
             "timeout": 5
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/subagent-start-context.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/subagent-start-context.sh\"",
             "timeout": 5
           }
         ]
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/validate-subagent-stop.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-subagent-stop.sh\"",
             "timeout": 10
           }
         ]
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/validate-task-completed.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-task-completed.sh\"",
             "timeout": 10
           }
         ]
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/protect-config-change.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-config-change.sh\"",
             "timeout": 5
           }
         ]
