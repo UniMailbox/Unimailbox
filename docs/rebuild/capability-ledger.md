@@ -33,7 +33,7 @@ identity source. The historical rows remain useful provenance but are not curren
 
 ## Current state
 
-Updated 2026-10-10. This table owns current execution status; dated overlays and
+Updated 2026-10-11. This table owns current execution status; dated overlays and
 CAP/phase tables below retain their historical scope. Do not restart an old slice
 without checking its later implementation and QA records.
 
@@ -41,6 +41,7 @@ without checking its later implementation and QA records.
 | --- | --- |
 | **Phase** | Rebuilt application on canonical main; staging acceptance and operational consolidation. Historical phase numbering is retained below. |
 | **Active capability** | None. Completed task contracts are archived; no feature workspace is active. |
+| **Active operations** | Initial independent production setup for leanda.tech. Existing Gmail forwarding remains active; mailbox owners, address cutover and real delivery acceptance are pending. See [Leanda onboarding](../operations/leanda-mail.md). |
 | **Next capability** | Select the next product slice from the current execution plan and explicit user priorities. Remaining acceptance includes the full catalog, production cutover/data import and additional provider/reliability work. |
 | **Verification gap** | Focused browser/mail, rich editor/R2, personal settings, loading and scheduled-send scenarios have dated staging evidence under docs/qa/. This does not complete the comprehensive acceptance catalog or prove production readiness, provider-side duplicate suppression or multi-day live recovery. |
 | **Repository state** | Canonical repository: UniMailbox/Unimailbox; main replaces the legacy tree while retaining its history and legacy/pre-rebuild-2026-10-10. Self-hosted D1 sessions authorize Bearer tokens; refresh cookies restore sessions, and public registration/Cloudflare Access/Better Auth runtime login are disabled. Schema is 0033. Brevo is the registered provider; current UI uses satnaing/shadcn-admin. Source pushes verify in CI; Cloudflare deployments remain manual. |

@@ -1,0 +1,97 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unimailbox-production",
+  "account_id": "6f215b03c5ff77ef28410254e9701d67",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-06",
+  "send_metrics": false,
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "mail.leanda.tech",
+      "custom_domain": true,
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "unimailbox-production-db",
+      "database_id": "95823dc9-bf9b-4366-8cad-de9310c09fdb",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "unimailbox-production-attachments",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SETUP_SESSION",
+      "id": "1bbecea80eee4d479360efa57e84ac09",
+    },
+    {
+      "binding": "CACHE",
+      "id": "25ce9606acff4a59b1847b88fcbc3cd4",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOUND",
+        "queue": "unimailbox-production-outbound",
+      },
+      {
+        "binding": "OUTBOUND_DLQ",
+        "queue": "unimailbox-production-outbound-dlq",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "unimailbox-production-outbound",
+        "max_retries": 5,
+        "dead_letter_queue": "unimailbox-production-outbound-dlq",
+      },
+    ],
+  },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api", "/api/*", "/healthz", "/healthz/*", "/readyz"],
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "secrets_store_secrets": [
+    {
+      "binding": "INSTALLATION_TOKEN",
+      "store_id": "6e833ff48a204eca892bb07a863fa54a",
+      "secret_name": "unimailbox-production-installation-token",
+    },
+    {
+      "binding": "CREDENTIAL_ENCRYPTION_KEY",
+      "store_id": "6e833ff48a204eca892bb07a863fa54a",
+      "secret_name": "unimailbox-production-credential-encryption-key",
+    },
+    {
+      "binding": "CURSOR_SIGNING_KEY",
+      "store_id": "6e833ff48a204eca892bb07a863fa54a",
+      "secret_name": "unimailbox-production-cursor-signing-key",
+    },
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    "RELEASE_SHA": "development",
+    "RELEASE_TREE": "development",
+    "APP_ORIGIN": "https://mail.leanda.tech",
+  },
+  "version_metadata": {
+    "binding": "VERSION",
+  },
+}

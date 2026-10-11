@@ -8,6 +8,11 @@ Use the exact Node version in `.nvmrc`, pnpm from `packageManager`, and the Work
 
 Staging is configured at `https://staging.unimailbox.tech`. Production and preview example configs require the operator to choose an account and custom domain, copy the example to its canonical filename and review it before bootstrap. Names must carry the environment prefix; D1/KV IDs, bucket, queues and secret names must not overlap another environment in the same account. An environment variable cannot override the selected account. Account membership, configured resource identities and active secret metadata are checked before migrations.
 
+The canonical production config now targets `https://mail.leanda.tech` in the
+Leanda account. Its provisioning, publication and mailbox cutover are separate
+steps tracked in [Leanda mail onboarding](leanda-mail.md). Review this target
+before using production commands; use the example for a different installation.
+
 ## Bootstrap once
 
 ```bash
@@ -15,7 +20,7 @@ pnpm scaffold bootstrap --environment staging --dry-run
 pnpm scaffold bootstrap --environment staging
 ```
 
-Bootstrap provisions only absent, explicitly declared resources, resolves D1/KV IDs from fresh list responses and persists them in the canonical config. It reuses an explicitly selected Secrets Store or the single existing account store, regardless of its name. Ambiguous stores require an explicit ID. Existing active secrets are preserved. Inactive or ambiguous secrets fail the operation.
+Bootstrap provisions only absent, explicitly declared resources, resolves D1/KV IDs from fresh list responses and persists them in the canonical config. It reuses an explicitly selected Secrets Store or the single existing account store, regardless of its name. Ambiguous stores require an explicit ID. Existing active secrets are preserved. Existing inactive or ambiguous secrets fail the operation. Newly created secrets receive up to three metadata checks to allow delayed visibility/activation; confirmation retries never create or rotate another value.
 
 New secret values are passed on stdin and saved first in a protected `.tmp/secret-recovery/<account>/<environment>/` directory (0700 directory, 0600 files). Move these files into the team's secret manager with an independent recovery copy, then securely remove local copies. Never upload this directory as a CI artifact. Existing secret values cannot be recovered through metadata commands.
 

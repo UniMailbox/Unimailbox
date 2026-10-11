@@ -91,6 +91,11 @@ new environment rather than applying this schema to a legacy installation.
 
 Use the Node version in `.nvmrc`, pnpm from `packageManager`, and `pnpm wrangler` for the pinned workspace CLI. `pnpm deploy:staging --dry-run` runs release checks and prepares a fresh build; `pnpm deploy:staging` verifies and publishes the explicit staging config. Bootstrap and named secret rotation are separate commands. See [deployment and recovery runbook](docs/operations/deploy.md) for environment setup, release artifacts, monitoring and rollback.
 
+The [Leanda mail onboarding record](docs/operations/leanda-mail.md) tracks the
+independent production target and address-by-address transition from existing
+forwarding. Deployment alone does not switch incoming mail or complete delivery
+acceptance.
+
 ## Public repository hygiene
 
 Keep real passwords, tokens, provider keys, private mail and download capabilities
