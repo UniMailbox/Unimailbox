@@ -128,9 +128,16 @@ export function createMissingSecrets(
       ),
       `Create ${secret.binding}`,
     );
-    const verified = listSecrets(wrangler, secret.storeId).filter(
-      (r) => r.name === secret.name && r.active && r.scopes.includes('workers'),
-    );
+    // A successful create can precede list visibility/activation by a few seconds.
+    // Retry only metadata reads; never recreate or replace the generated value.
+    let verified: SecretMetadata[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, attempt * 1000);
+      verified = listSecrets(wrangler, secret.storeId).filter(
+        (r) => r.name === secret.name && r.active && r.scopes.includes('workers'),
+      );
+      if (verified.length > 0) break;
+    }
     if (verified.length !== 1)
       throw new Error(`Cannot confirm created remote secret ${secret.binding}.`);
   }

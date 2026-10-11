@@ -308,6 +308,64 @@ describe('remote secret and resource operations', () => {
     expect(created.size).toBe(3);
     expect(parseSecretMetadata(secretTable(f.target))).toHaveLength(3);
   });
+  it('waits for a newly created secret to become visible and active without recreating it', () => {
+    const f = fixture();
+    vi.spyOn(Atomics, 'wait').mockReturnValue('timed-out');
+    let created = false;
+    let confirmationReads = 0;
+    const commands = vi.fn<WranglerCommand>((args) => {
+      if (args.includes('create')) {
+        created = true;
+        return result({});
+      }
+      const read = created ? ++confirmationReads : 0;
+      const rows = f.target.secrets.flatMap((s, i) => {
+        if (i === 0 && read < 2) return [];
+        return [
+          [
+            s.name,
+            String(i + 1).repeat(32),
+            '',
+            'workers',
+            read === 2 && i === 0 ? 'pending' : 'active',
+          ],
+        ];
+      });
+      return {
+        status: 0,
+        stdout: table(['Name', 'ID', 'Comment', 'Scopes', 'Status'], rows),
+        stderr: '',
+      };
+    });
+    createMissingSecrets(f.dir, commands, f.target);
+    expect(commands.mock.calls.filter(([args]) => args.includes('create'))).toHaveLength(1);
+    expect(commands.mock.calls.some(([args]) => args.includes('update'))).toBe(false);
+    expect(Atomics.wait).toHaveBeenCalledTimes(2);
+  });
+  it('stops after bounded confirmation reads if a created secret never becomes active', () => {
+    const f = fixture();
+    vi.spyOn(Atomics, 'wait').mockReturnValue('timed-out');
+    const commands = vi.fn<WranglerCommand>((args) =>
+      args.includes('create')
+        ? result({})
+        : {
+            status: 0,
+            stdout: table(
+              ['Name', 'ID', 'Comment', 'Scopes', 'Status'],
+              f.target.secrets
+                .slice(1)
+                .map((s, i) => [s.name, String(i + 2).repeat(32), '', 'workers', 'active']),
+            ),
+            stderr: '',
+          },
+    );
+    expect(() => createMissingSecrets(f.dir, commands, f.target)).toThrow(
+      'Cannot confirm created remote secret',
+    );
+    expect(commands.mock.calls.filter(([args]) => args.includes('create'))).toHaveLength(1);
+    expect(commands.mock.calls.filter(([args]) => args.includes('list'))).toHaveLength(4);
+    expect(Atomics.wait).toHaveBeenCalledTimes(2);
+  });
   it('reuses the existing account store without requiring a hard-coded store name', () => {
     const f = fixture();
     f.target.secrets.forEach((s) => (s.storeId = 'PROVISION'));
