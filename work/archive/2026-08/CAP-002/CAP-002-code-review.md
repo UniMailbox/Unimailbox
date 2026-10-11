@@ -109,7 +109,7 @@ exits 1 because v8 coverage cannot load inside workerd. Both are reproduced belo
   Three separate bugs are hidden inside the dead block, all of which surface the moment someone moves
   it to the root config to make it live:
   1. `:29` — `'../../../packages/email-core/src/**/*.ts'`. From `apps/worker`, `../../` is the repo
-     root, so `../../../` resolves to `/Users/john/Workspace/x/packages/email-core` — outside the
+     root, so `../../../` resolves to `../packages/email-core` — outside the
      repository. `packages/email-core/**` would silently measure nothing.
   2. `:40-47` — `thresholds: { lines: 100, branches: 100, functions: 100, statements: 100 }` under a
      comment reading "Record-only — the build must not fail on these numbers." Vitest thresholds do
@@ -226,7 +226,7 @@ exits 1 because v8 coverage cannot load inside workerd. Both are reproduced belo
   ```
   $ pnpm --filter @unimailbox/worker run test:worker
   Error: Projects definition references a non-existing file or a directory:
-    /Users/john/Workspace/x/Unimailbox/apps/worker/apps/worker/vitest.unit.config.ts
+    apps/worker/apps/worker/vitest.unit.config.ts
   Exit status 1
   ```
 

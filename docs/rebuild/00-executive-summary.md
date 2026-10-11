@@ -2,7 +2,7 @@
 
 ## What this document is
 
-This is the **requirements + architecture specification** for a new repository that replaces the existing Cloud Mail system. The existing system lives at `/Users/john/Workspace/bby/cloud-mail/` and is treated as a **read-only reference**. The new system is built from scratch using the design captured here.
+This is the **requirements + architecture specification** for a new repository that replaces the existing Cloud Mail system. The existing system lives at `cloud-mail/` and is treated as a **read-only reference**. The new system is built from scratch using the design captured here.
 
 ## What the existing system is
 

@@ -1,7 +1,18 @@
 # Unimailbox：Cloud Mail 与 Agentic Inbox 整合审查及实施计划
 
+> Current interpretation (2026-10-10): this document preserves the October 4
+> integration investigation and its subsequent decisions. Current delivery status
+> is in [the ledger](capability-ledger.md#current-state), and staging evidence is
+> in dated `docs/qa/` records. Schema is now 0033. The current UI reference is
+> [satnaing/shadcn-admin](15-shadcn-admin-ui-redesign.md), replacing the original
+> shadcn-admin-kit proposal below. Rich compose/R2, personal settings/localization
+> and scheduled send are implemented with focused staging acceptance. SMTP and
+> comprehensive provider/recovery acceptance remain separate work. Old local-only
+> counts and "preview pending" statements below describe their dated snapshots.
+
+
 **日期：** 2026-10-04\
-**状态：** 三仓代码与 UI 基座审查完成；CAP-A1 自建身份和基础会话恢复、CAP-A2 UI 壳层、CAP-A3 按域名连接动态路由、Brevo webhook adapter 及通用早到事件重放有本地实现；入站 MIME 附件已写入 R2 并接通授权下载，CID 私有预览和旧孤儿对象回收已有本地实现；本地浏览器已验证登录、硬刷新恢复、首次改密、退出与管理/邮箱布局隔离；preview 边界、事件级幂等、SMTP、已关联对象生命周期和完整邮件闭环仍待完成\
+**历史状态（2026-10-04）：** 三仓代码与 UI 基座审查完成；CAP-A1 自建身份和基础会话恢复、CAP-A2 UI 壳层、CAP-A3 按域名连接动态路由、Brevo webhook adapter 及通用早到事件重放有本地实现；入站 MIME 附件已写入 R2 并接通授权下载，CID 私有预览和旧孤儿对象回收已有本地实现；本地浏览器已验证登录、硬刷新恢复、首次改密、退出与管理/邮箱布局隔离；preview 边界、事件级幂等、SMTP、已关联对象生命周期和完整邮件闭环仍待完成\
 **目标：** 在 Cloudflare Workers 上交付一个支持多用户、多域名、多邮箱授权的邮件系统；出站首选 Brevo，并通过 provider registry 为后续 SMTP/邮件服务商保留扩展位；入站使用 Cloudflare Email Routing；Web 界面和邮件核心吸收 `cloud-mail` 与 `agentic-inbox` 的有效实现。
 
 **已确认的产品决策：**
@@ -11,7 +22,7 @@
 - 完全移除 Cloudflare Access 作为认证或授权前置条件。Worker 不读取 `CF-Access-*` 头、不接受 Access JWT；管理员和普通用户都必须通过自建 D1 用户、密码和 session 模块，邮箱权限仍由 D1 membership 逐请求判断。
 - V1 不把 Durable Object 当作邮箱主存储。D1 是用户、权限、消息、状态和审计的权威来源，目标是把持久附件迁移到 R2，Queue 处理异步发送；DO 只作为未来可选的邮箱级协调和实时连接层。
 - 管理界面与邮箱界面使用同一个 Worker/React 工程，但采用独立路由、布局、API 前缀和权限上下文；以后有明确运营或扩展需求时再拆成独立部署。
-- Web UI 采用 [`marmelab/shadcn-admin-kit`](https://github.com/marmelab/shadcn-admin-kit) 作为视觉和布局基座，当前上游参考版本固定为 `78e32b93174937f0871877b3ddaf2ddd4d71ea16`。只引入经过审查的 shell、导航、表格、表单、对话框、反馈状态和 design tokens；不复制其认证、数据访问、示例业务或部署配置。管理端和邮箱端共用基础组件，但分别使用 `AdminLayout` 与 `MailboxLayout`，避免把管理操作混入普通邮箱工作流。
+- 原始 UI 提案（已被文档 15 取代）采用 [`marmelab/shadcn-admin-kit`](https://github.com/marmelab/shadcn-admin-kit) 作为视觉和布局基座，当前上游参考版本固定为 `78e32b93174937f0871877b3ddaf2ddd4d71ea16`。只引入经过审查的 shell、导航、表格、表单、对话框、反馈状态和 design tokens；不复制其认证、数据访问、示例业务或部署配置。管理端和邮箱端共用基础组件，但分别使用 `AdminLayout` 与 `MailboxLayout`，避免把管理操作混入普通邮箱工作流。
 
 本文是当前代码事实和下一阶段执行顺序的工作基线。它不把 README、能力台账或测试数量单独当作交付证据，也不把两个参考项目整库复制到 Unimailbox。
 
@@ -84,7 +95,7 @@
 - 旧邀请注册、Better Auth 登录路径的 Worker/Web 测试已迁移为“公开注册关闭 + 自建 `/auth/login`、`/auth/me`、`/auth/logout`”契约；测试通过只证明本地 Worker/Web 行为，仍不代表远端部署或真实邮件闭环。创建、重置和状态变更现在把业务写入、D1 幂等记录和 `user.*` 审计事件放在同一 batch 中，并处理同一幂等键的并发竞态。
 - 生产和本地开发 Wrangler 配置、preflight 和 deploy secret 流程已移除 Better Auth 运行变量/Secret；旧 Better Auth adapter 仅保留在迁移兼容代码和 test-only fixture 中，不再是 Worker 入口或预检要求。Cloudflare Access 头、cookie 和 JWT 均不参与认证。
 
-### 3.5 UI 基座采用决策（shadcn-admin-kit）
+### 3.5 历史 UI 提案（shadcn-admin-kit；已由文档 15 取代）
 
 `shadcn-admin-kit` 作为 Unimailbox 的前端基础界面，采用“组件和布局迁移、业务边界保留”的方式：
 

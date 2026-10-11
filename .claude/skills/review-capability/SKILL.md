@@ -1,5 +1,10 @@
 # Skill: Review Capability
 
+Use within the current user-authorized scope and the host's available tools.
+Delegation is optional and requires authorization; without an independent agent,
+record a self-check rather than claiming independent review. Current ledger state
+and accepted decisions supersede historical phase sequencing.
+
 Procedure for independently reviewing a finished capability before acceptance.
 
 **Used by:** orchestrator (dispatches), reviewer subagents (execute).
@@ -29,15 +34,16 @@ Abort and report if any is false:
 
 ### 1 — Dispatch (orchestrator)
 
-Spawn in **parallel**, each with its own scoped brief:
+When delegation is authorized and available, dispatch the relevant dimensions
+with scoped briefs; reviewers may run in parallel after the diff is stable:
 
 | Reviewer | Role file | Always? |
 |---|---|---|
 | Architecture | `.claude/agents/architecture-reviewer.md` | Yes |
 | Code | `.claude/agents/code-reviewer.md` | Yes |
 | QA | `.claude/agents/qa-reviewer.md` | Yes, if the capability changes business behaviour |
-| Security | `.claude/rules/security.md` as the brief | If it touches auth, secrets, credentials, webhooks, or user-supplied input reaching storage |
-| Frontend | — | If it changes `apps/web/`. Check loading, error, empty, and success states; keyboard and focus behaviour; no store-as-event-bus |
+| Security | `.claude/agents/security-reviewer.md` + security rules | If it touches auth, secrets, credentials, webhooks, or user-supplied input reaching storage |
+| Frontend | `.claude/agents/frontend-reviewer.md` | If it changes `apps/web/`. Check loading, error, empty, and success states; keyboard and focus behaviour; no store-as-event-bus |
 
 Each brief contains: `task.md`, the diff, the role file, and the specific rules file. Not the whole
 `docs/` tree.

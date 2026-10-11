@@ -44,7 +44,7 @@ whether it compiles.
   key becomes an attacker-controlled write. Verify each new body is parsed via a Zod schema in
   `packages/contracts` and only the named fields are read.
 
-**Sensitive logging
+**Sensitive logging**
 
 - Grep the diff for any of: `console.log`, `logger.`, `.info(`, `.warn(`, `.error(`. For every
   hit, confirm the argument does not contain a password, hash, access/refresh token, decrypted
@@ -65,7 +65,9 @@ whether it compiles.
 
 - New `/api/v1/*` handler that does not run the request body through the Zod schema in
   `packages/contracts`. Use cases receive parsed, typed input.
-- Bodies over 1 MB are rejected with 413. Anything silently truncated is a finding.
+- Check the actual route limit: ordinary JSON has a 1 MiB cap; binary/editor/avatar
+  uploads and provider webhooks have their own rules. System attachment policy
+  must agree with editor validation. Silent truncation is a finding.
 - `PRAGMA foreign_keys = ON` is still set in the migration runner; a new migration that drops it
   is a finding (`R-DATA-004`).
 - Email addresses are compared and stored case-insensitively (`R-DATA-001`). A case-sensitive

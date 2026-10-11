@@ -11,9 +11,10 @@ is a blocking finding, never a follow-up ticket.
 
 - `PBKDF2` with `hash: 'SHA-256'`, **100,000 iterations** for new application passwords, 256 derived bits. The operator approved this hosted Workers compatibility adjustment on 2026-10-06; existing hashes retain their stored iteration count. The quarantined Better Auth envelope remains at 600,000.
 - Per-user random salt of **≥16 bytes** from `crypto.getRandomValues`.
-- Store `{ algorithm: 'pbkdf2-sha256', iterations, salt, hash }` — the iteration count is stored so
-  it can be raised later. Rehash on next successful login when the count increases.
-- Verify with a **constant-time** compare (`crypto.subtle.timingSafeEqual`). Never `===`.
+- Store algorithm, iterations, salt and hash. Verify using the stored work factor;
+  do not claim automatic rehashing until a migration/rehash path is implemented.
+- Verify with the platform constant-time comparison helper. Do not compare
+  password hashes or tokens with ordinary string equality.
 - Argon2 / scrypt / bcrypt are rejected — not native to Web Crypto (would require WASM).
 - Use native Web Crypto for new passwords; preserve standard derivation for existing higher-work-factor hashes, subject to the deployed Worker CPU limit.
 
@@ -22,12 +23,24 @@ is a blocking finding, never a follow-up ticket.
 - Two layers: encryption keys live in **Cloudflare Secrets Store** (`CREDENTIAL_ENCRYPTION_KEY`);
   encrypted payloads live in the `encrypted_credentials` D1 table as **AES-GCM** ciphertext with a
   version field.
-- Keys never appear in `wrangler.toml`/`wrangler.jsonc`, source, or a settings table. Settings store
+- Real deployed key values never appear in Wrangler configuration, source or a
+  settings table. Public local-only fixture constants are explicitly synthetic. Settings store
   only a `credential_id` reference.
 - Decrypted credentials are cached **for the lifetime of one request only**. Never module-scope.
-- Secrets are never logged, never returned in an API response, never sent to the client (`R-SECRET-003`).
-- Webhook signing secrets rotate with a **7-day** window where old and new are both accepted.
-- Re-encryption on rotation is a one-shot `maintenance_job`, not inline work.
+- Stored provider/encryption credentials are never logged or returned by read APIs
+  (`R-SECRET-003`). Explicit creation/reset/rotation may return a new initial
+  password or webhook secret once to the authorized actor. Protect these write
+  responses and never include their values in logs, documentation or reports.
+  R-SECRET-003 also permits the explicit `provider.sync`-authorized, audited
+  webhook-secret reveal POST for provider dashboard setup; list APIs never reveal it.
+- Recipient editor-asset capability URLs grant access to that file; treat complete
+  live URLs as sensitive. Private incoming attachments remain authenticated.
+- A seven-day overlapping webhook rotation window is an original design goal,
+  not an implemented guarantee. The current adapter verifies the configured
+  secret; add a tested rotation/overlap path before claiming dual-key acceptance.
+- Encryption-key rotation is disabled by release tooling until a tested
+  key-version/re-encryption migration exists. The one-shot maintenance job is
+  proposed work, not a current command. Follow the deployment runbook.
 
 ## Authorization
 
@@ -67,21 +80,31 @@ Hard rules:
 
 ## Idempotency — ADR-004
 
-- `Idempotency-Key` is **required** on every mutating endpoint (`POST`, `PATCH`, `DELETE`).
-- `requestHash = sha256(canonical JSON of body)`.
+- Application mutation routes require `Idempotency-Key` (8–128 characters from
+  `[A-Za-z0-9_-]`; UUID is a client convention, not the only valid format).
+  Provider webhooks use authenticated provider delivery/event identity instead;
+  disabled public registration returns its refusal without requiring a key.
+- Hash the canonical operation input. JSON mutations hash their defined body;
+  binary uploads hash the streamed bytes plus relevant metadata.
 - The `idempotency_records` row `(actorUserId, operation, idempotencyKey, requestHash,
   responseStatus, responseJson)` is written **in the same D1 batch as the business write**. Not
-  before, not after.
+  before, not after, for strict business mutations. Auth/setup retain documented
+  best-effort response caching; do not describe those paths as atomic business replay.
 - Same key + same hash → return the stored response. Same key + different hash →
   `409 IDEMPOTENCY_KEY_REUSED`.
-- TTL 24h, purged by a daily cron.
+- Retention defaults to 24 hours and follows the configured system setting; cleanup
+  is part of the existing daily identity sweep, not a separate Cron trigger.
 - Outbound provider calls use the canonical message ID as their idempotency key (`R-OUTBOUND-004`).
 
 ## Input and transport
 
 - Validate every request body with a zod schema from `packages/contracts` at the route boundary.
   Use cases receive parsed, typed input — they do not re-parse raw JSON.
-- Reject any `/api/v1/*` request body over **1 MB** with 413.
+- Ordinary JSON API bodies are capped at **1 MiB**. Binary uploads and provider
+  webhooks are sibling routes with their own transport rules. Editor file uploads
+  follow `maxAttachmentBytes` (up to 100 MiB); images use the smaller of that
+  setting and 5 MiB. Avatars are limited to 2 MiB; legacy attachment uploads have
+  their own fixed cap. Do not pass raw binary through the JSON body limiter.
 - Never build SQL by string concatenation. Drizzle query builder or parameterized statements only.
 - `PRAGMA foreign_keys = ON` (`R-DATA-004`).
 - Email addresses are compared and stored case-insensitively (`R-DATA-001`) — an authorization or
@@ -93,7 +116,9 @@ Hard rules:
 One JSON line per event with `event`, `requestId`, `actorUserId?`, `durationMs`.
 
 **Never log:** passwords, password hashes, access or refresh tokens, message bodies, attachment
-bytes, decrypted secrets, provider API keys, `Idempotency-Key` values tied to a body.
+bytes, decrypted secrets, provider API keys, `Idempotency-Key` values tied to a body,
+complete download capabilities or raw shell commands that may contain credentials.
+See `docs/operations/repository-hygiene.md` for public-document and commit checks.
 
 ## Audit
 

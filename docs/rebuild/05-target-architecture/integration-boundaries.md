@@ -1,5 +1,11 @@
 # Integration Boundaries
 
+> Original target-design detail. Current module ownership and transport contracts
+> are in [module boundaries](module-boundaries.md) and [API conventions](api-design.md).
+> Concrete tables/bindings come from the source and numbered migrations; future
+> provider examples and class sketches below are not claims of shipped behavior.
+
+
 ## Provider plugin interface
 
 ```typescript

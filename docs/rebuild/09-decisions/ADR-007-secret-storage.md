@@ -2,6 +2,11 @@
 
 ## Status
 
+Encryption storage is accepted. Rotation/re-encryption is a design requirement,
+not delivered tooling: the release CLI currently refuses encryption-key rotation
+until a tested key-version and re-encryption migration is available. See the
+[deployment runbook](../../operations/deploy.md).
+
 Accepted.
 
 ## Context

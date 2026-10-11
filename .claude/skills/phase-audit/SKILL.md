@@ -1,5 +1,10 @@
 # Skill: Phase Audit
 
+Use within the current user-authorized scope and the host's available tools.
+Delegation is optional and requires authorization; without an independent agent,
+record a self-check rather than claiming independent review. Current ledger state
+and accepted decisions supersede historical phase sequencing.
+
 Procedure for deciding whether a roadmap phase may close. Run once, at the end of each phase, by an
 agent that did not implement the phase's capabilities.
 

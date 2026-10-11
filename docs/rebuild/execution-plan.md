@@ -1,4 +1,40 @@
-# Execution Plan
+# Execution plan
+
+Current priorities as of 2026-10-10. The [ledger](capability-ledger.md#current-state)
+owns status; user priorities determine the next authorized slice. No feature
+capability is currently active.
+
+## Current ordering
+
+1. Maintain the implemented mailbox/admin flows, self-hosted identity, shadcn UI,
+   rich editor/R2 storage, localization and scheduled send. Use dated QA records
+   and the current source rather than reopening the old recovery sequence.
+2. Close the remaining comprehensive acceptance gaps with recorded allowed,
+   denied, failure and recovery scenarios. Focused staging success does not close
+   every case in the [acceptance catalog](../qa/acceptance-test-cases.md).
+3. Extend provider/reliability work only when selected: provider-side duplicate
+   suppression proof, event-level webhook replay policy, synchronization contract
+   and an SMTP adapter. Brevo is the only registered provider today.
+4. Plan legacy data import and production cutover as separate work, with backup,
+   migration mapping, isolation and rollback evidence. Existing legacy databases
+   must not receive this application's migration chain directly.
+5. Add scale/realtime coordination only after measurements justify it. Keep the
+   accepted D1/R2/Queue design and the single five-minute Cron.
+
+These are remaining work boundaries, not an instruction to expand the current
+user request into deployment, data migration or speculative features.
+
+## Superseded recovery sequence
+
+The August plan below explains earlier CAP boundaries and decisions. Its "next"
+statements, Better Auth runtime migration and phase status are historical. The
+October integration decisions supersede that authentication direction: accounts
+are admin-created, authentication uses application-owned D1 sessions, and Better
+Auth material is retained only for migration compatibility.
+
+---
+
+# Historical recovery plan — 2026-08-19
 
 This is the ordered implementation plan. Delivery status remains authoritative in
 `capability-ledger.md`; business scope remains authoritative in the roadmap and business-rule

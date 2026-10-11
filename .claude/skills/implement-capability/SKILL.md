@@ -1,5 +1,10 @@
 # Skill: Implement Capability
 
+Use within the current user-authorized scope and the host's available tools.
+Delegation is optional and requires authorization; without an independent agent,
+record a self-check rather than claiming independent review. Current ledger state
+and accepted decisions supersede historical phase sequencing.
+
 Procedure for taking one capability from the ledger to accepted, reviewed, documented, and committed.
 
 **Used by:** orchestrator (owns the procedure), implementer (executes steps 4–7).
@@ -56,7 +61,7 @@ Skip the workspace only for a genuinely single-file capability requiring no dele
 
 Name the layers this slice touches, in dependency order: domain → migration → repository → use case →
 route → contract schema → client → tests. Confirm each new module edge against the dependency table
-in `.claude/rules/architecture.md` *before* writing code. An edge not in that table needs the
+in `docs/rebuild/05-target-architecture/module-boundaries.md` *before* writing code. An edge not in that table needs the
 orchestrator's decision, not the implementer's.
 
 If an external reference is used, follow `.claude/rules/reference-implementations.md`. Pin the
@@ -81,7 +86,7 @@ Per `.claude/rules/testing.md`. Minimum for any capability touching business beh
 ### 6 — Self-check
 
 ```
-pnpm scaffold doctor && pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:worker && pnpm build
+pnpm verify
 ```
 
 Then re-read each acceptance criterion and confirm it individually. Then scan your own diff for the
@@ -98,8 +103,8 @@ Assumptions stated. No commit.
 
 ### 8 — Review
 
-Run `.claude/skills/review-capability/SKILL.md`. Reviewers must not have written the code. Run them
-in parallel with each other, never alongside the implementer.
+Run `.claude/skills/review-capability/SKILL.md`. Reviewers must not have written the code. When authorized and available, reviewers may run
+in parallel with each other after implementation is stable.
 
 ### 9 — Resolve
 
@@ -134,7 +139,7 @@ Do not mark the capability done unless every line is true:
 - [ ] Reference provenance and adaptation decisions recorded when an external implementation was used.
 - [ ] Delivery path verified at the contract's required level: artifact, route, trigger, binding,
       migration, and browser/runtime behavior as applicable.
-- [ ] All six quality gates pass, run and observed by the orchestrator.
+- [ ] The applicable gates in `.claude/rules/testing.md` pass with recorded evidence.
 - [ ] Architecture, code, and QA reviews complete; no open BLOCKER or HIGH.
 - [ ] Every implemented `R-*` rule has a test named for it.
 - [ ] Ledger and implementation log updated.

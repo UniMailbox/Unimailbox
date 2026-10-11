@@ -13,7 +13,9 @@ HOOK_LOG_FILE="${HOOK_LOG_DIR}/hooks.log"
 # crashing if the filesystem is read-only or the path is wedged — we would rather log nothing
 # than block the user's workflow.
 hook_log_init() {
-  mkdir -p "${HOOK_LOG_DIR}" 2>/dev/null || true
+  (umask 077; mkdir -p "${HOOK_LOG_DIR}"; touch "${HOOK_LOG_FILE}") 2>/dev/null || true
+  chmod 700 "${HOOK_LOG_DIR}" 2>/dev/null || true
+  chmod 600 "${HOOK_LOG_FILE}" 2>/dev/null || true
 }
 
 # hook_log <event> <message...>

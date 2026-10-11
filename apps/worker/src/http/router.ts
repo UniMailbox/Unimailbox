@@ -1,17 +1,15 @@
 // HTTP router — composes middleware and route handlers.
-// Real /api/v1/* routes land with CAP-007+.
 //
-// CAP-031 / R-API-005: every `/api/v1/*` request body is capped at 1 MB by
-// `enforceBodySize`, except `/api/v1/webhooks/*` (D-CAP-031-A — provider
-// payloads can legitimately exceed 1 MB and require HMAC verification over
-// the raw bytes before parsing) and the binary attachment upload route,
-// which applies its own 5 MiB check.
+// CAP-031: ordinary JSON API bodies are capped at 1 MiB by enforceBodySize.
+// Provider webhooks authenticate through their adapter before payload parsing.
+// Raw attachment/editor/avatar uploads apply route-specific binary limits;
+// editor file limits follow the system attachment policy.
 //
 // The router composition follows those exceptions literally:
 //   - `apiV1` sub-app chains `enforceBodySize(1024*1024)` for ordinary API
 //     routes.
 //   - `attachmentV1` is mounted before `apiV1`; its raw-binary route performs
-//     a binary-safe 5 MiB declared/actual byte check (CAP-049).
+//     declared/actual byte checks with the route-specific upload policy.
 //   - `webhookV1` is a sibling sub-app that does NOT chain the body limit;
 //     it mounts `/api/v1/webhooks/*` only.
 // `requestId`, `setupGate`, `authn`, and `config` are still applied
@@ -64,16 +62,16 @@ export function buildRouter(): Hono<AppEnv> {
   router.use('*', configMiddleware);
   router.use('*', authn); // Sets userId only from a Bearer token bound to an active D1 session.
 
-  // CAP-031 / R-API-005: `/api/v1/*` body-size enforcement. Mounted on the
+  // CAP-031: `/api/v1/*` body-size enforcement. Mounted on the
   // `/api/v1` path so every sub-app route chained below it inherits the
   // 1 MB cap. Webhooks and binary attachments use sibling sub-apps.
   const apiV1 = new Hono<AppEnv>();
   apiV1.use('*', enforceBodySize(BODY_SIZE_LIMIT_BYTES));
 
-  // CAP-049: attachments accept binary bodies up to 5 MiB. Mount this
+  // Binary uploads use route-specific limits. Mount this
   // sibling before the general apiV1 app so its terminal handler runs without
   // the text-reading 1 MiB middleware. The route performs a binary-safe
-  // Content-Length precheck and actual ArrayBuffer byte-length check.
+  // length precheck and actual byte-length check (streaming for editor assets).
   const attachmentV1 = new Hono<AppEnv>();
   attachmentV1.route('/', personalAvatarRoutes());
   attachmentV1.route('/', attachmentRoutes());

@@ -25,7 +25,7 @@
 
 ### D-01：切换 ENVIRONMENT 不会切换实际部署资源
 
-证据：[共享状态路径](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:32)、[配置生成](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:910)、[固定模板入口](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:956)。脚本始终读取主模板，复用同一个 `.cloudflare-resources.json`，只替换 `vars.ENVIRONMENT`。Worker 名称、数据库、桶、队列和 secret 名称不随目标变化，也未验证状态文件的账户归属。
+证据：[共享状态路径](../../scripts/deploy.ts#L32)、[配置生成](../../scripts/deploy.ts#L910)、[固定模板入口](../../scripts/deploy.ts#L956)。脚本始终读取主模板，复用同一个 `.cloudflare-resources.json`，只替换 `vars.ENVIRONMENT`。Worker 名称、数据库、桶、队列和 secret 名称不随目标变化，也未验证状态文件的账户归属。
 
 隔离运行 staging 与 production 两次，得到相同 Worker 名称 `unimailbox-worker` 和相同 D1 ID，只有环境变量不同。通用主模板还设置 `workers_dev: false`，却没有 route/custom domain；实际 staging 自定义域名配置不会被该入口采用。
 
@@ -35,7 +35,7 @@
 
 ### D-02：首次资源初始化和 Secrets Store 命令与锁定 CLI 不兼容
 
-证据：[D1 创建结果解析](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:392)、[secret create](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:664)、[secret update](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:690)、[Store 查找](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:577)。已对照项目锁定 Wrangler 4.121.0 的帮助和实现：
+证据：[D1 创建结果解析](../../scripts/deploy.ts#L392)、[secret create](../../scripts/deploy.ts#L664)、[secret update](../../scripts/deploy.ts#L690)、[Store 查找](../../scripts/deploy.ts#L577)。已对照项目锁定 Wrangler 4.121.0 的帮助和实现：
 
 - D1 创建输出根据 JSONC 配置生成 JSON 片段；脚本只匹配 TOML 的 `database_id = "..."`。模拟当前格式后，解析失败且退出码为 0，未继续发布。
 - secret create/update 均未传 `--remote`。当前 CLI 默认操作本地 Secrets Store，不能据成功退出就把远端密钥标记为已设置。[Cloudflare 说明](https://developers.cloudflare.com/secrets-store/manage-secrets/)。
@@ -48,7 +48,7 @@
 
 ### D-03：无法读取迁移记录时，仍尝试执行全部迁移
 
-证据：[readRemoteApplied](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1032)。Wrangler 非零退出时直接返回空数组，把鉴权、网络和数据库不可用等错误都视为空库。JSON 解析失败时又使用 `process.exit(r.status ?? 1)`；当 CLI 状态为 0 时，失败也以 0 结束。
+证据：[readRemoteApplied](../../scripts/deploy.ts#L1032)。Wrangler 非零退出时直接返回空数组，把鉴权、网络和数据库不可用等错误都视为空库。JSON 解析失败时又使用 `process.exit(r.status ?? 1)`；当 CLI 状态为 0 时，失败也以 0 结束。
 
 隔离复现：先让迁移记录查询失败，再让后续命令恢复成功，脚本仍执行 migration SQL 并发布；另一次返回无效 JSON，脚本没有部署却退出 0。现有包含 `ALTER TABLE` 的迁移不应被盲目重放；目前没有证据表明 staging 已发生重放或数据损坏。
 
@@ -56,7 +56,7 @@
 
 ### D-04：迁移校验失败后，再次部署可以绕过校验
 
-证据：[无 pending 提前返回](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1113)、[仅校验本次 pending](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1154)、[SQL 内记录已应用](/Users/john/Workspace/x/Unimailbox/migrations/0031_user_preferences.sql:16)。迁移 SQL 自行插入 `d1_migrations`，之后独立执行 companion 断言。断言失败不会删除已应用记录。
+证据：[无 pending 提前返回](../../scripts/deploy.ts#L1113)、[仅校验本次 pending](../../scripts/deploy.ts#L1154)、[SQL 内记录已应用](../../migrations/0031_user_preferences.sql#L16)。迁移 SQL 自行插入 `d1_migrations`，之后独立执行 companion 断言。断言失败不会删除已应用记录。
 
 隔离复现：第一次 SQL 成功、companion 返回 `pass=0`，发布停止、退出 1；第二次读取到已应用记录后，跳过失败的断言并成功发布、退出 0。
 
@@ -64,7 +64,7 @@
 
 ### D-05：单一密钥轮换参数包含不能直接替换的加密密钥
 
-证据：[统一 force 参数](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:626)、[重新生成凭据加密密钥](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:741)、[脚本自身的数据丢失提示](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1238)、[runbook 的安装令牌轮换建议](/Users/john/Workspace/x/Unimailbox/docs/operations/deploy.md:117)。`--force-secrets` 同时处理三个 secret，runbook 却建议用它轮换 `INSTALLATION_TOKEN`。脚本已明确说明重加密任务不存在。
+证据：[统一 force 参数](../../scripts/deploy.ts#L626)、[重新生成凭据加密密钥](../../scripts/deploy.ts#L741)、[脚本自身的数据丢失提示](../../scripts/deploy.ts#L1238)、[runbook 的安装令牌轮换建议](../../docs/operations/deploy.md#L117)。`--force-secrets` 同时处理三个 secret，runbook 却建议用它轮换 `INSTALLATION_TOKEN`。脚本已明确说明重加密任务不存在。
 
 影响：D-02 的 CLI 问题修复后，这个参数会同时替换 `CREDENTIAL_ENCRYPTION_KEY`；没有旧密钥或重加密流程时，现存 provider 凭据无法解密。当前命令失效不能作为长期保护，也未发现本次发生密钥轮换。
 
@@ -74,7 +74,7 @@
 
 ### D-06：发布入口不保证使用本次构建，也没有仓库内自动门禁
 
-证据：[主流程](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1281)、[dry-run](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1185)、[构建脚本](/Users/john/Workspace/x/Unimailbox/package.json:12)、[现有 CI 描述](/Users/john/Workspace/x/Unimailbox/docs/operations/deploy.md:192)。发布前没有执行依赖锁定安装、类型检查、测试或前端构建。Wrangler 可重新打包 Worker，但静态资源直接取现有 `apps/web/dist`，可能出现新后端配旧前端。脚本的 `--dry-run` 也只是打印，不执行 Wrangler 构建检查。
+证据：[主流程](../../scripts/deploy.ts#L1281)、[dry-run](../../scripts/deploy.ts#L1185)、[构建脚本](../../package.json#L12)、[现有 CI 描述](../../docs/operations/deploy.md#L192)。发布前没有执行依赖锁定安装、类型检查、测试或前端构建。Wrangler 可重新打包 Worker，但静态资源直接取现有 `apps/web/dist`，可能出现新后端配旧前端。脚本的 `--dry-run` 也只是打印，不执行 Wrangler 构建检查。
 
 仓库没有 `.github` 工作流；Cloudflare Builds 或其他外部流水线是否配置，本次未确认。当前线上版本元数据没有发布 tag/message，HTTP 也没有 release SHA/schema 信息。脚本没有并发发布锁。
 
@@ -82,7 +82,7 @@
 
 ### D-07：自定义域名健康检查被跳过，healthz 不检查依赖
 
-证据：[URL 提取与跳过分支](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1198)、[healthz 实现](/Users/john/Workspace/x/Unimailbox/apps/worker/src/http/router.ts:71)。脚本只识别 `*.workers.dev`，自定义域名输出不会触发 HTTP 检查。runbook 声称支持 custom domain，与实现不同；隔离复现确认此路径仍以成功结束。
+证据：[URL 提取与跳过分支](../../scripts/deploy.ts#L1198)、[healthz 实现](../../apps/worker/src/http/router.ts#L71)。脚本只识别 `*.workers.dev`，自定义域名输出不会触发 HTTP 检查。runbook 声称支持 custom domain，与实现不同；隔离复现确认此路径仍以成功结束。
 
 `/healthz` 仅返回固定 JSON，不能验证 D1、schema 或 secret 可用。当前实测 200 不应等同于完整部署验收。
 
@@ -90,7 +90,7 @@
 
 ### D-08：缺少与 schema、R2、密钥相配套的回滚流程
 
-证据：[迁移先于 deploy](/Users/john/Workspace/x/Unimailbox/scripts/deploy.ts:1299)；现有部署 runbook 未给出回滚/恢复步骤。迁移执行时旧 Worker 仍可能处理流量，故 schema 必须兼容仍在线的版本。
+证据：[迁移先于 deploy](../../scripts/deploy.ts#L1299)；现有部署 runbook 未给出回滚/恢复步骤。迁移执行时旧 Worker 仍可能处理流量，故 schema 必须兼容仍在线的版本。
 
 本次确认 staging 能读取 D1 Time Travel bookmark，不能说“数据库没有备份”。需要补的是：发布记录中的恢复点、可接受的数据回退范围、Worker 与 schema 的兼容判断、R2/密钥恢复策略和实际恢复演练。Worker rollback 不会回退连接资源的数据。[Worker rollback 限制](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/)；[D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)。
 
@@ -98,7 +98,7 @@
 
 ### D-09：静态资源发布缺少安全头、map 排除与缓存/404 策略
 
-证据：[sourcemap 配置](/Users/john/Workspace/x/Unimailbox/apps/web/vite.config.ts:16)、[静态资源路由](/Users/john/Workspace/x/Unimailbox/apps/worker/wrangler.staging.jsonc:27)，以及本次真实 HTTP 响应：
+证据：[sourcemap 配置](../../apps/web/vite.config.ts#L16)、[静态资源路由](../../apps/worker/wrangler.staging.jsonc#L27)，以及本次真实 HTTP 响应：
 
 - `/assets/index-B8USO41v.js.map` 返回 200、约 2.15 MB，包含 275 个 `sourcesContent`；完整前端源码可下载。本次没有据此认定服务端密钥泄露。
 - `/login` 没有 CSP、frame 限制、`nosniff`、Referrer-Policy 或 HSTS。下载附件已有局部安全头，不能覆盖登录页和其他静态页面。
@@ -111,7 +111,7 @@
 
 ### D-10：队列缺少 DLQ，清理任务缺少整体结果监测
 
-证据：[队列配置](/Users/john/Workspace/x/Unimailbox/apps/worker/wrangler.staging.jsonc:23)、[串行 Cron 任务](/Users/john/Workspace/x/Unimailbox/apps/worker/src/entrypoints/scheduled.ts:39)、[现有 outbox 补偿](/Users/john/Workspace/x/Unimailbox/apps/worker/src/modules/outbound-mail/reclaim-stale-jobs.ts:80)。队列设置 5 次重试，无 DLQ；重试耗尽后队列消息会被删除。[Cloudflare DLQ 文档](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)。
+证据：[队列配置](../../apps/worker/wrangler.staging.jsonc#L23)、[串行 Cron 任务](../../apps/worker/src/entrypoints/scheduled.ts#L39)、[现有 outbox 补偿](../../apps/worker/src/modules/outbound-mail/reclaim-stale-jobs.ts#L80)。队列设置 5 次重试，无 DLQ；重试耗尽后队列消息会被删除。[Cloudflare DLQ 文档](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)。
 
 D1 outbox、lease 回收和孤儿 queued 任务补偿已实现，因此不能直接推断邮件丢失。欠缺的是异常消息保留、失败分类、重驱流程及持续故障告警。Cron 已有 `outbound.reclaim` 统计日志，本次也观察到成功调用；但前面任务抛错会阻止后续附件/头像/孤儿清理，缺少全部任务完成的统一结果。仓库未见告警定义，账户级告警是否存在未确认。
 
@@ -119,7 +119,7 @@ D1 outbox、lease 回收和孤儿 queued 任务补偿已实现，因此不能直
 
 ## 工具与维护：D-11（P2）
 
-证据：[Node engines](/Users/john/Workspace/x/Unimailbox/package.json:7)、[原生 TS 启动参数](/Users/john/Workspace/x/Unimailbox/package.json:27)、[运行兼容日期](/Users/john/Workspace/x/Unimailbox/apps/worker/wrangler.staging.jsonc:6)、[手写 Env](/Users/john/Workspace/x/Unimailbox/apps/worker/src/platform/env.ts:38)。
+证据：[Node engines](../../package.json#L7)、[原生 TS 启动参数](../../package.json#L27)、[运行兼容日期](../../apps/worker/wrangler.staging.jsonc#L6)、[手写 Env](../../apps/worker/src/platform/env.ts#L38)。
 
 文档声明 Node >=20.11，但脚本使用 Node 22.6 才引入的 `--experimental-strip-types`，支持范围不一致。[Node 官方发布说明](https://nodejs.org/en/blog/release/v22.6.0)。本机根目录 `pnpm exec wrangler` 落到全局 4.147.0，Worker 包内执行为锁定的 4.121.0；裸命令不能保证一致。所有环境的 compatibility date 为 2025-09-23，已经超过一年；不应直接改日期而跳过回归。
 

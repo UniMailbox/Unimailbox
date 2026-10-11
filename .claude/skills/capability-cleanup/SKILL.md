@@ -1,5 +1,10 @@
 # Skill: Capability Cleanup
 
+Use within the current user-authorized scope and the host's available tools.
+Delegation is optional and requires authorization; without an independent agent,
+record a self-check rather than claiming independent review. Current ledger state
+and accepted decisions supersede historical phase sequencing.
+
 Procedure for resolving the working artifacts a capability produced, before the next capability
 starts. The point is to keep `work/` honest: every file resolves to one of PROMOTE, ARCHIVE, or
 DELETE. Files left UNKNOWN are how repository memory rots.
