@@ -791,6 +791,7 @@ export const zhCN: Readonly<Record<string, string>> = {
   'After saving the rule, confirm it for this domain.': '保存规则后，请确认此域名的路由。',
   'Deactivate account': '停用账号',
   'Restore account': '恢复账号',
+  Restore: '恢复',
   'Account restored.': '账号已恢复。',
   'Account deactivated.': '账号已停用。',
   'Resetting the password ends existing sessions. A new initial password will be shown once.':
