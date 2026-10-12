@@ -29,7 +29,7 @@ Backend permissions, mail operations, ownership, schema and API shapes are uncha
 
 ## Local evidence
 
-Source commit: `409ab7d`.
+Implementation commit: `409ab7d`; Chinese restore confirmation correction: `f4088ee`.
 
 - `pnpm verify` passed doctor 14/14, generated types, lint, TypeScript, builds,
   1,326 non-Worker tests, 980 Worker tests and 24 migration fixtures: 2,330 total.
@@ -47,7 +47,9 @@ Source commit: `409ab7d`.
 
 ## Delivery boundary
 
-Staging deployment is the next authorized step. No real-account business mutation
-was used for local browser verification; the fixture does not grant real permissions
-or disclose real credentials. Production, source push and PR publication are outside
-this update. The staging QA record will own the exact release and live smoke evidence.
+Staging deployment completed from `f4088ee`, with the entire exact-source gate
+passing all 2,330 tests. The [staging QA record](../../docs/qa/admin-operation-modals-staging-2026-10-12.md)
+owns the release identity, remote migration and live HTTP/asset evidence. No real-account
+business mutation was used for browser verification; the fixture does not grant real
+permissions or disclose real credentials. Production, source push and PR publication
+remain outside this update.

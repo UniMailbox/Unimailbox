@@ -4263,3 +4263,17 @@ passed the 69-test admin suite and focused follow-ups; staged Gitleaks passed.
 Desktop and 390 x 844 browser checks used synthetic local APIs. Staging publication
 and exact-source gate are recorded separately. See
 [handoff](../../work/handoffs/admin-operation-modals-2026-10-12.md).
+
+
+## 2026-10-12 — Administrator modal staging release
+
+Publish clean revision `f4088ee` through `pnpm deploy:staging`. The exact-source
+gate passed doctor 14/14, generated types, lint, TypeScript, builds and 2,330 tests
+(1,326 non-Worker, 980 Worker, 24 migration fixtures). All 34 remote migration
+companions passed; no migration was applied. Version
+`b562ed68-afb0-4cd0-999d-392ceab327a9` passed canonical release smoke. Independent
+HTTP checks matched the release identity/readiness, rejected unauthenticated admin
+GETs with 401/no-store, and verified all five published modal page chunks plus
+Chinese copy. Local browser observations used synthetic accounts/configuration;
+no authenticated real-account write was used for staging verification. No production
+publication or source push. See [staging QA](../qa/admin-operation-modals-staging-2026-10-12.md).
