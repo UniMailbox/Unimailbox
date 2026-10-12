@@ -162,9 +162,18 @@ limits. Composer tests cover preview, explicit insertion, cancellation, late
 responses, no automatic retry, preserved threading and escaped output.
 Desktop and 390-pixel mobile browser checks use synthetic local APIs: the
 independent Admin page and real Tiptap reply insertion were observed. This is
-browser UI evidence only; no deployment, production migration, real model
-inference or provider acceptance was performed. The final section-title copy
+browser UI evidence only; those checks do not prove real model inference or
+provider acceptance. The final section-title copy
 change was followed by the five configuration panel tests.
+
+Staging publication on 2026-10-12 deployed revision `5f85a35` as version
+`e4981bdf-2992-4794-8e9d-783263925e3d`. The release gate passed 2,300 tests
+and all 34 remote schema companions. Raw SQL migration tests now cover tracking
+and recovery after partial application; the original migration fixture had hidden
+a missing registration statement. Live metadata confirms the native AI binding,
+and the configuration is disabled with no API key. Health/readiness and protected
+AI-route checks passed. See [staging QA](../qa/ai-staging-2026-10-12.md).
+Real inference and generated-mail delivery remain unverified.
 
 References: [Workers AI bindings](https://developers.cloudflare.com/workers-ai/configuration/bindings/),
 [Workers AI JSON mode](https://developers.cloudflare.com/workers-ai/features/json-mode/),

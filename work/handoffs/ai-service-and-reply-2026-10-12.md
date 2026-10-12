@@ -36,12 +36,26 @@ credential-change semantics, reservation retention, cancellation and privacy.
 - Final copy and redundant test-fixture cleanup received focused configuration/
   settings tests and static checks after the full gate.
 
+## Staging publication
+
+User-authorized `pnpm deploy:staging` deployed revision `5f85a35` as Worker version
+`e4981bdf-2992-4794-8e9d-783263925e3d` at
+[staging](https://staging.unimailbox.tech). The repeated release gate passed 2,300
+tests (1,305 unit/frontend/contracts/scripts, 971 Worker, 24 migration fixtures).
+All 34 remote schema companions and release smoke passed. Health/readiness match
+the published revision/tree and schema 0034. Native Workers AI binding is present;
+configuration revision 0 is disabled and has no API key. Both AI endpoints reject
+unauthenticated requests with 401. See [QA](../../docs/qa/ai-staging-2026-10-12.md).
+
+The first release stopped before Worker publication because migration 0034 did
+not register itself. The fix adds tracking and allows safe partial/repeat SQL
+application; regression tests execute raw SQL without fixture-added tracking.
+The subsequent canonical release recovered successfully.
+
 ## Remaining acceptance
 
-No live model/account inference, remote migration, deployment, real-provider
-structured output or email delivery using generated content was performed.
-Migration 0034 must be applied before deploying the new Worker. Native Workers AI
-requires the configured AI binding; SDK backends require an administrator-owned
-credential. Real provider/model compatibility and output quality require explicit
-runtime acceptance. Feature source is committed as `850e0d7`; staging publication
-and remote migration acceptance are pending the release workflow.
+No live model/account inference, real-provider structured output or email delivery
+using generated content was performed. Enable a configured model in Admin → AI
+services for runtime acceptance. SDK backends require an administrator-owned
+credential. Real provider/model compatibility and output quality remain open.
+Feature source is committed as `850e0d7`, with migration fix `5f85a35`.

@@ -4149,3 +4149,23 @@ web/Worker builds and 2,299 tests (1,305 unit/Web/contracts/scripts, 971 Worker,
 and the real Tiptap editor; they do not prove live model inference or delivery.
 No deployment or production migration occurred. See [AI design](18-ai-service-foundation.md)
 and [handoff](../../work/handoffs/ai-service-and-reply-2026-10-12.md).
+
+
+## 2026-10-12 — AI staging release and migration recovery
+
+Commit feature `850e0d7` and design/handoff `2895ea2`, then publish staging through
+`pnpm deploy:staging`. The first release applied the AI table but stopped before
+Worker publication because raw migration 0034 lacked its tracking insert. Fix
+`5f85a35` registers the migration and preserves state on partial/repeated execution.
+Tests now execute the raw SQL at the 0033 boundary, covering tracking and recovery
+without the fixture's automatic registration.
+
+The repeated canonical gate passed doctor 14/14, generated types, lint, TypeScript,
+build and 2,300 tests (1,305 unit/frontend/contracts/scripts, 971 Worker and
+24 migration fixtures). All 34 remote schema companions passed. Staging version
+`e4981bdf-2992-4794-8e9d-783263925e3d` passed release smoke; health/readiness match
+revision `5f85a35`, schema 0034 and the prepared source digest. Native AI binding
+is present, default configuration remains disabled with no API key, and both AI
+routes require authentication. No model inference or generated email was sent.
+See [staging QA](../qa/ai-staging-2026-10-12.md). Production publication and source
+push were not part of this staging run.
