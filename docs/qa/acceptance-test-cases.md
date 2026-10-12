@@ -8,7 +8,7 @@
 当前 schema 为 **0028**。历史测试通过次数不属于本轮验收结果。
 
 - [执行记录 CSV](./acceptance-execution.csv)：与本文用例一一对应，初始结果全部为“未执行”。UTF-8 BOM，可导入 Excel。
-- [当前整合计划](../rebuild/12-cloud-mail-agentic-inbox-integration-plan.md)
+- [当前整合计划](../rebuild/12-mail-system-implementation-plan.md)
 - [UI 基座方案](../rebuild/13-shadcn-admin-kit-adoption.md)
 - [Durable Object ADR](../rebuild/14-durable-object-mailbox-adr.md)
 
@@ -20,7 +20,7 @@
 - Cloudflare Email Routing 收信，Brevo 首个发信 adapter；后续 SMTP/provider 扩展单列，不宣称已实现。
 - 自建用户和 session，admin 创建账号；无公开注册、邀请码或 Cloudflare Access 身份依赖。
 - 管理端 `/admin/*` 与邮箱端 `/mailbox/*` 分区。全局管理员不自动获得邮箱正文权限。
-- UTC 存储，前端按浏览器时区展示；不验收旧 Cloud Mail 的历史发送时间修复。
+- UTC 存储，前端按浏览器时区展示；历史数据修复需要独立验收。
 - DO 主存储不在 V1 范围；已有 D1/R2/Queue 方案需要真实环境闭环。
 
 本文既含已有实现的回归用例，也含目标验收和已知缺口。**预期结果是判定标准，不是已验证结论**。
@@ -1430,7 +1430,7 @@
 
 ### OPS — 端到端验收、运维与恢复
 
-**源码依据：** [worker.ts](../../apps/worker/src/worker.ts)、[scheduled.ts](../../apps/worker/src/entrypoints/scheduled.ts)、[12-cloud-mail-agentic-inbox-integration-plan.md](../../docs/rebuild/12-cloud-mail-agentic-inbox-integration-plan.md)、[deploy.ts](../../scripts/deploy.ts)
+**源码依据：** [worker.ts](../../apps/worker/src/worker.ts)、[scheduled.ts](../../apps/worker/src/entrypoints/scheduled.ts)、[12-mail-system-implementation-plan.md](../../docs/rebuild/12-mail-system-implementation-plan.md)、[deploy.ts](../../scripts/deploy.ts)
 
 **留证要求：** 本轮执行清单、外部 .eml、D1/R2 摘要、Queue/Cron/provider/浏览器证据与缺陷清单；记录 UTC 起止。
 
@@ -1480,7 +1480,7 @@
 
 ### GAP — 尚未闭合的产品能力与专项验收
 
-**源码依据：** [12-cloud-mail-agentic-inbox-integration-plan.md](../../docs/rebuild/12-cloud-mail-agentic-inbox-integration-plan.md)、[13-shadcn-admin-kit-adoption.md](../../docs/rebuild/13-shadcn-admin-kit-adoption.md)、[14-durable-object-mailbox-adr.md](../../docs/rebuild/14-durable-object-mailbox-adr.md)、[ComposeEmail.tsx](../../apps/web/src/features/mailbox/ComposeEmail.tsx)、[DraftRecoveryPage.tsx](../../apps/web/src/features/mailbox/DraftRecoveryPage.tsx)、[SettingsPage.tsx](../../apps/web/src/features/admin/SettingsPage.tsx)、[provider-registry.ts](../../apps/worker/src/integrations/providers/provider-registry.ts)
+**源码依据：** [12-mail-system-implementation-plan.md](../../docs/rebuild/12-mail-system-implementation-plan.md)、[13-shadcn-admin-kit-adoption.md](../../docs/rebuild/13-shadcn-admin-kit-adoption.md)、[14-durable-object-mailbox-adr.md](../../docs/rebuild/14-durable-object-mailbox-adr.md)、[ComposeEmail.tsx](../../apps/web/src/features/mailbox/ComposeEmail.tsx)、[DraftRecoveryPage.tsx](../../apps/web/src/features/mailbox/DraftRecoveryPage.tsx)、[SettingsPage.tsx](../../apps/web/src/features/admin/SettingsPage.tsx)、[provider-registry.ts](../../apps/worker/src/integrations/providers/provider-registry.ts)
 
 **留证要求：** 补齐前登记关联缺口/需求，不填写通过；补齐后保存 UI/API/真实环境证据，并回归对应主模块。
 

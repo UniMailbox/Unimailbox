@@ -43,5 +43,5 @@ The canonical Agentic Inbox adaptation decisions live in
 `docs/rebuild/11-agentic-inbox-adaptation.md`.
 
 Current UI provenance is in `docs/rebuild/15-shadcn-admin-ui-redesign.md`; editor
-and cloud-mail storage adaptation is in `docs/rebuild/16-email-editor-storage.md`.
+and R2 storage design is in `docs/rebuild/16-email-editor-storage.md`.
 The original shadcn-admin-kit proposal is superseded.

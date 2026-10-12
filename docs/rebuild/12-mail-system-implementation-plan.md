@@ -1,4 +1,4 @@
-# Unimailbox：Cloud Mail 与 Agentic Inbox 整合审查及实施计划
+# Unimailbox：邮件系统实施计划
 
 > Current interpretation (2026-10-10): this document preserves the October 4
 > integration investigation and its subsequent decisions. Current delivery status
@@ -13,11 +13,11 @@
 
 **日期：** 2026-10-04\
 **历史状态（2026-10-04）：** 三仓代码与 UI 基座审查完成；CAP-A1 自建身份和基础会话恢复、CAP-A2 UI 壳层、CAP-A3 按域名连接动态路由、Brevo webhook adapter 及通用早到事件重放有本地实现；入站 MIME 附件已写入 R2 并接通授权下载，CID 私有预览和旧孤儿对象回收已有本地实现；本地浏览器已验证登录、硬刷新恢复、首次改密、退出与管理/邮箱布局隔离；preview 边界、事件级幂等、SMTP、已关联对象生命周期和完整邮件闭环仍待完成\
-**目标：** 在 Cloudflare Workers 上交付一个支持多用户、多域名、多邮箱授权的邮件系统；出站首选 Brevo，并通过 provider registry 为后续 SMTP/邮件服务商保留扩展位；入站使用 Cloudflare Email Routing；Web 界面和邮件核心吸收 `cloud-mail` 与 `agentic-inbox` 的有效实现。
+**目标：** 在 Cloudflare Workers 上交付一个支持多用户、多域名、多邮箱授权的邮件系统；出站首选 Brevo，并通过 provider registry 为后续 SMTP/邮件服务商保留扩展位；入站使用 Cloudflare Email Routing；Web 界面和邮件核心遵循本项目的 contracts、授权与可靠投递约束。
 
 **已确认的产品决策：**
 
-- 所有后端、数据库和 provider 事件时间统一写入 UTC；API 输出 UTC 语义（新接口优先 RFC 3339 `Z`，历史 SQLite 无时区字符串在边界显式按 UTC 解释），前端按用户时区转换为 local time。Cloud Mail 的历史发送时间修复、`content.date` 回退和 30 天修复窗口不纳入本项目。
+- 所有后端、数据库和 provider 事件时间统一写入 UTC；API 输出 UTC 语义（新接口优先 RFC 3339 `Z`，历史 SQLite 无时区字符串在边界显式按 UTC 解释），前端按用户时区转换为 local time。历史数据修复需要独立迁移方案。
 - 关闭公开注册，不做邀请制。账号、域名、邮箱和 membership 均由应用内 admin 管理；admin 可创建、停用、恢复和重置账号，首次登录强制修改初始密码。
 - 完全移除 Cloudflare Access 作为认证或授权前置条件。Worker 不读取 `CF-Access-*` 头、不接受 Access JWT；管理员和普通用户都必须通过自建 D1 用户、密码和 session 模块，邮箱权限仍由 D1 membership 逐请求判断。
 - V1 不把 Durable Object 当作邮箱主存储。D1 是用户、权限、消息、状态和审计的权威来源，目标是把持久附件迁移到 R2，Queue 处理异步发送；DO 只作为未来可选的邮箱级协调和实时连接层。
@@ -39,14 +39,13 @@
 | 项目 | 本次检查 | 当前工作区状态 | 结论边界 |
 | --- | --- | --- | --- |
 | `Unimailbox` | Worker/Web 目录、D1 schema/migrations、入口、路由、provider、附件、认证、计划和台账；运行 typecheck/lint/test/build | `cf5acfdcdcaff2b6b752acf6b8536fa9d93473b6`，分支 `cap/CAP-065-mailbox-sharing-ui`；有大量未提交改动，无本次新提交 | 本地实现证据；不代表远端部署或真实邮件 |
-| `cloud-mail` | 2026-07 至 2026-09 Git 历史、`mail-worker` API/service/email/attachment/provider 代码、Vue/React UI、Brevo 计划文件和安全修复 | `1bd6a588797a9ae78cdf8ad90015c96a1a4289ca`；`main` 有未提交改动 | 可复用的邮件行为和风险来源；不直接复制旧认证、旧注册机制或旧数据模型 |
 | `agentic-inbox` | 当前账号流程、D1 grants、HTTP 组装、Email Routing、MailboxDO、R2、provider registry、React Router/Query UI | `6fb4c528d98d014068434da9edd08f6b81f2905e`；`main` 有大量未提交改动 | 当前工作区不能替代独立预览验收；参考模式需按 Unimailbox 规则改造 |
 
 ### 2.1 Unimailbox 本次可重复的本地证据
 
 - 本次分层重跑完成非 Worker 86 个文件、1188 个测试，Worker 51 个文件、854 个测试，以及 test-kit Worker 1 个文件、17 个测试。Web 项目包含在非 Worker 项目内，单独运行时为 57 个文件、435 个测试。Worker 测试需要本地 loopback 权限；这里的通过只证明本地绑定。
 - `pnpm typecheck`、`pnpm lint`、`pnpm format:check`、`pnpm build` 和最后的 `pnpm build:web`：本轮通过；`pnpm scaffold doctor`（14/14）是前一轮结果。最后的 Web 构建为 CSS 29.05 kB、主 JS 674.50 kB（minified），仍有 500 kB chunk 警告。
-- Worker build 的 Wrangler dry-run 能生成资产并列出 D1/KV/R2/Queue/Assets bindings；本机 Wrangler 写 `~/Library/Preferences/.wrangler/logs` 时出现 EPERM 警告。该命令没有创建或验证远端资源。
+- Worker build 的 Wrangler dry-run 能生成资产并列出 D1/KV/R2/Queue/Assets bindings；Wrangler 写诊断日志时出现 EPERM 警告。该命令没有创建或验证远端资源。
 - 本地 Vite → Worker 浏览器会话已验证管理员登录、硬刷新后 cookie-backed refresh、新 Bearer `/me`、退出后无法 refresh、`/mailbox` 与 `/admin` 布局切换、admin 创建账号；新建普通用户首次登录进入强制改密页，改密后进入邮箱，直接打开 `/admin` 和 `/admin/users` 被引回邮箱，而管理员仍能进入管理页。390px 暗色管理页无全局横向溢出，用户表格可键盘横向滚动。独立浏览器会话的页面错误列表为空。Email Routing、Queue、Cron、Brevo webhook、真实入站邮件或完整收件箱流程尚未验证；本地浏览器结果也不代表 preview。
 - 当前 `apps/worker/wrangler*.jsonc` 未声明 Durable Object namespace/class；`apps/worker/src/platform/env.ts` 也没有 DO binding，故 DO 仅是架构评估，不是当前已实现能力。
 
@@ -108,32 +107,18 @@
 
 **UI 基座退出证据：** 固定 commit 的来源和许可证记录；管理员与普通用户分别进入 `/admin/*`、`/mailbox/*` 的路由/权限测试；桌面、窄屏、暗色和键盘操作的浏览器验收；无跨用户 Query cache、无明文 token 持久化、无业务 API 越权；主 chunk 和 CSS 体积与当前基线对比。
 
-## 4. `cloud-mail` 审查结论
+## 4. 邮件核心约束
 
-### 4.1 最近几个月的主线变化
+邮件行为以 Unimailbox 的数据模型、contracts 和授权规则为准：
 
-2026-07 至 2026-09 的提交集中在：Brevo provider/webhook 和投递状态同步、每日 Cron、managed domains/admin email、邮箱共享、CC/BCC、回复全部、R2/附件上传、转发附件、内联图片、收件箱搜索、移动端邮箱选择器、列表联系信息、回复/转发工具栏和邮件 HTML 安全修复。这些提交说明旧系统真正高频的用户价值集中在邮件核心，而不是 AI 入口。Cloud Mail 的发送时间修复只作为历史背景审查，本项目不采用。
+- 入站使用 SMTP envelope recipient 确定目标邮箱；MIME From 是声明身份。持久化失败必须向运行时传播。
+- 邮件、收件人、邮箱关联和审计通过 D1 原子写入；原始 MIME 和附件字节保存在 R2。
+- 出站使用持久 outbox 和 Queue；provider SDK 只存在于 adapter 边界，发送和 webhook 状态分开记录。
+- 登录账号与业务邮箱分离；读写邮件必须同时满足全局权限和邮箱授权。
+- 邮件 HTML 统一清理；私有附件需要授权，收件人文件链接使用受控 capability。
+- 前端使用共享 contracts、query keys 和统一 React 界面，不引入独立认证或存储事实来源。
 
-### 4.2 应吸收的长处
-
-| 领域 | 可吸收的行为 | 在 Unimailbox 的落点 |
-| --- | --- | --- |
-| MIME/入站 | `postal-mime` 解析、收件人和线程头保留、拒收未知收件人、处理失败重抛 | `entrypoints/inbound-email.ts` + `email-core` + `messages`；加入 envelope/auth headers |
-| 列表和搜索 | 主题、发件人、收件人、正文多字段搜索；LIKE 通配符按字面值处理；时间+ID 双游标 | `messages` repository 与 `packages/contracts` cursor；统一 inbox/sent/all-mail 查询 |
-| 投递状态 | provider message id、webhook 事件、delivery status、早到 webhook reconcile；所有消息和事件时间写入 UTC，前端按用户时区显示 | `provider-sync`（仅状态 reconcile）plugin；不做 `content.date`/sent event/list date 回填、30 天历史时间修复或当前时间伪造 |
-| 发送状态 | webhook 事件归一化、provider message id、delivery status、早到 webhook 的后续 reconcile | `webhook_deliveries`、`provider_message_state`、`reconcile-webhook-deliveries.ts` |
-| 附件 | R2 直传、附件引用在 reply/forward 中复用、CID 内联图片、附件下载、移动端可滚动 compose | `attachments` + React compose/detail；保持上传所有权和一次性消费规则 |
-| UI 细节 | 虚拟化列表、邮箱/文件夹切换、reply-all、响应式写信、中文/英文文案和状态图标 | 用 Agentic Inbox 的 React shell 重做交互，同时保留 Unimailbox 的 contracts/queries |
-| 安全 | 共享 sanitizer 覆盖 `script`、SVG、iframe、事件属性、危险 URL/CSS；安全链接和私有响应头 | `packages/email-core`/`apps/web`/Worker template 共用策略并加恶意样本回归 |
-
-### 4.3 明确不直接采用的模式
-
-- 旧 JWT + KV token 作为长期普通用户身份；它可以作为数据迁移输入，不能成为新系统最终认证事实。
-- 全局路径前缀权限和仅按 email/id 查询的接口。特别是 `/allEmail/get` 这种只按消息 ID 读取的路径必须在 Unimailbox 中强制带 mailbox scope 和 user grant。
-- `mail-worker/src/init/init.js` 这种通过公开 secret 触发大量 lazy migration 的方式；新系统只使用有序、可追踪、repeat-safe 的 D1 migrations。
-- 收件入库只保存解析后的 MIME `From`；这个字段是攻击者可控的声明，必须与 SMTP envelope 和认证结果分开。
-- 让 provider SDK、Brevo/Resend 选择逻辑直接散落在 `email-service.js` 等业务服务中；所有 SDK 细节放进 adapter/plugin。
-- 同时维护 Vue 和 React 两套主界面。Unimailbox 统一采用 React + TanStack Router/Query，移植行为和布局，不复制旧 store/event bus。
+后续章节保留实施方向和阶段计划；是否已经交付以 capability ledger 的 Current state 为准。
 
 ## 5. `agentic-inbox` 审查结论
 
@@ -292,7 +277,7 @@ interface ProviderPlugin {
 1. 收敛 `managed_domains`、`mailboxes`、domain allow-list 和 Email Routing 配置检查；创建 mailbox 时禁止未知域名和重复地址。
 2. 每次 Email Routing 回调只按该回调的 `message.to` 信封地址匹配一个 active domain/mailbox；多个信封收件人由各自的回调分别投递，不因 MIME `To/Cc` 列出其他本地域名邮箱而额外 fan-out。`To/Cc` 仅作原始邮件元数据；Bcc 信封收件人即使不在头中也应收到邮件。
 3. 保存 MIME `From`、envelope sender、Return-Path、Received、Authentication-Results、DKIM/SPF/DMARC 结果（若平台提供）；UI 明确显示声明身份和认证状态。
-4. 复用 Cloud Mail 的 blocklist、subject/content/from 过滤和 per-role/domain policy，但过滤在 D1 写入前执行；sender policy 以 Cloudflare 提供的 envelope sender 为输入，RFC `From` 作为声明身份另存；拒收不生成半成品消息。
+4. 实现 blocklist、subject/content/from 过滤和 per-role/domain policy，但过滤在 D1 写入前执行；sender policy 以 Cloudflare 提供的 envelope sender 为输入，RFC `From` 作为声明身份另存；拒收不生成半成品消息。
 5. 消息、recipients、mailbox projections、初始 user state 和 receive audit 在一个 D1 batch 中写入；成功后才确认事件，异常重抛。
 6. 将 `received_at` 和所有入站审计时间以 UTC 写入；邮件 `Date` header 只作为原始 header/声明信息保存，不能覆盖 canonical receive time，也不触发历史时间修复。
 7. 为 `thread_id`、`in_reply_to`、`references`、CC/BCC、raw headers 建立稳定 contracts 和索引。
@@ -337,7 +322,7 @@ webhook 验签、事件映射和时间规范化已抽到 registry 中的 `Webhoo
 
 ### 阶段 4：shadcn-admin-kit 基座、收件箱和 React 工作区收敛
 
-**目标：** 保留 Unimailbox 已有业务状态，吸收 Agentic Inbox 的高效布局和 Cloud Mail 的邮件操作密度。
+**目标：** 保留 Unimailbox 已有业务状态，改进邮箱布局和邮件操作效率。
 
 **当前进度（2026-10-04）：** 已导入 kit-inspired tokens/shell 的本地实现，生产路由已分别
 包裹 `AdminLayout` 和 `MailboxLayout`；已接入统一 `LocalDateTime`，管理端和邮箱端的 UTC
@@ -350,17 +335,17 @@ webhook 验签、事件映射和时间规范化已抽到 registry 中的 `Webhoo
 2. 以 TanStack Query key factory 统一 session/user/mailbox/folder/message/thread/provider keys；admin keys 和 mailbox keys 分命名空间，所有 mutation 明确 invalidate、rollback 和权限撤销行为。
 3. 提供全局收件箱和单 mailbox 视图；切换邮箱时所有查询 key 带 user id + mailbox id，不能残留上一个用户或邮箱的数据。
 4. 所有列表、详情、审计和 webhook 时间从 UTC API 值在前端 `LocalDateTime` formatter 中转换为浏览器 local time，禁止把本地化后的字符串回写服务端或参与 cursor 比较。无时区的旧 D1 text 值在 formatter 中显式按 UTC 解析。
-5. 迁移 Cloud Mail 的虚拟化列表、时间排序、keyword search、reply-all、CC/BCC、线程折叠和移动端 compose 行为。
+5. 实现虚拟化列表、时间排序、keyword search、reply-all、CC/BCC、线程折叠和移动端 compose 行为。
 6. 发送 UI 展示受理、发送中、provider accepted、delivered、bounced、failed；不要把 `202` 画成最终成功。
 7. 保留草稿自动保存、IndexedDB working copy 和恢复页面，但草稿服务端写入仍受 mailbox `write` 权限和幂等约束。
 
-**重点文件：** `apps/web/src/app/router.tsx`、`apps/web/src/components/layouts/`、`apps/web/src/components/ui/`、`features/admin/`、`features/mailbox/`、`features/auth/`、`infrastructure/api/`、`queries/`；参考 `marmelab/shadcn-admin-kit` 固定 commit 的 shell/组件源码、`agentic-inbox/app/routes.ts`、`app/services/api.ts`、`app/queries/*` 和 `cloud-mail/mail-react/src/components/email-scroll/`。
+**重点文件：** `apps/web/src/app/router.tsx`、`apps/web/src/components/layouts/`、`apps/web/src/components/ui/`、`features/admin/`、`features/mailbox/`、`features/auth/`、`infrastructure/api/`、`queries/`；参考 `marmelab/shadcn-admin-kit` 固定 commit 的 shell/组件源码、`agentic-inbox/app/routes.ts`、`app/services/api.ts`、`app/queries/*`。
 
 **退出证据：** 浏览器覆盖登录、全局 inbox、邮箱切换、folder/search、详情/线程、回复全部、草稿恢复、发送状态、403/401/网络错误和移动宽度；Query cache 不串用户/邮箱。
 
 ### 阶段 5：R2 持久附件和安全 HTML
 
-**目标：** 达到 Cloud Mail 的附件体验，同时保留 Unimailbox 的所有权与一次性消费安全。
+**目标：** 提供完整附件体验，同时保留 Unimailbox 的所有权与一次性消费安全。
 
 **当前进度（2026-10-05）：** 已增加独立 R2 object-store seam；上传仍是有 TTL 的 KV staging，
 compose 消费前把同一 object key 写入 R2，下载和 Queue 发送优先读 R2，过期 sweep 同时清理
@@ -373,7 +358,7 @@ KV/R2。入站原始 MIME 以原字节写入 R2；`postal-mime` 从原字节解�
 1. 短期上传仍可使用有 TTL 的 staging；compose 提交时在 D1 batch 中消费元数据，Queue 发送前从可信对象存储读取字节。
 2. 对已入站或已发送邮件的附件执行 R2 持久化；对象 key 不使用原始文件名，文件名只进入受限 metadata/header。
 3. 下载按 mailbox read grant 检查；不存在、外部 mailbox、已过期 staging 和缺失 bytes 使用统一安全错误；设置正确 `Content-Disposition`、`Content-Type`、`Content-Length`。
-4. 复用 Cloud Mail 的 inline CID、回复/转发附件引用和 10 个常规附件等业务上限，但将限制写入 contracts/config，不散落在 UI。
+4. 实现 inline CID、回复/转发附件引用和 10 个常规附件等业务上限，但将限制写入 contracts/config，不散落在 UI。
 5. HTML sanitizer 同时覆盖 Web Shadow DOM/React、Worker/Telegram/preview 等所有 sink；安全链接加 `noopener noreferrer`，图片和 preview 使用严格 CSP/Referrer-Policy。
 
 **退出证据：** R2 upload/download/retry、大小/过期/越权/重复消费、CID/regular attachment、reply/forward、恶意 HTML/URL/CSS/事件属性样本；preview 真实附件上传、发送、下载和删除。
@@ -394,7 +379,7 @@ KV/R2。入站原始 MIME 以原字节写入 R2；`postal-mime` 从原字节解�
 
 **目标：** 证明系统在 Cloudflare 上真的能跑，再决定是否切换旧数据/域名。
 
-1. 为 preview 创建隔离 Worker、D1、R2、KV/Queue、Secrets；不触碰 `cloud-mail` 现有资源。
+1. 为 preview 创建隔离 Worker、D1、R2、KV/Queue、Secrets；不复用或修改其他安装的现有资源。
 2. 应用新迁移并记录 schema digest；部署 Worker/UI，确认 `/setup`、静态 assets、API、`email()`、Queue 和 Cron handler 均可达。
 3. 配置每个 zone 的 catch-all Email Routing、Brevo verified sender/DKIM/SPF/DMARC、webhook secret 和 provider connection。
 4. 用浏览器执行 admin 登录、创建两个账号并各自完成首次改密、停用/恢复/重置、创建域名/邮箱、授权两个用户、切换 `/admin/*` 与 `/mailbox/*`、收信、发信、回复、附件、delivery webhook 和失败重试。

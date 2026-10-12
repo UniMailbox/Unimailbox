@@ -4,6 +4,10 @@ Unimailbox's agent entry point. Follow the current user instructions and the
 host's tool and permission rules first. Repository guidance supports that work;
 it does not authorize additional agents, deployments, messages, or history rewrites.
 
+For deployment requests, start with [the agent deployment guide](docs/operations/agent-deploy.md).
+It supplies the installation workflow and prerequisite/optional-setting checks.
+The tool-neutral entry point is [AGENTS.md](AGENTS.md).
+
 ## State recovery — fresh session
 
 1. Check `git status`, branch, upstream and recent commits. Preserve unrelated work.
@@ -24,6 +28,8 @@ perform these checks themselves; hooks are not proof of correctness or delivery.
 | Path | Purpose |
 | --- | --- |
 | `README.md` | Product, local development and deployment entry points |
+| `AGENTS.md` | Tool-neutral navigation for agents |
+| `docs/operations/agent-deploy.md` | Agent installation workflow and usable-service acceptance |
 | `docs/rebuild/README.md` | Design navigation and current versus historical material |
 | `docs/rebuild/capability-ledger.md` | Current execution state and dated delivery history |
 | `docs/rebuild/execution-plan.md` | Remaining work and historical recovery sequence |

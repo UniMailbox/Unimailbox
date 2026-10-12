@@ -1,16 +1,19 @@
 # Unimailbox design and delivery documentation
 
-This repository contains the rebuilt application. The original Cloud Mail
-analysis and recovery plans are retained as design history; the rebuilt source
-now replaces the legacy application on the canonical repository's `main`.
+This repository contains the Unimailbox application. Earlier analysis and recovery
+plans are retained as design history; use current source and the capability ledger
+for implementation status.
 
 ## Start here
 
+- [Product overview](00-executive-summary.md) and [repository map](01-current-system/repository-map.md).
 - [Current state](capability-ledger.md#current-state): implemented behavior,
   dated staging evidence and remaining acceptance gaps.
 - [Execution plan](execution-plan.md): current priorities, followed by the
   historical August recovery plan.
 - [Implementation log](implementation-log.md): dated changes, not a current task queue.
+- [Agent deployment guide](../operations/agent-deploy.md): prerequisites, installation,
+  optional settings and real mail acceptance.
 - [Deployment runbook](../operations/deploy.md): environment configuration,
   migrations, secrets, publishing and recovery.
 - [Acceptance catalog](../qa/acceptance-test-cases.md) and
@@ -25,7 +28,7 @@ now replaces the legacy application on the canonical repository's `main`.
 | --- | --- |
 | Business constraints and terminology | [Business rules](02-business-discovery/business-rules.md), [glossary](02-business-discovery/business-glossary.md) |
 | Modules and integration boundaries | [Module boundaries](05-target-architecture/module-boundaries.md), [API conventions](05-target-architecture/api-design.md) |
-| Self-hosted identity and integration direction | [Integration decisions](12-cloud-mail-agentic-inbox-integration-plan.md) |
+| Self-hosted identity and integration direction | [Integration decisions](12-mail-system-implementation-plan.md) |
 | Current UI: satnaing/shadcn-admin | [UI adoption](15-shadcn-admin-ui-redesign.md) and source/license manifests |
 | Rich editor, images and R2 attachments | [Editor storage](16-email-editor-storage.md) |
 | Personal settings and bilingual errors | [Settings and localization](17-personal-settings-localization.md) |
@@ -39,7 +42,7 @@ An implemented feature is not automatically verified in every environment.
 
 ## Historical material
 
-`00-executive-summary.md`, `01-current-system/`, `03-domain-design/`,
+`01-current-system/dependency-map.md`, `01-current-system/module-map.md`, `03-domain-design/`,
 `04-legacy-review/`, `06-business-loops/`, `07-migration/`, `08-roadmap/`,
 `10-open-questions.md` and the `A`–`J` deliverables describe the original analysis,
 target design and phased plan. Their phase/status statements are dated provenance;

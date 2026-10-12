@@ -3,7 +3,7 @@
 ## Status
 
 Superseded for runtime authentication by the accepted October 4 integration
-decisions in [document 12](../12-cloud-mail-agentic-inbox-integration-plan.md).
+decisions in [document 12](../12-mail-system-implementation-plan.md).
 Application-owned D1 sessions and Bearer tokens now authorize requests; Better
 Auth endpoints and Cloudflare Access are not runtime login options. The original
 proposal below remains as migration-compatibility and decision history.

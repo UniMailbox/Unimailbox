@@ -576,7 +576,7 @@ Every mutating endpoint accepts `Idempotency-Key` header. The handler:
 ## G.13 Deployment model
 
 ```text
-github.com/<owner>/cloud-mail
+github.com/UniMailbox/Unimailbox
   → "Deploy to Cloudflare" button
   → Cloudflare provisions D1, R2, KV, Queue, Secrets Store bindings
   → Workers Builds runs migrations + deploys Worker

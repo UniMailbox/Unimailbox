@@ -1,12 +1,18 @@
 # Actors
 
-An actor is a **role played by a human or system** when interacting with Cloud Mail. Each actor has a goal, a set of permissions, and a set of responsibilities.
+Historical discovery vocabulary and role analysis. Current account creation,
+mailbox grants and delivery behavior follow the [business rules](business-rules.md)
+and [capability ledger](../capability-ledger.md#current-state). Retained invite,
+transport and legacy-field descriptions are not deployment prerequisites.
+
+
+An actor is a **role played by a human or system** when interacting with Unimailbox. Each actor has a goal, a set of permissions, and a set of responsibilities.
 
 ## A1. Operator
 
-**Definition:** the person who deploys Cloud Mail, owns the deployment, and is the first administrator.
+**Definition:** the person who deploys Unimailbox, owns the deployment, and is the first administrator.
 
-**Goal:** install Cloud Mail once, configure providers, invite users, run the system indefinitely.
+**Goal:** install Unimailbox once, configure providers, invite users, run the system indefinitely.
 
 **Permissions:** all permissions (administrator role).
 
@@ -77,7 +83,7 @@ An actor is a **role played by a human or system** when interacting with Cloud M
 
 **Definition:** a person or system outside the deployment that sends mail to a managed mailbox.
 
-**Goal:** deliver mail to a Cloud Mail address.
+**Goal:** deliver mail to a Unimailbox address.
 
 **Permissions:** none in the system.
 
@@ -87,7 +93,7 @@ An actor is a **role played by a human or system** when interacting with Cloud M
 
 **Definition:** an email address outside the deployment that receives mail from a member.
 
-**Goal:** receive mail from a Cloud Mail user.
+**Goal:** receive mail from a Unimailbox user.
 
 **Permissions:** none.
 
@@ -95,7 +101,7 @@ An actor is a **role played by a human or system** when interacting with Cloud M
 
 ## A7. Mail client (IMAP/POP3)
 
-**Definition:** a third-party mail client (Thunderbird, Apple Mail, Outlook) connecting to a Cloud Mail mailbox via POP3.
+**Definition:** a third-party mail client (Thunderbird, Apple Mail, Outlook) connecting to a Unimailbox mailbox via POP3.
 
 **Status:** **out of scope** for Phase 1–6 of the rebuild. See `doc/pop3-implementation-plan.md` for the separate workstream.
 
@@ -119,7 +125,7 @@ An actor is a **role played by a human or system** when interacting with Cloud M
 
 ## A9. Cloudflare
 
-**Definition:** the platform that hosts Cloud Mail.
+**Definition:** the platform that hosts Unimailbox.
 
 **Goal:** run the Worker; bind D1, R2, KV, Queue, Secrets Store; route Email Routing.
 

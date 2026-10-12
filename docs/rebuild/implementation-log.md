@@ -3744,7 +3744,7 @@ and server fallback. The new focused suite passed 24/24; the complete
 non-Worker suite passed 1218/1218 across 87 files. TypeScript, focused ESLint,
 focused Prettier, `git diff --check`, and the Worker Wrangler dry-run build
 passed. Wrangler reported an EPERM warning while trying to write its local
-log under `~/Library/Preferences/.wrangler/logs`, but still completed the
+diagnostic log, but still completed the
 dry-run with exit code 0 and listed the expected bindings. The Worker suite
 has not been rerun after the
 envelope-routing and webhook-adapter edits: the previous attempt was rejected
@@ -4277,3 +4277,54 @@ GETs with 401/no-store, and verified all five published modal page chunks plus
 Chinese copy. Local browser observations used synthetic accounts/configuration;
 no authenticated real-account write was used for staging verification. No production
 publication or source push. See [staging QA](../qa/admin-operation-modals-staging-2026-10-12.md).
+
+## 2026-10-12 — Public installation and agent deployment documentation
+
+README now introduces independent Cloudflare installations and links the new
+[agent deployment guide](../operations/agent-deploy.md) through a tool-neutral
+`AGENTS.md` entry point. The guide covers account/product access, template fields,
+bootstrap, protected key recovery, committed production configuration, publication,
+setup, routing, verified senders, mailbox grants, optional settings and real
+send/receive/reply/attachment acceptance. It distinguishes provider and setup UI
+gaps from completed mail service and uses GET polling for incoming smoke results.
+
+Public documentation no longer names the unrelated reference mail project or
+contains personal machine paths. The implementation plan has a neutral filename;
+its references are updated. Product and repository overviews describe current
+source, with earlier discovery material explicitly historical. Release and script
+instructions are aligned with the actual dispatcher and target validators.
+
+Validation: changed-document local links and secret scans passed; doctor 14/14,
+focused formatting and diff checks passed. Shell example syntax, fresh local key
+generation, independent 64-character hex values, 0600 permissions and refusal to
+overwrite existing keys were verified in isolated scratch. Production/staging/
+preview template transformations and documented deployment flags passed the real
+local parsers. No application, runtime configuration, migration or provider change;
+no deployment, DNS change, remote bootstrap, commit or push was performed.
+
+## 2026-10-12 — Upstream releases and fork update notifications
+
+Add a canonical-repository-only workflow that verifies stable tags and product
+versions, runs the full gate and creates a Release draft for maintainer review.
+The administrator overview now reads a `settings.read`-protected version check
+and provides stable release notes and upgrade links. The fixed anonymous GitHub
+request has a five-second timeout and bounded response; installation KV caches
+success/no-release for six hours and errors for 15 minutes. Checks can be disabled
+with `UPDATE_CHECK_ENABLED=false`; no automatic deployment or mail notification.
+Shared contracts own the product version independently of the Worker UUID.
+
+README/AGENTS and deployment navigation link the new update guide, which explains
+upstream subscription, custom fork merges, backups, preserving account/resources
+and encryption keys, verified deployment and existing-installation acceptance.
+
+Validation: 32 focused tests passed. The dirty workspace's full gate encountered
+an unrelated, ongoing mailbox-selector test change; an isolated owned snapshot
+based on `bb126eb` passed `pnpm verify`: doctor 14/14, bindings, lint, TypeScript,
+builds and 2,362 tests (1,351 non-Worker, 987 Worker, 24 migrations). A later
+version-independent fixture adjustment passed its seven Worker tests again.
+Actionlint, focused formatting, local links/shell syntax, diff and scoped redacted
+Gitleaks passed. Desktop/mobile agent-browser checks used synthetic APIs and
+confirmed English/Chinese notices, manual checks, links and no mobile overflow.
+Self-review only. Public latest-release API returned 404; no stable release exists
+to announce. No source commit/push, Release publication, deployment or private
+mail/provider changes. See [handoff](../../work/handoffs/upstream-update-notifications-2026-10-12.md).

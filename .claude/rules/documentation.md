@@ -67,7 +67,7 @@ Then remove the `work/active/` directory. `work/active/` contains only genuinely
 
 Forbidden at the repository root: `PLAN.md`, `NOTES.md`, `TODO*.md`, `RESULT.md`, `ANALYSIS.md`,
 `REVIEW*.md`, `DEBUG.txt`, `SUMMARY.md`, and anything similar. Approved root files are `CLAUDE.md`,
-`README.md`, and build/config files. Everything else belongs in a directory.
+`README.md`, `AGENTS.md`, and build/config files. Everything else belongs in a directory.
 
 ## Naming
 

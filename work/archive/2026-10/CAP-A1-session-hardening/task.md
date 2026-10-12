@@ -11,7 +11,7 @@ Finish the application-owned Bearer authentication boundary already introduced i
 - `apps/worker/src/http/router.ts` (stale authentication comments only)
 - Worker test fixtures in `apps/worker/src/http/routes/*.worker.test.ts` and `apps/worker/test/*.worker.test.ts` that manually seed cached access tokens
 - `package.json` test commands (run Worker pool projects sequentially)
-- `docs/rebuild/12-cloud-mail-agentic-inbox-integration-plan.md`
+- `docs/rebuild/12-mail-system-implementation-plan.md`
 - `docs/rebuild/capability-ledger.md`
 
 ## Acceptance

@@ -246,13 +246,13 @@ The rebuild happens in a new repository. The risks below are split into:
 
 ## J.2 Open questions (no answer yet)
 
-### Q1 — Do we ship a single-tenant or multi-tenant deployment model?  — **OPEN**
+### Q1 — Do we ship a single-tenant or multi-tenant deployment model? — **CLARIFIED 2026-10-12**
 
-The legacy `PRODUCT.md` says "multi-tenant, invite-gated" but the actual product is one operator running Cloud Mail for their team/friends/customers. The new system should clarify this.
+The deployment is operated by one organization or individual and can serve multiple users, domains and mailboxes. Independent operators deploy independent resources and credentials.
 
-**Recommendation:** treat the deployment as **single-tenant**. The "multi-tenant" language in `PRODUCT.md` is aspirational; the actual product is "one operator runs Cloud Mail for their team/friends/customers". The new system should not add tenant boundaries that the legacy code never had.
+**Current wording:** a self-hosted, multi-user mail application. Mailbox grants and roles define access inside each installation; separate installations do not share a database.
 
-**Decision needed:** confirm wording in `PRODUCT.md` or in the new system's product spec.
+**Decision reference:** the current implementation and deployment guide supersede the original open wording question.
 
 ### Q2 — Is LinuxDo OAuth actually used in any deployment?  — **UNKNOWN**
 

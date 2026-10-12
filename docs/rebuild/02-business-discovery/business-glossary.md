@@ -1,12 +1,18 @@
 # Business Glossary
 
+Historical discovery vocabulary and role analysis. Current account creation,
+mailbox grants and delivery behavior follow the [business rules](business-rules.md)
+and [capability ledger](../capability-ledger.md#current-state). Retained invite,
+transport and legacy-field descriptions are not deployment prerequisites.
+
+
 This is the canonical vocabulary for the rebuild. Every term is defined as the **business concept**, not as the legacy code's variable or table name. Conflicts with the legacy vocabulary are flagged.
 
 ## Actors
 
 | Term | Definition | Legacy mapping | Conflicts |
 |---|---|---|---|
-| **Operator** | The person who installs Cloud Mail, owns the deployment, configures providers, and is the first administrator. | `setting.admin` (env var) | None |
+| **Operator** | The person who installs Unimailbox, owns the deployment, configures providers, and is the first administrator. | `setting.admin` (env var) | None |
 | **Administrator** | A user with the `administrator` role. Manages users, roles, domains, settings. | `user.type=0` historically | Legacy has no `type=0` enum value; admin is granted by email-list bypass |
 | **Member** | A user with the `member` role. Default role for invited users. | `role.name='普通用户'` / `role_id=1` | None |
 | **Invitee** | A user who has not yet registered but holds a registration key. | `reg_key` row with `used_count < max_uses` | None |
@@ -17,16 +23,16 @@ This is the canonical vocabulary for the rebuild. Every term is defined as the *
 
 | Term | Definition | Legacy mapping | Conflicts |
 |---|---|---|---|
-| **User** | A person who can log in to Cloud Mail. Owns mailboxes and has roles. | `user` table | Legacy: `user.type` is a role *id*, not a string. New: `users.default_role_id` FK. |
+| **User** | A person who can log in to Unimailbox. Owns mailboxes and has roles. | `user` table | Legacy: `user.type` is a role *id*, not a string. New: `users.default_role_id` FK. |
 | **Mailbox** | An email address under a managed domain. Has an owner and zero or more members. | `account` table | **Conflict**: legacy calls mailboxes "accounts". New: rename to `mailbox`. |
-| **Managed domain** | A domain for which Cloud Mail accepts inbound mail and routes it to mailboxes. | `setting.managed_domains` (JSON array) | **Conflict**: legacy stores as JSON. New: `managed_domains` table. |
+| **Managed domain** | A domain for which Unimailbox accepts inbound mail and routes it to mailboxes. | `setting.managed_domains` (JSON array) | **Conflict**: legacy stores as JSON. New: `managed_domains` table. |
 | **Message** | The canonical record of a sent or received email. Owned by one user, visible to N mailboxes. | `email` table | **Conflict**: legacy `email` mixes inbound/outbound/drafts and holds read/star state on the row. |
 | **Mailbox message** | The relation between a message and a mailbox, plus folder assignment. | (implicit in `email.accountId`) | New: `mailbox_messages` table. |
 | **Recipient** | An email address that should receive a message, with type (to/cc/bcc). | `email.recipient` + `email.cc` + `email.bcc` (JSON blobs) | **Conflict**: legacy uses JSON blobs in text columns. New: `message_recipients` table. |
 | **Attachment** | A binary file attached to a message. Stored in R2. | `attachments` (legacy) / `att` table | New: `message_attachments` + `attachment_uploads` (two-table model with triggers). |
 | **Draft** | A message in `messages.status='draft'` state, visible only to its creator. | `email` row with `type=SEND, status=SAVING` (de facto) | **Conflict**: legacy has no explicit draft concept. New: explicit. |
 | **Outbound job** | A durable record that a message must be sent through a provider. | (none — provider call inline) | New: `outbound_jobs` table (durable outbox). |
-| **Provider connection** | The encrypted credential + config that lets Cloud Mail talk to a specific provider. | `setting.resend_tokens`, `setting.brevo_api_key` (env) | **Conflict**: legacy stores plaintext keys. New: encrypted. |
+| **Provider connection** | The encrypted credential + config that lets Unimailbox talk to a specific provider. | `setting.resend_tokens`, `setting.brevo_api_key` (env) | **Conflict**: legacy stores plaintext keys. New: encrypted. |
 | **Provider** | An outbound email service (Brevo, Resend, Cloudflare Email binding, future). | inline switch in `email-service.send` | **Conflict**: legacy is not provider-neutral. New: `ProviderRegistry`. |
 | **Webhook delivery** | A record of an inbound webhook event with idempotency locking. | `webhook_delivery` | Keep. |
 | **Provider message state** | The mapping between a provider's message ID and our canonical message. | `provider_email_state` | New name: `provider_message_state`. |

@@ -1,100 +1,58 @@
-# Executive Summary — Cloud Mail Rebuild Specification
+# Executive Summary — Unimailbox
 
-## What this document is
+Unimailbox is an open-source mail application operated through an independent
+Cloudflare installation. Each operator owns the account, domains, resources and
+credentials. An installation can serve multiple users, domains and mailboxes.
 
-This is the **requirements + architecture specification** for a new repository that replaces the existing Cloud Mail system. The existing system lives at `cloud-mail/` and is treated as a **read-only reference**. The new system is built from scratch using the design captured here.
+## Current product
 
-## What the existing system is
+The current application provides administrator-managed accounts and mailbox
+access, incoming mail through Cloudflare Email Routing, outgoing mail through
+Brevo, rich compose, drafts, replies, scheduled sending, R2 attachments, personal
+settings, audit logs and a bilingual web client. AI assistance is optional.
 
-Cloud Mail is a **multi-tenant, invite-gated, serverless email service** built on Cloudflare Workers + D1 + R2 + KV. It supports:
+The implementation is a TypeScript modular monolith: Hono handles the API,
+Drizzle accesses D1, and React/Vite/TanStack Router serve the web client. Worker
+entrypoints handle HTTP, incoming email, outbound Queue jobs and scheduled
+maintenance. Provider adapters keep external services separate from mail rules.
 
-- Personal and shared mailboxes under custom domains
-- Inbound mail via Cloudflare Email Routing
-- Outbound mail via Cloudflare Email binding, Resend, or Brevo
-- A web admin + inbox client (legacy Vue + in-progress React)
-- Operator-managed users, roles, registration keys, signatures, blacklist, AI code extraction, S3/R2 backends, and analytics
+Login identity and mailbox access are separate. Global permissions and explicit
+mailbox ownership/membership both govern mail operations. Provider credentials
+are encrypted in D1 using a key held in Secrets Store; private mail bytes live
+in R2. Durable outbound jobs and audited state changes support retry and recovery.
 
-## Why rebuild
+## Installation and acceptance
 
-The existing system has crossed the threshold where the **accidental complexity exceeds the business complexity**. The most important problems:
+Start with the [agent deployment guide](../operations/agent-deploy.md). It covers
+required inputs, resource creation, publication, administrator setup, routing,
+provider configuration, optional settings and real mail acceptance. The current
+runtime is Cloudflare; the repository does not ship a standalone VPS mail server.
 
-- Single-round SHA-256 password hashing (no PBKDF2, no constant-time compare)
-- SQL injection in `public-service.addUser`
-- Plaintext API keys in the `setting` table
-- A 311-line `email-service.send` function (three services in one)
-- A 57-column `setting` god-object
-- JSON blobs in text columns (`email.recipient`, `role.banEmail`, etc.)
-- Two parallel sources of authorization truth
-- Prefix-based route permission matching
-- `pnpm test` actually runs `wrangler deploy`
-- A `setting` table that owns blacklist policy, Telegram config, S3 credentials, R2/Resend/Brevo/CF provider config, Turnstile keys, signature, forwarding rules, login policy, AI policy, and notice copy — and is queried from every layer
-- Two parallel web clients (Vue + React) with no shared contracts
+The usable-service loop is:
 
-The existing system works. It does not survive the next addition of: another provider, another transport protocol, real multi-tenancy, or another engineer.
-
-## What we build instead
-
-A **modular monolith** on the same Cloudflare runtime, in a new repo:
-
-- Domain types own business rules. Providers own transport. Persistence owns D1. Workers' entrypoints are thin shells.
-- One provider registry. One message lifecycle. One outbound job table. One authorization policy.
-- A setup wizard that runs once on first install and yields a working tenant — no `setting` table to maintain by hand.
-- One web client, built in the new repo with TanStack Query + Tiptap + shadcn/ui.
-- TypeScript + Hono + Drizzle end-to-end, so contracts are explicit at every layer.
-
-## Business ground truth
-
-The core value loop is **four steps**, not the twenty-three operations the legacy UI exposes:
-
-```
-Operator installs → user invited → user signs in → user reads/writes mail → mail stored
+```text
+Operator deploys and configures mail
+  → administrator creates users, mailboxes and access grants
+  → user signs in and reads incoming mail
+  → user sends and replies through the provider
+  → messages and attachments remain accessible under the correct permissions
 ```
 
-The **six business capabilities** that account for ~95% of user value:
+A published Worker or completed wizard does not establish external delivery.
+A new installation needs its own verified incoming, outgoing, reply and attachment
+checks. Historical tests and maintainer deployment records describe their own
+scope only.
 
-1. **Identity & tenancy** — operator + invited users with role-driven permissions
-2. **Mailbox management** — own, share, rename, delete mailboxes
-3. **Inbound mail** — receive, parse, store, notify
-4. **Outbound mail** — compose, send through a provider, track delivery
-5. **Attachments** — upload, inline, download, dedup, presigned URL
-6. **Administration** — users, roles, registration keys, signatures, settings, audit
+## Documentation authority
 
-Everything else (Telegram forwarding, AI code extraction, ECharts analytics, S3 backend, public admin token, OAuth, Turnstile, S3 force-path-style) is **supporting infrastructure** that should not sit on the critical path.
+- [Capability ledger](capability-ledger.md#current-state): current delivered behavior and remaining gaps.
+- [Business rules](02-business-discovery/business-rules.md): accepted invariants.
+- [Architecture](05-target-architecture/architecture.md): runtime and module boundaries.
+- [Implementation plan](12-mail-system-implementation-plan.md): direction and dated plans.
+- [Release runbook](../operations/deploy.md): upgrades, secrets and recovery.
+- [Acceptance catalog](../qa/acceptance-test-cases.md): broader test coverage.
 
-## What this document set delivers
-
-Ten artifacts (A–J) and a folder tree of supporting analyses under `docs/rebuild/`:
-
-- **A. Executive Summary** — this file
-- **B. Current Business Capability Map** — what the existing system does, with module → capability → side-effect mapping
-- **C. Core Business Value Stream** — the one closed loop that defines success
-- **D. Major Architectural Problems** — the smells that justify the rebuild
-- **E. Proposed Domain Model** — bounded contexts, aggregates, state machines
-- **F. Minimal Business Closed Loop** — the smallest end-to-end slice that proves the design
-- **G. Target Architecture** — module boundaries, dependency rules, deploy model
-- **H. Progressive Rebuild Roadmap** — Phases 0–6 with exit criteria
-- **I. Legacy → New Mapping** — every legacy capability mapped to its new home (used as a *requirements* checklist in the new repo)
-- **J. Risks & Open Questions** — what could break and what we still don't know
-
-## Premise: greenfield
-
-This rebuild happens in a **new repository**. We do not modify this folder's `mail-worker/`, `mail-vue/`, or `mail-react/`. We use them only as a reference. The new repo is built from `00-executive-summary.md` onward.
-
-The only thing the new repo inherits from the existing system is **data**: a one-time migration script imports users, mailboxes, messages, attachments, and settings from the legacy D1 + R2 into the new schema. This migration is built in Phase 4 and runs per-deployment at cutover.
-
-## Non-goals for the rebuild
-
-To keep complexity honest:
-
-- **Not** a generic email-as-a-service platform for external customers.
-- **Not** a microservices decomposition. One Worker, multiple entrypoints.
-- **Not** a UI redesign. The visual system in `DESIGN.md` of the existing repo is the design reference.
-- **Not** a feature addition. Features that cannot be justified by cannot are deferred.
-- **Not** a parallel run. The new system replaces the existing system when Phase 4 ships.
-- **Not** a Vue or React-from-this-folder port. The new client is built fresh in the new repo.
-
-## Decision principle
-
-> Every new abstraction must answer "what concrete problem does this solve today?" If the answer is "future flexibility", we don't build it.
-
-The roadmap is **vertical-slice, capability-by-capability**, not backend-then-frontend. Each Phase has explicit, observable exit criteria. We do not move to the next phase until the current one's tests, deploy, and smoke-test pass.
+Earlier discovery, phase and legacy-review documents are design history. They do
+not enable transports, providers or authentication modes that the current source
+and deployment guide do not support. Existing-system data import is separate
+work; never apply this application's migrations to an incompatible database.

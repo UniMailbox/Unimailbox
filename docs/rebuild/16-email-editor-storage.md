@@ -14,7 +14,7 @@ No Tiptap Pro or hosted service is required. Upload is application-owned, consis
 
 ## Storage and delivery
 
-cloud-mail's R2 upload and linked-attachment flow is the source reference. This implementation uses the existing Worker R2 binding, so it needs no public bucket or additional S3 credentials. Raw binary goes through a bounded stream into R2, using incremental SHA-256; metadata/idempotency/audit are stored in D1. Images are rendered with a recipient capability URL; files are download links, not MIME attachments. Anyone with such a link can access that particular upload. Private incoming attachments keep their authenticated download flow.
+This implementation uses the existing Worker R2 binding, so it needs no public bucket or additional S3 credentials. Raw binary goes through a bounded stream into R2, using incremental SHA-256; metadata/idempotency/audit are stored in D1. Images are rendered with a recipient capability URL; files are download links, not MIME attachments. Anyone with such a link can access that particular upload. Private incoming attachments keep their authenticated download flow.
 
 - POST /api/v1/mailboxes/:mailboxId/editor-assets: message.send + mailbox send authorization.
 - POST /api/v1/admin/domains/:domainId/editor-assets: signature.manage + managed-domain existence.

@@ -1,17 +1,28 @@
 # Deployment and recovery runbook
 
+For a new installation, start with [the agent deployment guide](agent-deploy.md):
+it covers required inputs, template configuration, initialization, optional
+settings and real mail acceptance. This runbook owns release and recovery
+behavior. All commands run from the repository root; `pnpm wrangler` resolves
+Wrangler-relative config paths inside `apps/worker`.
+
 The release entry point is `pnpm scaffold deploy --environment <environment>`. It uses only `apps/worker/wrangler.<environment>.jsonc`; it never uses the old shared `.cloudflare-resources.json` or generated `.wrangler.resolved.jsonc`. `wrangler.jsonc` is the local build topology, not a release target.
 
 ## Toolchain and target
 
+For upstream version notifications and updates to an existing forked
+installation, use [the update guide](updates.md). A routine upgrade preserves
+the selected account/resources and secrets and does not repeat setup.
+
 Use the exact Node version in `.nvmrc`, pnpm from `packageManager`, and the Worker workspace's pinned Wrangler through `pnpm wrangler`. Install with `pnpm install --frozen-lockfile`; authenticate with `pnpm wrangler login` for a local release. The wrapper runs in `apps/worker`, so relative config/output paths are resolved there; use absolute paths for protected exports elsewhere. CI uses a scoped `CLOUDFLARE_API_TOKEN`.
 
-Staging is configured at `https://staging.unimailbox.tech`. Production and preview example configs require the operator to choose an account and custom domain, copy the example to its canonical filename and review it before bootstrap. Names must carry the environment prefix; D1/KV IDs, bucket, queues and secret names must not overlap another environment in the same account. An environment variable cannot override the selected account. Account membership, configured resource identities and active secret metadata are checked before migrations.
+Production and preview example configs require the operator to choose an account and custom domain, create the canonical configuration from the example and review it before bootstrap. The checked-in staging and production targets belong to the maintainers; they are not defaults for a new user's installation. Names must carry the environment prefix; D1/KV IDs, bucket, queues and secret names must not overlap another environment in the same account. An environment variable cannot override the selected account. Account membership, configured resource identities and active secret metadata are checked before migrations.
 
-The canonical production config now targets `https://mail.leanda.tech` in the
-Leanda account. Its provisioning, publication and mailbox cutover are separate
-steps tracked in [Leanda mail onboarding](leanda-mail.md). Review this target
-before using production commands; use the example for a different installation.
+The app hostname and mail domain are separate choices. Publishing the custom
+domain does not configure incoming MX/routing, create business mailboxes, verify
+Brevo senders or prove delivery. Follow the agent guide through setup and live
+acceptance before handing over a new service. Dated maintainer deployment records
+under `docs/qa/` are evidence for those installations only.
 
 ## Bootstrap once
 
@@ -20,9 +31,14 @@ pnpm scaffold bootstrap --environment staging --dry-run
 pnpm scaffold bootstrap --environment staging
 ```
 
-Bootstrap provisions only absent, explicitly declared resources, resolves D1/KV IDs from fresh list responses and persists them in the canonical config. It reuses an explicitly selected Secrets Store or the single existing account store, regardless of its name. Ambiguous stores require an explicit ID. Existing active secrets are preserved. Existing inactive or ambiguous secrets fail the operation. Newly created secrets receive up to three metadata checks to allow delayed visibility/activation; confirmation retries never create or rotate another value.
+Bootstrap provisions only absent, explicitly declared resources, resolves D1/KV IDs from fresh list responses and persists them in the canonical config. Its dry run validates the local target and prints a plan; it does not verify remote membership or product availability. It reuses an explicitly selected Secrets Store or the single existing account store, regardless of its name. Ambiguous stores require an explicit ID. Existing active secrets are preserved. Existing inactive or ambiguous secrets fail the operation. Newly created secrets receive up to three metadata checks to allow delayed visibility/activation; confirmation retries never create or rotate another value.
 
 New secret values are passed on stdin and saved first in a protected `.tmp/secret-recovery/<account>/<environment>/` directory (0700 directory, 0600 files). Move these files into the team's secret manager with an independent recovery copy, then securely remove local copies. Never upload this directory as a CI artifact. Existing secret values cannot be recovered through metadata commands.
+
+Bootstrap changes the selected configuration's resolved IDs. Review and commit
+those configuration changes before production preparation, which requires clean,
+committed release inputs. Local commits are sufficient; no upstream push is
+needed. Preserve unrelated work and stage only the reviewed configuration.
 
 ## Prepare and publish
 
