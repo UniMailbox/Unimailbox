@@ -19,6 +19,7 @@ export {
   createMailbox,
   findMailboxById,
   findMailboxByAddress,
+  resolveInboundMailbox,
   listMailboxesByUser,
   findMailboxMember,
   listMailboxMemberRows,

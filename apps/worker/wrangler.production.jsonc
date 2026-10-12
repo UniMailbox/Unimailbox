@@ -90,6 +90,7 @@
     "RELEASE_SHA": "development",
     "RELEASE_TREE": "development",
     "APP_ORIGIN": "https://mail.leanda.tech",
+    "INBOUND_CATCH_ALL_MAILBOX": "admin@leanda.tech",
   },
   "version_metadata": {
     "binding": "VERSION",

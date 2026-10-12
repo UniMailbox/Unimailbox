@@ -27,7 +27,12 @@ export async function smokeRelease(
     readiness.schema !== Object.keys(manifest.migrations).at(-1)?.slice(0, 4)
   )
     throw new Error('Deployment dependencies/schema are not ready.');
-  const page = await get('/login');
+  const setup = await get('/api/v1/setup/status');
+  const installation = (await setup.json()) as { data?: { status?: unknown } };
+  const setupRequired = installation.data?.status === 'setup';
+  if (!setup.ok || (!setupRequired && installation.data?.status !== 'complete'))
+    throw new Error('Installation status smoke failed.');
+  const page = await get(setupRequired ? '/setup' : '/login');
   const html = await page.text();
   if (!page.ok || !html.includes(manifest.entry) || !page.headers.get('Content-Security-Policy'))
     throw new Error('Frontend entry or security headers do not match the release.');
@@ -45,6 +50,12 @@ export async function smokeRelease(
     await response.body?.cancel();
   }
   const protectedRoute = await get('/api/v1/admin/overview');
+  if (setupRequired) {
+    if (protectedRoute.status !== 302 || protectedRoute.headers.get('Location') !== '/setup')
+      throw new Error('Protected API setup gate smoke failed.');
+    await protectedRoute.body?.cancel();
+    return;
+  }
   const error = (await protectedRoute.json()) as { error?: { code?: unknown } };
   if (protectedRoute.status !== 401 || error.error?.code !== 'AUTHENTICATION_REQUIRED')
     throw new Error('Protected API authentication smoke failed.');

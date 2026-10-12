@@ -25,8 +25,12 @@ import type { ForwardableEmailMessage } from '@cloudflare/workers-types';
 import type { Env } from '../platform/env';
 import { handleSmokeTestMessage } from '../modules/onboarding';
 import { normalizeAddress, parseInboundMime } from '@unimailbox/email-core';
-import { attachmentContentTypeSchema, attachmentFilenameSchema } from '@unimailbox/contracts';
-import { findMailboxByAddress } from '../modules/tenancy';
+import {
+  attachmentContentTypeSchema,
+  attachmentFilenameSchema,
+  emailAddressSchema,
+} from '@unimailbox/contracts';
+import { resolveInboundMailbox } from '../modules/tenancy';
 import {
   prepareCreateMessage,
   prepareCreateRecipient,
@@ -51,6 +55,22 @@ export default {
     const handled = await handleSmokeTestMessage(message.to, env.CACHE);
     if (handled) return;
 
+    // Preserve the previous domain-wide external copy, including mail that
+    // local policy later rejects. Await forwarding before persistence so a
+    // provider failure cannot silently discard the copy. A storage failure
+    // after forwarding can produce another copy on an upstream retry.
+    if (env.INBOUND_FORWARD_TO) {
+      const destination = emailAddressSchema.safeParse(env.INBOUND_FORWARD_TO);
+      const catchAll = emailAddressSchema.safeParse(env.INBOUND_CATCH_ALL_MAILBOX);
+      if (!destination.success || !catchAll.success)
+        throw new Error('Invalid inbound forwarding configuration.');
+      const domain = normalizeAddress(catchAll.data).split('@')[1];
+      if (normalizeAddress(destination.data).split('@')[1] === domain)
+        throw new Error('Inbound forwarding destination must be external.');
+      if (normalizeAddress(message.to).split('@')[1] === domain)
+        await message.forward(destination.data);
+    }
+
     // Parse the raw email
     const rawBytes = await new Response(message.raw).arrayBuffer();
     // Decode transfer encodings and nested multipart parts from the original
@@ -61,7 +81,7 @@ export default {
     // handler for the SMTP envelope recipient in message.to; only that address
     // is allowed to determine the mailbox that receives the message. This
     // also covers Bcc delivery, where the envelope address is absent from MIME.
-    const mailbox = await findMailboxByAddress(env.DB, message.to);
+    const mailbox = await resolveInboundMailbox(env.DB, message.to, env.INBOUND_CATCH_ALL_MAILBOX);
     if (!mailbox) {
       await message.setReject(UNKNOWN_RECIPIENT_REASON);
       return;
@@ -145,6 +165,24 @@ export default {
       };
       recipientInputs.push(recipientInput);
       recipientStatements.push(prepareCreateRecipient(env.DB, recipientInput));
+    }
+
+    // Bcc and catch-all delivery must retain the actual envelope address even
+    // when the sender's MIME headers omit it. Headers never choose the mailbox.
+    const envelopeAddress = normalizeAddress(message.to);
+    if (
+      !recipientInputs.some((recipient) => normalizeAddress(recipient.address) === envelopeAddress)
+    ) {
+      const input: CreateRecipientInput = {
+        id: systemIds.uuid(),
+        messageId,
+        address: envelopeAddress,
+        displayName: '',
+        type: 'bcc',
+        createdAt: now,
+      };
+      recipientInputs.push(input);
+      recipientStatements.push(prepareCreateRecipient(env.DB, input));
     }
 
     const mailboxMessageInput: CreateMailboxMessageInput = {

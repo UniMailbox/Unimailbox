@@ -66,6 +66,8 @@ exact validation and transport behavior.
 | R-INBOUND-006 | Per-role `availDomain` and `banEmail` policies are evaluated at receive time |
 | R-INBOUND-007 | The raw MIME is stored once; parsed content derives from the same bytes |
 | R-INBOUND-008 | The message + recipients + attachments + mailbox-message rows are inserted in a single D1 batch |
+| R-INBOUND-009 | Optional `INBOUND_CATCH_ALL_MAILBOX` routes absent envelope addresses only within that mailbox's active managed domain. Exact addresses take precedence, including disabled/deleted addresses which remain rejected. The catch-all does not create mailbox rows. |
+| R-INBOUND-010 | Optional private `INBOUND_FORWARD_TO` preserves a verified external copy for the configured catch-all domain before local policy and storage. Same-domain forwarding is refused to prevent loops. Forwarding failures propagate; R2/D1 and external forwarding have no shared transaction or exactly-once guarantee. |
 | R-INBOUND-009 | A message with `status=SAVING` is recovered by a scheduled job (status promoted to `received` or rejected) |
 
 ## R-OUTBOUND — Outbound mail

@@ -44,7 +44,7 @@ The manifest records Git revision plus a content hash (including dirty staging s
 
 Migration history reads fail closed. Only the exact missing `d1_migrations` table is treated as a fresh database. Unknown remote migrations, bad CLI output and failed assertions abort. Pending SQL is applied once; **all read-only schema assertions run on every attempt**, including when no migrations are pending. Legacy fixture writes in 0014/0020 stay in local verification after their explicit delimiter. A SQL history record alone never bypasses a failed verification. There is no `--skip-migrate` or bulk `--force-secrets` escape hatch.
 
-After publication the script checks the configured custom domain: exact Worker version/source identity, dependency readiness and schema, the current frontend entry, security headers, immutable hashed JS, 404 for bare `/api`/missing JS/maps, and 401 for a protected admin route. A failed smoke leaves a failed manifest and exits nonzero; publication may already have happened, so inspect the active version before retrying or reverting.
+After publication the script checks the configured custom domain: exact Worker version/source identity, dependency readiness and schema, installation status, the current frontend entry, security headers, immutable hashed JS, and 404 for bare `/api`/missing JS/maps. A fresh installation must serve `/setup` and redirect the protected admin route to `/setup`; a completed installation must serve `/login` and return 401 for that route. Passing the fresh-installation smoke does not mean mail is configured. A failed smoke leaves a failed manifest and exits nonzero; publication may already have happened, so inspect the active version before retrying or reverting.
 
 ## Secrets and independent rotation
 

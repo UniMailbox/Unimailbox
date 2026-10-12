@@ -6,7 +6,7 @@
 // Mailbox address = {localPart}@{domain.name} — domain lookup required for full address.
 
 import type { Database } from '../../platform/database';
-import type { MailboxMemberRole } from '@unimailbox/contracts';
+import { emailAddressSchema, type MailboxMemberRole } from '@unimailbox/contracts';
 
 export interface CreateMailboxInput {
   readonly id: string;
@@ -243,6 +243,55 @@ export async function findMailboxByAddress(
   return {
     id: result.id,
     address: `${result.local_part}@${domain.name}`,
+    displayName: result.display_name,
+    status: result.status,
+    domainId: result.domain_id,
+    localPart: result.local_part,
+    ownerUserId: result.owner_user_id,
+  };
+}
+
+/**
+ * Resolve the envelope in one lookup. An explicitly disabled/deleted address
+ * remains rejected; only an absent address can use its own domain's fallback.
+ */
+export async function resolveInboundMailbox(
+  db: Database,
+  address: string,
+  catchAllAddress?: string,
+): Promise<MailboxInfo | null> {
+  const recipient = emailAddressSchema.safeParse(address);
+  if (!recipient.success) return null;
+  const [localPart, domainName] = recipient.data.toLowerCase().split('@');
+  const fallback = emailAddressSchema.safeParse(catchAllAddress);
+  const [fallbackLocal, fallbackDomain] = fallback.success
+    ? fallback.data.toLowerCase().split('@')
+    : ['', ''];
+  const fallbackPart = fallbackDomain === domainName ? fallbackLocal : localPart;
+  const result = await db
+    .prepare(
+      `SELECT m.id, m.domain_id, m.owner_user_id, m.local_part, m.display_name,
+              m.status, d.name AS domain_name
+       FROM mailboxes m JOIN managed_domains d ON d.id = m.domain_id
+       WHERE d.name = ? AND d.status = 'active'
+         AND (m.local_part = ? COLLATE NOCASE OR m.local_part = ? COLLATE NOCASE)
+       ORDER BY CASE WHEN m.local_part = ? COLLATE NOCASE THEN 0 ELSE 1 END
+       LIMIT 1`,
+    )
+    .bind(domainName, localPart, fallbackPart, localPart)
+    .first<{
+      id: string;
+      domain_id: string;
+      owner_user_id: string;
+      local_part: string;
+      display_name: string;
+      status: string;
+      domain_name: string;
+    }>();
+  if (!result || result.status !== 'active') return null;
+  return {
+    id: result.id,
+    address: `${result.local_part}@${result.domain_name}`,
     displayName: result.display_name,
     status: result.status,
     domainId: result.domain_id,

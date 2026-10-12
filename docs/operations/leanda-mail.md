@@ -31,47 +31,66 @@ outbound queue, dead-letter queue and three named secrets use independent
 The existing single Cron trigger and daily file maintenance policy apply.
 
 Production resources and all three active secrets were provisioned on
-2026-10-11. No production Worker release has been published yet. Publication,
-application setup, address routing and real delivery must each be verified
-separately; no production mailbox or routing cutover is claimed by this record.
-The private prepared-release manifest records the exact source and local checks
-for the next publication.
+2026-10-11. Domain-wide routing and a retained Gmail copy were authorized on
+2026-10-12. Publication, setup and controlled real delivery are pending until
+recorded below. Staging and legacy resources must remain separate.
 
-The first bootstrap exposed a Secrets Store propagation delay: creation
-succeeded before its active metadata was visible. Bootstrap now retries that
-metadata read up to three times, without creating or rotating the value again.
-Focused deployment tests pass 22/22, including delayed activation and persistent
-confirmation failure. Previously created keys were preserved on resume.
+## Address routing and ownership
 
-## Address cutover
+Only the initial `admin@leanda.tech` application user will use this installation.
+Create `admin@leanda.tech`, `hello@leanda.tech` (the website contact destination)
+and `johnjiang@leanda.tech` as mailboxes owned by that user. Set the default
+mailbox to `admin@leanda.tech`; other addresses need no pre-created mailbox to
+receive mail.
 
-Before changing an address, confirm its local part, mailbox owner, sharing needs
-and whether the operator still needs a Gmail copy. `hello@leanda.tech` is the
-website's existing destination; other addresses must come from the operator.
+Production sets `INBOUND_CATCH_ALL_MAILBOX=admin@leanda.tech`. Existing active
+mailboxes receive their own envelope addresses first; other `leanda.tech`
+addresses enter the admin mailbox. Disabled/deleted exact addresses remain
+rejected locally. Foreign domains never use this fallback. The actual envelope
+address is retained as a Bcc recipient when absent from the sender's To/Cc
+headers. Arbitrary addresses do not create database rows, users, memberships,
+new Cron jobs or background scans. Sending from another address requires an
+explicit mailbox owned by admin through the existing mailbox creation flow.
 
-1. Finish production setup: create the administrator, register `leanda.tech`
-   and configure the existing Brevo account. Provider keys belong in the
-   application's encrypted credentials, never in this document or Wrangler vars.
-   Do not finalize setup before creating an administrator.
-2. Create each confirmed mailbox and any explicit memberships. A global
-   administrator does not automatically have access to another user's mail.
-3. Add an exact recipient rule that routes the confirmed address to
-   `unimailbox-production`. Keep the existing catch-all for other addresses.
-   Snapshot the previous rule privately before replacing an existing match.
-   Do not route business mail to the staging Worker.
-4. Configure a separate authenticated Brevo webhook for the production
+Set `INBOUND_FORWARD_TO` as a private Worker secret to the previous verified
+Gmail destination, never as a committed Wrangler var. The Worker awaits the
+Cloudflare forward before parsing, local policy or persistence so the previous
+Gmail copy is retained even if local processing subsequently rejects the mail.
+Invalid configuration or same-domain forwarding fails closed. A forwarding
+failure prevents persistence and surfaces the error; a later storage failure
+can produce another Gmail copy on retry. Forwarding and R2/D1 cannot provide an
+atomic, exactly-once transaction. Existing Gmail history stays in Gmail.
+
+## Production cutover
+
+1. Publish through the canonical production release command. A fresh
+   installation smoke checks `/setup` and its protected API redirect. It does
+   not prove configured mail delivery.
+2. Claim setup with the private installation token, run preflight, create the
+   administrator, register `leanda.tech` and configure the existing Brevo
+   account. Provider keys are encrypted by the application. Complete setup
+   only after the administrator exists. Create the three admin-owned mailboxes
+   and select the admin default mailbox.
+3. Install the private forwarding secret through Wrangler, confirm that the
+   original Gmail destination is still verified, and check the live release
+   and dependencies before changing routing.
+4. Preserve the original Cloudflare catch-all privately and compare its live
+   state immediately before changing it to `unimailbox-production`. Preserve
+   existing MX, SPF, DKIM, DMARC and the website/staging provider configuration.
+5. Configure a separate authenticated Brevo webhook for the production
    connection. Preserve existing website and staging webhooks. Protect webhook
    credentials and complete attachment download URLs as secrets.
-5. With explicitly authorized controlled test recipients, verify inbound storage,
-   mailbox visibility, a reply and provider delivery events. Also test a real
-   website form submission to the confirmed contact mailbox.
-6. If reception fails, restore that recipient's prior rule or remove the new
-   exact rule so the existing catch-all handles it. DNS and provider
-   authentication do not need to be disabled to roll back an address.
+6. Send controlled messages to an explicit mailbox and an unregistered domain
+   address; check mailbox ownership, original envelope identity, R2 storage,
+   Gmail forwarding and an outbound reply/provider event. A real website form
+   submission is a separate acceptance boundary.
+7. If actual reception/forwarding fails, restore the saved catch-all action
+   immediately. Do not disable DNS or provider authentication for rollback.
 
-There is no Gmail message import or automatic Gmail-copy feature in this
-onboarding procedure. Existing Gmail history remains there until a separate
-import or forwarding workflow is requested and verified.
+Focused tests cover domain isolation, exact mailbox precedence, disabled
+mailboxes, retained envelope identity, forwarding failures and loop prevention.
+Deployment script tests cover both fresh and completed installation gates.
+No production delivery acceptance is claimed until the live evidence is recorded.
 
 ## Credential handling
 

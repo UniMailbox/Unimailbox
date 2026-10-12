@@ -22,6 +22,10 @@ export type Env = Omit<
   RELEASE_SHA?: string;
   RELEASE_TREE?: string;
   APP_ORIGIN?: string;
+  /** Domain-scoped fallback for unknown inbound envelope recipients. */
+  INBOUND_CATCH_ALL_MAILBOX?: string;
+  /** Optional private Worker secret containing a verified external destination. */
+  INBOUND_FORWARD_TO?: string;
   /** Migration-only Better Auth compatibility binding; never required by the
    * deployed self-managed authentication path. */
   BETTER_AUTH_SECRET?: SecretsStoreSecret | string;

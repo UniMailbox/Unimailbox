@@ -421,6 +421,8 @@ describe('custom domain smoke', () => {
       if (url.pathname === '/healthz')
         return Response.json({ ok: true, version: 'version', tree: 'tree' });
       if (url.pathname === '/readyz') return Response.json({ ok: true, schema: '0031' });
+      if (url.pathname === '/api/v1/setup/status')
+        return Response.json({ data: { status: 'complete' } });
       if (url.pathname === '/login')
         return new Response(manifest.entry, {
           headers: { 'Content-Security-Policy': "default-src 'self'" },
@@ -439,6 +441,41 @@ describe('custom domain smoke', () => {
     await expect(smokeRelease({ ...manifest, version: 'wrong' }, request)).rejects.toThrow(
       'version',
     );
+  });
+  it('checks the fresh installation page and refuses an unguarded admin API', async () => {
+    const manifest = {
+      origin: 'https://production.example.com',
+      version: 'version',
+      tree: 'tree',
+      entry: '/assets/index-123.js',
+      migrations: { '0033_test.sql': 'hash' },
+    } as ReleaseManifest;
+    let guarded = true;
+    let setupStatus = 'setup';
+    const request = vi.fn<typeof fetch>(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/healthz') return Response.json({ ok: true, version: 'version', tree: 'tree' });
+      if (path === '/readyz') return Response.json({ ok: true, schema: '0033' });
+      if (path === '/api/v1/setup/status') return Response.json({ data: { status: setupStatus } });
+      if (path === '/setup')
+        return new Response(manifest.entry, {
+          headers: { 'Content-Security-Policy': "default-src 'self'" },
+        });
+      if (path === manifest.entry)
+        return new Response('js', {
+          headers: { 'Content-Type': 'text/javascript', 'Cache-Control': 'public, immutable' },
+        });
+      if (path === '/api/v1/admin/overview')
+        return guarded
+          ? new Response(null, { status: 302, headers: { Location: '/setup' } })
+          : Response.json({ data: {} });
+      return new Response(null, { status: 404 });
+    });
+    await smokeRelease(manifest, request);
+    guarded = false;
+    await expect(smokeRelease(manifest, request)).rejects.toThrow('setup gate');
+    setupStatus = 'unknown';
+    await expect(smokeRelease(manifest, request)).rejects.toThrow('Installation status');
   });
 });
 

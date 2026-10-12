@@ -6,7 +6,7 @@
  * R-INBOUND-006 (per-role banEmail) rejection paths. Rejection
  * short-circuits before any DB write (Decision §Q4: audit OUT OF SCOPE).
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types';
 import inboundEmail from './inbound-email';
@@ -122,6 +122,142 @@ describe('inbound-email handler — CAP-021', () => {
     await db.prepare('DELETE FROM managed_domains').run();
     await db.prepare('DELETE FROM users').run();
   });
+
+  it('stores an unknown envelope in the same-domain catch-all and preserves an external copy', async () => {
+    const db = await migrationsDb();
+    const owner = await createTestUser(db);
+    const domain = await createTestDomain(db);
+    const mailbox = await createTestMailbox(db, domain, owner, 'admin');
+    const message = makeMessage(
+      'ANYTHING@EXAMPLE.COM',
+      'sender@example.net',
+      'Catch-all',
+      'From: sender@example.net\r\nTo: someone@example.net\r\nSubject: Catch-all\r\n\r\nBody',
+    );
+    const forward = vi.fn(async () => {});
+    message.forward = forward;
+    await inboundEmail.email(message, {
+      ...env,
+      INBOUND_CATCH_ALL_MAILBOX: 'ADMIN@example.com',
+      INBOUND_FORWARD_TO: 'copy@example.net',
+    });
+    expect(message._getRejectReason()).toBeNull();
+    expect(forward).toHaveBeenCalledExactlyOnceWith('copy@example.net');
+    const stored = await db.prepare('SELECT mailbox_id FROM mailbox_messages').first();
+    expect(stored?.mailbox_id).toBe(mailbox);
+    expect(
+      await db.prepare("SELECT address FROM message_recipients WHERE type = 'bcc'").first(),
+    ).toMatchObject({ address: 'anything@example.com' });
+    expect(await db.prepare('SELECT COUNT(*) AS count FROM mailboxes').first()).toMatchObject({
+      count: 1,
+    });
+  });
+
+  it.each(['active', 'disabled', 'deleted'])(
+    'gives an explicit %s mailbox priority over catch-all',
+    async (status) => {
+      const db = await migrationsDb();
+      const owner = await createTestUser(db);
+      const domain = await createTestDomain(db);
+      await createTestMailbox(db, domain, owner, 'admin');
+      const exact = await createTestMailbox(db, domain, owner, 'hello');
+      await db.prepare('UPDATE mailboxes SET status = ? WHERE id = ?').bind(status, exact).run();
+      const message = makeMessage(
+        'hello@example.com',
+        'sender@example.net',
+        'Exact',
+        'From: sender@example.net\r\nTo: hello@example.com\r\n\r\nBody',
+      );
+      await inboundEmail.email(message, { ...env, INBOUND_CATCH_ALL_MAILBOX: 'admin@example.com' });
+      const stored = await db.prepare('SELECT mailbox_id FROM mailbox_messages').first();
+      if (status === 'active') expect(stored?.mailbox_id).toBe(exact);
+      else {
+        expect(message._getRejectReason()).toContain('Unknown recipient');
+        expect(stored).toBeNull();
+      }
+    },
+  );
+
+  it('never forwards or falls back across domains', async () => {
+    const db = await migrationsDb();
+    const owner = await createTestUser(db);
+    const domain = await createTestDomain(db);
+    await createTestMailbox(db, domain, owner, 'admin');
+    const message = makeMessage(
+      'unknown@other.example',
+      'sender@example.net',
+      'Other',
+      'From: sender@example.net\r\nTo: admin@example.com\r\n\r\nBody',
+    );
+    const forward = vi.fn(async () => {});
+    message.forward = forward;
+    await inboundEmail.email(message, {
+      ...env,
+      INBOUND_CATCH_ALL_MAILBOX: 'admin@example.com',
+      INBOUND_FORWARD_TO: 'copy@example.net',
+    });
+    expect(forward).not.toHaveBeenCalled();
+    expect(message._getRejectReason()).toContain('Unknown recipient');
+    expect(await db.prepare('SELECT COUNT(*) AS count FROM messages').first()).toMatchObject({
+      count: 0,
+    });
+  });
+
+  it('rejects a disabled catch-all without automatically creating a mailbox', async () => {
+    const db = await migrationsDb();
+    const owner = await createTestUser(db);
+    const domain = await createTestDomain(db);
+    const mailbox = await createTestMailbox(db, domain, owner, 'admin');
+    await db.prepare("UPDATE mailboxes SET status = 'disabled' WHERE id = ?").bind(mailbox).run();
+    const message = makeMessage(
+      'unknown@example.com',
+      'sender@example.net',
+      'Disabled',
+      'From: sender@example.net\r\nTo: unknown@example.com\r\n\r\nBody',
+    );
+    await inboundEmail.email(message, { ...env, INBOUND_CATCH_ALL_MAILBOX: 'admin@example.com' });
+    expect(message._getRejectReason()).toContain('Unknown recipient');
+    expect(await db.prepare('SELECT COUNT(*) AS count FROM mailboxes').first()).toMatchObject({
+      count: 1,
+    });
+  });
+
+  it('surfaces a forwarding failure before writing any mail or R2 objects', async () => {
+    const db = await migrationsDb();
+    const before = (await env.ATTACHMENTS.list()).objects.length;
+    const message = makeMessage('hello@example.com', 'sender@example.net', 'Failure', 'Body');
+    message.forward = vi.fn(async () => {
+      throw new Error('Forward failed');
+    });
+    await expect(
+      inboundEmail.email(message, {
+        ...env,
+        INBOUND_CATCH_ALL_MAILBOX: 'admin@example.com',
+        INBOUND_FORWARD_TO: 'copy@example.net',
+      }),
+    ).rejects.toThrow('Forward failed');
+    expect(await db.prepare('SELECT COUNT(*) AS count FROM messages').first()).toMatchObject({
+      count: 0,
+    });
+    expect((await env.ATTACHMENTS.list()).objects).toHaveLength(before);
+  });
+
+  it.each(['invalid', 'loop@example.com'])(
+    'rejects unsafe forwarding configuration: %s',
+    async (destination) => {
+      const message = makeMessage('hello@example.com', 'sender@example.net', 'Failure', 'Body');
+      const forward = vi.fn(async () => {});
+      message.forward = forward;
+      await expect(
+        inboundEmail.email(message, {
+          ...env,
+          INBOUND_CATCH_ALL_MAILBOX: 'admin@example.com',
+          INBOUND_FORWARD_TO: destination,
+        }),
+      ).rejects.toThrow('forwarding');
+      expect(forward).not.toHaveBeenCalled();
+    },
+  );
 
   it('parses and persists an inbound email to a known mailbox', async () => {
     const db = await migrationsDb();
