@@ -40,6 +40,8 @@ export interface ApiRequestInit {
   readonly body?: unknown;
   readonly headers?: Readonly<Record<string, string>>;
   readonly signal?: AbortSignal;
+  /** Explicitly disable automatic retries for paid inference calls. */
+  readonly retry?: boolean;
   /** Binary attachment response; errors still use the normal API envelope. */
   readonly responseType?: 'arrayBuffer';
   /** Used by tests to assert retry behaviour without sleeping in real time. */
@@ -197,7 +199,7 @@ export function createApiClient(init: ApiClientInit): ApiClient {
         }
 
         // Non-2xx — try to retry per the policy.
-        if (isRetryableStatus(response.status)) {
+        if (requestInit.retry !== false && isRetryableStatus(response.status)) {
           const delay = retryPolicy.nextDelay(attempt, { status: response.status });
           if (delay !== null && attempt < retryPolicy.maxAttempts + 1) {
             retryDelaysByCall.push(delay);

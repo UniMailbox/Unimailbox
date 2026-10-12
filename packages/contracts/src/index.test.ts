@@ -1458,6 +1458,8 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
   it('contains the exact expected option set, including the CAP-043 message actions', () => {
     expect([...auditActionSchema.options].sort()).toEqual(
       [
+        'ai.configuration_updated',
+        'message.ai_reply_generated',
         'setup.claim',
         'setup.preflight.complete',
         'setup.complete',

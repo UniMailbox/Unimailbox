@@ -70,6 +70,7 @@ import webhookEventProjectionSql from '../../../migrations/0027_webhook_event_pr
 import inboundAttachmentsSql from '../../../migrations/0028_inbound_attachments.sql?raw';
 import editorAssetsSql from '../../../migrations/0029_editor_assets.sql?raw';
 import attachmentCleanupSql from '../../../migrations/0032_attachment_cleanup.sql?raw';
+import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
 import scheduledSendSql from '../../../migrations/0033_scheduled_send.sql?raw';
 import userPreferencesSql from '../../../migrations/0031_user_preferences.sql?raw';
 import editorAssetSystemLimitSql from '../../../migrations/0030_editor_asset_system_limit.sql?raw';
@@ -236,6 +237,7 @@ const MIGRATIONS = [
     sql: attachmentCleanupSql,
   },
   { name: '0033_scheduled_send', fileName: '0033_scheduled_send.sql', sql: scheduledSendSql },
+  { name: '0034_ai_configuration', fileName: '0034_ai_configuration.sql', sql: aiConfigurationSql },
 ] as const;
 
 export interface MigrationsDbOptions {

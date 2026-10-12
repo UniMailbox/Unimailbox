@@ -7,6 +7,7 @@
 // R-WORKFLOW-005: maintenance_jobs cursor-based, idempotent.
 import {
   sqliteTable,
+  blob,
   text,
   integer,
   index,
@@ -205,3 +206,13 @@ export type RolePolicyRowDrizzle = typeof rolePolicies.$inferSelect;
 export type NewRolePolicyRowDrizzle = typeof rolePolicies.$inferInsert;
 export type RolePolicyBanEmailRow = typeof rolePolicyBanEmails.$inferSelect;
 export type RolePolicyAvailDomainRow = typeof rolePolicyAvailDomains.$inferSelect;
+
+export const aiConfiguration = sqliteTable('ai_configuration', {
+  id: text('id').primaryKey(),
+  configuration: text('configuration').notNull(),
+  ciphertext: blob('ciphertext', { mode: 'buffer' }),
+  iv: blob('iv', { mode: 'buffer' }),
+  authTag: blob('auth_tag', { mode: 'buffer' }),
+  revision: integer('revision').notNull().default(0),
+  updatedAt: text('updated_at').notNull(),
+});

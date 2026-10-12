@@ -592,7 +592,7 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * `'0027'` for provider-neutral webhook event projections, and `'0028'` for
  * received MIME attachment metadata.
  */
-export const CURRENT_SCHEMA_VERSION = '0033' as const;
+export const CURRENT_SCHEMA_VERSION = '0034' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008
@@ -1439,3 +1439,5 @@ export const cancelScheduledSendSchema = z
   .object({ expectedRevision: z.number().int().nonnegative() })
   .strict();
 export type ScheduledSendItem = z.infer<typeof scheduledSendItemSchema>;
+
+export * from './ai';

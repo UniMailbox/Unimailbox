@@ -105,3 +105,9 @@ export {
 } from './settings-repository';
 export { readAdminOverview } from './overview-repository';
 export { getEditorUploadPolicy } from './editor-upload-policy';
+
+export {
+  getAiConfiguration,
+  updateAiConfiguration,
+  readAiConfiguration,
+} from './ai-configuration-service';

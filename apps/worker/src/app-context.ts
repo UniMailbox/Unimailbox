@@ -1,3 +1,9 @@
+import { createAiAdapters } from './integrations/ai/registry';
+import { createAiService } from './modules/ai';
+import { readAiConfiguration } from './modules/admin';
+import { decrypt, importEncryptionKey } from './platform/crypto';
+import { readSecret } from './platform/secrets';
+import type { AiService } from '@unimailbox/contracts';
 // Composition root — the only place wiring happens.
 // CAP-001 stub: returns named collaborators so use cases cannot reach back
 // into the raw Cloudflare `Env` (per ADR-007 + .claude/rules/security.md
@@ -23,6 +29,7 @@ import {
 } from './modules/admin';
 
 export interface AppContext {
+  readonly ai: AiService<AbortSignal>;
   readonly db: Database;
   readonly cache: Cache;
   readonly setupSessionStore: SetupSessionStore;
@@ -52,6 +59,20 @@ export function buildAppContext(env: Env): AppContext {
   const db = getDatabase(env);
   return {
     db,
+    ai: createAiService({
+      adapters: createAiAdapters(env.AI),
+      loadConfiguration: async () => {
+        const snapshot = await readAiConfiguration(db);
+        const apiKey =
+          snapshot.configuration.enabled && snapshot.credential
+            ? await decrypt(
+                snapshot.credential,
+                await importEncryptionKey(await readSecret(env.CREDENTIAL_ENCRYPTION_KEY)),
+              )
+            : null;
+        return { configuration: snapshot.configuration, apiKey };
+      },
+    }),
     cache: getCache(env),
     setupSessionStore: getSetupSessionStore(env),
     objectStore: getObjectStore(env),

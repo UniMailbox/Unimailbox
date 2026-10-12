@@ -7,6 +7,7 @@ import type { PlatformConfig } from './config';
 // Test/local secret values and migration compatibility vars remain explicit.
 export type Env = Omit<
   RuntimeBindings,
+  | 'AI'
   | 'INSTALLATION_TOKEN'
   | 'CREDENTIAL_ENCRYPTION_KEY'
   | 'CURSOR_SIGNING_KEY'
@@ -16,6 +17,7 @@ export type Env = Omit<
   | 'APP_ORIGIN'
   | 'VERSION'
 > & {
+  AI?: Ai;
   INSTALLATION_TOKEN: SecretsStoreSecret;
   CREDENTIAL_ENCRYPTION_KEY: SecretsStoreSecret;
   VERSION?: WorkerVersionMetadata;

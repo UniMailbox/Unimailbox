@@ -14,4 +14,4 @@
 // 0026 adds admin-managed password lifecycle columns for CAP-A1.
 // 0027 stores verified, provider-neutral webhook projections for replay.
 // 0028 stores received MIME attachment metadata separately from uploads.
-export const CURRENT_SCHEMA_VERSION = '0033' as const;
+export const CURRENT_SCHEMA_VERSION = '0034' as const;

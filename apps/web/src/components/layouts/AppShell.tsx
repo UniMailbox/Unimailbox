@@ -38,6 +38,7 @@ import {
   Plus,
   X,
   Settings2,
+  Sparkles,
 } from 'lucide-react';
 import { authSessionQuery } from '../../features/auth/auth-queries';
 import { QuickSettings, UserAvatar } from '../../features/settings/QuickSettings';
@@ -90,6 +91,12 @@ export const adminNavigation = [
     label: 'Settings',
     icon: Settings2,
     description: 'Configure preferences for this deployment.',
+  },
+  {
+    to: '/admin/ai',
+    label: 'AI services',
+    icon: Sparkles,
+    description: 'Configure AI backends and email reply assistance.',
   },
   {
     to: '/admin/users',
@@ -435,7 +442,11 @@ function ShellPending({ admin }: { admin: boolean }): ReactElement {
       <main className="admin-page">
         <ContentSkeleton
           variant={
-            pathname === '/admin/settings' ? 'form' : pathname === '/admin' ? 'overview' : 'list'
+            pathname === '/admin/settings' || pathname === '/admin/ai'
+              ? 'form'
+              : pathname === '/admin'
+                ? 'overview'
+                : 'list'
           }
         />
       </main>

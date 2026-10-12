@@ -1,6 +1,19 @@
 import { type ErrorCode } from '@unimailbox/contracts';
 import { getLanguage, type Language } from './locale';
 export const errorMessages = {
+  AI_DISABLED: { en: 'AI is disabled.', 'zh-CN': 'AI 服务未启用。' },
+  AI_NOT_CONFIGURED: {
+    en: 'Configure the AI binding or API key.',
+    'zh-CN': '请配置 AI 绑定或 API Key。',
+  },
+  AI_UPSTREAM_ERROR: { en: 'AI service request failed.', 'zh-CN': 'AI 服务请求失败。' },
+  AI_TIMEOUT: { en: 'AI request timed out.', 'zh-CN': 'AI 请求超时。' },
+  AI_CANCELLED: { en: 'AI request cancelled.', 'zh-CN': 'AI 请求已取消。' },
+  AI_INVALID_RESPONSE: {
+    en: 'AI returned an invalid or incomplete response.',
+    'zh-CN': 'AI 返回了无效或不完整的响应。',
+  },
+
   INVALID_SCHEDULE_TIME: {
     en: 'Choose a future time within one year.',
     'zh-CN': '请选择一年内的未来时间。',

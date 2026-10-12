@@ -185,6 +185,6 @@ describe('deployment readiness', () => {
   it('checks the current schema and secret bindings before setup is complete', async () => {
     const response = await SELF.fetch('http://localhost/readyz');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, schema: '0033' });
+    expect(await response.json()).toMatchObject({ ok: true, schema: '0034' });
   });
 });

@@ -37,6 +37,8 @@ import { adminUserRoutes } from './routes/admin-users';
 import { adminDomainRoutes } from './routes/admin-domains';
 import { adminRoleRoutes } from './routes/admin-roles';
 import { adminSignatureRoutes } from './routes/admin-signatures';
+import { adminAiRoutes } from './routes/admin-ai';
+import { aiReplyRoutes } from './routes/ai-reply';
 import { adminSettingsRoutes } from './routes/admin-settings';
 import { adminOverviewRoutes } from './routes/admin-overview';
 import { mailboxRoutes } from './routes/mailboxes';
@@ -117,6 +119,7 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-069: typed, allowlisted global system settings.
   apiV1.route('/', adminSettingsRoutes());
+  apiV1.route('/', adminAiRoutes());
   apiV1.route('/', adminOverviewRoutes());
 
   // CAP-020: Mailbox routes.
@@ -127,6 +130,7 @@ export function buildRouter(): Hono<AppEnv> {
 
   // CAP-023: Compose (send) routes.
   apiV1.route('/', composeRoutes());
+  apiV1.route('/', aiReplyRoutes());
 
   // CAP-047 server draft-create slice: POST /api/v1/mailboxes/:mailboxId/drafts.
   // Mounted next to compose so the create-draft route shares the same

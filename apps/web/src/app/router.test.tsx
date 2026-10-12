@@ -569,6 +569,8 @@ describe('router — CAP-062 production draft route', () => {
     '/admin/domains',
     '/admin/roles',
     '/admin/signatures',
+    '/admin/settings',
+    '/admin/ai',
   ])('redirects direct application route %s into setup when incomplete', async (path) => {
     const apiClient = createApiClient({
       baseUrl: '',
@@ -676,29 +678,32 @@ describe('router — CAP-062 production draft route', () => {
 // (covered in features/admin/AuditEventsPage.test.tsx).
 // ---------------------------------------------------------------------------
 describe('router — CAP-067 production role route', () => {
-  it('matches the real /admin/roles route for an authenticated session', async () => {
-    const apiClient = createApiClient({
-      baseUrl: '',
-      getSessionToken: () => null,
-      fetchImpl: (async () =>
-        jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
-    });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, staleTime: 0 } },
-    });
-    queryClient.setQueryData(authQueryKeys.session(), {
-      userId: 'role-route-admin',
-      email: 'admin@example.test',
-      displayName: 'Role admin',
-      expiresAt: '2099-01-01T00:00:00Z',
-    });
-    const history = createMemoryHistory({ initialEntries: ['/admin/roles'] });
-    const router = createAppRouter(apiClient, queryClient, history);
+  it.each(['/admin/roles', '/admin/ai'])(
+    'matches the real %s route for an authenticated session',
+    async (path) => {
+      const apiClient = createApiClient({
+        baseUrl: '',
+        getSessionToken: () => null,
+        fetchImpl: (async () =>
+          jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
+      });
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 0 } },
+      });
+      queryClient.setQueryData(authQueryKeys.session(), {
+        userId: 'role-route-admin',
+        email: 'admin@example.test',
+        displayName: 'Role admin',
+        expiresAt: '2099-01-01T00:00:00Z',
+      });
+      const history = createMemoryHistory({ initialEntries: [path] });
+      const router = createAppRouter(apiClient, queryClient, history);
 
-    await router.load();
+      await router.load();
 
-    expect(history.location.pathname).toBe('/admin/roles');
-  });
+      expect(history.location.pathname).toBe(path);
+    },
+  );
 
   it('redirects a member away from the real admin workspace', async () => {
     const apiClient = createApiClient({

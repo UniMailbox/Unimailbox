@@ -6,6 +6,10 @@ import { errorMessage } from '../../infrastructure/i18n/error-messages';
 import { useComposer } from './compose-window-context';
 import { useInAppShell } from '../../components/layouts/AppShell';
 import { RichTextEditor } from '../../components/editor/RichTextEditor';
+import { AiReplyDialog, aiReplyHtml } from './AiReplyDialog';
+import { getLanguage } from '../../infrastructure/i18n/locale';
+import type { AiReplyRequest } from '@unimailbox/contracts';
+import { Sparkles } from 'lucide-react';
 import { EDITOR_BODY_MAX_BYTES } from '@unimailbox/contracts';
 import { useState, type ReactElement } from 'react';
 import { useForm } from 'react-hook-form';
@@ -146,6 +150,7 @@ function ReplyComposer({ mailboxId, parentMessageId }: ReplyComposerProps): Reac
         // component instance, but RHF defaultValues apply at mount only.
         key={parent.id}
         mailboxId={mailboxId}
+        sourceMessageId={parent.id}
         defaultValues={{
           to: prefill.to.join(', '),
           cc: '',
@@ -190,11 +195,17 @@ function ReplyComposer({ mailboxId, parentMessageId }: ReplyComposerProps): Reac
 interface ComposeFormProps {
   readonly mailboxId: string;
   readonly defaultValues: ComposeFormFields;
+  readonly sourceMessageId?: string;
   /** Threading headers for a reply; absent for a fresh compose. */
   readonly replyContext?: { readonly inReplyTo: string; readonly references: string } | undefined;
 }
 
-function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProps): ReactElement {
+function ComposeForm({
+  mailboxId,
+  defaultValues,
+  replyContext,
+  sourceMessageId,
+}: ComposeFormProps): ReactElement {
   const t = useT();
   const composer = useComposer();
   const inShell = useInAppShell() || Boolean(composer);
@@ -208,6 +219,8 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
   // from that blank form would silently carry the OLD inReplyTo /
   // references into an unrelated message.
   const [activeReplyContext, setActiveReplyContext] = useState(replyContext);
+  const [activeSourceId, setActiveSourceId] = useState(sourceMessageId);
+  const [aiRequest, setAiRequest] = useState<Omit<AiReplyRequest, 'instructions'> | null>(null);
   const [htmlBody, setHtmlBody] = useState('');
   const [uploading, setUploading] = useState(false);
   const [showCc, setShowCc] = useState(Boolean(defaultValues.cc));
@@ -218,6 +231,7 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
     handleSubmit,
     reset,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<ComposeFormFields>({
     resolver: zodResolver(composeFormSchema),
@@ -270,6 +284,8 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
           // Fix pass (d): the cleared reply context degrades the titles
           // to the Compose wording and drops the threading headers.
           setActiveReplyContext(undefined);
+          setActiveSourceId(undefined);
+          setAiRequest(null);
           reset(EMPTY_FORM_VALUES);
           setHtmlBody('');
           composer?.sent();
@@ -415,6 +431,22 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
 
           <div className="wizard-actions">
             <Button
+              type="button"
+              variant="secondary"
+              disabled={pending}
+              onClick={() =>
+                setAiRequest({
+                  ...(activeSourceId ? { sourceMessageId: activeSourceId } : {}),
+                  subject: getValues('subject'),
+                  draftBody: getValues('body'),
+                  language: getLanguage(),
+                })
+              }
+            >
+              <Sparkles className="size-4" />
+              {t(activeSourceId ? 'AI reply' : 'AI draft')}
+            </Button>
+            <Button
               type="submit"
               variant="primary"
               disabled={
@@ -438,6 +470,18 @@ function ComposeForm({ mailboxId, defaultValues, replyContext }: ComposeFormProp
           </div>
         </form>
       </Card>
+      {aiRequest ? (
+        <AiReplyDialog
+          mailboxId={mailboxId}
+          request={aiRequest}
+          onClose={() => setAiRequest(null)}
+          onApply={(text) => {
+            setHtmlBody(aiReplyHtml(text));
+            setValue('body', text, { shouldDirty: true, shouldValidate: true });
+            setAiRequest(null);
+          }}
+        />
+      ) : null}
       {scheduling ? (
         <ScheduleSendDialog
           open

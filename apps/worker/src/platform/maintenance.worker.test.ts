@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
+import { CURRENT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { resetAndMigrate } from '@unimailbox/test-kit';
 import { runMaintenanceTasks } from './maintenance';
 import { CRON_HEARTBEAT_KEY, DAILY_CRON_HEARTBEAT_KEY, maintenanceHealth } from './health';
@@ -32,10 +33,13 @@ describe('maintenance failure isolation and monitoring', () => {
     expect((await SELF.fetch('http://localhost/healthz/maintenance')).status).toBe(503);
   });
   it('reports schema drift as not ready', async () => {
-    await env.DB.prepare("DELETE FROM d1_migrations WHERE name LIKE '0033_%'").run();
+    await env.DB.prepare('DELETE FROM d1_migrations WHERE name LIKE ?')
+      .bind(`${CURRENT_SCHEMA_VERSION}_%`)
+      .run();
     const response = await SELF.fetch('http://localhost/readyz');
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ ok: false, schema: '0032' });
+    const previous = String(Number(CURRENT_SCHEMA_VERSION) - 1).padStart(4, '0');
+    expect(await response.json()).toMatchObject({ ok: false, schema: previous });
   });
 
   it('keeps daily failure visible after a successful frequent tick, until daily recovery', async () => {

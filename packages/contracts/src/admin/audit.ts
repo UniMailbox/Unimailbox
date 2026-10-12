@@ -57,6 +57,8 @@ export interface D1StatementLike {
 // CAP-047 adds the server draft lifecycle transitions; CAP-051 adds the
 // scheduled attachment expiry transition.
 export const auditActionSchema = z.enum([
+  'ai.configuration_updated',
+  'message.ai_reply_generated',
   // CAP-026 / CAP-027 setup + admin
   'setup.claim',
   // CAP-041 preflight hotfix: emitted when POST /api/v1/setup/preflight

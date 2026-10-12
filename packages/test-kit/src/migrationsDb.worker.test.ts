@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CURRENT_SCHEMA_VERSION as CONTRACT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { migrationsDb } from './migrationsDb';
+import aiConfigurationVerification from '../../../migrations/0034_ai_configuration.verify.sql?raw';
 import settingsRevisionVerification from '../../../migrations/0025_system_settings_revision.verify.sql?raw';
 import scheduledSendVerification from '../../../migrations/0033_scheduled_send.verify.sql?raw';
 import attachmentCleanupVerification from '../../../migrations/0032_attachment_cleanup.verify.sql?raw';
@@ -48,6 +49,27 @@ describe('migrationsDb (worker pool)', () => {
   beforeEach(async () => {
     const { reset } = await import('cloudflare:test');
     await reset();
+  });
+
+  it('0034 seeds disabled AI and prevents incomplete credentials or invalid revisions', async () => {
+    const db = await migrationsDb();
+    expect(await db.prepare(aiConfigurationVerification.split(';')[0] ?? '').first()).toEqual({
+      assertion: '0034_ai_configuration_row',
+      pass: 1,
+    });
+    expect(
+      await db
+        .prepare(
+          "SELECT json_extract(configuration, '$.enabled') AS enabled, revision, ciphertext FROM ai_configuration WHERE id='system'",
+        )
+        .first(),
+    ).toEqual({ enabled: 0, revision: 0, ciphertext: null });
+    await expect(
+      db.prepare("UPDATE ai_configuration SET revision = -1 WHERE id='system'").run(),
+    ).rejects.toThrow();
+    await expect(
+      db.prepare("UPDATE ai_configuration SET ciphertext = X'01' WHERE id='system'").run(),
+    ).rejects.toThrow();
   });
 
   it('0033 adds nullable schedule fields and preserves existing outbox rows', async () => {
@@ -425,7 +447,7 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
     // CAP-069: 0025 seeds the internal system-settings revision row.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0033');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0034');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {

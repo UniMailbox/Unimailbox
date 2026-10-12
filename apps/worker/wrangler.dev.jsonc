@@ -6,6 +6,7 @@
   "compatibility_date": "2026-10-06",
   "send_metrics": false,
   "compatibility_flags": ["nodejs_compat"],
+  "ai": { "binding": "AI", "remote": true },
   "workers_dev": false,
   "observability": {
     "enabled": true,

@@ -155,6 +155,9 @@ const SignaturesPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('../features/admin/SettingsPage').then((module) => ({ default: module.SettingsPage })),
 );
+const AiSettingsPage = lazy(() =>
+  import('../features/admin/AiSettingsPage').then((module) => ({ default: module.AiSettingsPage })),
+);
 
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
@@ -604,6 +607,17 @@ const adminSettingsRoute = createRoute({
   ),
 });
 
+const adminAiRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/ai',
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <AiSettingsPage />
+    </AdminLayout>
+  ),
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -819,6 +833,7 @@ const routeTree = rootRoute.addChildren([
   adminRolesRoute,
   adminSignaturesRoute,
   adminSettingsRoute,
+  adminAiRoute,
   setupChildren,
 ]);
 

@@ -49,6 +49,7 @@ import {
 import type { AnyRouter } from '@tanstack/react-router';
 import type { MessageDetail } from '@unimailbox/contracts';
 import { ComposeEmail } from './ComposeEmail';
+import { aiReplyHtml } from './AiReplyDialog';
 import { mailboxQueryKeys } from './mailbox-queries';
 import { authQueryKeys } from '../auth/auth-queries';
 import { jsonResponse, errorResponse } from '../../test-utils';
@@ -89,6 +90,136 @@ vi.mock('../../components/editor/RichTextEditor', () => ({
 afterEach(() => {
   cleanup();
   resetAuthSessionForTesting();
+});
+
+describe('AI composer assistance', () => {
+  function aiRoute(response: () => Response | Promise<Response>): RouteHandler {
+    return {
+      match: (url, method) =>
+        method === 'POST' && url === `/api/v1/mailboxes/${MAILBOX_ID}/ai-reply`,
+      response,
+    };
+  }
+  it('previews a reply and only replaces body after confirmation, preserving recipients and threading', async () => {
+    const text = 'Thanks <team> & colleagues.\nPlease confirm the date.';
+    const user = userEvent.setup();
+    const { calls } = await renderCompose({
+      replyToMessageId: PARENT_ID,
+      routes: [
+        sessionRoute(),
+        parentDetailRoute(() => jsonResponse({ data: PARENT_DETAIL })),
+        aiRoute(() => jsonResponse({ data: { text } })),
+        sendRoute({
+          responses: [
+            jsonResponse({ data: { messageId: SENT_MESSAGE_ID, status: 'queued' } }, 202),
+          ],
+        }),
+      ],
+    });
+    await screen.findByTestId('compose-form');
+    await user.type(screen.getByLabelText('Body'), 'Keep my existing draft');
+    await user.click(screen.getByRole('button', { name: 'AI reply' }));
+    await user.type(screen.getByLabelText('Instructions (optional)'), 'Ask for the date');
+    await user.click(screen.getByRole('button', { name: 'Generate' }));
+    expect(await screen.findByLabelText('AI preview')).toHaveValue(text);
+    expect(screen.getByLabelText('Body')).toHaveValue('Keep my existing draft');
+    const ai = calls.find((call) => call.url.endsWith('/ai-reply'));
+    expect(ai?.body).toEqual({
+      sourceMessageId: PARENT_ID,
+      subject: 'Re: Quarterly report',
+      instructions: 'Ask for the date',
+      draftBody: 'Keep my existing draft',
+      language: 'en',
+    });
+    expect(ai?.headers['idempotency-key']).toMatch(UUID_PATTERN);
+    expect(calls.filter((call) => call.url.endsWith('/messages/send'))).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'Replace body' }));
+    expect(screen.getByLabelText('To')).toHaveValue('sender@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByTestId('compose-confirmation');
+    const send = calls.find((call) => call.url.endsWith('/messages/send'));
+    expect(send?.body).toMatchObject({
+      textBody: text,
+      htmlBody: aiReplyHtml(text),
+      inReplyTo: '<reply-1@example.com>',
+    });
+    expect(screen.queryByRole('button', { name: 'AI reply' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'AI draft' })).toBeInTheDocument();
+  });
+  it('supports replies without RFC threading headers and cancel preserves the body', async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderCompose({
+      replyToMessageId: PARENT_ID,
+      routes: [
+        sessionRoute(),
+        parentDetailRoute(() =>
+          jsonResponse({ data: { ...PARENT_DETAIL, messageIdHeader: null } }),
+        ),
+        aiRoute(() => jsonResponse({ data: { text: 'Fixture answer' } })),
+      ],
+    });
+    await screen.findByTestId('compose-form');
+    await user.type(screen.getByLabelText('Body'), 'Unchanged draft');
+    await user.click(screen.getByRole('button', { name: 'AI reply' }));
+    await user.click(screen.getByRole('button', { name: 'Generate' }));
+    await screen.findByLabelText('AI preview');
+    expect(calls.find((call) => call.url.endsWith('/ai-reply'))?.body).toMatchObject({
+      sourceMessageId: PARENT_ID,
+    });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByLabelText('Body')).toHaveValue('Unchanged draft');
+  });
+  it('displays provider failure once without automatic retry or losing the existing body', async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      aiRoute(() => errorResponse('AI_UPSTREAM_ERROR', 'Could not generate', 502)),
+    ]);
+    await user.type(screen.getByLabelText('Subject'), 'Fixture');
+    await user.type(screen.getByLabelText('Body'), 'Keep draft');
+    await user.click(screen.getByRole('button', { name: 'AI draft' }));
+    await user.click(screen.getByRole('button', { name: 'Generate' }));
+    expect(await screen.findByTestId('ai-reply-error')).toHaveTextContent('AI_UPSTREAM_ERROR');
+    expect(calls.filter((call) => call.url.endsWith('/ai-reply'))).toHaveLength(1);
+    expect(screen.getByLabelText('Body')).toHaveValue('Keep draft');
+  });
+  it('keeps late responses from filling the body after the dialog is cancelled', async () => {
+    let resolve!: (response: Response) => void;
+    const response = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    const user = userEvent.setup();
+    await renderBlankComposer([sessionRoute(), aiRoute(() => response)]);
+    await user.type(screen.getByLabelText('Subject'), 'Fixture');
+    await user.click(screen.getByRole('button', { name: 'AI draft' }));
+    await user.click(screen.getByRole('button', { name: 'Generate' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    resolve(jsonResponse({ data: { text: 'Late response' } }));
+    await waitFor(() => expect(screen.queryByLabelText('AI preview')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('Body')).toHaveValue('');
+  });
+  it('rejects an empty subject before contacting AI and rejects an invalid response', async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderBlankComposer([
+      sessionRoute(),
+      aiRoute(() => jsonResponse({ data: { text: '' } })),
+    ]);
+    await user.click(screen.getByRole('button', { name: 'AI draft' }));
+    await user.click(screen.getByRole('button', { name: 'Generate' }));
+    expect(await screen.findByTestId('ai-reply-error')).toHaveTextContent('VALIDATION_ERROR');
+    expect(calls.filter((call) => call.url.endsWith('/ai-reply'))).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.type(screen.getByLabelText('Subject'), 'Fixture');
+    await user.click(screen.getByRole('button', { name: 'AI draft' }));
+    await user.click(screen.getByRole('button', { name: 'Generate' }));
+    expect(await screen.findByTestId('ai-reply-error')).toHaveTextContent('AI_INVALID_RESPONSE');
+    expect(screen.queryByLabelText('AI preview')).not.toBeInTheDocument();
+  });
+  it('escapes model text before insertion into the rich editor', () => {
+    expect(aiReplyHtml('<img src=x onerror="alert(1)">\nA&B')).toBe(
+      '<p>&lt;img src=x onerror=&quot;alert(1)&quot;&gt;<br>A&amp;B</p>',
+    );
+  });
 });
 
 const SESSION = {

@@ -82,6 +82,11 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
         rolesRoute,
         signaturesRoute,
         settingsRoute,
+        createRoute({
+          getParentRoute: () => rootRoute,
+          path: '/admin/ai',
+          component: () => <div>AI</div>,
+        }),
       ]),
       history: createMemoryHistory({ initialEntries: ['/admin'] }),
     });
@@ -149,6 +154,7 @@ describe('AdminLandingPage links (CAP-044 Slice 3)', () => {
       { testid: 'admin-roles-link', href: '/admin/roles' },
       { testid: 'admin-signatures-link', href: '/admin/signatures' },
       { testid: 'admin-settings-link', href: '/admin/settings' },
+      { testid: 'admin-ai-link', href: '/admin/ai' },
     ];
     for (const link of expected) {
       const element = screen.getByTestId(link.testid);
