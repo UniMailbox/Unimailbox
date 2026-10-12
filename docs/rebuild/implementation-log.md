@@ -10,6 +10,24 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-12 — Scoped MCP agent access
+
+Admin → MCP service now controls a stateless HTTPS endpoint at `/api/mcp` (443),
+one-time mailbox-scoped hashed credentials, separate draft/AI and send grants,
+expiry/revocation and rate limits. Current account/role/mailbox checks remain
+mandatory; send uses the existing audited/idempotent compose and outbox workflow.
+Copy prompt references a private environment variable without including a secret.
+Origin, bounded-body, batch, no-store and content-free tool-audit protections are
+part of the adapter; a send confirmation flag does not prove human approval.
+
+Commit `6701e04` was published to staging after the full 2,381-test gate, a D1
+recovery bookmark, migration 0035 and all 35 schema companions. Live read-only
+MCP negotiation, scope, Origin denial and revocation passed, then configuration
+was restored to disabled. No real mail was sent; actual local-agent setup and
+browser clipboard proof remain open. Design: `19-mcp-service.md`; QA:
+`../qa/mcp-staging-2026-10-12.md`; handoff:
+`../../work/handoffs/mcp-service-2026-10-12.md`. Review was a main-agent self-review.
+
 ## 2026-10-04 — CAP-A1 mailbox authorization boundary corrected
 
 The mailbox authorizer no longer accepts a global-administrator bypass. A `role.manage` grant
