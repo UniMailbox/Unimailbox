@@ -28,10 +28,10 @@ exact validation and transport behavior.
 | R-MAILBOX-001 | A mailbox belongs to exactly one managed domain |
 | R-MAILBOX-002 | A mailbox has exactly one owner |
 | R-MAILBOX-003 | The owner cannot be added as a member |
-| R-MAILBOX-004 | The owner can always perform all operations on their mailbox |
+| R-MAILBOX-004 | The owner has implicit mailbox operation access; assigning user permissions requires global mailbox.share. Administrator-created users receive full mailbox access for each selected mailbox (2026-10-12 decision) |
 | R-MAILBOX-005 | A viewer can read but not send or modify |
 | R-MAILBOX-006 | A sender can read and send but not rename or manage members |
-| R-MAILBOX-007 | An admin can read, send, rename, and manage members |
+| R-MAILBOX-007 | A mailbox admin can read, send, rename and organize their message view; ownership and mailbox roles do not authorize member management. Admin user assignment additionally requires user.manage for writes and user.read for reads (2026-10-12 decision) |
 | R-MAILBOX-008 | Only the owner can delete a mailbox |
 | R-MAILBOX-009 | Deleting a mailbox cascades to its messages and attachments |
 | R-MAILBOX-010 | A mailbox display name is at most 30 characters |

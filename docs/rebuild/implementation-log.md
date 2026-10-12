@@ -4200,3 +4200,31 @@ Version `7747f536-f15e-42c5-a0a7-41d0c53be2b2` passed release smoke. A synthetic
 live MiniMax request returned 200 with exactly `OK`, no think tags, in 15.6 seconds.
 The diagnostic session was revoked and no message sent. See
 [staging QA](../qa/ai-staging-2026-10-12.md).
+
+
+## 2026-10-12 — Administrator-owned user mailbox assignments
+
+Remove member management from the mailbox sidebar and inbox header. Legacy
+member-page bookmarks use the administrative guard and redirect to Admin Users;
+ordinary users return to their mailbox. Membership APIs now require global
+`mailbox.share`, including for owners. Ownership and mailbox roles no longer
+satisfy the mailbox `manage_members` operation.
+
+Admin Users can select multiple mailboxes when creating an account. Each selected
+mailbox receives the existing full-operation `admin` membership role, atomically
+with the user, default member role, audit event and idempotency record. The new
+user-centric permission panel assigns/replaces/revokes viewer, sender or full
+mailbox access. Writes require `user.manage` and `mailbox.share`; reads require
+`user.read` and `mailbox.share`. Administrators gain metadata access rather than
+implicit access to private mail. Existing owned mailboxes retain their implicit
+operation permissions; this change does not transfer ownership.
+
+Local `pnpm verify` passed 14 doctor checks, generated types, lint, TypeScript,
+web/Worker builds and 2,323 tests (1,319 unit/frontend/contracts/scripts, 980 Worker,
+24 migration fixtures). A final frontend cache reconciliation and style pass
+also passed focused frontend tests, ESLint, TypeScript and web build. Synthetic
+local browser checks covered creation with two full-access grants, another
+mailbox's send access, read-only downgrade, Chinese text, desktop/mobile layouts
+and ordinary-user navigation. No production/staging publication, remote data
+change or migration occurred. Self-review only; no independent agent review.
+See [handoff](../../work/handoffs/user-mailbox-access-2026-10-12.md).
