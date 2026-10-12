@@ -54,8 +54,9 @@ The subsequent canonical release recovered successfully.
 
 ## Remaining acceptance
 
-No live model/account inference, real-provider structured output or email delivery
-using generated content was performed. Enable a configured model in Admin → AI
-services for runtime acceptance. SDK backends require an administrator-owned
-credential. Real provider/model compatibility and output quality remain open.
+A later configured MiniMax OpenAI-compatible draft request passed with synthetic
+context after changing `Minimax M3` to exact API ID `MiniMax-M3` through the Admin
+API (revision 2, existing credential preserved). See the QA recovery section.
+Real-provider structured output, output quality and email delivery using generated
+content remain unverified. SDK backends require an administrator-owned credential.
 Feature source is committed as `850e0d7`, with migration fix `5f85a35`.

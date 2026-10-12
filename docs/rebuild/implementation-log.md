@@ -4169,3 +4169,17 @@ is present, default configuration remains disabled with no API key, and both AI
 routes require authentication. No model inference or generated email was sent.
 See [staging QA](../qa/ai-staging-2026-10-12.md). Production publication and source
 push were not part of this staging run.
+
+
+## 2026-10-12 — Configured AI upstream error diagnosis
+
+The reported `AI_UPSTREAM_ERROR` matched a content-free failed audit event.
+Staging was configured with display-style model name `Minimax M3`; MiniMax's
+API requires exact ID `MiniMax-M3`. Correct the model through authenticated Admin
+GET/PUT with revision matching, preserving the endpoint and encrypted credential.
+Configuration revision advanced to 2. A fresh synthetic-context AI draft request
+through staging returned 200 in approximately 3.5 seconds; no source email was
+read and no message was sent. The temporary diagnostic session was revoked.
+This is live MiniMax text-inference evidence, while structured-output/model-quality
+and generated-mail delivery acceptance remain open. No Worker redeployment was
+needed. See [staging QA recovery](../qa/ai-staging-2026-10-12.md).

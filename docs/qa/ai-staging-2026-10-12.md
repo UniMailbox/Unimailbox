@@ -45,3 +45,22 @@ authenticated staging AI configuration round trip, real model inference,
 provider-specific structured output, output quality or generated-mail delivery.
 Enable/configure the desired model in Admin → AI services for that next acceptance.
 The run did not publish production or push source commits.
+
+
+## Configured MiniMax request recovery — 2026-10-12
+
+A later user report supplied request ID
+`e301b4c0-9c94-41ad-a087-4c3d49164768`; its content-free audit outcome was
+`AI_UPSTREAM_ERROR`. The OpenAI-compatible backend had been configured with model
+`Minimax M3`. The [official MiniMax OpenAI SDK guide](https://platform.minimax.cn/docs/api-reference/text-openai-api)
+uses exact model ID `MiniMax-M3`; the configured base URL
+`https://api.minimax.cn/v1` matches the same guide.
+
+An authenticated, revision-checked Admin GET/PUT changed only that model ID and
+advanced configuration revision 1 → 2, preserving the existing encrypted API key
+and endpoint. A new AI draft request with synthetic context and no source email
+returned HTTP 200 with 229 characters in approximately 3.5 seconds. This proves
+one live configured MiniMax generation through the deployed Worker, not model
+output quality or structured-output compatibility. The operation sent no email.
+No source change or Worker redeployment was necessary for this configuration fix.
+The temporary diagnostic login session was revoked after verification.
