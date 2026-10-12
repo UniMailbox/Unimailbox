@@ -294,32 +294,6 @@ export function AiConfigurationPanel(): ReactElement {
               value={form.timeoutMs}
               onChange={(event) => setForm({ ...form, timeoutMs: Number(event.target.value) })}
             />
-            {canManage ? (
-              <div className="admin-dialog-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={save.isPending}
-                  onClick={() => {
-                    setEditing(false);
-                    setForm(query.data.configuration);
-                    setRevision(query.data.revision);
-                    setApiKey('');
-                    setClearKey(false);
-                    setConflict(false);
-                    setMessage(null);
-                    save.reset();
-                  }}
-                >
-                  {t('Cancel')}
-                </Button>
-                <Button type="submit" loading={save.isPending} disabled={conflict}>
-                  {t('Save AI configuration')}
-                </Button>
-              </div>
-            ) : (
-              <p>{t('Read-only access. Ask an administrator to make changes.')}</p>
-            )}
           </fieldset>
           {conflict ? (
             <Button type="button" variant="secondary" onClick={() => void query.refetch()}>
@@ -327,6 +301,32 @@ export function AiConfigurationPanel(): ReactElement {
             </Button>
           ) : null}
           {message ? <p role={save.isError ? 'alert' : 'status'}>{message}</p> : null}
+          {canManage ? (
+            <div className="admin-dialog-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={save.isPending}
+                onClick={() => {
+                  setEditing(false);
+                  setForm(query.data.configuration);
+                  setRevision(query.data.revision);
+                  setApiKey('');
+                  setClearKey(false);
+                  setConflict(false);
+                  setMessage(null);
+                  save.reset();
+                }}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button type="submit" loading={save.isPending} disabled={conflict}>
+                {t('Save AI configuration')}
+              </Button>
+            </div>
+          ) : (
+            <p>{t('Read-only access. Ask an administrator to make changes.')}</p>
+          )}
         </form>
       </EditorDialog>
     </>

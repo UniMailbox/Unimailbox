@@ -191,7 +191,15 @@ function SignaturesContent(): ReactElement {
           <EditorDialog
             open={createOpen}
             onOpenChange={(open) => {
-              if (!createMutation.isPending && !uploading) setCreateOpen(open);
+              if (createMutation.isPending || uploading) return;
+              setCreateOpen(open);
+              if (!open) {
+                setDomainId('');
+                setHtmlContent('');
+                setTextContent('');
+                setIsEnabled(true);
+                setCreateError(null);
+              }
             }}
             title={t('New signature')}
             description={t('Choose a domain and add your signature content.')}
@@ -234,13 +242,30 @@ function SignaturesContent(): ReactElement {
                   {createError.message} ({createError.code})
                 </div>
               ) : null}
-              <Button
-                type="submit"
-                loading={createMutation.isPending}
-                disabled={createMutation.isPending || uploading}
-              >
-                {createMutation.isPending ? t('Saving…') : t('Add signature')}
-              </Button>
+              <div className="admin-dialog-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={createMutation.isPending || uploading}
+                  onClick={() => {
+                    setCreateOpen(false);
+                    setDomainId('');
+                    setHtmlContent('');
+                    setTextContent('');
+                    setIsEnabled(true);
+                    setCreateError(null);
+                  }}
+                >
+                  {t('Cancel')}
+                </Button>
+                <Button
+                  type="submit"
+                  loading={createMutation.isPending}
+                  disabled={createMutation.isPending || uploading}
+                >
+                  {createMutation.isPending ? t('Saving…') : t('Add signature')}
+                </Button>
+              </div>
             </form>
           </EditorDialog>
         ) : null}
@@ -421,7 +446,21 @@ function SignatureRow({
               {error.message} ({error.code})
             </div>
           ) : null}
-          <div className="admin-domain-actions">
+          <div className="admin-dialog-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={updateMutation.isPending || deleteMutation.isPending || uploading}
+              onClick={() => {
+                setEditing(false);
+                setHtmlContent(signature.htmlContent);
+                setTextContent(signature.textContent);
+                setIsEnabled(signature.isEnabled);
+                setError(null);
+              }}
+            >
+              {t('Cancel')}
+            </Button>
             <Button
               type="submit"
               loading={updateMutation.isPending}

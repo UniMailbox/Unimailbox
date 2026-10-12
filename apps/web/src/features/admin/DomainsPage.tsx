@@ -338,6 +338,16 @@ function DomainsContent(): ReactElement {
               onChange={(event) => setName(event.target.value)}
               aria-describedby={addError === null ? undefined : 'domain-add-error'}
             />
+            {addError !== null ? (
+              <div
+                className="admin-error-banner"
+                role="alert"
+                id="domain-add-error"
+                data-testid="domain-add-error"
+              >
+                <span>{addError.message}</span> <span>{addError.code}</span>
+              </div>
+            ) : null}
             <div className="admin-dialog-actions">
               <Button
                 type="button"
@@ -360,11 +370,6 @@ function DomainsContent(): ReactElement {
               </Button>
             </div>
           </div>
-          {addError !== null ? (
-            <div className="admin-error-banner" role="alert" data-testid="domain-add-error">
-              <span>{addError.message}</span> <span>{addError.code}</span>
-            </div>
-          ) : null}
         </form>
       </EditorDialog>
       <EditorDialog
@@ -381,6 +386,7 @@ function DomainsContent(): ReactElement {
         {configureTarget !== null ? (
           <div className="admin-dialog-form">
             <form
+              id="domain-configuration-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 outboundMutation.mutate({
@@ -415,36 +421,32 @@ function DomainsContent(): ReactElement {
                   onRetry={() => void connectionsQuery.refetch()}
                 />
               ) : null}
-              <div className="admin-dialog-actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={outboundMutation.isPending || verifyMutation.isPending}
-                  onClick={() => {
-                    setConfigureTarget(null);
-                    setActionError(null);
-                  }}
-                >
-                  {t('Cancel')}
-                </Button>
-                <Button
-                  type="submit"
-                  loading={outboundMutation.isPending}
-                  disabled={
-                    connectionsQuery.isPending ||
-                    connectionsQuery.isError ||
-                    outboundMutation.isPending ||
-                    verifyMutation.isPending ||
-                    connectionId === (configureTarget.outboundConnectionId ?? '')
-                  }
-                >
-                  {t('Save')}
-                </Button>
-              </div>
             </form>
             <Card
               title={t('Connect Cloudflare Email Routing')}
               description={t('Point inbound mail for each managed domain to this Worker.')}
+              actions={
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => verifyMutation.mutate(configureTarget.id)}
+                  loading={verifyMutation.isPending}
+                  disabled={
+                    verifyMutation.isPending ||
+                    outboundMutation.isPending ||
+                    routingConfirmed.has(configureTarget.id)
+                  }
+                  aria-label={t('Verify {value0}', { value0: configureTarget.name })}
+                >
+                  {routingConfirmed.has(configureTarget.id) ? (
+                    <>
+                      <CheckCircle2 aria-hidden="true" /> {t('Routing confirmed ')}
+                    </>
+                  ) : (
+                    t('Confirm routing')
+                  )}
+                </Button>
+              }
             >
               <div className="cloudflare-flow" data-testid="cloudflare-routing-flow">
                 <div className="cloudflare-flow-step">
@@ -482,30 +484,37 @@ function DomainsContent(): ReactElement {
                 </p>
               </div>
             </Card>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => verifyMutation.mutate(configureTarget.id)}
-              loading={verifyMutation.isPending}
-              disabled={
-                verifyMutation.isPending ||
-                outboundMutation.isPending ||
-                routingConfirmed.has(configureTarget.id)
-              }
-              aria-label={t('Verify {value0}', { value0: configureTarget.name })}
-            >
-              {routingConfirmed.has(configureTarget.id) ? (
-                <>
-                  <CheckCircle2 aria-hidden="true" /> {t('Routing confirmed ')}
-                </>
-              ) : (
-                t('Confirm routing')
-              )}
-            </Button>
             {notice !== null ? <p role="status">{notice}</p> : null}
             {actionError !== null ? (
               <ErrorPanel message={actionError.message} code={actionError.code} />
             ) : null}
+            <div className="admin-dialog-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={outboundMutation.isPending || verifyMutation.isPending}
+                onClick={() => {
+                  setConfigureTarget(null);
+                  setActionError(null);
+                }}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button
+                type="submit"
+                form="domain-configuration-form"
+                loading={outboundMutation.isPending}
+                disabled={
+                  connectionsQuery.isPending ||
+                  connectionsQuery.isError ||
+                  outboundMutation.isPending ||
+                  verifyMutation.isPending ||
+                  connectionId === (configureTarget.outboundConnectionId ?? '')
+                }
+              >
+                {t('Save')}
+              </Button>
+            </div>
           </div>
         ) : null}
       </EditorDialog>

@@ -264,23 +264,28 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
           description={item.label}
           compact
         >
-          <div className="admin-secret-reveal" data-testid={`admin-secret-revealed-${item.id}`}>
+          <div
+            className="admin-secret-reveal admin-dialog-form"
+            data-testid={`admin-secret-revealed-${item.id}`}
+          >
             <p className="admin-secret-reveal-note">
               {t('Shown once — copy it now. Every reveal is recorded in the audit trail.')}
             </p>
             <code className="admin-secret-reveal-value">{revealed.webhookSecret}</code>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              data-testid={`admin-secret-hide-${item.id}`}
-              onClick={() => {
-                setRevealed(null);
-                revealMutation.reset();
-              }}
-            >
-              {t('Hide')}
-            </Button>
+            <div className="admin-dialog-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-testid={`admin-secret-hide-${item.id}`}
+                onClick={() => {
+                  setRevealed(null);
+                  revealMutation.reset();
+                }}
+              >
+                {t('Hide')}
+              </Button>
+            </div>
           </div>
         </EditorDialog>
       ) : null}

@@ -183,6 +183,9 @@ describe('AI configuration panel', () => {
     await waitFor(() => expect(screen.getByLabelText('Model ID')).toBeDisabled());
     expect(screen.getByRole('button', { name: 'Reload AI configuration' })).toBeEnabled();
     expect(calls).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     cleanup();
     mount({ ...initial, canManage: false });
     expect(

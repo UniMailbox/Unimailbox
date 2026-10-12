@@ -217,12 +217,34 @@ describe('RolesPage (CAP-067)', () => {
     await user.click(edit);
     await user.clear(screen.getByLabelText('Edit Support agent role name'));
     await user.type(screen.getByLabelText('Edit Support agent role name'), 'Unsaved');
-    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
     expect(edit).toHaveFocus();
     await user.click(edit);
     expect(screen.getByLabelText('Edit Support agent role name')).toHaveValue('Support agent');
+  });
+
+  it('discards a cancelled new role including its selected permissions without writing', async () => {
+    const { calls } = mountRolesPage([() => listResponse()]);
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole('button', { name: 'New role' });
+    for (const closeWith of ['button', 'Escape']) {
+      await user.click(trigger);
+      await user.type(screen.getByLabelText('Role name'), 'Unsaved role');
+      await user.type(screen.getByLabelText('Role description'), 'Unsaved description');
+      await user.click(screen.getByRole('checkbox', { name: 'Send messages' }));
+      if (closeWith === 'button') await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      else await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(trigger).toHaveFocus();
+      await user.click(trigger);
+      expect(screen.getByLabelText('Role name')).toHaveValue('');
+      expect(screen.getByLabelText('Role description')).toHaveValue('');
+      expect(screen.getByRole('checkbox', { name: 'Send messages' })).not.toBeChecked();
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    }
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0);
   });
 
   it('shows edit validation failures without sending a mutation', async () => {

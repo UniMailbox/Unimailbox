@@ -434,31 +434,33 @@ function SettingsContent(): ReactElement {
           {canManage ? (
             <div className="configuration-save-bar">
               <span className="configuration-help">{t('Changes apply after saving.')}</span>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={
-                  updateMutation.isPending || (isRefreshingAfterConflict && query.isFetching)
-                }
-                onClick={() => {
-                  setEditing(false);
-                  setForm(query.data.settings);
-                  setFormError(null);
-                }}
-              >
-                {t('Cancel')}
-              </Button>
-              <Button
-                type="submit"
-                loading={updateMutation.isPending || isRefreshingAfterConflict}
-                disabled={updateMutation.isPending || isRefreshingAfterConflict}
-              >
-                {isRefreshingAfterConflict
-                  ? t('Refreshing…')
-                  : updateMutation.isPending
-                    ? t('Saving…')
-                    : t('Save settings')}
-              </Button>
+              <div className="admin-dialog-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    updateMutation.isPending || (isRefreshingAfterConflict && query.isFetching)
+                  }
+                  onClick={() => {
+                    setEditing(false);
+                    setForm(query.data.settings);
+                    setFormError(null);
+                  }}
+                >
+                  {t('Cancel')}
+                </Button>
+                <Button
+                  type="submit"
+                  loading={updateMutation.isPending || isRefreshingAfterConflict}
+                  disabled={updateMutation.isPending || isRefreshingAfterConflict}
+                >
+                  {isRefreshingAfterConflict
+                    ? t('Refreshing…')
+                    : updateMutation.isPending
+                      ? t('Saving…')
+                      : t('Save settings')}
+                </Button>
+              </div>
             </div>
           ) : null}
         </form>

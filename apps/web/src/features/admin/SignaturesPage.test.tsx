@@ -169,6 +169,54 @@ describe('SignaturesPage (CAP-068)', () => {
     });
   });
 
+  it('cancels creation and editing without a write and restores fresh form values', async () => {
+    const availableDomain = '00000000-0000-4000-8000-000000000004';
+    const { calls } = mountPage((url) => {
+      if (url.endsWith('/admin/domains'))
+        return jsonResponse({
+          data: {
+            items: [
+              {
+                id: availableDomain,
+                name: 'new.example.com',
+                status: 'active',
+                outboundConnectionId: null,
+                createdAt: '2026-09-01',
+                updatedAt: '2026-09-01',
+              },
+            ],
+          },
+        });
+      return jsonResponse({ data: { items: [signature()] } });
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'New signature' }));
+    await user.click(screen.getByRole('combobox', { name: 'Managed domain' }));
+    await user.click(screen.getByRole('option', { name: 'new.example.com' }));
+    await user.type(screen.getByLabelText('Plain-text content'), 'Unsaved signature');
+    await user.click(screen.getByRole('switch', { name: 'Enabled' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'New signature' }));
+    expect(screen.getByRole('combobox', { name: 'Managed domain' })).toHaveTextContent(
+      'Choose a domain',
+    );
+    expect(screen.getByLabelText('Plain-text content')).toHaveValue('');
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const edit = screen.getByRole('button', { name: /Edit .* signature/ });
+    await user.click(edit);
+    await user.clear(screen.getByLabelText('Plain-text content'));
+    await user.type(screen.getByLabelText('Plain-text content'), 'Unsaved edit');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(edit).toHaveFocus();
+    await user.click(edit);
+    expect(screen.getByLabelText('Plain-text content')).toHaveValue('Regards');
+    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0);
+  });
+
   it('keeps the opening version when another writer refreshes the cached signature', async () => {
     let submittedVersion: string | null = null;
     const { queryClient } = mountPage((url, init) => {

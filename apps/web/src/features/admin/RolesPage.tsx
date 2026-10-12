@@ -189,7 +189,14 @@ function RolesContent(): ReactElement {
         <EditorDialog
           open={createOpen}
           onOpenChange={(open) => {
-            if (!createMutation.isPending) setCreateOpen(open);
+            if (createMutation.isPending) return;
+            setCreateOpen(open);
+            if (!open) {
+              setName('');
+              setDescription('');
+              setPermissionKeys([]);
+              setCreateError(null);
+            }
           }}
           title={t('New role')}
           description={t('Choose a name and permissions for a custom role.')}
@@ -226,13 +233,29 @@ function RolesContent(): ReactElement {
                 <span>{createError.message}</span> <span>{createError.code}</span>
               </div>
             ) : null}
-            <Button
-              type="submit"
-              loading={createMutation.isPending}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending ? t('Creating…') : t('Create role')}
-            </Button>
+            <div className="admin-dialog-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={createMutation.isPending}
+                onClick={() => {
+                  setCreateOpen(false);
+                  setName('');
+                  setDescription('');
+                  setPermissionKeys([]);
+                  setCreateError(null);
+                }}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button
+                type="submit"
+                loading={createMutation.isPending}
+                disabled={createMutation.isPending}
+              >
+                {createMutation.isPending ? t('Creating…') : t('Create role')}
+              </Button>
+            </div>
           </form>
         </EditorDialog>
         {notice !== null ? (
@@ -503,7 +526,23 @@ function EditableRoleRow({
               <span>{deleteError.message}</span> <span>{deleteError.code}</span>
             </div>
           ) : null}
-          <div className="admin-role-actions">
+          <div className="admin-dialog-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={updateMutation.isPending || deleteMutation.isPending}
+              onClick={() => {
+                setEditing(false);
+                setDirty(false);
+                setName(role.name);
+                setDescription(role.description);
+                setPermissionKeys([...role.permissionKeys]);
+                setValidationError(null);
+                updateMutation.reset();
+              }}
+            >
+              {t('Cancel')}
+            </Button>
             <Button
               type="submit"
               loading={updateMutation.isPending}

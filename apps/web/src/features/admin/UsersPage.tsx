@@ -302,7 +302,9 @@ function UsersContent(): ReactElement {
               {t('Expires: ')}
               <LocalDateTime value={oneTimePassword.expiresAt} />
             </p>
-            <Button onClick={closeAction}>{t('Done')}</Button>
+            <div className="admin-dialog-actions">
+              <Button onClick={closeAction}>{t('Done')}</Button>
+            </div>
           </div>
         ) : action?.kind === 'create' ? (
           <form
