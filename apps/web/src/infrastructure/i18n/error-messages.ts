@@ -1,6 +1,11 @@
 import { type ErrorCode } from '@unimailbox/contracts';
 import { getLanguage, type Language } from './locale';
 export const errorMessages = {
+  MCP_DISABLED: { en: 'MCP service is disabled.', 'zh-CN': 'MCP 服务未启用。' },
+  MCP_RATE_LIMITED: {
+    en: 'MCP request limit exceeded. Try again later.',
+    'zh-CN': 'MCP 请求过于频繁，请稍后重试。',
+  },
   AI_DISABLED: { en: 'AI is disabled.', 'zh-CN': 'AI 服务未启用。' },
   AI_NOT_CONFIGURED: {
     en: 'Configure the AI binding or API key.',

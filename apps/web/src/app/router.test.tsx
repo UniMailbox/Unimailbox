@@ -571,6 +571,7 @@ describe('router — CAP-062 production draft route', () => {
     '/admin/signatures',
     '/admin/settings',
     '/admin/ai',
+    '/admin/mcp',
   ])('redirects direct application route %s into setup when incomplete', async (path) => {
     const apiClient = createApiClient({
       baseUrl: '',
@@ -692,7 +693,7 @@ describe('router — CAP-062 production draft route', () => {
 // (covered in features/admin/AuditEventsPage.test.tsx).
 // ---------------------------------------------------------------------------
 describe('router — CAP-067 production role route', () => {
-  it.each(['/admin/roles', '/admin/ai'])(
+  it.each(['/admin/roles', '/admin/ai', '/admin/mcp'])(
     'matches the real %s route for an authenticated session',
     async (path) => {
       const apiClient = createApiClient({

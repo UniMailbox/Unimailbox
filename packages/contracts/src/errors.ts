@@ -1,5 +1,7 @@
 // Shared stable machine codes. Display text belongs to the client locale catalog.
 export const ERROR_CODES = {
+  MCP_DISABLED: 'MCP_DISABLED',
+  MCP_RATE_LIMITED: 'MCP_RATE_LIMITED',
   AI_DISABLED: 'AI_DISABLED',
   AI_NOT_CONFIGURED: 'AI_NOT_CONFIGURED',
   AI_UPSTREAM_ERROR: 'AI_UPSTREAM_ERROR',

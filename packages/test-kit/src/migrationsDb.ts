@@ -71,6 +71,7 @@ import inboundAttachmentsSql from '../../../migrations/0028_inbound_attachments.
 import editorAssetsSql from '../../../migrations/0029_editor_assets.sql?raw';
 import attachmentCleanupSql from '../../../migrations/0032_attachment_cleanup.sql?raw';
 import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
+import mcpAccessSql from '../../../migrations/0035_mcp_access.sql?raw';
 import scheduledSendSql from '../../../migrations/0033_scheduled_send.sql?raw';
 import userPreferencesSql from '../../../migrations/0031_user_preferences.sql?raw';
 import editorAssetSystemLimitSql from '../../../migrations/0030_editor_asset_system_limit.sql?raw';
@@ -238,6 +239,7 @@ const MIGRATIONS = [
   },
   { name: '0033_scheduled_send', fileName: '0033_scheduled_send.sql', sql: scheduledSendSql },
   { name: '0034_ai_configuration', fileName: '0034_ai_configuration.sql', sql: aiConfigurationSql },
+  { name: '0035_mcp_access', fileName: '0035_mcp_access.sql', sql: mcpAccessSql },
 ] as const;
 
 export interface MigrationsDbOptions {

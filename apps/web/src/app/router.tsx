@@ -155,6 +155,12 @@ const AiSettingsPage = lazy(() =>
   import('../features/admin/AiSettingsPage').then((module) => ({ default: module.AiSettingsPage })),
 );
 
+const McpSettingsPage = lazy(() =>
+  import('../features/admin/McpSettingsPage').then((module) => ({
+    default: module.McpSettingsPage,
+  })),
+);
+
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
 // Step / page components still use `useApiClient()` and `useQueryClient()`
@@ -607,6 +613,17 @@ const adminAiRoute = createRoute({
   ),
 });
 
+const adminMcpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/mcp',
+  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
+  component: () => (
+    <AdminLayout>
+      <McpSettingsPage />
+    </AdminLayout>
+  ),
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -823,6 +840,7 @@ const routeTree = rootRoute.addChildren([
   adminSignaturesRoute,
   adminSettingsRoute,
   adminAiRoute,
+  adminMcpRoute,
   setupChildren,
 ]);
 

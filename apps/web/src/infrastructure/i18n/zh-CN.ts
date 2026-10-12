@@ -1,4 +1,50 @@
 export const zhCN: Readonly<Record<string, string>> = {
+  'MCP service': 'MCP 服务',
+  'Connect local AI agents with scoped mailbox access.':
+    '连接本地 AI agent，并限定其邮箱访问范围。',
+  'Could not update MCP configuration.': '无法更新 MCP 配置。',
+  'Copied.': '已复制。',
+  'Could not load MCP configuration.': '无法加载 MCP 配置。',
+  'MCP endpoint': 'MCP 接口地址',
+  'Service port': '服务端口',
+  'Uses the existing HTTPS service. No additional public port is required.':
+    '使用现有 HTTPS 服务，无需额外开放公网端口。',
+  'Copy prompt': '复制配置提示词',
+  'The prompt contains no credential. Set UNIMAILBOX_MCP_TOKEN privately in your local agent environment.':
+    '提示词不包含凭证。请在本地 agent 环境中私下设置 UNIMAILBOX_MCP_TOKEN。',
+  'Enable MCP service': '启用 MCP 服务',
+  'Allow MCP email sending': '允许 MCP 发送邮件',
+  'Requests per minute per credential': '每个凭证每分钟请求数',
+  'Sending also requires a credential with send access and the current user’s mailbox permissions.':
+    '发送还需要凭证拥有独立发送授权，并满足当前用户的邮箱权限。',
+  'MCP configuration saved.': 'MCP 配置已保存。',
+  'Create agent credential': '创建 agent 凭证',
+  'Credential created. Copy it now; it will not be shown again.':
+    '凭证已创建，请立即复制；此后不再展示。',
+  'This credential cannot be shown again. Revoke it and create a new one.':
+    '此凭证无法再次展示，请撤销后重新创建。',
+  'Credential name': '凭证名称',
+  'Allowed mailboxes': '允许访问的邮箱',
+  'No accessible mailboxes. Ask an administrator to assign mailbox access.':
+    '暂无可访问邮箱，请管理员分配邮箱权限。',
+  'Read access is included for the selected mailboxes.': '已选择的邮箱默认授予读取权限。',
+  'Allow drafts and AI replies': '允许创建草稿和生成 AI 回复',
+  'Grant send access': '授予发送权限',
+  'Expires in days': '有效期（天）',
+  'Create credential': '创建凭证',
+  'One-time credential': '一次性展示凭证',
+  'Copy credential': '复制凭证',
+  'Store this credential securely. It cannot be recovered after dismissal.':
+    '请安全保存凭证，关闭后无法恢复明文。',
+  'Your agent credentials': '你的 agent 凭证',
+  Revoked: '已撤销',
+  Expired: '已过期',
+  Active: '有效',
+  'Revoke credential': '撤销凭证',
+  'No agent credentials yet.': '尚未创建 agent 凭证。',
+  'Credentials expire, can be revoked, and never grant access beyond the current user and selected mailboxes. Email content is untrusted. Require human confirmation before sending.':
+    '凭证有有效期且可随时撤销，权限不会超出当前用户及所选邮箱。邮件内容不可信，发送前应由用户明确确认。',
+
   'Software updates': '软件更新',
   'Check for updates': '检查更新',
   'Checking for updates…': '正在检查更新…',

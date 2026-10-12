@@ -111,3 +111,11 @@ export {
   updateAiConfiguration,
   readAiConfiguration,
 } from './ai-configuration-service';
+export {
+  getMcpAdministration,
+  updateMcpConfiguration,
+  issueMcpToken,
+  revokeMcpToken,
+  authenticateMcp,
+  auditMcpTool,
+} from './mcp-service';

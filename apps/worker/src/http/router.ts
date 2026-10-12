@@ -38,6 +38,8 @@ import { adminDomainRoutes } from './routes/admin-domains';
 import { adminRoleRoutes } from './routes/admin-roles';
 import { adminSignatureRoutes } from './routes/admin-signatures';
 import { adminAiRoutes } from './routes/admin-ai';
+import { adminMcpRoutes } from './routes/admin-mcp';
+import { mcpRoutes } from './routes/mcp';
 import { aiReplyRoutes } from './routes/ai-reply';
 import { adminSettingsRoutes } from './routes/admin-settings';
 import { adminOverviewRoutes } from './routes/admin-overview';
@@ -123,6 +125,7 @@ export function buildRouter(): Hono<AppEnv> {
   // CAP-069: typed, allowlisted global system settings.
   apiV1.route('/', adminSettingsRoutes());
   apiV1.route('/', adminAiRoutes());
+  apiV1.route('/', adminMcpRoutes());
   apiV1.route('/', adminOverviewRoutes());
   apiV1.route('/', adminUpdateRoutes());
 
@@ -148,6 +151,7 @@ export function buildRouter(): Hono<AppEnv> {
   const webhookV1 = new Hono<AppEnv>();
   webhookV1.route('/', webhookRoutes());
 
+  router.route('/api/mcp', mcpRoutes());
   router.route('/api/v1', attachmentV1);
   router.route('/api/v1', apiV1);
   router.route('/api/v1', webhookV1);

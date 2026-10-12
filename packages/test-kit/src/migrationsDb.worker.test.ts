@@ -12,6 +12,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CURRENT_SCHEMA_VERSION as CONTRACT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { migrationsDb } from './migrationsDb';
+import mcpSql from '../../../migrations/0035_mcp_access.sql?raw';
+import mcpVerification from '../../../migrations/0035_mcp_access.verify.sql?raw';
 import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
 import aiConfigurationVerification from '../../../migrations/0034_ai_configuration.verify.sql?raw';
 import settingsRevisionVerification from '../../../migrations/0025_system_settings_revision.verify.sql?raw';
@@ -54,6 +56,34 @@ describe('migrationsDb (worker pool)', () => {
   beforeEach(async () => {
     const { reset } = await import('cloudflare:test');
     await reset();
+  });
+
+  it('0035 raw SQL registers itself, seeds disabled MCP and safely resumes/replays', async () => {
+    const db = await migrationsDb({ through: '0034_ai_configuration' });
+    const statements = mcpSql
+      .replace(/^--.*$/gm, '')
+      .split(';')
+      .filter((sql) => sql.trim());
+    await db.batch(statements.slice(0, -1).map((sql) => db.prepare(sql)));
+    expect(
+      await db
+        .prepare('SELECT enabled,allow_send,requests_per_minute,revision FROM mcp_configuration')
+        .first(),
+    ).toEqual({ enabled: 0, allow_send: 0, requests_per_minute: 30, revision: 0 });
+    await db.prepare("UPDATE mcp_configuration SET enabled=1,revision=2 WHERE id='system'").run();
+    for (let i = 0; i < 2; i++) await db.batch(statements.map((sql) => db.prepare(sql)));
+    expect(await db.prepare('SELECT enabled,revision FROM mcp_configuration').first()).toEqual({
+      enabled: 1,
+      revision: 2,
+    });
+    for (const sql of mcpVerification.split(';').filter((sql) => sql.trim())) {
+      const rows = await db.prepare(sql).all<{ assertion?: string; pass: number }>();
+      for (const row of rows.results) expect(row.pass, row.assertion).toBe(1);
+    }
+    await expect(db.prepare('UPDATE mcp_configuration SET revision=-1').run()).rejects.toThrow();
+    await expect(
+      db.prepare('UPDATE mcp_configuration SET requests_per_minute=121').run(),
+    ).rejects.toThrow();
   });
 
   it('0034 seeds disabled AI and prevents incomplete credentials or invalid revisions', async () => {
@@ -479,7 +509,7 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
     // CAP-069: 0025 seeds the internal system-settings revision row.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0034');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0035');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {
