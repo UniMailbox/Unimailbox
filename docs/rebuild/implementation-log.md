@@ -4245,3 +4245,21 @@ membership read, and published assignment controls/Chinese text. Authenticated
 real-account creation/grant edits were not exercised; no verification grants,
 mail content or provider configuration were changed. No production publication
 or source push. See [staging QA](../qa/user-mailbox-access-staging-2026-10-12.md).
+
+
+## 2026-10-12 — Administrator operation modals
+
+Source `409ab7d` moves account creation, mailbox grants, password/reset/status,
+domain add/configuration, general/AI configuration and one-time credential display
+into the existing bounded dialogs. Lists and saved configuration remain on the
+page. Domain connection selection now requires Save. Cancellation clears drafts;
+failed writes remain in the modal; pending writes block duplicate submission and
+accidental closing. Settings conflict refresh retains its edit lock, including
+when the modal is reopened. Chained reveal dialogs restore the original trigger.
+No backend permission, schema or API change.
+
+The first full local gate passed 2,330 tests. Final UI focus/cache/cancel corrections
+passed the 69-test admin suite and focused follow-ups; staged Gitleaks passed.
+Desktop and 390 x 844 browser checks used synthetic local APIs. Staging publication
+and exact-source gate are recorded separately. See
+[handoff](../../work/handoffs/admin-operation-modals-2026-10-12.md).
