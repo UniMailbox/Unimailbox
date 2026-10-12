@@ -1,5 +1,5 @@
 -- Disabled by default; credential bytes never enter the public JSON projection.
-CREATE TABLE ai_configuration (
+CREATE TABLE IF NOT EXISTS ai_configuration (
   id TEXT PRIMARY KEY CHECK (id = 'system'),
   configuration TEXT NOT NULL CHECK (json_valid(configuration)),
   ciphertext BLOB,
@@ -11,5 +11,6 @@ CREATE TABLE ai_configuration (
          (ciphertext IS NOT NULL AND length(ciphertext) > 0 AND iv IS NOT NULL AND auth_tag IS NOT NULL
           AND length(iv) = 12 AND length(auth_tag) = 16))
 );
-INSERT INTO ai_configuration (id, configuration) VALUES
+INSERT OR IGNORE INTO ai_configuration (id, configuration) VALUES
 ('system', '{"enabled":false,"protocol":"workers-ai","model":"","baseUrl":null,"maxOutputTokens":1024,"timeoutMs":30000}');
+INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0034_ai_configuration.sql');

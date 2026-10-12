@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CURRENT_SCHEMA_VERSION as CONTRACT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { migrationsDb } from './migrationsDb';
+import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
 import aiConfigurationVerification from '../../../migrations/0034_ai_configuration.verify.sql?raw';
 import settingsRevisionVerification from '../../../migrations/0025_system_settings_revision.verify.sql?raw';
 import scheduledSendVerification from '../../../migrations/0033_scheduled_send.verify.sql?raw';
@@ -21,6 +22,10 @@ const NEW_UUID = '00000000-0000-4000-8000-000000000001';
 const NOW = '2026-01-01 00:00:00';
 const SALT_HEX = '00';
 const HASH_HEX = '11';
+const AI_MIGRATION_STATEMENTS = aiConfigurationSql
+  .replace(/^--.*$/gm, '')
+  .split(';')
+  .filter((sql) => sql.trim());
 
 async function insertUser(
   db: D1Database,
@@ -52,7 +57,14 @@ describe('migrationsDb (worker pool)', () => {
   });
 
   it('0034 seeds disabled AI and prevents incomplete credentials or invalid revisions', async () => {
-    const db = await migrationsDb();
+    const db = await migrationsDb({ through: '0033_scheduled_send' });
+    // Deployment executes raw SQL; applyD1Migrations itself adds tracking rows
+    // and would mask a missing registration statement in the migration.
+    await db.batch(AI_MIGRATION_STATEMENTS.map((sql) => db.prepare(sql)));
+    for (const sql of aiConfigurationVerification.split(';').filter((sql) => sql.trim())) {
+      const rows = await db.prepare(sql).all<{ assertion: string; pass: number }>();
+      for (const row of rows.results) expect(row.pass, row.assertion).toBe(1);
+    }
     expect(await db.prepare(aiConfigurationVerification.split(';')[0] ?? '').first()).toEqual({
       assertion: '0034_ai_configuration_row',
       pass: 1,
@@ -70,6 +82,26 @@ describe('migrationsDb (worker pool)', () => {
     await expect(
       db.prepare("UPDATE ai_configuration SET ciphertext = X'01' WHERE id='system'").run(),
     ).rejects.toThrow();
+  });
+
+  it('0034 resumes a partial raw deployment and preserves configured state on replay', async () => {
+    const db = await migrationsDb({ through: '0033_scheduled_send' });
+    const statements = AI_MIGRATION_STATEMENTS;
+    await db.batch(statements.slice(0, -1).map((sql) => db.prepare(sql)));
+    await db.prepare("UPDATE ai_configuration SET revision = 1 WHERE id='system'").run();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await db.batch(statements.map((sql) => db.prepare(sql)));
+    }
+    expect(
+      await db.prepare("SELECT revision FROM ai_configuration WHERE id='system'").first(),
+    ).toEqual({ revision: 1 });
+    expect(
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM d1_migrations WHERE name='0034_ai_configuration.sql'",
+        )
+        .first(),
+    ).toEqual({ count: 1 });
   });
 
   it('0033 adds nullable schedule fields and preserves existing outbox rows', async () => {
