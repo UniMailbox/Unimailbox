@@ -804,4 +804,11 @@ export const zhCN: Readonly<Record<string, string>> = {
   Configured: '已配置',
   'Not configured': '未配置',
   Default: '默认',
+  'Search mailboxes': '搜索邮箱',
+  'Search and select mailboxes': '搜索并选择邮箱',
+  'Assigned mailboxes': '已分配邮箱',
+  'Available mailboxes': '可选邮箱',
+  'Show mailbox options': '展开邮箱选项',
+  'No matching mailboxes.': '没有匹配的邮箱。',
+  'Remove {value0}': '移除 {value0}',
 };

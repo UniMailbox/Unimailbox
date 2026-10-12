@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
 import { ApiError } from '../../infrastructure/api/errors';
+import { MailboxTagsSelector } from './MailboxTagsSelector';
 import { useSetUserMailboxAccess, useUserMailboxAccess } from './user-mailbox-queries';
 
 export function UserMailboxAccessPanel({
@@ -162,24 +163,14 @@ export function InitialMailboxAssignments({
         />
       ) : null}
       {query.data?.length === 0 ? <p>{t('No mailboxes are available for assignment.')}</p> : null}
-      <div className="admin-mailbox-assignment-options">
-        {query.data?.map((mailbox) => (
-          <label key={mailbox.id}>
-            <input
-              type="checkbox"
-              checked={selected.includes(mailbox.id)}
-              onChange={(event) =>
-                onChange(
-                  event.target.checked
-                    ? [...selected, mailbox.id]
-                    : selected.filter((id) => id !== mailbox.id),
-                )
-              }
-            />
-            {mailbox.address}
-          </label>
-        ))}
-      </div>
+      {query.data !== undefined ? (
+        <MailboxTagsSelector
+          mailboxes={query.data}
+          selected={selected}
+          onChange={onChange}
+          disabled={disabled || query.isError}
+        />
+      ) : null}
     </fieldset>
   );
 }

@@ -307,7 +307,7 @@ function UsersContent(): ReactElement {
         ) : action?.kind === 'create' ? (
           <form
             onSubmit={(event) => void submitCreate(event)}
-            className="admin-dialog-form"
+            className="admin-dialog-form admin-create-user-form"
             data-testid="admin-create-user-form"
             noValidate
           >
@@ -332,6 +332,16 @@ function UsersContent(): ReactElement {
                 disabled={createMutation.isPending}
               />
             </fieldset>
+            {mutationError !== null ? (
+              <div
+                className="admin-error-banner"
+                role="alert"
+                data-testid="admin-user-mutation-error"
+              >
+                <p>{mutationError.message}</p>
+                <span data-testid="error-code">{mutationError.code}</span>
+              </div>
+            ) : null}
             <div className="admin-dialog-actions">
               <Button type="button" variant="secondary" disabled={busy} onClick={closeAction}>
                 {t('Cancel')}
@@ -383,7 +393,7 @@ function UsersContent(): ReactElement {
             </div>
           </div>
         ) : null}
-        {mutationError !== null ? (
+        {mutationError !== null && action?.kind !== 'create' ? (
           <div className="admin-error-banner" role="alert" data-testid="admin-user-mutation-error">
             <p>{mutationError.message}</p>
             <span data-testid="error-code">{mutationError.code}</span>

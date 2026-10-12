@@ -807,17 +807,17 @@ input[type='checkbox'] {
   text-align: center;
 }
 
-[data-testid='admin-create-user-form'] {
+.admin-create-user-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
-  max-width: 48rem;
+  width: 100%;
 }
-[data-testid='admin-create-user-form'] .wizard-field {
+.admin-create-user-form .wizard-field {
   margin: 0;
 }
-[data-testid='admin-create-user-form'] > button {
-  justify-self: start;
+.admin-create-user-form > fieldset {
+  grid-template-columns: minmax(0, 1fr);
 }
 .message-attachment {
   border: 1px solid var(--border);
@@ -825,7 +825,7 @@ input[type='checkbox'] {
   padding: 1rem;
 }
 @media (max-width: 767px) {
-  [data-testid='admin-create-user-form'] {
+  .admin-create-user-form {
     grid-template-columns: 1fr;
   }
   input,
@@ -1549,22 +1549,25 @@ input[type='checkbox'] {
 }
 
 .admin-initial-mailbox-assignments {
-  margin: 1.5rem 0;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
-.admin-mailbox-assignment-options,
+.admin-initial-mailbox-assignments > legend {
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.admin-initial-mailbox-assignments > p {
+  margin-bottom: 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
 .admin-mailbox-access-list {
   display: grid;
   gap: 1rem;
   margin-top: 1rem;
-}
-.admin-mailbox-assignment-options label {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  overflow-wrap: anywhere;
 }
 .admin-mailbox-access-row {
   display: flex;
@@ -1639,4 +1642,114 @@ input[type='checkbox'] {
     grid-template-columns: minmax(0, 1fr);
     gap: 0.25rem;
   }
+}
+
+.mailbox-tags-control {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: 0.375rem;
+}
+.mailbox-tags-control:focus-within {
+  border-color: var(--ring);
+  outline: 2px solid color-mix(in srgb, var(--ring) 35%, transparent);
+}
+.mailbox-tags-control[data-disabled] {
+  opacity: 0.6;
+}
+.mailbox-selected-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mailbox-selected-tag {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  background: var(--secondary);
+  font-size: 0.8125rem;
+}
+.mailbox-selected-tag > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mailbox-tags-search {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.mailbox-tags-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 1.75rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.875rem;
+}
+.mailbox-selected-tag button,
+.mailbox-tags-search button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.25rem;
+}
+.mailbox-selected-tag button:hover:not(:disabled),
+.mailbox-tags-search button:hover:not(:disabled) {
+  background: var(--accent);
+}
+.mailbox-selected-tag button:focus-visible,
+.mailbox-tags-search button:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.mailbox-selected-tag svg,
+.mailbox-tags-search svg,
+.mailbox-tags-options svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+.mailbox-tags-options {
+  margin-top: 0.375rem;
+  padding: 0.25rem;
+  max-height: min(14rem, 35svh);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--background);
+}
+.mailbox-tags-options ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mailbox-tags-options [role='option'] {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.mailbox-tags-options [data-active] {
+  background: var(--accent);
+}
+.mailbox-tags-options p {
+  padding: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
 }

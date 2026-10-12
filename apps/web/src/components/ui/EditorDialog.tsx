@@ -38,6 +38,12 @@ export function EditorDialog({
           aboveCompose && 'z-[110]',
         )}
         {...(aboveCompose ? { overlayClassName: 'z-[100]' } : {})}
+        onEscapeKeyDown={(event) => {
+          // Let an expanded combobox consume Escape before dismissing its editor.
+          if (document.activeElement?.matches('[role="combobox"][aria-expanded="true"]')) {
+            event.preventDefault();
+          }
+        }}
         onOpenAutoFocus={() => {
           restoreFocus.current =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;

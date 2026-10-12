@@ -121,8 +121,9 @@ describe('administrator user mailbox assignments', () => {
     await interaction.click(await screen.findByRole('button', { name: 'Create account' }));
     await screen.findByTestId('admin-create-user-form');
     await interaction.type(screen.getByLabelText('Email'), 'new@example.com');
-    await interaction.click(await screen.findByRole('checkbox', { name: 'box-2@example.com' }));
-    await interaction.click(screen.getByRole('checkbox', { name: 'box-3@example.com' }));
+    await interaction.click(await screen.findByRole('combobox', { name: 'Search mailboxes' }));
+    await interaction.click(screen.getByRole('option', { name: 'box-2@example.com' }));
+    await interaction.click(screen.getByRole('option', { name: 'box-3@example.com' }));
     await interaction.click(screen.getByRole('button', { name: 'Create account' }));
     expect(await screen.findByTestId('admin-one-time-password')).toHaveTextContent(
       'synthetic-initial-password',
@@ -145,7 +146,55 @@ describe('administrator user mailbox assignments', () => {
       ).not.toContain('synthetic-initial-password'),
     );
     await interaction.click(screen.getByRole('button', { name: 'Create account' }));
-    expect(await screen.findByRole('checkbox', { name: 'box-2@example.com' })).not.toBeChecked();
+    await screen.findByRole('combobox', { name: 'Search mailboxes' });
+    expect(screen.queryByRole('list', { name: 'Assigned mailboxes' })).not.toBeInTheDocument();
+  });
+
+  it('filters by address and display name, removes tags, and submits only selected IDs', async () => {
+    const { calls } = mount();
+    const interaction = userEvent.setup();
+    await interaction.click(await screen.findByRole('button', { name: 'Create account' }));
+    await interaction.type(screen.getByLabelText('Email'), 'new@example.com');
+    const search = await screen.findByRole('combobox', { name: 'Search mailboxes' });
+    await interaction.type(search, 'BOX 2');
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    await interaction.click(screen.getByRole('option', { name: 'box-2@example.com' }));
+    await interaction.clear(search);
+    await interaction.type(search, 'box-3@');
+    await interaction.click(screen.getByRole('option', { name: 'box-3@example.com' }));
+    await interaction.click(screen.getByRole('button', { name: 'Remove box-2@example.com' }));
+    expect(screen.queryByRole('button', { name: 'Remove box-2@example.com' })).toBeNull();
+    await interaction.clear(search);
+    await interaction.type(search, 'missing');
+    expect(screen.getByRole('status')).toHaveTextContent('No matching mailboxes.');
+    await interaction.click(screen.getByRole('button', { name: 'Create account' }));
+    await screen.findByTestId('admin-one-time-password');
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
+      email: 'new@example.com',
+      mailboxIds: [box(3, null).id],
+    });
+  });
+
+  it('selects with keyboard without submitting, then closes options before closing the modal', async () => {
+    const { calls } = mount();
+    const interaction = userEvent.setup();
+    await interaction.click(await screen.findByRole('button', { name: 'Create account' }));
+    await interaction.type(screen.getByLabelText('Email'), 'new@example.com');
+    const search = await screen.findByRole('combobox', { name: 'Search mailboxes' });
+    await interaction.click(search);
+    await interaction.keyboard('{ArrowDown}{Enter}');
+    expect(screen.getByRole('button', { name: 'Remove box-2@example.com' })).toBeInTheDocument();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
+    await interaction.keyboard('{Enter}');
+    expect(screen.queryByRole('list', { name: 'Assigned mailboxes' })).toBeNull();
+    await interaction.keyboard('{ArrowUp}{Enter}');
+    expect(screen.getByRole('button', { name: 'Remove box-1@example.com' })).toBeInTheDocument();
+    await interaction.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Create account' })).toBeInTheDocument();
+    await interaction.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
   });
 
   it('R-AUTHZ-003 updates and revokes one mailbox while protecting ownership and preserving other grants', async () => {
