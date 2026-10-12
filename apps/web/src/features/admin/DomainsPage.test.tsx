@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -108,13 +108,14 @@ describe('DomainsPage (CAP-066)', () => {
     ]);
     await waitFor(() => expect(screen.getByTestId('admin-domains-list')).toBeInTheDocument());
     expect(screen.getByText('domain-1.example.com')).toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Outbound connection for domain-1.example.com'),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Domain name'), '  NEW.EXAMPLE.COM ');
     await user.click(screen.getByRole('button', { name: 'Add domain' }));
+    await user.type(screen.getByLabelText('Domain name'), '  NEW.EXAMPLE.COM ');
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Add domain' }),
+    );
 
     await waitFor(() => expect(screen.getByText('new.example.com')).toBeInTheDocument());
     const post = calls.find((call) => call.method === 'POST');
@@ -157,16 +158,20 @@ describe('DomainsPage (CAP-066)', () => {
     await waitFor(() => expect(screen.getByTestId('admin-domain-row')).toBeInTheDocument());
 
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Configure domain-1.example.com' }));
     const select = screen.getByLabelText('Outbound connection for domain-1.example.com');
     await user.click(select);
     await user.click(screen.getByRole('option', { name: 'Primary Brevo (brevo)' }));
+    expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('domain-success')).toHaveTextContent(
         'Outbound connection updated for domain-1.example.com.',
       );
     });
-    expect(select).toHaveTextContent('Primary Brevo (brevo)');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Outbound connection: Primary Brevo')).toBeInTheDocument();
     const patch = calls.find((call) => call.method === 'PATCH');
     expect(patch).toBeDefined();
     expect(JSON.parse(patch?.body ?? '')).toEqual({ connectionId: connection.id });
@@ -192,9 +197,12 @@ describe('DomainsPage (CAP-066)', () => {
     ]);
     await waitFor(() => expect(screen.getByTestId('admin-domains-empty')).toBeInTheDocument());
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add domain' }));
     const input = screen.getByLabelText('Domain name');
     await user.type(input, 'example.com');
-    await user.click(screen.getByRole('button', { name: 'Add domain' }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Add domain' }),
+    );
     await waitFor(() => expect(screen.getByTestId('domain-add-error')).toBeInTheDocument());
     expect(screen.getByTestId('domain-add-error')).toHaveTextContent('DOMAIN_ALREADY_MANAGED');
     expect(input).toHaveValue('example.com');
@@ -216,7 +224,7 @@ describe('DomainsPage (CAP-066)', () => {
     expect(screen.getByRole('alertdialog')).toHaveTextContent('This cannot be undone');
     await user.click(screen.getByTestId('alert-dialog-confirm'));
     await waitFor(() => expect(screen.getByTestId('admin-domains-empty')).toBeInTheDocument());
-    expect(screen.getByLabelText('Domain name')).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Add domain' })).toHaveFocus();
   });
 
   it('traps dialog focus and restores it to the delete trigger after Escape', async () => {
@@ -248,10 +256,15 @@ describe('DomainsPage (CAP-066)', () => {
     ]);
     await waitFor(() => expect(screen.getByTestId('admin-domain-row')).toBeInTheDocument());
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Configure domain-1.example.com' }));
     await user.click(screen.getByRole('button', { name: 'Verify domain-1.example.com' }));
-    await waitFor(() => expect(screen.getByTestId('domain-action-error')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(screen.getByRole('dialog')).getByRole('alert')).toBeInTheDocument(),
+    );
     expect(screen.getByTestId('admin-domain-row')).toBeInTheDocument();
-    expect(screen.getByTestId('domain-action-error')).toHaveTextContent('DOMAIN_NOT_ACTIVE');
+    expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent(
+      'DOMAIN_NOT_ACTIVE',
+    );
   });
 
   it('renders an invalid response as a retryable client error', async () => {

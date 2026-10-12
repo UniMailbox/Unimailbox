@@ -5,7 +5,7 @@ import type {
   UserListItem,
 } from '@unimailbox/contracts';
 import { useT } from '../../infrastructure/i18n/locale';
-import { Card } from '../../components/ui/Card';
+import { EditorDialog } from '../../components/ui/EditorDialog';
 import { Button } from '../../components/ui/Button';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
@@ -42,16 +42,20 @@ export function UserMailboxAccessPanel({
     }
   };
   return (
-    <Card title={t('Mailbox access')} description={user.email}>
+    <EditorDialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !mutation.isPending) onClose();
+      }}
+      title={t('Mailbox access')}
+      description={user.email}
+    >
       <div className="admin-user-mailbox-access" data-testid="admin-user-mailbox-access">
         <p>
           {t(
             'Mailbox permissions are assigned by administrators. Full access includes reading, sending and organizing messages.',
           )}
         </p>
-        <Button type="button" variant="secondary" onClick={onClose} disabled={mutation.isPending}>
-          {t('Close')}
-        </Button>
         {query.isPending ? <ContentSkeleton variant="list" /> : null}
         {query.error ? (
           <ErrorPanel
@@ -73,8 +77,13 @@ export function UserMailboxAccessPanel({
             />
           ))}
         </div>
+        <div className="admin-dialog-actions">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={mutation.isPending}>
+            {t('Done')}
+          </Button>
+        </div>
       </div>
-    </Card>
+    </EditorDialog>
   );
 }
 

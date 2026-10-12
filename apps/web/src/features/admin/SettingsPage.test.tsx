@@ -101,7 +101,10 @@ describe('SettingsPage (CAP-069)', () => {
     expect(screen.queryByLabelText('Site title')).not.toBeInTheDocument();
     expect(loading.querySelector('button, input, select')).toBeNull();
     resolveSettings(jsonResponse({ data: settings({ siteTitle: 'Ready mailbox' }) }));
-    expect(await screen.findByLabelText('Site title')).toHaveValue('Ready mailbox');
+    expect(await screen.findByText('Ready mailbox')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-form')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit settings' }));
+    expect(screen.getByLabelText('Site title')).toHaveValue('Ready mailbox');
     expect(screen.queryByTestId('admin-loading')).not.toBeInTheDocument();
   });
 
@@ -113,6 +116,7 @@ describe('SettingsPage (CAP-069)', () => {
     const { calls } = mountPage((_url, init) =>
       init?.method === 'PATCH' ? pending : jsonResponse({ data: settings() }),
     );
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Edit settings' }));
     const title = await screen.findByLabelText('Site title');
     const user = userEvent.setup();
     await user.clear(title);
@@ -126,7 +130,8 @@ describe('SettingsPage (CAP-069)', () => {
     await user.click(busy);
     expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
     resolveSave(jsonResponse({ data: settings({ siteTitle: 'Operations' }) }));
-    expect(await screen.findByRole('button', { name: 'Save settings' })).toBeEnabled();
+    expect(await screen.findByTestId('settings-success')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('R-SETTINGS-007 renders, edits, and saves settings with a success state', async () => {
@@ -136,6 +141,7 @@ describe('SettingsPage (CAP-069)', () => {
     });
     await waitFor(() => expect(screen.getByTestId('admin-settings-page')).toBeInTheDocument());
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Edit settings' }));
     const title = screen.getByLabelText('Site title');
     await user.clear(title);
     await user.type(title, 'Operations');
@@ -150,6 +156,7 @@ describe('SettingsPage (CAP-069)', () => {
       jsonResponse({ data: settings((init?.method ?? 'GET') === 'PATCH' ? {} : {}) }),
     );
     await waitFor(() => expect(screen.getByTestId('admin-settings-page')).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit settings' }));
     expect(screen.getByLabelText('Maximum attachment size')).toHaveValue(100);
     expect(screen.getByRole('combobox', { name: 'Attachment size unit' })).toHaveTextContent('MB');
 
@@ -175,6 +182,7 @@ describe('SettingsPage (CAP-069)', () => {
     );
     expect(await screen.findByTestId('admin-settings-page')).toBeInTheDocument();
     const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Edit settings' }));
     await user.click(screen.getByRole('switch', { name: 'Inbound mail enabled' }));
     await user.click(screen.getByRole('combobox', { name: 'Unknown recipient policy' }));
     await user.click(screen.getByRole('option', { name: 'Store unknown recipients' }));
@@ -201,6 +209,7 @@ describe('SettingsPage (CAP-069)', () => {
         : jsonResponse({ data: settings() }),
     );
     await waitFor(() => expect(screen.getByTestId('admin-settings-page')).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit settings' }));
     const registration = screen.getByRole('checkbox', {
       name: /public registration disabled/i,
     });
@@ -215,9 +224,9 @@ describe('SettingsPage (CAP-069)', () => {
         : jsonResponse({ data: settings({}, { canManage: false }) }),
     );
     await waitFor(() => expect(screen.getByTestId('settings-read-only-note')).toBeInTheDocument());
-    expect(screen.getByLabelText('Site title')).toBeDisabled();
-    expect(screen.getByRole('switch', { name: 'Inbound mail enabled' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Unknown recipient policy' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Edit settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.getByText('Site title')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save settings' })).not.toBeInTheDocument();
   });
 
@@ -255,6 +264,7 @@ describe('SettingsPage (CAP-069)', () => {
       }
       return errorResponse('STALE_IF_MATCH', 'Settings changed since they were loaded', 412);
     });
+    await user.click(await screen.findByRole('button', { name: 'Edit settings' }));
     await waitFor(() => expect(screen.getByDisplayValue('Initial')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Save settings' }));
     await waitFor(() => expect(screen.getByTestId('settings-form-error')).toBeInTheDocument());
@@ -279,6 +289,7 @@ describe('SettingsPage (CAP-069)', () => {
       }
       return errorResponse('STALE_IF_MATCH', 'Settings changed since they were loaded', 412);
     });
+    await user.click(await screen.findByRole('button', { name: 'Edit settings' }));
     await waitFor(() => expect(screen.getByDisplayValue('Initial')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Save settings' }));
     await waitFor(() => expect(screen.getByTestId('settings-refreshing')).toBeInTheDocument());

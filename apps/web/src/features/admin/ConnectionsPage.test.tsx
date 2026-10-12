@@ -277,12 +277,16 @@ describe('ConnectionsPage (CAP-044 Slice 3 / AC 20)', () => {
     });
     expect(screen.queryByTestId('alert-dialog')).not.toBeInTheDocument();
     expect(screen.getByText(SECRET)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Webhook secret' })).toHaveTextContent(SECRET);
     const note = screen.getByTestId(`admin-secret-revealed-${row.id}`).textContent ?? '';
     expect(note).toContain('Shown once');
     expect(note).toContain('audit trail');
 
     // Hide clears the value; it does not come back.
     await user.click(screen.getByTestId(`admin-secret-hide-${row.id}`));
+    await waitFor(() =>
+      expect(screen.getByTestId(`admin-connection-reveal-${row.id}`)).toHaveFocus(),
+    );
     expect(screen.queryByTestId(`admin-secret-revealed-${row.id}`)).not.toBeInTheDocument();
     expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
   });

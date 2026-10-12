@@ -1597,3 +1597,46 @@ input[type='checkbox'] {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Administration keeps editing and one-time values inside bounded dialogs. */
+.admin-dialog-form,
+.admin-dialog-form > fieldset {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.admin-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.admin-configuration-summary {
+  display: grid;
+  gap: 0.875rem;
+  margin-bottom: 1rem;
+}
+.admin-configuration-summary > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 1rem;
+}
+.admin-configuration-summary dt {
+  color: var(--muted-foreground);
+}
+.admin-configuration-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.editor-dialog .admin-secret-reveal-value,
+.editor-dialog code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+@media (max-width: 640px) {
+  .admin-configuration-summary > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+}

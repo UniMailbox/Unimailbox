@@ -678,6 +678,8 @@ export function useCreateAdminUserMutation() {
   const queryClient = useQueryClient();
   const session = authSessionQuery().data;
   return useMutation({
+    // One-time initial passwords must leave the mutation cache when the dialog resets.
+    gcTime: 0,
     mutationFn: (request: {
       readonly email: string;
       readonly displayName?: string;
@@ -696,6 +698,8 @@ export function useResetAdminUserPasswordMutation() {
   const queryClient = useQueryClient();
   const session = authSessionQuery().data;
   return useMutation({
+    // One-time initial passwords must leave the mutation cache when the dialog resets.
+    gcTime: 0,
     mutationFn: (userId: string) => resetAdminUserPassword(apiClient, userId),
     onSuccess: () => {
       void queryClient.invalidateQueries({

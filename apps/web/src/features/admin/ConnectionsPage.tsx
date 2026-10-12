@@ -28,7 +28,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 // The reveal flow layers a per-row confirm dialog (AlertDialog) on top;
 // a reveal failure (e.g. 403 for an operator without provider.sync)
 // renders INSIDE the dialog's error slot, rows stay mounted.
-import { useState, type ReactElement } from 'react';
+import { useRef, useState, type ReactElement } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
@@ -37,6 +37,7 @@ import { useApiClient } from '../../infrastructure/api/client-provider';
 import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Button } from '../../components/ui/Button';
+import { EditorDialog } from '../../components/ui/EditorDialog';
 import { AlertDialog } from '../../components/ui/AlertDialog';
 import { LocalDateTime } from '../../components/ui/LocalDateTime';
 import {
@@ -168,6 +169,7 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
   const apiClient = useApiClient();
   // Transient, component-local reveal state (R-SECRET-003 — one-time
   // display; never cached, stored, or logged).
+  const revealTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [revealed, setRevealed] = useState<WebhookSecretReveal | null>(null);
   const [revealError, setRevealError] = useState<string | null>(null);
@@ -233,7 +235,8 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
             variant="secondary"
             size="sm"
             data-testid={`admin-connection-reveal-${item.id}`}
-            onClick={() => {
+            onClick={(event) => {
+              revealTriggerRef.current = event.currentTarget;
               // A new reveal clears the previous one-time value first.
               setRevealed(null);
               setRevealError(null);
@@ -248,23 +251,38 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
         // The one-time display. The note is part of the R-SECRET-003
         // contract: the operator must know the value is shown once and
         // that the reveal was recorded in the audit trail.
-        <div className="admin-secret-reveal" data-testid={`admin-secret-revealed-${item.id}`}>
-          <p className="admin-secret-reveal-note">
-            {t('Shown once — copy it now. Every reveal is recorded in the audit trail.')}
-          </p>
-          <code className="admin-secret-reveal-value">{revealed.webhookSecret}</code>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            data-testid={`admin-secret-hide-${item.id}`}
-            onClick={() => {
+        <EditorDialog
+          returnFocusRef={revealTriggerRef}
+          open
+          onOpenChange={(open) => {
+            if (!open) {
               setRevealed(null);
-            }}
-          >
-            {t('Hide')}
-          </Button>
-        </div>
+              revealMutation.reset();
+            }
+          }}
+          title={t('Webhook secret')}
+          description={item.label}
+          compact
+        >
+          <div className="admin-secret-reveal" data-testid={`admin-secret-revealed-${item.id}`}>
+            <p className="admin-secret-reveal-note">
+              {t('Shown once — copy it now. Every reveal is recorded in the audit trail.')}
+            </p>
+            <code className="admin-secret-reveal-value">{revealed.webhookSecret}</code>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid={`admin-secret-hide-${item.id}`}
+              onClick={() => {
+                setRevealed(null);
+                revealMutation.reset();
+              }}
+            >
+              {t('Hide')}
+            </Button>
+          </div>
+        </EditorDialog>
       ) : null}
       <AlertDialog
         open={confirming}
@@ -278,6 +296,7 @@ function ConnectionRow({ item }: { readonly item: AdminConnection }): ReactEleme
           revealMutation.mutate(item.id);
         }}
         onCancel={() => {
+          if (revealMutation.isPending) return;
           setConfirming(false);
           setRevealError(null);
         }}

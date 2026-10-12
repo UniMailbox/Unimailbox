@@ -23,7 +23,7 @@
 // The router integration of the PRODUCTION route tree (session guard) is
 // owned by router.test.tsx; this file stays scoped to the page.
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -105,6 +105,7 @@ function mountAdminRouter(
 }
 
 interface RenderOptions {
+  readonly mutationHandler?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   readonly resolvers: Array<(call: { url: string; method: string }) => Response>;
   /** Pre-seed the session cache with null to hit the expired fallback. */
   readonly session?: unknown;
@@ -132,6 +133,10 @@ function renderUsersPage(options: RenderOptions): {
     if (url.includes('/api/v1/auth/me')) {
       calls.push({ url, method: 'GET' });
       return authSessionResolver();
+    }
+    if (init?.method && init.method !== 'GET' && options.mutationHandler) {
+      calls.push({ url, method: init.method });
+      return options.mutationHandler(url, init);
     }
     if (url === '/api/v1/admin/mailboxes') return jsonResponse({ data: { items: [] } });
     if (options.pendingUsersFetch === true) {
@@ -387,5 +392,127 @@ describe('UsersPage (CAP-044 Slice 3 / AC 19)', () => {
     // No users surface renders alongside the fallback.
     expect(screen.queryByTestId('admin-users-list')).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-users-page')).not.toBeInTheDocument();
+  });
+  it('opens creation on demand, discards cancelled input and restores keyboard focus', async () => {
+    const { fetchCalls } = renderUsersPage({
+      resolvers: [() => jsonResponse({ data: { items: [userRow(1)], nextCursor: null } })],
+    });
+    const interaction = userEvent.setup();
+    const trigger = await screen.findByRole('button', { name: 'Create account' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-create-user-form')).not.toBeInTheDocument();
+    await interaction.click(trigger);
+    const dialog = within(screen.getByRole('dialog', { name: 'Create account' }));
+    const email = dialog.getByLabelText('Email');
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement);
+    await interaction.type(email, 'cancelled@example.com');
+    await interaction.click(dialog.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(fetchCalls.filter((call) => call.method === 'POST')).toHaveLength(0);
+    await interaction.click(trigger);
+    expect(screen.getByLabelText('Email')).toHaveValue('');
+  });
+
+  it('keeps a failed creation inside the modal with its input available for correction', async () => {
+    renderUsersPage({
+      resolvers: [() => jsonResponse({ data: { items: [userRow(1)], nextCursor: null } })],
+      mutationHandler: () => errorResponse('PERMISSION_DENIED', 'Creation denied', 403),
+    });
+    const interaction = userEvent.setup();
+    await interaction.click(await screen.findByRole('button', { name: 'Create account' }));
+    const dialog = within(screen.getByRole('dialog'));
+    await interaction.type(dialog.getByLabelText('Email'), 'new@example.com');
+    await interaction.click(dialog.getByRole('button', { name: 'Create account' }));
+    expect(await dialog.findByRole('alert')).toHaveTextContent('PERMISSION_DENIED');
+    expect(dialog.getByLabelText('Email')).toHaveValue('new@example.com');
+    expect(dialog.getByRole('button', { name: 'Create account' })).toBeEnabled();
+  });
+
+  it('requires reset confirmation, blocks closing during the request and shows the password only in the modal', async () => {
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const { fetchCalls } = renderUsersPage({
+      resolvers: [() => jsonResponse({ data: { items: [userRow(1)], nextCursor: null } })],
+      mutationHandler: () => pending,
+    });
+    const interaction = userEvent.setup();
+    const trigger = await screen.findByRole('button', { name: 'Reset password' });
+    await interaction.click(trigger);
+    let dialog = within(screen.getByRole('dialog', { name: 'Reset password' }));
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement);
+    expect(fetchCalls.filter((call) => call.method === 'POST')).toHaveLength(0);
+    await interaction.click(dialog.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await interaction.click(trigger);
+    dialog = within(screen.getByRole('dialog'));
+    await interaction.click(dialog.getByRole('button', { name: 'Reset password' }));
+    await waitFor(() =>
+      expect(dialog.getByRole('button', { name: 'Reset password' })).toBeDisabled(),
+    );
+    await interaction.keyboard('{Escape}');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(fetchCalls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    finish(
+      jsonResponse({
+        data: {
+          userId: userRow(1).id,
+          initialPassword: 'synthetic-reset-password',
+          initialPasswordExpiresAt: '2099-01-01T00:00:00Z',
+        },
+      }),
+    );
+    const passwordDialog = within(await screen.findByRole('dialog', { name: 'Initial password' }));
+    expect(passwordDialog.getByTestId('admin-one-time-password')).toHaveTextContent(
+      'synthetic-reset-password',
+    );
+    await interaction.click(passwordDialog.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByText('synthetic-reset-password')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('requires deactivation confirmation and retains the modal on a denied write', async () => {
+    const { fetchCalls } = renderUsersPage({
+      resolvers: [() => jsonResponse({ data: { items: [userRow(1)], nextCursor: null } })],
+      mutationHandler: () => errorResponse('PERMISSION_DENIED', 'Status denied', 403),
+    });
+    const interaction = userEvent.setup();
+    await interaction.click(await screen.findByRole('button', { name: 'Deactivate' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Deactivate account' }));
+    expect(dialog.getByText('user-1@example.com')).toBeInTheDocument();
+    expect(fetchCalls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
+    await interaction.click(dialog.getByRole('button', { name: 'Deactivate' }));
+    expect(await dialog.findByRole('alert')).toHaveTextContent('PERMISSION_DENIED');
+    expect(dialog.getByRole('button', { name: 'Deactivate' })).toBeEnabled();
+    expect(screen.getByTestId('admin-user-row')).toHaveTextContent('active');
+  });
+
+  it('restores an account through a modal and returns to the updated list on success', async () => {
+    const { fetchCalls } = renderUsersPage({
+      resolvers: [
+        () =>
+          jsonResponse({ data: { items: [userRow(1, { status: 'banned' })], nextCursor: null } }),
+        () => jsonResponse({ data: { items: [userRow(1)], nextCursor: null } }),
+      ],
+      mutationHandler: (_url, init) => {
+        expect(JSON.parse(String(init?.body))).toEqual({ status: 'active' });
+        return jsonResponse({ data: { userId: userRow(1).id, status: 'active' } });
+      },
+    });
+    const interaction = userEvent.setup();
+    await interaction.click(await screen.findByRole('button', { name: 'Reactivate' }));
+    await interaction.click(
+      within(screen.getByRole('dialog', { name: 'Restore account' })).getByRole('button', {
+        name: 'Restore',
+      }),
+    );
+    expect(await screen.findByText('Account restored.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(fetchCalls.filter((call) => call.method === 'PATCH')).toHaveLength(1);
+    expect(await screen.findByRole('button', { name: 'Deactivate' })).toBeInTheDocument();
   });
 });

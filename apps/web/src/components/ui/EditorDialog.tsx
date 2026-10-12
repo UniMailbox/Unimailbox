@@ -1,4 +1,4 @@
-import { useRef, type ReactElement, type ReactNode } from 'react';
+import { useRef, type ReactElement, type ReactNode, type RefObject } from 'react';
 import { cn } from '../../lib/utils';
 import {
   Dialog,
@@ -16,6 +16,7 @@ export function EditorDialog({
   children,
   aboveCompose = false,
   compact = false,
+  returnFocusRef,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -24,6 +25,8 @@ export function EditorDialog({
   children: ReactNode;
   aboveCompose?: boolean;
   compact?: boolean;
+  /** A chained confirmation can unmount the immediate opening control. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }): ReactElement {
   const restoreFocus = useRef<HTMLElement | null>(null);
   return (
@@ -40,9 +43,10 @@ export function EditorDialog({
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
         }}
         onCloseAutoFocus={(event) => {
-          if (restoreFocus.current?.isConnected) {
+          const target = returnFocusRef?.current ?? restoreFocus.current;
+          if (target?.isConnected) {
             event.preventDefault();
-            restoreFocus.current.focus();
+            target.focus();
           }
         }}
       >

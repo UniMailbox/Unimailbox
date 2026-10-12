@@ -104,7 +104,7 @@ function mount(options: { failSave?: boolean; language?: 'zh-CN'; failList?: boo
       </ApiClientProvider>
     </QueryClientProvider>,
   );
-  return { calls };
+  return { calls, queryClient };
 }
 
 afterEach(() => {
@@ -115,8 +115,10 @@ afterEach(() => {
 
 describe('administrator user mailbox assignments', () => {
   it('R-MAILBOX-004 submits selected mailboxes with account creation and clears the selection', async () => {
-    const { calls } = mount();
+    const { calls, queryClient } = mount();
     const interaction = userEvent.setup();
+    expect(screen.queryByTestId('admin-create-user-form')).not.toBeInTheDocument();
+    await interaction.click(await screen.findByRole('button', { name: 'Create account' }));
     await screen.findByTestId('admin-create-user-form');
     await interaction.type(screen.getByLabelText('Email'), 'new@example.com');
     await interaction.click(await screen.findByRole('checkbox', { name: 'box-2@example.com' }));
@@ -130,7 +132,20 @@ describe('administrator user mailbox assignments', () => {
       body: { email: 'new@example.com', mailboxIds: [box(2, null).id, box(3, null).id] },
       key: expect.any(String),
     });
-    expect(screen.getByRole('checkbox', { name: 'box-2@example.com' })).not.toBeChecked();
+    await interaction.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByTestId('admin-one-time-password')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        JSON.stringify(
+          queryClient
+            .getMutationCache()
+            .getAll()
+            .map((mutation) => mutation.state.data),
+        ),
+      ).not.toContain('synthetic-initial-password'),
+    );
+    await interaction.click(screen.getByRole('button', { name: 'Create account' }));
+    expect(await screen.findByRole('checkbox', { name: 'box-2@example.com' })).not.toBeChecked();
   });
 
   it('R-AUTHZ-003 updates and revokes one mailbox while protecting ownership and preserving other grants', async () => {
@@ -183,9 +198,33 @@ describe('administrator user mailbox assignments', () => {
     expect(panel.queryAllByRole('combobox')).toHaveLength(0);
   });
 
+  it('opens grant editing as a modal and restores focus on Escape without writing', async () => {
+    const { calls } = mount();
+    const interaction = userEvent.setup();
+    const trigger = await screen.findByRole('button', { name: 'Mailbox access' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await interaction.click(trigger);
+    const dialog = within(screen.getByRole('dialog', { name: 'Mailbox access' }));
+    await interaction.selectOptions(
+      await dialog.findByRole('combobox', { name: 'box-2@example.com' }),
+      'sender',
+    );
+    await interaction.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(calls.filter((call) => call.method === 'PUT')).toHaveLength(0);
+    await interaction.click(trigger);
+    expect(await screen.findByRole('combobox', { name: 'box-2@example.com' })).toHaveValue(
+      'viewer',
+    );
+  });
+
   it('renders Chinese assignment controls and permission options', async () => {
     mount({ language: 'zh-CN' });
+    const interaction = userEvent.setup();
+    await interaction.click(await screen.findByRole('button', { name: '创建账户' }));
     expect(await screen.findByText('分配邮箱')).toBeInTheDocument();
+    await interaction.keyboard('{Escape}');
     await userEvent.setup().click(await screen.findByRole('button', { name: '邮箱权限' }));
     const panel = within(await screen.findByTestId('admin-user-mailbox-access'));
     const select = await panel.findByRole('combobox', { name: 'box-2@example.com' });

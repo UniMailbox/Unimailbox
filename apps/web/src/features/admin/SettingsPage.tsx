@@ -6,6 +6,7 @@ import { Label } from '../../components/ui/shadcn/label';
 import { Switch } from '../../components/ui/shadcn/switch';
 import { Checkbox } from '../../components/ui/shadcn/checkbox';
 import { SelectField } from '../../components/ui/SelectField';
+import { EditorDialog } from '../../components/ui/EditorDialog';
 import { PageHeader } from '../../components/ui/PageHeader';
 // apps/web — general settings administration (CAP-069).
 //
@@ -53,6 +54,7 @@ function SettingsContent(): ReactElement {
   const query = adminSettingsQuery();
   const userId = session?.userId ?? 'anonymous';
   const settingsKey = adminQueryKeys.settings(userId);
+  const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<SystemSettings | null>(null);
   const [formError, setFormError] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -98,6 +100,7 @@ function SettingsContent(): ReactElement {
       queryClient.setQueryData(settingsKey, result);
       void queryClient.invalidateQueries({ queryKey: editorUploadPolicyKey });
       setNotice(t('General settings saved.'));
+      setEditing(false);
     },
     onError: (error) => {
       const apiError = normalizeApiError(error);
@@ -168,7 +171,23 @@ function SettingsContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-settings-page">
-      <PageHeader title={t('General settings')} />
+      <PageHeader
+        title={t('General settings')}
+        actions={
+          canManage ? (
+            <Button
+              onClick={() => {
+                setForm(query.data.settings);
+                setFormError(null);
+                setNotice(null);
+                setEditing(true);
+              }}
+            >
+              {t('Edit settings')}
+            </Button>
+          ) : undefined
+        }
+      />
       <div className="settings-metadata" data-testid="settings-runtime-info">
         <span>
           {t('Environment: ')}
@@ -191,204 +210,269 @@ function SettingsContent(): ReactElement {
           {t('Read-only access. Ask an administrator to make changes.')}
         </p>
       ) : null}
-      <form onSubmit={submit} className="settings-form" noValidate data-testid="settings-form">
-        <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
-          <ConfigurationSection title={t('General')}>
-            <Input
-              id="settings-site-title"
-              label={t('Site title')}
-              type="text"
-              value={form.siteTitle}
-              onChange={(event) => setForm({ ...form, siteTitle: event.target.value })}
-              maxLength={100}
-            />
-            <div className="configuration-toggle">
-              <Label htmlFor="settings-registration">
-                {t('Public registration disabled')}{' '}
-                <span className="configuration-help">
-                  {t('Accounts are created by administrators.')}
-                </span>
-              </Label>
-              <Checkbox id="settings-registration" checked={false} disabled />
+      <Card title={t('General settings')}>
+        <dl className="admin-configuration-summary">
+          {[
+            [t('Site title'), query.data.settings.siteTitle],
+            [t('Public registration disabled'), t('Accounts are created by administrators.')],
+            [
+              t('Inbound mail enabled'),
+              t(query.data.settings.inboundEnabled ? 'Enabled' : 'Disabled'),
+            ],
+            [
+              t('Outbound mail enabled'),
+              t(query.data.settings.outboundEnabled ? 'Enabled' : 'Disabled'),
+            ],
+            [
+              t('Unknown recipient policy'),
+              t(
+                query.data.settings.unknownRecipientPolicy === 'reject'
+                  ? 'Reject unknown recipients'
+                  : 'Store unknown recipients',
+              ),
+            ],
+            [t('Maximum mailboxes per user'), query.data.settings.maxMailboxesPerUser],
+            [t('Maximum attachments per message'), query.data.settings.maxAttachmentsPerMessage],
+            [
+              t('Maximum attachment size'),
+              `${attachmentSizeParts(query.data.settings.maxAttachmentBytes).value} ${attachmentSizeParts(query.data.settings.maxAttachmentBytes).unit}`,
+            ],
+            [t('Audit retention in days'), query.data.settings.auditRetentionDays],
+            [t('Idempotency retention in hours'), query.data.settings.idempotencyRetentionHours],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
             </div>
-          </ConfigurationSection>
-          <ConfigurationSection title={t('Mail flow')}>
-            <div className="configuration-toggle">
-              <Label htmlFor="settings-inbound">{t('Inbound mail enabled')}</Label>
-              <Switch
-                id="settings-inbound"
-                checked={form.inboundEnabled}
-                disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
-                onCheckedChange={(checked) => setForm({ ...form, inboundEnabled: checked })}
+          ))}
+        </dl>
+      </Card>
+      <EditorDialog
+        open={editing}
+        onOpenChange={(open) => {
+          if (updateMutation.isPending || (isRefreshingAfterConflict && query.isFetching)) return;
+          setEditing(open);
+          if (!open) {
+            setForm(query.data.settings);
+            setFormError(null);
+          }
+        }}
+        title={t('Edit settings')}
+        description={t('Changes apply after saving.')}
+      >
+        <form onSubmit={submit} className="settings-form" noValidate data-testid="settings-form">
+          <fieldset disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}>
+            <ConfigurationSection title={t('General')}>
+              <Input
+                id="settings-site-title"
+                label={t('Site title')}
+                type="text"
+                value={form.siteTitle}
+                onChange={(event) => setForm({ ...form, siteTitle: event.target.value })}
+                maxLength={100}
               />
-            </div>
-            <div className="configuration-toggle">
-              <Label htmlFor="settings-outbound">{t('Outbound mail enabled')}</Label>
-              <Switch
-                id="settings-outbound"
-                checked={form.outboundEnabled}
-                disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
-                onCheckedChange={(checked) => setForm({ ...form, outboundEnabled: checked })}
-              />
-            </div>
-            <div className="wizard-field">
-              <Label htmlFor="settings-unknown-recipient">{t('Unknown recipient policy')}</Label>
-              <SelectField
-                id="settings-unknown-recipient"
-                value={form.unknownRecipientPolicy}
-                disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
-                onValueChange={(value) =>
-                  setForm({
-                    ...form,
-                    unknownRecipientPolicy: value as SystemSettings['unknownRecipientPolicy'],
-                  })
+              <div className="configuration-toggle">
+                <Label htmlFor="settings-registration">
+                  {t('Public registration disabled')}{' '}
+                  <span className="configuration-help">
+                    {t('Accounts are created by administrators.')}
+                  </span>
+                </Label>
+                <Checkbox id="settings-registration" checked={false} disabled />
+              </div>
+            </ConfigurationSection>
+            <ConfigurationSection title={t('Mail flow')}>
+              <div className="configuration-toggle">
+                <Label htmlFor="settings-inbound">{t('Inbound mail enabled')}</Label>
+                <Switch
+                  id="settings-inbound"
+                  checked={form.inboundEnabled}
+                  disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
+                  onCheckedChange={(checked) => setForm({ ...form, inboundEnabled: checked })}
+                />
+              </div>
+              <div className="configuration-toggle">
+                <Label htmlFor="settings-outbound">{t('Outbound mail enabled')}</Label>
+                <Switch
+                  id="settings-outbound"
+                  checked={form.outboundEnabled}
+                  disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
+                  onCheckedChange={(checked) => setForm({ ...form, outboundEnabled: checked })}
+                />
+              </div>
+              <div className="wizard-field">
+                <Label htmlFor="settings-unknown-recipient">{t('Unknown recipient policy')}</Label>
+                <SelectField
+                  id="settings-unknown-recipient"
+                  value={form.unknownRecipientPolicy}
+                  disabled={!canManage || updateMutation.isPending || isRefreshingAfterConflict}
+                  onValueChange={(value) =>
+                    setForm({
+                      ...form,
+                      unknownRecipientPolicy: value as SystemSettings['unknownRecipientPolicy'],
+                    })
+                  }
+                  options={[
+                    { value: 'reject', label: 'Reject unknown recipients' },
+                    { value: 'store', label: 'Store unknown recipients' },
+                  ]}
+                />
+              </div>
+            </ConfigurationSection>
+            <ConfigurationSection title={t('Limits')}>
+              <Input
+                id="settings-max-mailboxes"
+                label={t('Maximum mailboxes per user')}
+                type="number"
+                min={1}
+                max={100}
+                value={form.maxMailboxesPerUser}
+                onChange={(event) =>
+                  setForm({ ...form, maxMailboxesPerUser: Number(event.target.value) })
                 }
-                options={[
-                  { value: 'reject', label: 'Reject unknown recipients' },
-                  { value: 'store', label: 'Store unknown recipients' },
-                ]}
               />
-            </div>
-          </ConfigurationSection>
-          <ConfigurationSection title={t('Limits')}>
-            <Input
-              id="settings-max-mailboxes"
-              label={t('Maximum mailboxes per user')}
-              type="number"
-              min={1}
-              max={100}
-              value={form.maxMailboxesPerUser}
-              onChange={(event) =>
-                setForm({ ...form, maxMailboxesPerUser: Number(event.target.value) })
-              }
-            />
-            <Input
-              id="settings-max-attachments"
-              label={t('Maximum attachments per message')}
-              type="number"
-              min={1}
-              max={10}
-              value={form.maxAttachmentsPerMessage}
-              onChange={(event) =>
-                setForm({ ...form, maxAttachmentsPerMessage: Number(event.target.value) })
-              }
-            />
-            {(() => {
-              const attachment = attachmentSizeParts(form.maxAttachmentBytes);
-              const factor = attachment.unit === 'MB' ? 1024 * 1024 : 1024;
-              return (
-                <div className="settings-attachment-size" data-testid="settings-attachment-size">
-                  <Input
-                    id="settings-max-attachment-value"
-                    label={t('Maximum attachment size')}
-                    help={t('Limit applies to each message attachment.')}
-                    type="number"
-                    min={1}
-                    max={Math.floor(SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES / factor)}
-                    step={1}
-                    value={attachment.value}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      setForm({
-                        ...form,
-                        maxAttachmentBytes: Number.isFinite(value)
-                          ? Math.min(value * factor, SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES)
-                          : form.maxAttachmentBytes,
-                      });
-                    }}
-                  />
-                  <div className="settings-attachment-unit">
-                    <label className="input-label" htmlFor="settings-max-attachment-unit">
-                      {t('Unit')}
-                    </label>
-                    <SelectField
-                      id="settings-max-attachment-unit"
-                      label={t('Attachment size unit')}
-                      value={attachment.unit}
-                      onValueChange={(unit) => {
-                        const nextFactor = unit === 'MB' ? 1024 * 1024 : 1024;
-                        const nextValue = Math.max(
-                          1,
-                          Math.round(form.maxAttachmentBytes / nextFactor),
-                        );
+              <Input
+                id="settings-max-attachments"
+                label={t('Maximum attachments per message')}
+                type="number"
+                min={1}
+                max={10}
+                value={form.maxAttachmentsPerMessage}
+                onChange={(event) =>
+                  setForm({ ...form, maxAttachmentsPerMessage: Number(event.target.value) })
+                }
+              />
+              {(() => {
+                const attachment = attachmentSizeParts(form.maxAttachmentBytes);
+                const factor = attachment.unit === 'MB' ? 1024 * 1024 : 1024;
+                return (
+                  <div className="settings-attachment-size" data-testid="settings-attachment-size">
+                    <Input
+                      id="settings-max-attachment-value"
+                      label={t('Maximum attachment size')}
+                      help={t('Limit applies to each message attachment.')}
+                      type="number"
+                      min={1}
+                      max={Math.floor(SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES / factor)}
+                      step={1}
+                      value={attachment.value}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
                         setForm({
                           ...form,
-                          maxAttachmentBytes: Math.min(
-                            nextValue * nextFactor,
-                            SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES,
-                          ),
+                          maxAttachmentBytes: Number.isFinite(value)
+                            ? Math.min(value * factor, SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES)
+                            : form.maxAttachmentBytes,
                         });
                       }}
-                      options={[
-                        { value: 'KB', label: 'KB' },
-                        { value: 'MB', label: 'MB' },
-                      ]}
                     />
+                    <div className="settings-attachment-unit">
+                      <label className="input-label" htmlFor="settings-max-attachment-unit">
+                        {t('Unit')}
+                      </label>
+                      <SelectField
+                        id="settings-max-attachment-unit"
+                        label={t('Attachment size unit')}
+                        value={attachment.unit}
+                        onValueChange={(unit) => {
+                          const nextFactor = unit === 'MB' ? 1024 * 1024 : 1024;
+                          const nextValue = Math.max(
+                            1,
+                            Math.round(form.maxAttachmentBytes / nextFactor),
+                          );
+                          setForm({
+                            ...form,
+                            maxAttachmentBytes: Math.min(
+                              nextValue * nextFactor,
+                              SYSTEM_SETTINGS_MAX_ATTACHMENT_BYTES,
+                            ),
+                          });
+                        }}
+                        options={[
+                          { value: 'KB', label: 'KB' },
+                          { value: 'MB', label: 'MB' },
+                        ]}
+                      />
+                    </div>
                   </div>
-                </div>
-              );
-            })()}
-          </ConfigurationSection>
-          <ConfigurationSection
-            title={t('Retention')}
-            description={t('Stored policy. Automatic cleanup is not active yet.')}
-          >
-            <Input
-              id="settings-audit-retention"
-              label={t('Audit retention in days')}
-              type="number"
-              min={1}
-              max={3650}
-              value={form.auditRetentionDays}
-              onChange={(event) =>
-                setForm({ ...form, auditRetentionDays: Number(event.target.value) })
-              }
-            />
-            <Input
-              id="settings-idempotency-retention"
-              label={t('Idempotency retention in hours')}
-              type="number"
-              min={1}
-              max={168}
-              value={form.idempotencyRetentionHours}
-              onChange={(event) =>
-                setForm({ ...form, idempotencyRetentionHours: Number(event.target.value) })
-              }
-            />
-          </ConfigurationSection>
-        </fieldset>
-        {formError !== null ? (
-          <div className="admin-error-banner" role="alert" data-testid="settings-form-error">
-            {formError.message} ({formError.code})
-          </div>
-        ) : null}
-        {canManage ? (
-          <div className="configuration-save-bar">
-            <span className="configuration-help">{t('Changes apply after saving.')}</span>
-            <Button
-              type="submit"
-              loading={updateMutation.isPending || isRefreshingAfterConflict}
-              disabled={updateMutation.isPending || isRefreshingAfterConflict}
+                );
+              })()}
+            </ConfigurationSection>
+            <ConfigurationSection
+              title={t('Retention')}
+              description={t('Stored policy. Automatic cleanup is not active yet.')}
             >
-              {isRefreshingAfterConflict
-                ? t('Refreshing…')
-                : updateMutation.isPending
-                  ? t('Saving…')
-                  : t('Save settings')}
-            </Button>
-          </div>
-        ) : null}
-      </form>
-      {isRefreshingAfterConflict ? (
-        <p role="status" data-testid="settings-refreshing">
-          {t('Settings changed elsewhere. Loading the latest values… ')}
-          {refreshError !== null || queryError !== null ? (
-            <Button type="button" variant="secondary" onClick={refreshAfterConflict}>
-              {t('Retry loading latest settings')}
-            </Button>
+              <Input
+                id="settings-audit-retention"
+                label={t('Audit retention in days')}
+                type="number"
+                min={1}
+                max={3650}
+                value={form.auditRetentionDays}
+                onChange={(event) =>
+                  setForm({ ...form, auditRetentionDays: Number(event.target.value) })
+                }
+              />
+              <Input
+                id="settings-idempotency-retention"
+                label={t('Idempotency retention in hours')}
+                type="number"
+                min={1}
+                max={168}
+                value={form.idempotencyRetentionHours}
+                onChange={(event) =>
+                  setForm({ ...form, idempotencyRetentionHours: Number(event.target.value) })
+                }
+              />
+            </ConfigurationSection>
+          </fieldset>
+          {formError !== null ? (
+            <div className="admin-error-banner" role="alert" data-testid="settings-form-error">
+              {formError.message} ({formError.code})
+            </div>
           ) : null}
-        </p>
-      ) : null}
+          {canManage ? (
+            <div className="configuration-save-bar">
+              <span className="configuration-help">{t('Changes apply after saving.')}</span>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={
+                  updateMutation.isPending || (isRefreshingAfterConflict && query.isFetching)
+                }
+                onClick={() => {
+                  setEditing(false);
+                  setForm(query.data.settings);
+                  setFormError(null);
+                }}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button
+                type="submit"
+                loading={updateMutation.isPending || isRefreshingAfterConflict}
+                disabled={updateMutation.isPending || isRefreshingAfterConflict}
+              >
+                {isRefreshingAfterConflict
+                  ? t('Refreshing…')
+                  : updateMutation.isPending
+                    ? t('Saving…')
+                    : t('Save settings')}
+              </Button>
+            </div>
+          ) : null}
+        </form>
+        {isRefreshingAfterConflict ? (
+          <p role="status" data-testid="settings-refreshing">
+            {t('Settings changed elsewhere. Loading the latest values… ')}
+            {refreshError !== null || queryError !== null ? (
+              <Button type="button" variant="secondary" onClick={refreshAfterConflict}>
+                {t('Retry loading latest settings')}
+              </Button>
+            ) : null}
+          </p>
+        ) : null}
+      </EditorDialog>
       {notice !== null ? (
         <p className="admin-success" role="status" data-testid="settings-success">
           {notice}

@@ -10,13 +10,14 @@ import { CheckCircle2, Cloud, ExternalLink } from 'lucide-react';
 // remain server-authoritative. Verification is described as operator
 // confirmation because Phase 1 has no Cloudflare API integration.
 
-import { useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
+import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createManagedDomainRequestSchema, type ManagedDomain } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
 import { useApiClient } from '../../infrastructure/api/client-provider';
+import { EditorDialog } from '../../components/ui/EditorDialog';
 import { AlertDialog } from '../../components/ui/AlertDialog';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -54,13 +55,15 @@ function DomainsContent(): ReactElement {
   const session = authSessionQuery().data;
   const query = adminDomainsQuery();
   const connectionsQuery = adminConnectionsQuery();
+  const [addOpen, setAddOpen] = useState(false);
+  const [configureTarget, setConfigureTarget] = useState<ManagedDomain | null>(null);
+  const [connectionId, setConnectionId] = useState('');
   const [name, setName] = useState('');
   const [addError, setAddError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedDomain | null>(null);
   const [routingConfirmed, setRoutingConfirmed] = useState<ReadonlySet<string>>(new Set());
-  const domainNameInputRef = useRef<HTMLInputElement>(null);
   const userId = session?.userId ?? 'anonymous';
   const domainsKey = adminQueryKeys.domains(userId);
 
@@ -77,6 +80,7 @@ function DomainsContent(): ReactElement {
         ...(current ?? []),
       ]);
       setName('');
+      setAddOpen(false);
       setNotice(t('Added {value0}.', { value0: domain.name }));
     },
     onError: (error) => {
@@ -139,6 +143,7 @@ function DomainsContent(): ReactElement {
       queryClient.setQueryData<ManagedDomain[]>(domainsKey, (current) =>
         (current ?? []).map((domain) => (domain.id === updated.id ? updated : domain)),
       );
+      setConfigureTarget(null);
       setNotice(t('Outbound connection updated for {value0}.', { value0: updated.name }));
     },
     onError: (error) => {
@@ -151,7 +156,7 @@ function DomainsContent(): ReactElement {
       // A successful delete removes the trigger button's row before the
       // dialog unmounts, so the generic dialog cannot restore focus there.
       // Keep keyboard navigation in the domain-management task instead.
-      domainNameInputRef.current?.focus();
+      document.querySelector<HTMLButtonElement>('[data-testid="domain-add-trigger"]')?.focus();
     }
   }, [deleteMutation.isSuccess]);
 
@@ -209,78 +214,30 @@ function DomainsContent(): ReactElement {
   const connections = connectionsQuery.data ?? [];
   return (
     <main className="admin-page" data-testid="admin-domains-page">
-      <PageHeader title={t('Domains')} />
-      <Card
-        title={t('Connect Cloudflare Email Routing')}
-        description={t('Point inbound mail for each managed domain to this Worker.')}
-      >
-        <div className="cloudflare-flow" data-testid="cloudflare-routing-flow">
-          <div className="cloudflare-flow-step">
-            <span className="cloudflare-flow-index">1</span>
-            <div>
-              <strong>{t('Open Cloudflare')}</strong>
-              <p>
-                {t('In Email Routing, choose the managed domain and route mail to this Worker.')}
-              </p>
-              <a
-                className="btn btn-secondary cloudflare-dashboard-link"
-                href="https://dash.cloudflare.com"
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Cloud aria-hidden="true" />
-                {t('Open Cloudflare dashboard ')}
-                <ExternalLink aria-hidden="true" />
-              </a>
-            </div>
-          </div>
-          <div className="cloudflare-flow-step">
-            <span className="cloudflare-flow-index">2</span>
-            <div>
-              <strong>{t('Confirm the routing rule')}</strong>
-              <p>{t('After saving the rule, confirm it beside the matching domain below.')}</p>
-            </div>
-          </div>
-          <p className="configuration-note">
-            {t(
-              'Confirmation records the operator action. Delivery is proven when an inbound test email arrives.',
-            )}
-          </p>
-        </div>
-      </Card>
+      <PageHeader
+        title={t('Domains')}
+        actions={
+          <Button
+            data-testid="domain-add-trigger"
+            onClick={() => {
+              setAddError(null);
+              setAddOpen(true);
+            }}
+          >
+            {t('Add domain')}
+          </Button>
+        }
+      />
       <Card title={t('Managed domains')}>
         <p className="configuration-note" data-testid="domain-verify-note">
           {t('Verification records your confirmation; DNS and delivery are not tested.')}
         </p>
-        <form onSubmit={submitAdd} className="admin-form" noValidate>
-          <label htmlFor="managed-domain-name">{t('Domain name')}</label>
-          <div className="admin-form-row">
-            <PrimitiveInput
-              id="managed-domain-name"
-              ref={domainNameInputRef}
-              name="name"
-              type="text"
-              autoComplete="off"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              aria-describedby={addError === null ? undefined : 'domain-add-error'}
-            />
-            <Button type="submit" loading={addMutation.isPending} disabled={addMutation.isPending}>
-              {addMutation.isPending ? t('Adding…') : t('Add domain')}
-            </Button>
-          </div>
-          {addError !== null ? (
-            <div className="admin-error-banner" role="alert" data-testid="domain-add-error">
-              <span>{addError.message}</span> <span>{addError.code}</span>
-            </div>
-          ) : null}
-        </form>
         {notice !== null ? (
           <p role="status" className="admin-success" data-testid="domain-success">
             {notice}
           </p>
         ) : null}
-        {actionError !== null ? (
+        {actionError !== null && configureTarget === null && deleteTarget === null ? (
           <div className="admin-error-banner" role="alert" data-testid="domain-action-error">
             <span>{actionError.message}</span> <span>{actionError.code}</span>
           </div>
@@ -318,53 +275,26 @@ function DomainsContent(): ReactElement {
                     <LocalDateTime value={domain.updatedAt} />
                   </small>
                 </div>
-                <label className="admin-domain-connection-field">
-                  <span>{t('Outbound connection')}</span>
-                  <SelectField
-                    label={t('Outbound connection for {value0}', { value0: domain.name })}
-                    value={domain.outboundConnectionId ?? ''}
-                    disabled={connectionsQuery.isPending || outboundMutation.isPending}
-                    onValueChange={(value) =>
-                      outboundMutation.mutate({ domain, connectionId: value === '' ? null : value })
-                    }
-                    options={[
-                      { value: '', label: 'No connection' },
-                      ...connections.map((connection) => ({
-                        value: connection.id,
-                        label: `${connection.label} (${connection.providerKey})${connection.status === 'active' ? '' : ` — ${connection.status}`}`,
-                        disabled: connection.status !== 'active',
-                      })),
-                    ]}
-                  />
-                  <small className="configuration-help">{t('Saves automatically.')}</small>
-                  {connectionsQuery.error !== null ? (
-                    <small data-testid="domain-connections-unavailable">
-                      {t('Provider connections are unavailable.')}
-                    </small>
-                  ) : null}
-                </label>
+                <p className="resource-row-description">
+                  {t('Outbound connection')}:{' '}
+                  {connections.find((connection) => connection.id === domain.outboundConnectionId)
+                    ?.label ??
+                    (domain.outboundConnectionId === null
+                      ? t('No connection')
+                      : t('Provider connections are unavailable.'))}
+                </p>
                 <div className="admin-domain-actions">
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => verifyMutation.mutate(domain.id)}
-                    loading={verifyMutation.isPending}
-                    disabled={
-                      verifyMutation.isPending ||
-                      deleteMutation.isPending ||
-                      routingConfirmed.has(domain.id)
-                    }
-                    aria-label={t('Verify {value0}', { value0: domain.name })}
+                    onClick={() => {
+                      setActionError(null);
+                      setConnectionId(domain.outboundConnectionId ?? '');
+                      setConfigureTarget(domain);
+                    }}
+                    aria-label={t('Configure {value0}', { value0: domain.name })}
                   >
-                    {routingConfirmed.has(domain.id) ? (
-                      <>
-                        <CheckCircle2 aria-hidden="true" /> {t('Routing confirmed ')}
-                      </>
-                    ) : verifyMutation.isPending ? (
-                      t('Confirming…')
-                    ) : (
-                      t('Confirm routing')
-                    )}
+                    {t('Configure')}
                   </Button>
                   <Button
                     type="button"
@@ -381,6 +311,204 @@ function DomainsContent(): ReactElement {
           </ul>
         )}
       </Card>
+      <EditorDialog
+        open={addOpen}
+        onOpenChange={(open) => {
+          if (addMutation.isPending) return;
+          setAddOpen(open);
+          if (!open) {
+            setName('');
+            setAddError(null);
+          }
+        }}
+        title={t('Add domain')}
+        description={t('Add a domain to manage its mail routing.')}
+        compact
+      >
+        <form onSubmit={submitAdd} className="admin-form" noValidate>
+          <label htmlFor="managed-domain-name">{t('Domain name')}</label>
+          <div className="admin-dialog-form">
+            <PrimitiveInput
+              id="managed-domain-name"
+              name="name"
+              type="text"
+              autoComplete="off"
+              disabled={addMutation.isPending}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              aria-describedby={addError === null ? undefined : 'domain-add-error'}
+            />
+            <div className="admin-dialog-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={addMutation.isPending}
+                onClick={() => {
+                  setAddOpen(false);
+                  setName('');
+                  setAddError(null);
+                }}
+              >
+                {t('Cancel')}
+              </Button>
+              <Button
+                type="submit"
+                loading={addMutation.isPending}
+                disabled={addMutation.isPending}
+              >
+                {addMutation.isPending ? t('Adding…') : t('Add domain')}
+              </Button>
+            </div>
+          </div>
+          {addError !== null ? (
+            <div className="admin-error-banner" role="alert" data-testid="domain-add-error">
+              <span>{addError.message}</span> <span>{addError.code}</span>
+            </div>
+          ) : null}
+        </form>
+      </EditorDialog>
+      <EditorDialog
+        open={configureTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !outboundMutation.isPending && !verifyMutation.isPending) {
+            setConfigureTarget(null);
+            setActionError(null);
+          }
+        }}
+        title={t('Configure domain')}
+        description={configureTarget?.name ?? ''}
+      >
+        {configureTarget !== null ? (
+          <div className="admin-dialog-form">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                outboundMutation.mutate({
+                  domain: configureTarget,
+                  connectionId: connectionId === '' ? null : connectionId,
+                });
+              }}
+              className="admin-dialog-form"
+            >
+              <SelectField
+                label={t('Outbound connection for {value0}', { value0: configureTarget.name })}
+                value={connectionId}
+                disabled={
+                  connectionsQuery.isPending ||
+                  connectionsQuery.isError ||
+                  outboundMutation.isPending ||
+                  verifyMutation.isPending
+                }
+                onValueChange={setConnectionId}
+                options={[
+                  { value: '', label: 'No connection' },
+                  ...connections.map((connection) => ({
+                    value: connection.id,
+                    label: `${connection.label} (${connection.providerKey})${connection.status === 'active' ? '' : ` — ${connection.status}`}`,
+                    disabled: connection.status !== 'active',
+                  })),
+                ]}
+              />
+              {connectionsQuery.error !== null ? (
+                <ErrorPanel
+                  message={t('Provider connections are unavailable.')}
+                  onRetry={() => void connectionsQuery.refetch()}
+                />
+              ) : null}
+              <div className="admin-dialog-actions">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={outboundMutation.isPending || verifyMutation.isPending}
+                  onClick={() => {
+                    setConfigureTarget(null);
+                    setActionError(null);
+                  }}
+                >
+                  {t('Cancel')}
+                </Button>
+                <Button
+                  type="submit"
+                  loading={outboundMutation.isPending}
+                  disabled={
+                    connectionsQuery.isPending ||
+                    connectionsQuery.isError ||
+                    outboundMutation.isPending ||
+                    verifyMutation.isPending ||
+                    connectionId === (configureTarget.outboundConnectionId ?? '')
+                  }
+                >
+                  {t('Save')}
+                </Button>
+              </div>
+            </form>
+            <Card
+              title={t('Connect Cloudflare Email Routing')}
+              description={t('Point inbound mail for each managed domain to this Worker.')}
+            >
+              <div className="cloudflare-flow" data-testid="cloudflare-routing-flow">
+                <div className="cloudflare-flow-step">
+                  <span className="cloudflare-flow-index">1</span>
+                  <div>
+                    <strong>{t('Open Cloudflare')}</strong>
+                    <p>
+                      {t(
+                        'In Email Routing, choose the managed domain and route mail to this Worker.',
+                      )}
+                    </p>
+                    <a
+                      className="btn btn-secondary cloudflare-dashboard-link"
+                      href="https://dash.cloudflare.com"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Cloud aria-hidden="true" />
+                      {t('Open Cloudflare dashboard ')}
+                      <ExternalLink aria-hidden="true" />
+                    </a>
+                  </div>
+                </div>
+                <div className="cloudflare-flow-step">
+                  <span className="cloudflare-flow-index">2</span>
+                  <div>
+                    <strong>{t('Confirm the routing rule')}</strong>
+                    <p>{t('After saving the rule, confirm it for this domain.')}</p>
+                  </div>
+                </div>
+                <p className="configuration-note">
+                  {t(
+                    'Confirmation records the operator action. Delivery is proven when an inbound test email arrives.',
+                  )}
+                </p>
+              </div>
+            </Card>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => verifyMutation.mutate(configureTarget.id)}
+              loading={verifyMutation.isPending}
+              disabled={
+                verifyMutation.isPending ||
+                outboundMutation.isPending ||
+                routingConfirmed.has(configureTarget.id)
+              }
+              aria-label={t('Verify {value0}', { value0: configureTarget.name })}
+            >
+              {routingConfirmed.has(configureTarget.id) ? (
+                <>
+                  <CheckCircle2 aria-hidden="true" /> {t('Routing confirmed ')}
+                </>
+              ) : (
+                t('Confirm routing')
+              )}
+            </Button>
+            {notice !== null ? <p role="status">{notice}</p> : null}
+            {actionError !== null ? (
+              <ErrorPanel message={actionError.message} code={actionError.code} />
+            ) : null}
+          </div>
+        ) : null}
+      </EditorDialog>
       <AlertDialog
         open={deleteTarget !== null}
         name="Delete managed domain"

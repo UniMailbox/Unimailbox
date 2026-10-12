@@ -31,6 +31,7 @@ import type { UserListItem } from '@unimailbox/contracts';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { ApiError } from '../../infrastructure/api/errors';
+import { EditorDialog } from '../../components/ui/EditorDialog';
 import { Card } from '../../components/ui/Card';
 import { ErrorPanel } from '../../components/ui/ErrorPanel';
 import { Button } from '../../components/ui/Button';
@@ -71,6 +72,11 @@ export function UsersPage(): ReactElement {
   return <UsersContent />;
 }
 
+type UserAction =
+  | { readonly kind: 'create' }
+  | { readonly kind: 'reset'; readonly user: UserListItem }
+  | { readonly kind: 'status'; readonly user: UserListItem; readonly status: 'active' | 'banned' };
+
 function UsersContent(): ReactElement {
   const t = useT();
   const queryClient = useQueryClient();
@@ -80,16 +86,32 @@ function UsersContent(): ReactElement {
   const createMutation = useCreateAdminUserMutation();
   const resetMutation = useResetAdminUserPasswordMutation();
   const statusMutation = useUpdateAdminUserStatusMutation();
+  const [action, setAction] = useState<UserAction | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [mailboxIds, setMailboxIds] = useState<string[]>([]);
   const [accessUser, setAccessUser] = useState<UserListItem | null>(null);
   const [oneTimePassword, setOneTimePassword] = useState<{
-    readonly userId: string;
+    readonly email: string;
     readonly password: string;
     readonly expiresAt: string;
   } | null>(null);
   const [mutationError, setMutationError] = useState<ApiError | null>(null);
+
+  const busy = createMutation.isPending || resetMutation.isPending || statusMutation.isPending;
+  const closeAction = (): void => {
+    if (busy) return;
+    setAction(null);
+    setOneTimePassword(null);
+    setMutationError(null);
+    setEmail('');
+    setDisplayName('');
+    setMailboxIds([]);
+    createMutation.reset();
+    resetMutation.reset();
+    statusMutation.reset();
+  };
 
   const submitCreate = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -101,7 +123,7 @@ function UsersContent(): ReactElement {
         ...(displayName.trim() === '' ? {} : { displayName: displayName.trim() }),
       });
       setOneTimePassword({
-        userId: created.id,
+        email: created.email,
         password: created.initialPassword,
         expiresAt: created.initialPasswordExpiresAt,
       });
@@ -115,12 +137,12 @@ function UsersContent(): ReactElement {
     }
   };
 
-  const resetPassword = async (userId: string): Promise<void> => {
+  const resetPassword = async (user: UserListItem): Promise<void> => {
     setMutationError(null);
     try {
-      const reset = await resetMutation.mutateAsync(userId);
+      const reset = await resetMutation.mutateAsync(user.id);
       setOneTimePassword({
-        userId,
+        email: user.email,
         password: reset.initialPassword,
         expiresAt: reset.initialPasswordExpiresAt,
       });
@@ -137,6 +159,8 @@ function UsersContent(): ReactElement {
     setMutationError(null);
     try {
       await statusMutation.mutateAsync({ userId, status });
+      setAction(null);
+      setNotice(t(status === 'active' ? 'Account restored.' : 'Account deactivated.'));
     } catch (cause) {
       setMutationError(
         cause instanceof ApiError
@@ -225,67 +249,147 @@ function UsersContent(): ReactElement {
 
   return (
     <main className="admin-page" data-testid="admin-users-page">
-      <PageHeader title={t('Users')} />
-      <Card
-        title={t('Create account')}
-        description={t('The generated initial password is shown once and expires after 24 hours.')}
-      >
-        <form
-          onSubmit={(event) => void submitCreate(event)}
-          data-testid="admin-create-user-form"
-          noValidate
-        >
-          <Input
-            id="admin-user-email"
-            type="email"
-            label={t('Email')}
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-          <Input
-            id="admin-user-display-name"
-            label={t('Display name')}
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-          />
-          <InitialMailboxAssignments
-            selected={mailboxIds}
-            onChange={setMailboxIds}
-            disabled={createMutation.isPending}
-          />
+      <PageHeader
+        title={t('Users')}
+        actions={
           <Button
-            type="submit"
-            loading={createMutation.isPending}
-            disabled={createMutation.isPending || email.trim() === ''}
+            onClick={() => {
+              setMutationError(null);
+              setAction({ kind: 'create' });
+            }}
           >
-            {createMutation.isPending ? t('Creating…') : t('Create account')}
+            {t('Create account')}
           </Button>
-        </form>
-      </Card>
-      {mutationError !== null ? (
-        <div className="admin-error-banner" role="alert" data-testid="admin-user-mutation-error">
-          <p>{mutationError.message}</p>
-          <span data-testid="error-code">{mutationError.code}</span>
-        </div>
+        }
+      />
+      {notice !== null ? (
+        <p role="status" className="admin-success">
+          {notice}
+        </p>
       ) : null}
-      {oneTimePassword !== null ? (
-        <Card
-          title={t('Initial password')}
-          description={t('Copy this password now. It will not be shown again.')}
-        >
-          <p data-testid="admin-one-time-password">
-            <code>{oneTimePassword.password}</code>
-          </p>
-          <p>
-            {t('Expires: ')}
-            <LocalDateTime value={oneTimePassword.expiresAt} />
-          </p>
-          <Button type="button" variant="secondary" onClick={() => setOneTimePassword(null)}>
-            {t('Close')}
-          </Button>
-        </Card>
-      ) : null}
+      <EditorDialog
+        open={action !== null}
+        onOpenChange={(open) => {
+          if (!open) closeAction();
+        }}
+        title={t(
+          oneTimePassword !== null
+            ? 'Initial password'
+            : action?.kind === 'reset'
+              ? 'Reset password'
+              : action?.kind === 'status'
+                ? action.status === 'banned'
+                  ? 'Deactivate account'
+                  : 'Restore account'
+                : 'Create account',
+        )}
+        description={
+          oneTimePassword !== null
+            ? oneTimePassword.email
+            : action?.kind === 'create'
+              ? t('The generated initial password is shown once and expires after 24 hours.')
+              : (action?.user.email ?? '')
+        }
+        compact={action?.kind !== 'create' || oneTimePassword !== null}
+      >
+        {oneTimePassword !== null ? (
+          <div className="admin-dialog-form">
+            <p>{t('Copy this password now. It will not be shown again.')}</p>
+            <p data-testid="admin-one-time-password">
+              <code>{oneTimePassword.password}</code>
+            </p>
+            <p>
+              {t('Expires: ')}
+              <LocalDateTime value={oneTimePassword.expiresAt} />
+            </p>
+            <Button onClick={closeAction}>{t('Done')}</Button>
+          </div>
+        ) : action?.kind === 'create' ? (
+          <form
+            onSubmit={(event) => void submitCreate(event)}
+            className="admin-dialog-form"
+            data-testid="admin-create-user-form"
+            noValidate
+          >
+            <fieldset disabled={createMutation.isPending}>
+              <Input
+                id="admin-user-email"
+                type="email"
+                label={t('Email')}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+              <Input
+                id="admin-user-display-name"
+                label={t('Display name')}
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+              <InitialMailboxAssignments
+                selected={mailboxIds}
+                onChange={setMailboxIds}
+                disabled={createMutation.isPending}
+              />
+            </fieldset>
+            <div className="admin-dialog-actions">
+              <Button type="button" variant="secondary" disabled={busy} onClick={closeAction}>
+                {t('Cancel')}
+              </Button>
+              <Button
+                type="submit"
+                loading={createMutation.isPending}
+                disabled={createMutation.isPending || email.trim() === ''}
+              >
+                {createMutation.isPending ? t('Creating…') : t('Create account')}
+              </Button>
+            </div>
+          </form>
+        ) : action !== null ? (
+          <div className="admin-dialog-form">
+            <p>
+              {t(
+                action.kind === 'reset'
+                  ? 'Resetting the password ends existing sessions. A new initial password will be shown once.'
+                  : action.status === 'banned'
+                    ? 'Deactivating this account ends its sessions and prevents sign-in.'
+                    : 'Restore this account so the user can sign in again.',
+              )}
+            </p>
+            <div className="admin-dialog-actions">
+              <Button type="button" variant="secondary" disabled={busy} onClick={closeAction}>
+                {t('Cancel')}
+              </Button>
+              <Button
+                variant={
+                  action.kind === 'status' && action.status === 'banned' ? 'danger' : 'primary'
+                }
+                loading={resetMutation.isPending || statusMutation.isPending}
+                disabled={resetMutation.isPending || statusMutation.isPending}
+                onClick={() =>
+                  action.kind === 'reset'
+                    ? void resetPassword(action.user)
+                    : void changeStatus(action.user.id, action.status)
+                }
+              >
+                {t(
+                  action.kind === 'reset'
+                    ? 'Reset password'
+                    : action.status === 'banned'
+                      ? 'Deactivate'
+                      : 'Restore',
+                )}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        {mutationError !== null ? (
+          <div className="admin-error-banner" role="alert" data-testid="admin-user-mutation-error">
+            <p>{mutationError.message}</p>
+            <span data-testid="error-code">{mutationError.code}</span>
+          </div>
+        ) : null}
+      </EditorDialog>
       {accessUser !== null ? (
         <UserMailboxAccessPanel
           key={accessUser.id}
@@ -347,8 +451,14 @@ function UsersContent(): ReactElement {
                     isCurrentUser={item.id === sessionQuery.data?.userId}
                     busy={resetMutation.isPending || statusMutation.isPending}
                     onMailboxAccess={() => setAccessUser(item)}
-                    onReset={() => void resetPassword(item.id)}
-                    onStatusChange={(status) => void changeStatus(item.id, status)}
+                    onReset={() => {
+                      setMutationError(null);
+                      setAction({ kind: 'reset', user: item });
+                    }}
+                    onStatusChange={(status) => {
+                      setMutationError(null);
+                      setAction({ kind: 'status', user: item, status });
+                    }}
                   />
                 ))}
               </TableBody>
