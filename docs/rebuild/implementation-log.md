@@ -4328,3 +4328,29 @@ confirmed English/Chinese notices, manual checks, links and no mobile overflow.
 Self-review only. Public latest-release API returned 404; no stable release exists
 to announce. No source commit/push, Release publication, deployment or private
 mail/provider changes. See [handoff](../../work/handoffs/upstream-update-notifications-2026-10-12.md).
+
+
+## 2026-10-12 — Publish first stable source Release 1.0.0
+
+Commit the prepared public installation guides and upstream update checks together
+with the reviewed administration/AI work. Set APPLICATION_VERSION to 1.0.0 and
+publish immutable v1.0.0 at `847b8e60d5b5386764d5172176ef9a2955602bc6` on upstream
+main. The official draft workflow validated main ancestry and product/tag equality,
+ran the full gate and created the draft. Reviewed notes were then published as
+Latest at 19:28:58 Asia/Shanghai. Public latest-release metadata and exact note
+content were verified. Main/tag Verify, secret scanning and main CodeQL passed.
+
+The clean canonical staging flow passed 2,368 tests (1,357 non-Worker, 987 Worker,
+24 migration fixtures); all 34 remote migration companions passed, none applied.
+Staging application revision `25e1059`, Worker `01d1bd24-80b1-473c-be4f-2edc16d4765f`,
+source digest and eight served page chunks matched; nine anonymous admin paths
+rejected access. The tag's later changes were documentation-only. Recovery
+metadata remains protected privately. No additional real-account mutation,
+provider/delivery test or production deployment was performed for publication.
+
+GitHub surfaced existing dependency advisories. Fresh pnpm audit reported one
+critical, 13 high, 18 moderate and four low findings. Their dependency paths,
+unresolved status and lack of a deployed exploitability assessment are recorded
+in [release QA](../qa/release-1.0.0-2026-10-12.md) and the public release notes.
+Dependency upgrades are outside this publication change. Local links, Actionlint,
+diff and redacted staged/all-history secret scans passed. Self-review only.

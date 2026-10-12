@@ -1,7 +1,8 @@
 # Upstream update notifications — 2026-10-12
 
-Implemented locally; self-review only. No source commit/push, GitHub Release,
-Cloudflare publication, provider action or private mail change for this work.
+Historical implementation evidence below records the original local scope and
+self-review. Publication completed later on 2026-10-12; see
+[1.0.0 release QA](../../docs/qa/release-1.0.0-2026-10-12.md).
 
 ## Behavior
 
@@ -60,11 +61,14 @@ selector work. Did not edit those parallel source/style changes or their tests.
 - Public GitHub latest-release endpoint returned 404; authenticated release
   listing returned no releases on 2026-10-12. API version 2026-03-10 was accepted.
 
-## Remaining publication boundary
+## Publication follow-up
 
-Review and merge the source/docs. Choose a first stable product version, update
-`APPLICATION_VERSION` from its `0.0.0` baseline, tag the reviewed upstream main
-commit, and publish the resulting draft with complete upgrade notes after runtime
-acceptance. Actual workflow execution and notification delivery are unverified.
-Deploying this code is required before existing installations display the panel.
-The mechanism currently contains no actual stable Release to announce.
+Source and reviewed deployment/update documentation were committed and pushed to
+upstream main. Product version is 1.0.0. The immutable v1.0.0 tag matches main's
+reviewed release commit; its complete GitHub gate created a draft, which was
+published with reviewed notes as Latest. The matching application code/assets
+are deployed to staging; no production deployment was performed for this release.
+
+Actual notification delivery and an authenticated live administrator-panel check
+remain unverified. The dependency audit has unresolved advisories recorded in
+release QA and the public notes; functional/secret scans are not security clearance.

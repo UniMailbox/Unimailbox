@@ -56,3 +56,21 @@ demonstrated. Dependency remediation and regression checks remain outstanding.
 Private evidence is under `.tmp/release-100-*`; the recovery manifest is in
 `.tmp/release-100-recovery/release.json`. Raw logs, credentials and artifacts are
 excluded from Git.
+
+## Completed GitHub publication
+
+- Stable [Unimailbox 1.0.0](https://github.com/UniMailbox/Unimailbox/releases/tag/v1.0.0)
+  published at 2026-10-12 19:28:58 Asia/Shanghai. Public `releases/latest` returns
+  `v1.0.0`, `draft: false`, `prerelease: false`; body matches the reviewed notes.
+- Annotated tag `v1.0.0` resolves to `847b8e60d5b5386764d5172176ef9a2955602bc6`,
+  the reviewed main commit. Its only changes since the staging application
+  revision are the release notes and this QA record. No tag was moved.
+- [Draft release workflow](https://github.com/UniMailbox/Unimailbox/actions/runs/38242008491)
+  passed main ancestry, the full gate, tag/version matching and draft creation.
+- [Main Verify](https://github.com/UniMailbox/Unimailbox/actions/runs/38241975450)
+  and [tag Verify](https://github.com/UniMailbox/Unimailbox/actions/runs/38242008574)
+  passed. Main CI independently reports 1,357 + 987 + 24 = 2,368 passing tests.
+- Main/tag secret scans and main CodeQL passed. Existing dependency advisories
+  above remain unresolved; those checks do not establish security clearance.
+- Publication creates source archives and Release metadata. It does not deploy
+  production or verify GitHub notification delivery or external mail receipt.
