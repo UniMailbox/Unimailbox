@@ -10,6 +10,7 @@ import { adminNavigation } from '../../components/layouts/AppShell';
 import { adminDomainsQuery, adminOverviewQuery } from './admin-queries';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
+import { UpdatePanel } from './UpdatePanel';
 export function AdminLandingPage(): ReactElement {
   const t = useT();
   const session = authSessionQuery();
@@ -34,6 +35,7 @@ export function AdminLandingPage(): ReactElement {
   return (
     <main className="admin-page" data-testid="admin-landing">
       <PageHeader title={t('Overview')} />
+      <UpdatePanel />
       <Card title={t('Mailbox overview')}>
         <div className="overview-toolbar">
           <div className="overview-scope-field">

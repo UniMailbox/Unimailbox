@@ -23,6 +23,8 @@ export type Env = Omit<
   VERSION?: WorkerVersionMetadata;
   RELEASE_SHA?: string;
   RELEASE_TREE?: string;
+  /** Set to "false" to disable anonymous GitHub release checks. */
+  UPDATE_CHECK_ENABLED?: string;
   APP_ORIGIN?: string;
   /** Domain-scoped fallback for unknown inbound envelope recipients. */
   INBOUND_CATCH_ALL_MAILBOX?: string;

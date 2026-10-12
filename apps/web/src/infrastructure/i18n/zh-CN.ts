@@ -1,4 +1,21 @@
 export const zhCN: Readonly<Record<string, string>> = {
+  'Software updates': '软件更新',
+  'Check for updates': '检查更新',
+  'Checking for updates…': '正在检查更新…',
+  'Release notes': '版本说明',
+  'Upgrade guide': '升级指南',
+  'Last checked': '上次检查',
+  'Installed base version: {version}': '当前基础版本：{version}',
+  'Revision: {revision}': '提交：{revision}',
+  'A new version is available: {version}.': '有新版本可用：{version}。',
+  'You are running the latest stable version.': '当前已是最新稳定版本。',
+  'This installation is ahead of the latest stable release.': '当前安装版本高于最新稳定版本。',
+  'No stable release has been published yet.': '暂未发布稳定版本。',
+  'Could not check for updates. Try again later or view GitHub releases.':
+    '无法检查更新。请稍后重试或查看 GitHub 发布页面。',
+  'Update checks are disabled for this installation.': '当前安装已关闭更新检查。',
+  'Review release notes and back up your data before upgrading. Fork changes require review.':
+    '升级前请阅读版本说明并备份数据；fork 的自定义改动需要单独检查。',
   'AI services': 'AI 服务',
   'AI backend': 'AI 后端',
   'Configure AI backends and email reply assistance.': '配置 AI 服务后端与邮件回复辅助。',

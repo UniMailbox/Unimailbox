@@ -1,0 +1,53 @@
+name: Draft upstream release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    # Forks use upstream releases for notifications; never publish on their behalf.
+    if: github.repository == 'UniMailbox/Unimailbox'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a commit on the upstream main history
+        run: git merge-base --is-ancestor HEAD origin/main
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - name: Validate the stable product version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'JS'
+          import { APPLICATION_VERSION, releaseTagSchema } from './packages/contracts/dist/release.js';
+          const tag = releaseTagSchema.parse(process.env.RELEASE_TAG);
+          if (APPLICATION_VERSION === '0.0.0' || tag !== `v${APPLICATION_VERSION}`) {
+            throw new Error('Release tag must match a non-development APPLICATION_VERSION.');
+          }
+          JS
+      - name: Create a draft for release-note review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo UniMailbox/Unimailbox >/dev/null 2>&1; then
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" --repo UniMailbox/Unimailbox \
+            --verify-tag --draft --title "$RELEASE_TAG" --generate-notes \
+            --notes 'Before upgrading, read [the upgrade guide](https://github.com/UniMailbox/Unimailbox/blob/main/docs/operations/updates.md).'

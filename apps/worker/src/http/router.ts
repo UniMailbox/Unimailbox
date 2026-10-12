@@ -41,6 +41,7 @@ import { adminAiRoutes } from './routes/admin-ai';
 import { aiReplyRoutes } from './routes/ai-reply';
 import { adminSettingsRoutes } from './routes/admin-settings';
 import { adminOverviewRoutes } from './routes/admin-overview';
+import { adminUpdateRoutes } from './routes/admin-updates';
 import { adminUserMailboxRoutes } from './routes/admin-user-mailboxes';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
@@ -123,6 +124,7 @@ export function buildRouter(): Hono<AppEnv> {
   apiV1.route('/', adminSettingsRoutes());
   apiV1.route('/', adminAiRoutes());
   apiV1.route('/', adminOverviewRoutes());
+  apiV1.route('/', adminUpdateRoutes());
 
   // CAP-020: Mailbox routes.
   apiV1.route('/', mailboxRoutes());
