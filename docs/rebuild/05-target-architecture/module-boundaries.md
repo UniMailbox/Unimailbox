@@ -24,6 +24,7 @@ additional permitted dependencies; a permitted edge need not be used today.
 | editor-assets | None |
 | signatures | tenancy, editor-assets |
 | admin | identity, tenancy, messages, outbound-mail |
+| ai | None; configuration loader and AI adapter contracts wired by app-context |
 | installation | identity, tenancy, admin |
 | maintenance | messages, tenancy, attachments |
 
@@ -60,9 +61,17 @@ The full pairwise dependency policy also requires code review.
 | Domain signatures | signatures, D1, with editor-asset usage references |
 | Jobs, provider connections, encrypted credentials and webhook state | outbound-mail, D1 |
 | Roles, permissions, settings, audit, blocklists and role policies | admin, D1 |
+| AI configuration and encrypted AI credentials | admin, D1; AI adapters and service wired by app-context |
 | Idempotency infrastructure | platform helpers; business modules batch their records with writes |
 
 Resource cleanup goes through these ownership boundaries. Published editor
 usages protect historical mail; private incoming attachments retain mailbox
 authorization. See [editor storage](../16-email-editor-storage.md) and
 [storage decision](../14-durable-object-mailbox-adr.md).
+
+AI service details and configuration semantics: [AI service foundation](../18-ai-service-foundation.md).
+
+Email AI reply orchestration belongs to messages. Its AI service and audit writer
+are neutral contracts supplied by HTTP composition, without dependencies on the
+AI/admin modules or SDKs. The use case checks source mailbox authorization,
+reserves paid inference idempotency, and settles response plus audit together.

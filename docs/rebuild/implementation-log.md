@@ -4126,3 +4126,26 @@ build and 2217 tests. Current files and all reachable history passed reviewed
 secret scanning; known private deployment credentials did not appear in Git.
 See [repository QA](../qa/repository-hygiene-2026-10-10.md) for scope and limits.
 Shared Git history, live Cloudflare resources and production data are preserved.
+
+## 2026-10-12 — Configurable AI service and email reply assistance
+
+Add a neutral AI service with native Cloudflare Workers AI and official Anthropic/
+OpenAI SDK adapters, text/validated structured output, bounded inference, sanitized
+errors and optional native binding. Admin owns migration 0034, encrypted AI
+credentials, revision-checked/idempotent saves and safe read metadata. The new
+Admin → AI services page is independent of general settings.
+
+Add reply/draft assistance to the composer: optional instructions, separate
+preview and explicit insertion, preserving recipients/threading and keeping
+model text escaped in the real rich editor. The messages use case reads source
+mail under global and mailbox read/send permissions. Paid inference reserves
+its idempotency key before calling the backend; outcome and content-free audit
+settle together. Same-key concurrent, failed or unknown outcomes do not repeat
+inference automatically. The feature never sends or schedules mail itself.
+
+Local `pnpm verify` passed 14 scaffold checks, generated types, lint, TypeScript,
+web/Worker builds and 2,299 tests (1,305 unit/Web/contracts/scripts, 971 Worker,
+23 migration fixtures). Desktop/mobile browser checks use synthetic local APIs
+and the real Tiptap editor; they do not prove live model inference or delivery.
+No deployment or production migration occurred. See [AI design](18-ai-service-foundation.md)
+and [handoff](../../work/handoffs/ai-service-and-reply-2026-10-12.md).

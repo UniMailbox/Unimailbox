@@ -55,3 +55,5 @@ old and rebuilt schema histories are incompatible; never apply the rebuilt
 migrations directly to a legacy installation.
 
 Agent conventions live in [CLAUDE.md](../../CLAUDE.md) and `.claude/`.
+
+- [18. AI service foundation](18-ai-service-foundation.md) — selectable protocols, administrator configuration and unified inference seam.
