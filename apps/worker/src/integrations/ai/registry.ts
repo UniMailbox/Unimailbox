@@ -36,6 +36,23 @@ function invalidResponse(): DomainError {
     httpStatus: 502,
   });
 }
+function finalAnswer(text: string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  let depth = 0;
+  // Compatible backends may inline reasoning instead of using a separate field.
+  // Track nesting and discard unfinished blocks so reasoning cannot reach mail.
+  for (const tag of text.matchAll(/<\/?think\s*>/gi)) {
+    if (depth === 0) parts.push(text.slice(cursor, tag.index));
+    if (tag[0].startsWith('</')) {
+      if (depth === 0) throw invalidResponse();
+      depth--;
+    } else depth++;
+    cursor = tag.index + tag[0].length;
+  }
+  if (depth === 0) parts.push(text.slice(cursor));
+  return parts.join('').trim();
+}
 function result(
   protocol: AiProtocol,
   model: string,
@@ -45,6 +62,8 @@ function result(
   outputTokens: number | null,
   request: AiGenerateRequest,
 ): AiGenerateResult {
+  // Preserve literal strings inside validated JSON; this cleanup is for text.
+  if (request.output.type === 'text') text = finalAnswer(text);
   if (
     !z.string().min(1).safeParse(model).success ||
     !z.string().min(1).safeParse(text).success ||

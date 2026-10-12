@@ -24,11 +24,11 @@ const body = {
 };
 const now = '2026-01-01 00:00:00';
 const upstreamReply = 'Thank you. When will it arrive?';
-const result = () =>
+const result = (text = upstreamReply) =>
   Response.json({
     id: 'fixture',
     model: 'fixture-model',
-    choices: [{ message: { role: 'assistant', content: upstreamReply }, finish_reason: 'stop' }],
+    choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
     usage: { prompt_tokens: 20, completion_tokens: 10 },
   });
 let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
@@ -206,6 +206,26 @@ describe('AI email reply HTTP in workerd (synthetic upstream)', () => {
         }>()
       )?.count,
     ).toBe(0);
+  });
+  it('removes inline reasoning before the reply response and idempotency replay', async () => {
+    const reasoning = 'Synthetic private reasoning that must not reach the editor.';
+    const upstream = mockUpstream(async () =>
+      result(`<think>${reasoning}</think>\n${upstreamReply}`),
+    );
+    const key = 'fixture-clean-final-answer';
+    const first = await post({ key });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ data: { text: upstreamReply } });
+    const replay = await post({ key });
+    expect(await replay.json()).toEqual({ data: { text: upstreamReply } });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    const cached = await env.DB.prepare(
+      'SELECT response_json FROM idempotency_records WHERE idempotency_key = ?',
+    )
+      .bind(key)
+      .first<{ response_json: string }>();
+    expect(cached?.response_json).not.toContain(reasoning);
+    expect(cached?.response_json).not.toContain('<think>');
   });
   for (const role of ['sender', 'admin'])
     it(`R-AUTHZ-003 allows mailbox ${role}`, async () => {

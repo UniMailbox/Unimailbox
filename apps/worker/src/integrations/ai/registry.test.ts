@@ -189,3 +189,46 @@ describe('Workers AI adapter', () => {
     ).rejects.toMatchObject({ code: 'AI_INVALID_RESPONSE' });
   });
 });
+
+describe('AI final-answer text', () => {
+  for (const protocol of ['workers-ai', 'openai', 'anthropic'] as const) {
+    const generate = async (text: string, input = request) => {
+      const adapters = createAiAdapters(
+        { run: async () => ({ response: text }) } as unknown as Ai,
+        async () =>
+          Response.json(protocol === 'openai' ? openaiResponse(text) : anthropicResponse(text)),
+      );
+      return adapters[protocol].generate(
+        { ...DEFAULT_AI_CONFIGURATION, protocol, model: 'test-model' },
+        'test-key',
+        input,
+        signal,
+      );
+    };
+    it(`${protocol} removes reasoning blocks and preserves only the email body`, async () => {
+      for (const text of [
+        '<think>Private reasoning\nover multiple lines.</think>\n\nHello <team>,\nThanks & regards.',
+        '<THINK >outer<think>nested</think>reasoning</THINK>\nHello <team>,\nThanks & regards.',
+        'Hello <team>,<think>first</think>\nThanks & regards.<think>second</think>',
+        'Hello <team>,\nThanks & regards.<think>unfinished reasoning',
+        'Hello <team>,\nThanks & regards.',
+      ]) {
+        expect((await generate(text)).text).toBe('Hello <team>,\nThanks & regards.');
+      }
+    });
+    it(`${protocol} rejects reasoning-only or malformed final answers`, async () => {
+      for (const text of [
+        '<think>reasoning</think>\n ',
+        '<think>unfinished',
+        'reasoning</think>OK',
+      ]) {
+        await expect(generate(text)).rejects.toMatchObject({ code: 'AI_INVALID_RESPONSE' });
+      }
+    });
+    it(`${protocol} preserves literal think tags in structured JSON`, async () => {
+      expect((await generate('{"answer":"<think>literal</think>"}', structured)).json).toEqual({
+        answer: '<think>literal</think>',
+      });
+    });
+  }
+});
