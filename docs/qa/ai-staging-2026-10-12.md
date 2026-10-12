@@ -64,3 +64,29 @@ one live configured MiniMax generation through the deployed Worker, not model
 output quality or structured-output compatibility. The operation sent no email.
 No source change or Worker redeployment was necessary for this configuration fix.
 The temporary diagnostic login session was revoked after verification.
+
+
+## Final-answer filtering — 2026-10-12
+
+The next user report confirmed successful inference but requested removal of
+inline thinking. Fix `6e147c58fa22b66b251ee34d274f793e17c8f9ca` normalizes text
+in the shared adapter result before composer preview, insertion and idempotency
+settlement. Closed, nested, mixed-case and unfinished `<think>` blocks are
+removed. Reasoning-only and orphan-closing output fail explicitly. Structured
+JSON retains literal strings rather than applying text cleanup inside values.
+
+The canonical staging release passed 2,310 tests (1,314 unit/frontend/contracts/
+scripts, 972 Worker, 24 migration fixtures), doctor 14/14, generated types, lint,
+TypeScript and builds. The Worker regression verifies both first response and
+idempotency replay contain only the body and do not cache reasoning. All 34 remote
+schema companions passed; no migration was applied in this release.
+
+Worker version `7747f536-f15e-42c5-a0a7-41d0c53be2b2` passed release smoke at the
+staging origin, matching source digest
+`b8752a8c81c4d20ed14cf4e7aaf5cd25f9e713012ec15a498de10c7bbbb37ce9`.
+A live configured MiniMax draft request with synthetic context returned HTTP 200,
+exact final text `OK` (two characters), no think tags, in approximately 15.6 seconds.
+Configuration stayed at revision 2. No source email was read or message sent;
+the temporary diagnostic login session was revoked. This is text normalization
+acceptance, not general model-quality or structured-output acceptance. Existing
+previously inserted draft text and earlier replay records are not rewritten.

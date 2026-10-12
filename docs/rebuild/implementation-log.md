@@ -4183,3 +4183,20 @@ read and no message was sent. The temporary diagnostic session was revoked.
 This is live MiniMax text-inference evidence, while structured-output/model-quality
 and generated-mail delivery acceptance remain open. No Worker redeployment was
 needed. See [staging QA recovery](../qa/ai-staging-2026-10-12.md).
+
+
+## 2026-10-12 — Remove inline AI reasoning from email bodies
+
+Fix `6e147c5` removes `<think>` content from the shared adapter's plain-text
+result. The parser handles nesting, case differences and unfinished reasoning;
+empty/malformed final answers fail explicitly. Structured JSON retains literal
+tag strings. Worker HTTP tests confirm clean response and replay storage, with
+one inference call. Existing drafts and old replay data are not rewritten.
+
+The canonical staging release passed doctor 14/14, generated types, lint,
+TypeScript, build and 2,310 tests (1,314 unit/frontend/contracts/scripts,
+972 Worker, 24 migration fixtures), plus all 34 remote schema companions.
+Version `7747f536-f15e-42c5-a0a7-41d0c53be2b2` passed release smoke. A synthetic
+live MiniMax request returned 200 with exactly `OK`, no think tags, in 15.6 seconds.
+The diagnostic session was revoked and no message sent. See
+[staging QA](../qa/ai-staging-2026-10-12.md).

@@ -60,3 +60,14 @@ API (revision 2, existing credential preserved). See the QA recovery section.
 Real-provider structured output, output quality and email delivery using generated
 content remain unverified. SDK backends require an administrator-owned credential.
 Feature source is committed as `850e0d7`, with migration fix `5f85a35`.
+
+
+## Final-answer filtering follow-up
+
+Fix `6e147c5` removes inline thinking in the shared text adapter result before
+preview/insertion and idempotency settlement. Nested, mixed-case and unfinished
+think blocks are covered; reasoning-only output is rejected. Literal strings in
+structured JSON stay unchanged. The canonical staging gate passed 2,310 tests and
+all 34 remote schema companions. Version `7747f536-f15e-42c5-a0a7-41d0c53be2b2`
+passed release smoke and a live synthetic MiniMax request returned exactly `OK`
+without think tags. No email was sent. See the QA final-answer section for scope.

@@ -59,6 +59,12 @@ const response = await buildAppContext(env).ai.generate({
 The result contains `protocol`, `model`, `text`, `json`, `finishReason` and
 `usage: { inputTokens, outputTokens }`. Missing native usage is `null`, not zero.
 Native Workers AI does not reliably supply a finish reason, so it is `null`.
+For plain-text generation, adapters remove inline `<think>…</think>` reasoning
+before returning the result. Nested, case-insensitive and unfinished blocks are
+handled; reasoning-only or orphan-closing-tag output fails as `AI_INVALID_RESPONSE`.
+This ensures composer preview/insertion and new idempotency records contain only
+the final body. Separate SDK reasoning fields/blocks are never merged into text.
+Structured JSON retains literal tag strings and still requires schema validation.
 
 Structured output is requested per business call, not as a global business schema:
 
