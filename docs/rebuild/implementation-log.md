@@ -4228,3 +4228,20 @@ mailbox's send access, read-only downgrade, Chinese text, desktop/mobile layouts
 and ordinary-user navigation. No production/staging publication, remote data
 change or migration occurred. Self-review only; no independent agent review.
 See [handoff](../../work/handoffs/user-mailbox-access-2026-10-12.md).
+
+
+## 2026-10-12 — User mailbox access staging release
+
+Commit feature `e5b1941` and rules/handoff `7bd65c6`, then publish staging through
+`pnpm deploy:staging`. The canonical gate passed doctor 14/14, generated types,
+lint, TypeScript, web/Worker builds and 2,323 tests (1,319 non-Worker, 980 Worker,
+24 migration fixtures). Both staged commits passed redacted Gitleaks checks.
+All 34 remote migration companions passed; no migration was applied.
+
+Version `ce628a61-f6a0-4785-9b36-7ce9120ac776` passed release smoke. Independent
+HTTP checks confirmed health/readiness at revision `7bd65c6`, schema 0034,
+matching source digest, 401/no-store on the new grant reads/write and legacy
+membership read, and published assignment controls/Chinese text. Authenticated
+real-account creation/grant edits were not exercised; no verification grants,
+mail content or provider configuration were changed. No production publication
+or source push. See [staging QA](../qa/user-mailbox-access-staging-2026-10-12.md).

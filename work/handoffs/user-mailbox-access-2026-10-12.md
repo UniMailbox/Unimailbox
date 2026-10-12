@@ -4,7 +4,8 @@
 
 Branch: `codex/admin-user-mailbox-access`, started from clean
 `codex/leanda-mail-production` at `3a9d411`. Feature commit: `e5b1941`.
-Staging publication is now authorized and in progress; source has not been pushed.
+Staging published from revision `7bd65c6`; source has not been pushed.
+See [staging QA](../../docs/qa/user-mailbox-access-staging-2026-10-12.md).
 
 - Mailbox sidebar and inbox header no longer link to member management.
   Legacy `/mailbox/:id/members` bookmarks redirect administrators to Admin Users;
@@ -73,8 +74,10 @@ password were synthetic only; no real account or mail access was changed.
 
 ## Acceptance boundary
 
-No production/staging deployment or authenticated remote browser acceptance was
-performed. Publish through the canonical release workflow when authorized, then
-repeat real admin creation, grant edit/revoke and ordinary-user denied cases.
+Staging publication and independent HTTP smoke passed on 2026-10-12; all 34
+remote migration companions passed without applying a migration. Worker version:
+`ce628a61-f6a0-4785-9b36-7ce9120ac776`. Authenticated staging creation, grant
+edit/revoke and ordinary-user denied cases still need real-account acceptance.
+Production was not published.
 Existing read-only/send grants remain unchanged; the full-access default applies
 to mailboxes explicitly selected during new account creation.
