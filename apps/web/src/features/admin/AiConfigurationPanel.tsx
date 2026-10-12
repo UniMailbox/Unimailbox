@@ -8,7 +8,8 @@ import {
 import { useT } from '../../infrastructure/i18n/locale';
 import { useApiClient } from '../../infrastructure/api/client-provider';
 import { ApiError } from '../../infrastructure/api/errors';
-import { ConfigurationSection } from '../../components/ui/ConfigurationSection';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { Card } from '../../components/ui/Card';
 import { EditorDialog } from '../../components/ui/EditorDialog';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
@@ -28,6 +29,7 @@ export function AiConfigurationPanel(): ReactElement {
   const [form, setForm] = useState<AiConfiguration | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [clearKey, setClearKey] = useState(false);
+  const [enabledBeforeKeyRemoval, setEnabledBeforeKeyRemoval] = useState(false);
   const [revision, setRevision] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
@@ -79,15 +81,31 @@ export function AiConfigurationPanel(): ReactElement {
     setMessage(null);
     save.mutate();
   };
-  if (query.isPending) return <p role="status">{t('Loading AI configuration…')}</p>;
+  const header = (actions?: ReactElement): ReactElement => (
+    <PageHeader
+      title={t('AI services')}
+      description={t('Configure the AI backend used to draft email replies.')}
+      actions={actions}
+    />
+  );
+  if (query.isPending)
+    return (
+      <>
+        {header()}
+        <p role="status">{t('Loading AI configuration…')}</p>
+      </>
+    );
   if (query.isError)
     return (
-      <div role="alert">
-        {t('Could not load AI configuration.')}{' '}
-        <Button variant="secondary" onClick={() => void query.refetch()}>
-          {t('Retry')}
-        </Button>
-      </div>
+      <>
+        {header()}
+        <div role="alert">
+          {t('Could not load AI configuration.')}{' '}
+          <Button variant="secondary" onClick={() => void query.refetch()}>
+            {t('Retry')}
+          </Button>
+        </div>
+      </>
     );
   if (!form || !query.data) return <></>;
   const canManage = query.data.canManage;
@@ -95,41 +113,41 @@ export function AiConfigurationPanel(): ReactElement {
     form.protocol !== query.data.configuration.protocol ||
     form.baseUrl !== query.data.configuration.baseUrl;
   return (
-    <ConfigurationSection
-      title={t('AI backend')}
-      description={t('Configure the AI backend used to draft email replies.')}
-    >
-      <dl className="admin-configuration-summary">
-        {[
-          [t('Enable AI service'), t(query.data.configuration.enabled ? 'Enabled' : 'Disabled')],
-          [t('API protocol'), query.data.configuration.protocol],
-          [t('Model ID'), query.data.configuration.model],
-          [t('Service base URL'), query.data.configuration.baseUrl ?? t('Default')],
-          ['API Key', t(query.data.hasApiKey ? 'Configured' : 'Not configured')],
-          [t('Maximum output tokens'), query.data.configuration.maxOutputTokens],
-          [t('Timeout in milliseconds'), query.data.configuration.timeoutMs],
-        ].map(([label, value]) => (
-          <div key={String(label)}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-      {canManage ? (
-        <Button
-          onClick={() => {
-            setForm(query.data.configuration);
-            setRevision(query.data.revision);
-            setMessage(null);
-            setConflict(false);
-            setEditing(true);
-          }}
-        >
-          {t('Edit AI configuration')}
-        </Button>
-      ) : (
-        <p>{t('Read-only access. Ask an administrator to make changes.')}</p>
+    <>
+      {header(
+        canManage ? (
+          <Button
+            onClick={() => {
+              setForm(query.data.configuration);
+              setRevision(query.data.revision);
+              setMessage(null);
+              setConflict(false);
+              setEditing(true);
+            }}
+          >
+            {t('Edit AI configuration')}
+          </Button>
+        ) : undefined,
       )}
+      <Card>
+        <dl className="admin-configuration-summary">
+          {[
+            [t('Enable AI service'), t(query.data.configuration.enabled ? 'Enabled' : 'Disabled')],
+            [t('API protocol'), query.data.configuration.protocol],
+            [t('Model ID'), query.data.configuration.model],
+            [t('Service base URL'), query.data.configuration.baseUrl ?? t('Default')],
+            ['API Key', t(query.data.hasApiKey ? 'Configured' : 'Not configured')],
+            [t('Maximum output tokens'), query.data.configuration.maxOutputTokens],
+            [t('Timeout in milliseconds'), query.data.configuration.timeoutMs],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {!canManage ? <p>{t('Read-only access. Ask an administrator to make changes.')}</p> : null}
+      </Card>
       {!editing && message ? <p role="status">{message}</p> : null}
       <EditorDialog
         open={editing}
@@ -210,34 +228,50 @@ export function AiConfigurationPanel(): ReactElement {
                     setApiKey('');
                   }}
                 />
-                <Input
-                  id="ai-api-key"
-                  label="API Key"
-                  type="password"
-                  autoComplete="new-password"
-                  value={apiKey}
-                  onChange={(event) => {
-                    setApiKey(event.target.value);
-                    setClearKey(false);
-                  }}
-                  help={
-                    !destinationChanged && query.data.hasApiKey && !clearKey
-                      ? t('API key saved. Leave empty to keep it.')
-                      : t('Enter an API key for this backend.')
-                  }
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    setClearKey(true);
-                    setApiKey('');
-                    setForm({ ...form, enabled: false });
-                  }}
-                >
-                  {t('Remove saved API key')}
-                </Button>
-                {clearKey ? <p role="status">{t('API key will be removed when saved.')}</p> : null}
+                <div className="ai-api-key-field">
+                  <div className="ai-api-key-heading">
+                    <Label htmlFor="ai-api-key">API Key</Label>
+                    {query.data.hasApiKey && !destinationChanged ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className={clearKey ? undefined : 'ai-key-remove'}
+                        onClick={() => {
+                          if (clearKey) {
+                            setClearKey(false);
+                            setForm({ ...form, enabled: enabledBeforeKeyRemoval });
+                          } else {
+                            setEnabledBeforeKeyRemoval(form.enabled);
+                            setClearKey(true);
+                            setApiKey('');
+                            setForm({ ...form, enabled: false });
+                          }
+                        }}
+                      >
+                        {t(clearKey ? 'Undo' : 'Remove saved API key')}
+                      </Button>
+                    ) : null}
+                  </div>
+                  <Input
+                    id="ai-api-key"
+                    type="password"
+                    autoComplete="new-password"
+                    value={apiKey}
+                    onChange={(event) => {
+                      setApiKey(event.target.value);
+                      setClearKey(false);
+                    }}
+                    help={
+                      !destinationChanged && query.data.hasApiKey && !clearKey
+                        ? t('API key saved. Leave empty to keep it.')
+                        : t('Enter an API key for this backend.')
+                    }
+                  />
+                  {clearKey ? (
+                    <p role="status">{t('API key will be removed when saved.')}</p>
+                  ) : null}
+                </div>
               </>
             )}
             <Input
@@ -295,6 +329,6 @@ export function AiConfigurationPanel(): ReactElement {
           {message ? <p role={save.isError ? 'alert' : 'status'}>{message}</p> : null}
         </form>
       </EditorDialog>
-    </ConfigurationSection>
+    </>
   );
 }

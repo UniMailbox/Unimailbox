@@ -126,6 +126,39 @@ describe('AI configuration panel', () => {
       configuration: { enabled: false },
     });
   });
+  it('undoes pending key removal before saving without changing the stored key or enabled state', async () => {
+    const { calls } = mount({
+      ...initial,
+      configuration: { ...initial.configuration, enabled: true },
+    });
+    const user = userEvent.setup();
+    const edit = await screen.findByRole('button', { name: 'Edit AI configuration' });
+    expect(edit.closest('header')).not.toBeNull();
+    await user.click(edit);
+    await user.click(screen.getByRole('button', { name: 'Remove saved API key' }));
+    expect(calls).toHaveLength(0);
+    expect(screen.getByRole('switch', { name: 'Enable AI service' })).not.toBeChecked();
+    expect(screen.getByText('API key will be removed when saved.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(screen.queryByText('API key will be removed when saved.')).not.toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Enable AI service' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Save AI configuration' }));
+    await screen.findByText('AI configuration saved.');
+    const request = JSON.parse(String(calls[0]?.body));
+    expect(request).not.toHaveProperty('apiKey');
+    expect(request.configuration.enabled).toBe(true);
+  });
+  it('does not offer removal when no saved key exists or when choosing another backend', async () => {
+    mount({ ...initial, hasApiKey: false });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Edit AI configuration' }));
+    expect(screen.queryByRole('button', { name: 'Remove saved API key' })).not.toBeInTheDocument();
+    cleanup();
+    mount();
+    await user.click(await screen.findByRole('button', { name: 'Edit AI configuration' }));
+    await user.type(screen.getByLabelText('Service base URL'), 'https://other.example.com');
+    expect(screen.queryByRole('button', { name: 'Remove saved API key' })).not.toBeInTheDocument();
+  });
   it('clears typed key when switching endpoint and protocol', async () => {
     mount();
     const user = userEvent.setup();
