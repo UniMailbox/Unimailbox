@@ -32,8 +32,11 @@ The existing single Cron trigger and daily file maintenance policy apply.
 
 Production resources and all three active secrets were provisioned on
 2026-10-11. Domain-wide routing and a retained Gmail copy were authorized on
-2026-10-12. Publication, setup and controlled real delivery are pending until
-recorded below. Staging and legacy resources must remain separate.
+2026-10-12. Production publication, admin setup and controlled send/receive/reply
+acceptance completed on 2026-10-12, including actual Gmail receipt and R2 raw
+storage. See [live acceptance](../qa/leanda-production-mail-2026-10-12.md) for
+the exact release identity and verification boundaries. Staging and legacy
+resources remain separate.
 
 ## Address routing and ownership
 
@@ -90,7 +93,11 @@ atomic, exactly-once transaction. Existing Gmail history stays in Gmail.
 Focused tests cover domain isolation, exact mailbox precedence, disabled
 mailboxes, retained envelope identity, forwarding failures and loop prevention.
 Deployment script tests cover both fresh and completed installation gates.
-No production delivery acceptance is claimed until the live evidence is recorded.
+The scoped live cutover acceptance passed on 2026-10-12. A real website contact
+form submission and the comprehensive application acceptance catalog were not
+run as part of this cutover. Initial webhook provisioning required an audited,
+guarded D1 initialization for the new connection because setup/reveal currently
+does not generate an absent webhook key; it preserved all existing keys.
 
 ## Credential handling
 
