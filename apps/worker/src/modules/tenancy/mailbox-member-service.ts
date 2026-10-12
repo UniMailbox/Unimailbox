@@ -105,18 +105,22 @@ function mailboxNotFound(): never {
   });
 }
 
-/** Owner or global mailbox.share; explicit mailbox-admin is deliberately insufficient. */
+/** Only global mailbox.share grants membership administration, including for owners. */
 export async function assertCanManageMailboxMembers(
   db: Database,
-  actorUserId: string,
+  _actorUserId: string,
   mailboxId: string,
   hasGlobalShare: boolean,
 ): Promise<MailboxInfo> {
+  if (!hasGlobalShare) {
+    throw new DomainError({
+      code: 'PERMISSION_DENIED',
+      message: 'Permission denied: mailbox.share',
+      httpStatus: 403,
+    });
+  }
   const mailbox = await findMailboxById(db, mailboxId);
   if (!mailbox) mailboxNotFound();
-  // Missing and foreign mailboxes intentionally collapse to the same 404 so
-  // member data cannot be probed through the sharing surface.
-  if (mailbox.ownerUserId !== actorUserId && !hasGlobalShare) mailboxNotFound();
   return mailbox;
 }
 

@@ -57,7 +57,8 @@ import {
   isIdempotencyUniqueViolation,
   replayAfterRace,
 } from '../../platform/idempotency';
-import { prepareCreateAuditEvent } from '../../modules/admin';
+import { checkPermission, prepareCreateAuditEvent } from '../../modules/admin';
+import { prepareInitialMailboxAccess } from '../../modules/tenancy';
 
 const INITIAL_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATE_USER_OPERATION = 'POST /api/v1/admin/users';
@@ -156,6 +157,12 @@ export function adminUserRoutes(): Hono<AppEnv> {
       const userId = systemIds.uuid();
       const now = sqliteTimestamp(systemClock.now());
       const expiresAt = initialPasswordExpiry();
+      const mailboxGrants = await prepareInitialMailboxAccess(c.env.DB, {
+        userId,
+        mailboxIds: body.mailboxIds ?? [],
+        createdAt: now,
+        hasGlobalShare: await checkPermission(c.env.DB, adminId, 'mailbox.share'),
+      });
 
       try {
         const responseJson = JSON.stringify({
@@ -189,6 +196,7 @@ export function adminUserRoutes(): Hono<AppEnv> {
             initialPasswordExpiresAt: expiresAt,
             grantedBy: adminId,
           }),
+          ...mailboxGrants,
           prepareCreateAuditEvent(c.env.DB, {
             id: systemIds.uuid(),
             actorUserId: adminId,
@@ -196,7 +204,11 @@ export function adminUserRoutes(): Hono<AppEnv> {
             resourceType: 'user',
             resourceId: userId,
             requestId: c.get('requestId') ?? null,
-            metadata: JSON.stringify({ email: body.email }),
+            metadata: JSON.stringify({
+              email: body.email,
+              mailboxIds: body.mailboxIds ?? [],
+              mailboxRole: 'admin',
+            }),
             createdAt: now,
           }),
         ]);

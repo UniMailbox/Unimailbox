@@ -6,7 +6,11 @@
 // Mailbox address = {localPart}@{domain.name} — domain lookup required for full address.
 
 import type { Database } from '../../platform/database';
-import { emailAddressSchema, type MailboxMemberRole } from '@unimailbox/contracts';
+import {
+  emailAddressSchema,
+  type AdminUserMailboxItem,
+  type MailboxMemberRole,
+} from '@unimailbox/contracts';
 
 export interface CreateMailboxInput {
   readonly id: string;
@@ -404,4 +408,55 @@ export async function listMailboxMemberRows(
       createdAt: row.created_at,
     })) ?? []
   );
+}
+
+/** Metadata only: system administrators do not gain access to message content. */
+export async function listAdministrativeMailboxes(
+  db: Database,
+  userId: string | null,
+): Promise<AdminUserMailboxItem[]> {
+  const rows = await db
+    .prepare(
+      `
+    SELECT m.id, m.domain_id, m.owner_user_id, m.local_part, m.display_name, m.status,
+      d.name AS domain_name, mm.role
+    FROM mailboxes m JOIN managed_domains d ON d.id = m.domain_id
+    LEFT JOIN mailbox_members mm ON mm.mailbox_id = m.id AND mm.user_id = ?
+    WHERE m.status = 'active' AND d.status = 'active'
+    ORDER BY d.name, m.local_part, m.id
+  `,
+    )
+    .bind(userId)
+    .all<{
+      id: string;
+      domain_id: string;
+      owner_user_id: string;
+      local_part: string;
+      display_name: string;
+      status: string;
+      domain_name: string;
+      role: MailboxMemberRole | null;
+    }>();
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    address: `${row.local_part}@${row.domain_name}`,
+    displayName: row.display_name,
+    status: row.status,
+    domainId: row.domain_id,
+    localPart: row.local_part,
+    ownerUserId: row.owner_user_id,
+    role: row.owner_user_id === userId ? 'owner' : row.role,
+  }));
+}
+
+export function prepareSetMailboxMemberRole(
+  db: Database,
+  input: CreateMailboxMemberInput,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO mailbox_members (mailbox_id, user_id, role, created_at)
+    VALUES (?, ?, ?, ?) ON CONFLICT(mailbox_id, user_id) DO UPDATE SET role = excluded.role`,
+    )
+    .bind(input.mailboxId, input.userId, input.role, input.createdAt);
 }

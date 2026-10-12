@@ -770,6 +770,11 @@ export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
 export const adminCreateUserRequestSchema = z.object({
   email: emailAddressSchema,
   displayName: z.string().max(100).optional(),
+  mailboxIds: z
+    .array(uuidSchema)
+    .max(100)
+    .refine((ids) => new Set(ids).size === ids.length, 'Duplicate mailbox IDs')
+    .optional(),
 });
 
 export type AdminCreateUserRequest = z.infer<typeof adminCreateUserRequestSchema>;
@@ -900,6 +905,34 @@ export const deleteMailboxMemberResponseSchema = z
   .strict();
 
 export type DeleteMailboxMemberResponse = z.infer<typeof deleteMailboxMemberResponseSchema>;
+
+/** Administrative mailbox catalogue, optionally projected for one user. */
+export const adminUserMailboxItemSchema = mailboxListItemSchema.extend({
+  role: z.enum(['owner', 'viewer', 'sender', 'admin']).nullable(),
+});
+export type AdminUserMailboxItem = z.infer<typeof adminUserMailboxItemSchema>;
+export const adminUserMailboxListResponseSchema = z
+  .object({
+    items: z.array(adminUserMailboxItemSchema),
+  })
+  .strict();
+export const adminUserMailboxAccessRequestSchema = z
+  .object({
+    role: mailboxMemberRoleSchema.nullable(),
+  })
+  .strict();
+export type AdminUserMailboxAccessRequest = z.infer<typeof adminUserMailboxAccessRequestSchema>;
+export const adminUserMailboxAccessResponseSchema = z
+  .object({
+    data: z
+      .object({
+        userId: uuidSchema,
+        mailboxId: uuidSchema,
+        role: mailboxMemberRoleSchema.nullable(),
+      })
+      .strict(),
+  })
+  .strict();
 
 // ---------------------------------------------------------------------------
 // Messages — CAP-022

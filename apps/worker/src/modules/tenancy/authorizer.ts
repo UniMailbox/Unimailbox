@@ -3,7 +3,7 @@
 //
 // R-AUTHZ-003: Two independent layers — global (requirePermission) + mailbox-scoped (assertCan).
 // R-AUTHZ-004: Authorize against the target mailbox/message ID, never client-supplied IDs.
-// R-MAILBOX-003: Owner is implicitly authorized for all ops.
+// R-MAILBOX-003: Owner has implicit mailbox operations; grant management is admin-only.
 //
 // Permission matrix from .claude/rules/security.md:
 // | op      | owner | viewer | sender | admin |
@@ -11,7 +11,7 @@
 // | read    | ✓     | ✓      | ✓      | ✓     |
 // | send    | ✓     | ✗      | ✓      | ✓     |
 // | rename  | ✓     | ✗      | ✗      | ✓     |
-// | manage_members | ✓ | ✗      | ✗      | ✓     |
+// | manage_members | ✗ | ✗      | ✗      | ✗     |
 // | delete_message | ✓ | ✗      | ✗      | ✗     |
 // | delete_mailbox | ✓ | ✗      | ✗      | ✗     |
 
@@ -34,9 +34,10 @@ export type MailboxOp =
  * if the operation is not allowed.
  *
  * Authorization logic:
- * 1. Owner can do everything (implicit membership per R-MAILBOX-003)
- * 2. Members are authorized per the permission matrix
- * 3. Non-owners with no membership are denied, including global administrators
+ * 1. Member management requires the separate administrative sharing service.
+ * 2. Owner can perform mailbox operations (implicit membership per R-MAILBOX-003)
+ * 3. Members are authorized per the permission matrix
+ * 4. Non-owners with no membership are denied, including global administrators
  *
  * @param db — D1 database binding
  * @param userId — UUID of the user performing the operation
@@ -60,7 +61,16 @@ export async function assertCan(
     });
   }
 
-  // 2. Owner can do everything (implicit membership per R-MAILBOX-003)
+  // Mailbox ownership/membership never conveys permission to assign grants.
+  if (op === 'manage_members') {
+    throw new DomainError({
+      code: 'MAILBOX_ACCESS_DENIED',
+      message: 'Mailbox access must be assigned by an administrator',
+      httpStatus: 403,
+    });
+  }
+
+  // 2. Owner has implicit mailbox operation permissions (R-MAILBOX-003)
   if (mailbox.ownerUserId === userId) {
     return;
   }
@@ -79,7 +89,7 @@ export async function assertCan(
   const allowedOps: Record<string, string[]> = {
     viewer: ['read'],
     sender: ['read', 'send'],
-    admin: ['read', 'send', 'rename', 'manage_members'],
+    admin: ['read', 'send', 'rename'],
   };
 
   const allowedForRole = allowedOps[member.role];

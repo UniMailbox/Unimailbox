@@ -48,3 +48,9 @@ export {
   type MailboxMemberServiceDependencies,
   type MailboxMemberServiceResult,
 } from './mailbox-member-service';
+
+export {
+  listUserMailboxAccess,
+  prepareInitialMailboxAccess,
+  setUserMailboxAccess,
+} from './user-mailbox-access-service';

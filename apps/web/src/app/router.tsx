@@ -115,11 +115,7 @@ const DraftRecoveryPage = lazy(() =>
     default: module.DraftRecoveryPage,
   })),
 );
-const MailboxMembersPage = lazy(() =>
-  import('../features/mailbox/MailboxMembersPage').then((module) => ({
-    default: module.MailboxMembersPage,
-  })),
-);
+
 const AdminLandingPage = lazy(() =>
   import('../features/admin/AdminLandingPage').then((module) => ({
     default: module.AdminLandingPage,
@@ -480,20 +476,13 @@ const draftRecoveryRoute = createRoute({
   },
 });
 
-// CAP-065 — mailbox member management. The route is authenticated like the
-// sibling mailbox surfaces; CAP-057's server-side owner/global-share check
-// remains the authorization authority for the member data and mutations.
+// Preserve old bookmarks while moving permission management into Admin Users.
 const mailboxMembersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/mailbox/$mailboxId/members',
-  beforeLoad: async ({ context }) => requireAuthenticatedSession(context),
-  component: function MailboxMembersRoute(): ReactElement {
-    const params = useParams({ strict: false });
-    return (
-      <MailboxLayout>
-        <MailboxMembersPage mailboxId={params.mailboxId} />
-      </MailboxLayout>
-    );
+  beforeLoad: async ({ context }) => {
+    await requireAdministrativeSession(context);
+    throw redirect({ to: '/admin/users' });
   },
 });
 

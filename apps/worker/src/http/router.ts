@@ -41,6 +41,7 @@ import { adminAiRoutes } from './routes/admin-ai';
 import { aiReplyRoutes } from './routes/ai-reply';
 import { adminSettingsRoutes } from './routes/admin-settings';
 import { adminOverviewRoutes } from './routes/admin-overview';
+import { adminUserMailboxRoutes } from './routes/admin-user-mailboxes';
 import { mailboxRoutes } from './routes/mailboxes';
 import { messageRoutes } from './routes/messages';
 import { composeRoutes } from './routes/compose';
@@ -106,6 +107,7 @@ export function buildRouter(): Hono<AppEnv> {
   // module's public listUsers (D-CAP-044-H). Same mount style as the
   // audit-event routes (/admin/users).
   apiV1.route('/', adminUserRoutes());
+  apiV1.route('/', adminUserMailboxRoutes());
 
   // CAP-066: managed-domain administration. Paths are fully qualified
   // inside the sub-app (/admin/domains*) like the users/audit routes above.

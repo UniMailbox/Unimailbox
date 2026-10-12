@@ -1489,6 +1489,7 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
         'attachment.expired',
         'mailbox.member_added',
         'mailbox.member_removed',
+        'mailbox.member_access_changed',
         'role.created',
         'role.updated',
         'role.deleted',

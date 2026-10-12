@@ -64,9 +64,18 @@ access without ownership or an explicit mailbox membership.
 | read | ✓ | ✓ | ✓ | ✓ |
 | send | ✓ | ✗ | ✓ | ✓ |
 | rename | ✓ | ✗ | ✗ | ✓ |
-| manage_members | ✓ | ✗ | ✗ | ✓ |
+| manage_members | ✗ | ✗ | ✗ | ✗ |
 | delete_message | ✓ | ✗ | ✗ | ✗ |
 | delete_mailbox | ✓ | ✗ | ✗ | ✗ |
+
+Mailbox ownership and mailbox roles do not grant member administration. Since the
+2026-10-12 user decision, all membership APIs require global `mailbox.share`;
+the Admin Users assignment API additionally requires `user.manage` for writes
+and `user.read` for reads. The mailbox `admin` role means full current mailbox
+operations (read, send, rename and per-user message organization), not global
+administration. Hard deletion remains owner-only and is not a shipped message
+operation. New accounts receive this mailbox role for each explicitly selected
+mailbox, atomically with account creation.
 
 Hard rules:
 

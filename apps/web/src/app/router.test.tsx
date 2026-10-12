@@ -613,17 +613,31 @@ describe('router — CAP-062 production draft route', () => {
     expect(history.location.pathname).toBe('/login');
   });
 
-  it('matches the real mailbox member route for an authenticated session', async () => {
+  it('R-AUTHZ-003 redirects ordinary users away from legacy member management', async () => {
     const apiClient = createApiClient({
       baseUrl: '',
       getSessionToken: () => null,
-      fetchImpl: (async () =>
-        jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
+      fetchImpl: (async (input) =>
+        String(input).includes('/auth/me')
+          ? jsonResponse({
+              data: {
+                user: {
+                  id: 'user-members-route',
+                  email: 'owner@example.test',
+                  displayName: 'Owner',
+                },
+                canAccessAdmin: false,
+              },
+            })
+          : jsonResponse({
+              data: { status: 'complete', currentStep: 'complete' },
+            })) as typeof fetch,
     });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
     });
     queryClient.setQueryData(authQueryKeys.session(), {
+      canAccessAdmin: false,
       userId: 'user-members-route',
       email: 'owner@example.test',
       displayName: 'Owner',
@@ -636,7 +650,7 @@ describe('router — CAP-062 production draft route', () => {
 
     await router.load();
 
-    expect(history.location.pathname).toBe('/mailbox/00000000-0000-4000-8000-000000000001/members');
+    expect(history.location.pathname).toBe('/mailbox');
   });
 
   it('matches the real draft recovery route for an authenticated session', async () => {

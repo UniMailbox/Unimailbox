@@ -69,12 +69,15 @@ async function mailboxFor(
   ownerUserId: string,
   localPart = `box-${crypto.randomUUID().slice(0, 8)}`,
 ) {
-  const domainId = crypto.randomUUID();
+  const existingDomain = await env.DB.prepare(
+    "SELECT id FROM managed_domains WHERE name = 'example.com'",
+  ).first<{ id: string }>();
+  const domainId = existingDomain?.id ?? crypto.randomUUID();
   const mailboxId = crypto.randomUUID();
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
+      `INSERT OR IGNORE INTO managed_domains (id, name, status, outbound_connection_id, created_at, updated_at)
        VALUES (?, 'example.com', 'active', NULL, ?, ?)`,
     ).bind(domainId, now, now),
     env.DB.prepare(
@@ -110,8 +113,32 @@ async function addMember(
 describe('CAP-057 mailbox member contracts and lifecycle', () => {
   beforeEach(setup);
 
-  it('R-MAILBOX-003 R-MAILBOX-004 R-AUTHZ-001 R-AUTHZ-003 R-API-001 R-API-004 R-AUDIT-001 lets the owner add/list/remove with one add audit and one removal audit', async () => {
-    const ownerId = await createUser('owner@example.com');
+  it('R-AUTHZ-003 denies ordinary owners membership reads, additions and removals', async () => {
+    const ownerId = await createUser('ordinary-owner@example.com');
+    const targetId = await createUser('target@example.com');
+    const token = await sessionFor(ownerId);
+    const mailboxId = await mailboxFor(ownerId);
+    const responses = [
+      await SELF.fetch(`${BASE}/mailboxes/${mailboxId}/members`, { headers: jsonHeaders(token) }),
+      await addMember(token, mailboxId, 'target@example.com', 'sender'),
+      await SELF.fetch(`${BASE}/mailboxes/${mailboxId}/members/${targetId}`, {
+        method: 'DELETE',
+        headers: jsonHeaders(token, 'denied-owner-delete'),
+      }),
+    ];
+    for (const response of responses) {
+      expect(response.status).toBe(403);
+      expect((await response.json()).error.code).toBe('PERMISSION_DENIED');
+    }
+    await expect(assertCan(env.DB, ownerId, mailboxId, 'read')).resolves.toBeUndefined();
+    await expect(assertCan(env.DB, ownerId, mailboxId, 'send')).resolves.toBeUndefined();
+    expect(await env.DB.prepare('SELECT * FROM mailbox_members').all()).toMatchObject({
+      results: [],
+    });
+  });
+
+  it('R-MAILBOX-003 R-MAILBOX-004 R-AUTHZ-001 R-AUTHZ-003 R-API-001 R-API-004 R-AUDIT-001 lets an administrator add/list/remove with one add audit and one removal audit', async () => {
+    const ownerId = await createUser('owner@example.com', 'administrator');
     const targetId = await createUser('TARGET@example.com', 'member', 'Target User');
     const ownerToken = await sessionFor(ownerId);
     const mailboxId = await mailboxFor(ownerId);
@@ -209,7 +236,7 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
   });
 
   it('R-AUTHZ-001 R-AUTHZ-003 R-AUTHZ-004 R-MAILBOX-005 R-MAILBOX-006 R-MAILBOX-007 R-DATA-004 R-API-002 denies mailbox-admin role without mailbox.share but permits global share', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     const memberAdminId = await createUser('member-admin@example.com');
     const globalId = await createUser('global@example.com', 'administrator');
     await createUser('target@example.com');
@@ -227,15 +254,15 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
     const denied = await SELF.fetch(`${BASE}/mailboxes/${mailboxId}/members`, {
       headers: { Authorization: `Bearer ${memberAdminToken}` },
     });
-    expect(denied.status).toBe(404);
-    expect((await denied.json()).error.code).toBe('MAILBOX_NOT_FOUND');
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error.code).toBe('PERMISSION_DENIED');
 
     const allowed = await addMember(globalToken, mailboxId, 'target@example.com', 'viewer');
     expect(allowed.status).toBe(201);
   });
 
   it('R-DATA-001 R-API-003 R-API-006 R-AUDIT-004 rejects unknown/self/duplicate/invalid without side effects', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     await createUser('target@example.com');
     const ownerToken = await sessionFor(ownerId);
     const mailboxId = await mailboxFor(ownerId);
@@ -280,7 +307,7 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
   });
 
   it('R-API-004 R-API-006 R-AUDIT-001 replays the exact POST response and rejects same-key body changes', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     await createUser('target@example.com');
     const ownerToken = await sessionFor(ownerId);
     const mailboxId = await mailboxFor(ownerId);
@@ -316,7 +343,7 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
   });
 
   it('R-API-004 R-AUDIT-001 handles concurrent same-key adds as one committed transition', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     await createUser('target@example.com');
     const ownerToken = await sessionFor(ownerId);
     const mailboxId = await mailboxFor(ownerId);
@@ -341,7 +368,7 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
   });
 
   it('R-AUDIT-001 R-API-004 emits one removal audit when different-key deletes race', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     const targetId = await createUser('target@example.com');
     const ownerToken = await sessionFor(ownerId);
     const mailboxId = await mailboxFor(ownerId);
@@ -364,7 +391,7 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
   });
 
   it('R-API-004 R-AUDIT-001 replays concurrent same-key deletes after the member preflight loses', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     const targetId = await createUser('target@example.com');
     const ownerToken = await sessionFor(ownerId);
     const mailboxId = await mailboxFor(ownerId);
@@ -390,7 +417,7 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
   });
 
   it('R-MAILBOX-005 R-MAILBOX-006 R-MAILBOX-007 persists viewer/sender/admin role semantics for mailbox authorization', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     const viewerId = await createUser('viewer@example.com');
     const senderId = await createUser('sender@example.com');
     const adminId = await createUser('admin@example.com');
@@ -416,11 +443,13 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
     });
     await expect(assertCan(env.DB, adminId, mailboxId, 'read')).resolves.toBeUndefined();
     await expect(assertCan(env.DB, adminId, mailboxId, 'send')).resolves.toBeUndefined();
-    await expect(assertCan(env.DB, adminId, mailboxId, 'manage_members')).resolves.toBeUndefined();
+    await expect(assertCan(env.DB, adminId, mailboxId, 'manage_members')).rejects.toMatchObject({
+      code: 'MAILBOX_ACCESS_DENIED',
+    });
   });
 
   it('R-AUTHZ-003 R-AUTHZ-004 R-API-002 protects foreign/missing mailboxes and owner deletion paths', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     const otherId = await createUser('other@example.com');
     const ownerToken = await sessionFor(ownerId);
     const otherToken = await sessionFor(otherId);
@@ -430,8 +459,8 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
     const foreign = await SELF.fetch(`${BASE}/mailboxes/${mailboxId}/members`, {
       headers: { Authorization: `Bearer ${otherToken}` },
     });
-    expect(foreign.status).toBe(404);
-    expect((await foreign.json()).error.code).toBe('MAILBOX_NOT_FOUND');
+    expect(foreign.status).toBe(403);
+    expect((await foreign.json()).error.code).toBe('PERMISSION_DENIED');
 
     const missing = await SELF.fetch(`${BASE}/mailboxes/${missingMailboxId}/members`, {
       headers: { Authorization: `Bearer ${ownerToken}` },
@@ -452,7 +481,7 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
   });
 
   it('R-API-004 R-DATA-001 returns multiple members in stable createdAt/userId order', async () => {
-    const ownerId = await createUser('owner@example.com');
+    const ownerId = await createUser('owner@example.com', 'administrator');
     const firstId = await createUser('first@example.com', 'member', 'First');
     const secondId = await createUser('second@example.com', 'member', 'Second');
     const thirdId = await createUser('third@example.com', 'member', 'Third');
@@ -477,5 +506,307 @@ describe('CAP-057 mailbox member contracts and lifecycle', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { data: { items: { userId: string }[] } };
     expect(body.data.items.map((item) => item.userId)).toEqual([secondId, firstId, thirdId]);
+  });
+});
+
+describe('administrator-assigned user mailbox access', () => {
+  beforeEach(setup);
+
+  it('R-MAILBOX-004 R-AUTHZ-003 creates a user with full access to multiple selected mailboxes only', async () => {
+    const administratorId = await createUser('administrator@example.com', 'administrator');
+    const ownerId = await createUser('ordinary@example.com');
+    const token = await sessionFor(administratorId);
+    const boxes = [await mailboxFor(ownerId), await mailboxFor(ownerId), await mailboxFor(ownerId)];
+    const response = await SELF.fetch(`${BASE}/admin/users`, {
+      method: 'POST',
+      headers: jsonHeaders(token, 'create-with-grants'),
+      body: JSON.stringify({ email: 'new@example.com', mailboxIds: boxes.slice(0, 2) }),
+    });
+    expect(response.status).toBe(201);
+    const userId = (await response.json()).data.user.id as string;
+    const members = await env.DB.prepare(
+      'SELECT mailbox_id, role FROM mailbox_members WHERE user_id = ? ORDER BY mailbox_id',
+    )
+      .bind(userId)
+      .all();
+    expect(members.results).toEqual(
+      boxes
+        .slice(0, 2)
+        .sort()
+        .map((id) => ({ mailbox_id: id, role: 'admin' })),
+    );
+    for (const mailboxId of boxes.slice(0, 2)) {
+      await expect(assertCan(env.DB, userId, mailboxId, 'read')).resolves.toBeUndefined();
+      await expect(assertCan(env.DB, userId, mailboxId, 'send')).resolves.toBeUndefined();
+      await expect(assertCan(env.DB, userId, mailboxId, 'rename')).resolves.toBeUndefined();
+    }
+    await expect(assertCan(env.DB, userId, boxes[2] ?? '', 'read')).rejects.toMatchObject({
+      code: 'MAILBOX_ACCESS_DENIED',
+    });
+    // Administration of mailbox metadata never grants private message access.
+    await expect(assertCan(env.DB, administratorId, boxes[0] ?? '', 'read')).rejects.toMatchObject({
+      code: 'MAILBOX_ACCESS_DENIED',
+    });
+    const audit = await env.DB.prepare(
+      "SELECT metadata FROM audit_events WHERE resource_id = ? AND action = 'user.created'",
+    )
+      .bind(userId)
+      .first<{ metadata: string }>();
+    expect(JSON.parse(audit?.metadata ?? '{}')).toMatchObject({
+      mailboxIds: boxes.slice(0, 2),
+      mailboxRole: 'admin',
+    });
+  });
+
+  it('R-AUDIT-001 rolls account creation and all selected grants back together', async () => {
+    const adminId = await createUser('admin@example.com', 'administrator');
+    const token = await sessionFor(adminId);
+    const mailboxId = await mailboxFor(adminId);
+    await env.DB.prepare(
+      "CREATE TRIGGER fail_initial_grant_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'user.created' BEGIN SELECT RAISE(ABORT, 'forced creation failure'); END",
+    ).run();
+    try {
+      const response = await SELF.fetch(`${BASE}/admin/users`, {
+        method: 'POST',
+        headers: jsonHeaders(token, 'rollback-create-grants'),
+        body: JSON.stringify({ email: 'rollback-grants@example.com', mailboxIds: [mailboxId] }),
+      });
+      expect(response.status).toBe(500);
+      expect(
+        await env.DB.prepare(
+          "SELECT * FROM users WHERE email = 'rollback-grants@example.com'",
+        ).first(),
+      ).toBeNull();
+      expect((await env.DB.prepare('SELECT * FROM mailbox_members').all()).results).toEqual([]);
+      expect(
+        await env.DB.prepare(
+          "SELECT * FROM idempotency_records WHERE idempotency_key = 'rollback-create-grants'",
+        ).first(),
+      ).toBeNull();
+    } finally {
+      await env.DB.prepare('DROP TRIGGER fail_initial_grant_audit').run();
+    }
+  });
+
+  it('R-AUTHZ-003 R-API-004 assigns, changes and revokes a grant without affecting another mailbox', async () => {
+    const adminId = await createUser('admin@example.com', 'administrator');
+    const ownerId = await createUser('owner@example.com');
+    const targetId = await createUser('target@example.com');
+    const token = await sessionFor(adminId);
+    const targetToken = await sessionFor(targetId);
+    const mailboxId = await mailboxFor(ownerId);
+    const anotherId = await mailboxFor(ownerId);
+    const path = `${BASE}/admin/users/${targetId}/mailboxes/${mailboxId}`;
+    const put = (role: string | null, key: string) =>
+      SELF.fetch(path, {
+        method: 'PUT',
+        headers: jsonHeaders(token, `access-${key}`),
+        body: JSON.stringify({ role }),
+      });
+    const other = await SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes/${anotherId}`, {
+      method: 'PUT',
+      headers: jsonHeaders(token, 'other-mailbox'),
+      body: JSON.stringify({ role: 'admin' }),
+    });
+    expect(other.status).toBe(200);
+    const viewer = await put('viewer', 'viewer');
+    expect(viewer.status).toBe(200);
+    await expect(assertCan(env.DB, targetId, mailboxId, 'read')).resolves.toBeUndefined();
+    await expect(assertCan(env.DB, targetId, mailboxId, 'send')).rejects.toMatchObject({
+      code: 'MAILBOX_ACCESS_DENIED',
+    });
+    const sendDenied = await SELF.fetch(`${BASE}/mailboxes/${mailboxId}/messages/send`, {
+      method: 'POST',
+      headers: jsonHeaders(targetToken, 'viewer-send'),
+      body: '{}',
+    });
+    expect(sendDenied.status).toBe(403);
+    const sender = await put('sender', 'sender');
+    expect(sender.status).toBe(200);
+    const senderText = await sender.text();
+    await expect(assertCan(env.DB, targetId, mailboxId, 'send')).resolves.toBeUndefined();
+    expect(await (await put('sender', 'sender')).text()).toBe(senderText);
+    const conflict = await put('viewer', 'sender');
+    expect(conflict.status).toBe(409);
+    expect((await conflict.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    const beforeRevoke = await SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes`, {
+      headers: jsonHeaders(token),
+    });
+    expect(beforeRevoke.status).toBe(200);
+    expect((await beforeRevoke.json()).data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: mailboxId, role: 'sender' }),
+        expect.objectContaining({ id: anotherId, role: 'admin' }),
+      ]),
+    );
+    expect((await put(null, 'revoke')).status).toBe(200);
+    await expect(assertCan(env.DB, targetId, mailboxId, 'read')).rejects.toMatchObject({
+      code: 'MAILBOX_ACCESS_DENIED',
+    });
+    await expect(assertCan(env.DB, targetId, anotherId, 'send')).resolves.toBeUndefined();
+    const list = await SELF.fetch(`${BASE}/mailboxes`, { headers: jsonHeaders(targetToken) });
+    expect((await list.json()).data.items.map((box: { id: string }) => box.id)).toEqual([
+      anotherId,
+    ]);
+    const readDenied = await SELF.fetch(`${BASE}/mailboxes/${mailboxId}/messages`, {
+      headers: jsonHeaders(targetToken),
+    });
+    expect(readDenied.status).toBe(403);
+    const audit = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM audit_events WHERE action = 'mailbox.member_access_changed' AND resource_id = ?",
+    )
+      .bind(mailboxId)
+      .first<{ count: number }>();
+    expect(audit?.count).toBe(3);
+  });
+
+  it('R-AUTHZ-001 denies ordinary owners all admin grant endpoints and creation', async () => {
+    const ownerId = await createUser('ordinary-owner@example.com');
+    const targetId = await createUser('target@example.com');
+    const token = await sessionFor(ownerId);
+    const mailboxId = await mailboxFor(ownerId);
+    const responses = [
+      await SELF.fetch(`${BASE}/admin/mailboxes`, { headers: jsonHeaders(token) }),
+      await SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes`, {
+        headers: jsonHeaders(token),
+      }),
+      await SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes/${mailboxId}`, {
+        method: 'PUT',
+        headers: jsonHeaders(token, 'denied-access'),
+        body: JSON.stringify({ role: 'admin' }),
+      }),
+      await SELF.fetch(`${BASE}/admin/users`, {
+        method: 'POST',
+        headers: jsonHeaders(token, 'denied-create'),
+        body: JSON.stringify({ email: 'bad@example.com', mailboxIds: [mailboxId] }),
+      }),
+    ];
+    for (const response of responses) expect(response.status).toBe(403);
+    const unauthenticated = await SELF.fetch(`${BASE}/admin/mailboxes`);
+    expect(unauthenticated.status).toBe(401);
+    expect((await env.DB.prepare('SELECT * FROM mailbox_members').all()).results).toEqual([]);
+  });
+
+  it('R-AUTHZ-001 requires both account management and mailbox sharing permissions', async () => {
+    const adminId = await createUser('restricted@example.com', 'administrator');
+    const targetId = await createUser('target@example.com');
+    const mailboxId = await mailboxFor(adminId);
+    const token = await sessionFor(adminId);
+    await env.DB.prepare(
+      "DELETE FROM role_permissions WHERE role_id = 'administrator' AND permission_id = 'mailbox.share'",
+    ).run();
+    const deniedCreate = await SELF.fetch(`${BASE}/admin/users`, {
+      method: 'POST',
+      headers: jsonHeaders(token, 'restricted-create'),
+      body: JSON.stringify({ email: 'restricted-new@example.com', mailboxIds: [mailboxId] }),
+    });
+    expect(deniedCreate.status).toBe(403);
+    const deniedPut = await SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes/${mailboxId}`, {
+      method: 'PUT',
+      headers: jsonHeaders(token, 'restricted-put'),
+      body: JSON.stringify({ role: 'sender' }),
+    });
+    expect(deniedPut.status).toBe(403);
+    await env.DB.prepare(
+      "INSERT INTO role_permissions (role_id, permission_id) VALUES ('administrator', 'mailbox.share')",
+    ).run();
+    await env.DB.prepare(
+      "DELETE FROM role_permissions WHERE role_id = 'administrator' AND permission_id = 'user.manage'",
+    ).run();
+    const shareOnly = await SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes/${mailboxId}`, {
+      method: 'PUT',
+      headers: jsonHeaders(token, 'share-only'),
+      body: JSON.stringify({ role: 'sender' }),
+    });
+    expect(shareOnly.status).toBe(403);
+  });
+
+  it('R-AUDIT-001 R-API-004 rolls grant changes back when audit fails and handles concurrent same-key mutations', async () => {
+    const adminId = await createUser('admin@example.com', 'administrator');
+    const targetId = await createUser('target@example.com');
+    const token = await sessionFor(adminId);
+    const mailboxId = await mailboxFor(adminId);
+    const put = (key: string) =>
+      SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes/${mailboxId}`, {
+        method: 'PUT',
+        headers: jsonHeaders(token, `access-${key}`),
+        body: JSON.stringify({ role: 'sender' }),
+      });
+    await env.DB.prepare(
+      "CREATE TRIGGER fail_access_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'mailbox.member_access_changed' BEGIN SELECT RAISE(ABORT, 'forced access audit failure'); END",
+    ).run();
+    try {
+      expect((await put('rollback')).status).toBe(500);
+      expect(
+        await env.DB.prepare('SELECT * FROM mailbox_members WHERE mailbox_id = ?')
+          .bind(mailboxId)
+          .first(),
+      ).toBeNull();
+      expect(
+        await env.DB.prepare(
+          "SELECT * FROM idempotency_records WHERE idempotency_key = 'access-rollback'",
+        ).first(),
+      ).toBeNull();
+    } finally {
+      await env.DB.prepare('DROP TRIGGER fail_access_audit').run();
+    }
+    const responses = await Promise.all([put('race'), put('race')]);
+    expect(responses.map((r) => r.status)).toEqual([200, 200]);
+    const texts = await Promise.all(responses.map((r) => r.text()));
+    expect(texts[0]).toBe(texts[1]);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM audit_events WHERE action = 'mailbox.member_access_changed'",
+        ).first<{ count: number }>()
+      )?.count,
+    ).toBe(1);
+  });
+
+  it('R-API-003 rejects owner overrides, inactive users, inactive/missing mailboxes and duplicate creation grants', async () => {
+    const adminId = await createUser('admin@example.com', 'administrator');
+    const token = await sessionFor(adminId);
+    const targetId = await createUser('target@example.com');
+    const mailboxId = await mailboxFor(adminId);
+    const put = (userId: string, box: string, role: unknown = 'sender') =>
+      SELF.fetch(`${BASE}/admin/users/${userId}/mailboxes/${box}`, {
+        method: 'PUT',
+        headers: jsonHeaders(token, crypto.randomUUID()),
+        body: JSON.stringify({ role }),
+      });
+    expect((await put(adminId, mailboxId)).status).toBe(409);
+    expect((await put(targetId, crypto.randomUUID())).status).toBe(404);
+    expect((await put(targetId, mailboxId, 'owner')).status).toBe(400);
+    expect((await put(targetId, 'invalid-id')).status).toBe(400);
+    expect(
+      (
+        await SELF.fetch(`${BASE}/admin/users/${targetId}/mailboxes/${mailboxId}`, {
+          method: 'PUT',
+          headers: jsonHeaders(token),
+          body: JSON.stringify({ role: 'sender' }),
+        })
+      ).status,
+    ).toBe(400);
+    const create = (ids: string[]) =>
+      SELF.fetch(`${BASE}/admin/users`, {
+        method: 'POST',
+        headers: jsonHeaders(token, crypto.randomUUID()),
+        body: JSON.stringify({ email: 'invalid-new@example.com', mailboxIds: ids }),
+      });
+    expect((await create([mailboxId, mailboxId])).status).toBe(400);
+    expect((await create([crypto.randomUUID()])).status).toBe(404);
+    await env.DB.prepare("UPDATE mailboxes SET status = 'disabled' WHERE id = ?")
+      .bind(mailboxId)
+      .run();
+    expect((await create([mailboxId])).status).toBe(404);
+    expect((await put(targetId, mailboxId)).status).toBe(404);
+    await env.DB.prepare("UPDATE mailboxes SET status = 'active' WHERE id = ?")
+      .bind(mailboxId)
+      .run();
+    await env.DB.prepare("UPDATE users SET status = 'banned' WHERE id = ?").bind(targetId).run();
+    expect((await put(targetId, mailboxId)).status).toBe(404);
+    expect(
+      await env.DB.prepare("SELECT id FROM users WHERE email = 'invalid-new@example.com'").first(),
+    ).toBeNull();
   });
 });

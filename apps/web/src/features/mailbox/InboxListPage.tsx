@@ -191,14 +191,7 @@ function InboxListContent({ mailboxId, folder }: InboxListContentProps): ReactEl
           {/* CAP-044 Slice 3 (D-CAP-044-K): the admin link, rendered only
               when the nav probe succeeds (member → nothing). */}
           {!inShell ? <AppNav /> : null}
-          <Link
-            to="/mailbox/$mailboxId/members"
-            params={{ mailboxId }}
-            className="mailbox-folder-link"
-            data-testid="inbox-members-link"
-          >
-            {t('Members')}
-          </Link>
+
           {!inShell ? (
             <Link
               to="/mailbox/$mailboxId/compose"

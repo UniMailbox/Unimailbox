@@ -110,6 +110,7 @@ export const auditActionSchema = z.enum([
   // CAP-057 mailbox sharing transitions.
   'mailbox.member_added',
   'mailbox.member_removed',
+  'mailbox.member_access_changed',
   // CAP-066 managed-domain administration.
   'domain.created',
   'domain.verified',

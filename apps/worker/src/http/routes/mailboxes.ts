@@ -79,6 +79,13 @@ async function requireMailboxShareAccess(
       httpStatus: 401,
     });
   }
+  if (c.get('mustChangePassword') === true) {
+    throw new DomainError({
+      code: 'PASSWORD_CHANGE_REQUIRED',
+      message: 'Password change required',
+      httpStatus: 403,
+    });
+  }
   const hasGlobalShare = await checkPermission(c.env.DB, userId, 'mailbox.share');
   await assertCanManageMailboxMembers(c.env.DB, userId, mailboxId, hasGlobalShare);
   return { userId, hasGlobalShare };

@@ -133,6 +133,7 @@ function renderUsersPage(options: RenderOptions): {
       calls.push({ url, method: 'GET' });
       return authSessionResolver();
     }
+    if (url === '/api/v1/admin/mailboxes') return jsonResponse({ data: { items: [] } });
     if (options.pendingUsersFetch === true) {
       calls.push({ url, method: 'GET' });
       return new Promise<Response>(() => {});

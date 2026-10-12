@@ -965,15 +965,12 @@ describe('R-MAILBOX-003 — owner implicit membership', () => {
       .first();
     expect(memberRow).toBeNull();
 
+    await expect(assertCan(env.DB, ownerId, mailboxId, 'manage_members')).rejects.toMatchObject({
+      code: 'MAILBOX_ACCESS_DENIED',
+    });
+
     // Every owner-permitted operation must succeed implicitly.
-    const ops = [
-      'read',
-      'send',
-      'rename',
-      'manage_members',
-      'delete_message',
-      'delete_mailbox',
-    ] as const;
+    const ops = ['read', 'send', 'rename', 'delete_message', 'delete_mailbox'] as const;
     for (const op of ops) {
       await expect(assertCan(env.DB, ownerId, mailboxId, op)).resolves.toBeUndefined();
     }

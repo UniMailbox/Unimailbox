@@ -616,7 +616,11 @@ export interface AdminCreatedUser {
 
 export async function createAdminUser(
   apiClient: ApiClient,
-  request: { readonly email: string; readonly displayName?: string },
+  request: {
+    readonly email: string;
+    readonly displayName?: string;
+    readonly mailboxIds?: string[];
+  },
 ): Promise<AdminCreatedUser> {
   const response = await apiClient.fetch<unknown>('/api/v1/admin/users', {
     method: 'POST',
@@ -674,8 +678,11 @@ export function useCreateAdminUserMutation() {
   const queryClient = useQueryClient();
   const session = authSessionQuery().data;
   return useMutation({
-    mutationFn: (request: { readonly email: string; readonly displayName?: string }) =>
-      createAdminUser(apiClient, request),
+    mutationFn: (request: {
+      readonly email: string;
+      readonly displayName?: string;
+      readonly mailboxIds?: string[];
+    }) => createAdminUser(apiClient, request),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: adminQueryKeys.users(session?.userId ?? 'anonymous'),

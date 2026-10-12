@@ -1,3 +1,4 @@
+import { InitialMailboxAssignments, UserMailboxAccessPanel } from './UserMailboxAccessPanel';
 import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
 import { useT } from '../../infrastructure/i18n/locale';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -81,6 +82,8 @@ function UsersContent(): ReactElement {
   const statusMutation = useUpdateAdminUserStatusMutation();
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [mailboxIds, setMailboxIds] = useState<string[]>([]);
+  const [accessUser, setAccessUser] = useState<UserListItem | null>(null);
   const [oneTimePassword, setOneTimePassword] = useState<{
     readonly userId: string;
     readonly password: string;
@@ -94,6 +97,7 @@ function UsersContent(): ReactElement {
     try {
       const created = await createMutation.mutateAsync({
         email,
+        ...(mailboxIds.length === 0 ? {} : { mailboxIds }),
         ...(displayName.trim() === '' ? {} : { displayName: displayName.trim() }),
       });
       setOneTimePassword({
@@ -103,6 +107,7 @@ function UsersContent(): ReactElement {
       });
       setEmail('');
       setDisplayName('');
+      setMailboxIds([]);
     } catch (cause) {
       setMutationError(
         cause instanceof ApiError ? cause : new ApiError('UNKNOWN', 'Could not create user', 500),
@@ -244,6 +249,11 @@ function UsersContent(): ReactElement {
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
           />
+          <InitialMailboxAssignments
+            selected={mailboxIds}
+            onChange={setMailboxIds}
+            disabled={createMutation.isPending}
+          />
           <Button
             type="submit"
             loading={createMutation.isPending}
@@ -275,6 +285,13 @@ function UsersContent(): ReactElement {
             {t('Close')}
           </Button>
         </Card>
+      ) : null}
+      {accessUser !== null ? (
+        <UserMailboxAccessPanel
+          key={accessUser.id}
+          user={accessUser}
+          onClose={() => setAccessUser(null)}
+        />
       ) : null}
       <Card title={t('Users')}>
         {apiError !== null ? (
@@ -329,6 +346,7 @@ function UsersContent(): ReactElement {
                     item={item}
                     isCurrentUser={item.id === sessionQuery.data?.userId}
                     busy={resetMutation.isPending || statusMutation.isPending}
+                    onMailboxAccess={() => setAccessUser(item)}
                     onReset={() => void resetPassword(item.id)}
                     onStatusChange={(status) => void changeStatus(item.id, status)}
                   />
@@ -363,12 +381,14 @@ function UserRow({
   isCurrentUser,
   busy,
   onReset,
+  onMailboxAccess,
   onStatusChange,
 }: {
   readonly item: UserListItem;
   readonly isCurrentUser: boolean;
   readonly busy: boolean;
   readonly onReset: () => void;
+  readonly onMailboxAccess: () => void;
   readonly onStatusChange: (status: 'active' | 'banned') => void;
 }): ReactElement {
   const t = useT();
@@ -388,6 +408,15 @@ function UserRow({
       </TableCell>
       <TableCell>
         <div className="admin-user-row-actions">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={busy || item.status !== 'active'}
+            onClick={onMailboxAccess}
+          >
+            {t('Mailbox access')}
+          </Button>
           <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onReset}>
             {t('Reset password')}
           </Button>

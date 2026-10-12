@@ -336,22 +336,6 @@ function Navigation({
                           </SidebarMenuButton>
                         </SidebarMenuItem>
                       ))}
-                      <SidebarMenuItem>
-                        <SidebarMenuButton
-                          asChild
-                          tooltip={t('Members')}
-                          isActive={pathname.endsWith('/members')}
-                        >
-                          <Link
-                            to="/mailbox/$mailboxId/members"
-                            params={{ mailboxId: navigationMailboxId }}
-                            onClick={close}
-                          >
-                            <Users />
-                            <span>{t('Members')}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
                     </>
                   ) : null}
                 </>

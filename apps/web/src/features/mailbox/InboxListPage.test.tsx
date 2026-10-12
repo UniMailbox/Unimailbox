@@ -865,7 +865,7 @@ describe('InboxListPage', () => {
     expect(composeLink.textContent).toBe('Compose');
   });
 
-  it('CAP-065: links to mailbox member management for this mailbox', async () => {
+  it('R-AUTHZ-003: keeps permission management out of the inbox', async () => {
     renderInbox({
       resolvers: [() => jsonResponse({ data: { items: [], nextCursor: null } })],
       session: SESSION,
@@ -873,9 +873,8 @@ describe('InboxListPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('inbox-empty')).toBeInTheDocument();
     });
-    const membersLink = screen.getByTestId('inbox-members-link');
-    expect(membersLink.getAttribute('href')).toBe(`/mailbox/${MAILBOX_ID}/members`);
-    expect(membersLink.textContent).toBe('Members');
+    expect(screen.queryByTestId('inbox-members-link')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Members' })).not.toBeInTheDocument();
   });
 });
 
