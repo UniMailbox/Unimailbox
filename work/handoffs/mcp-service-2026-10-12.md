@@ -1,5 +1,8 @@
 # MCP service handoff
 
+Historical 2026-10-12 snapshot. The administration/personal-settings split and
+current deployment are recorded in `work/handoffs/mcp-personal-settings-2026-10-13.md`.
+
 Implemented and published to staging on 2026-10-12. Application commit `6701e04`;
 Worker `7c94c494-ea3a-4875-9e34-96c55a9511c7`; schema 0035. Production was not
 changed. Final standard release gate passed 2,381 tests and all 35 remote schema

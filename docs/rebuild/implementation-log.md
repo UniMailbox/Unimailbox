@@ -10,6 +10,27 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-13 — MCP settings split by service and user
+
+MCP is a card under Admin AI services with one service switch and an editable
+shared setup prompt. The separate menu/page is removed (old bookmarks redirect).
+Ordinary users manage their own expiring mailbox-scoped credentials in Quick
+settings; read-only is default, draft/AI and send grants are independent and
+bounded by live permissions. Personal APIs no longer require administrative
+settings permissions. The retired installation send switch no longer gates sends;
+existing read/draft credentials keep their grants and server limits remain active.
+Migration 0036 adds the shared prompt without replacing credentials or keys.
+
+Application commit `eb72db8` passed 2,389 tests and all 36 remote SQL companions,
+then published to staging as Worker `b5a54cc1-476f-4ee8-9d9d-4e887916412b`.
+Ordinary-member scope/denial, prompt propagation, read negotiation, separate send
+discovery, Origin and revocation passed; all temporary access was removed and the
+original disabled configuration restored. Readiness and maintenance passed.
+No real mail was read or sent. UI evidence is synthetic; browser clipboard and
+actual local-agent configuration remain open. Review was a main-agent self-review.
+See `19-mcp-service.md`, `../qa/mcp-personal-settings-staging-2026-10-13.md` and
+`../../work/handoffs/mcp-personal-settings-2026-10-13.md`.
+
 ## 2026-10-12 — Scoped MCP agent access
 
 Admin → MCP service now controls a stateless HTTPS endpoint at `/api/mcp` (443),

@@ -9,3 +9,8 @@ Requested 2026-10-13. Implement directly; no delegated work.
 - Verify allowed/denied personal access, ownership isolation, prompt persistence, disabled behavior and frontend flows. Run the canonical release gate, commit only owned paths, and deploy the same authorized staging installation. No production changes or real mail sends.
 
 Acceptance: source, local gates and staging API checks separately recorded. Browser/local-agent configuration remains unverified unless observed.
+
+Completed: application commit `eb72db8`, full 2,389-test release gate, migration
+0036/all 36 companions, staging publication and ordinary-user MCP/API checks.
+Self-review and staged secret checks passed. Evidence and remaining browser/agent
+boundaries: `docs/qa/mcp-personal-settings-staging-2026-10-13.md`.

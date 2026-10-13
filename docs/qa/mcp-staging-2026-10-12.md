@@ -1,5 +1,8 @@
 # MCP staging validation — 2026-10-12
 
+Historical snapshot. The settings split and current release evidence are in
+`docs/qa/mcp-personal-settings-staging-2026-10-13.md`.
+
 Target: the existing `staging.unimailbox.tech` installation in Cloudflare account
 `6f215b03c5ff77ef28410254e9701d67`. No production, routing, provider configuration,
 resource replacement or key rotation occurred.
