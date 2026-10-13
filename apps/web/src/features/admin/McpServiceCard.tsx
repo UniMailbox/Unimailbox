@@ -17,18 +17,23 @@ import { useApiClient } from '../../infrastructure/api/client-provider';
 import { ApiError } from '../../infrastructure/api/errors';
 import { errorMessage } from '../../infrastructure/i18n/error-messages';
 import { useT } from '../../infrastructure/i18n/locale';
-import { authSessionQuery } from '../auth/auth-queries';
 
-export function McpServiceCard(): ReactElement {
+export function McpServiceCard({ userId }: { userId: string }): ReactElement {
   const t = useT();
   const client = useApiClient();
   const queryClient = useQueryClient();
-  const userId = authSessionQuery().data?.userId;
   const query = useQuery({
     queryKey: ['admin', userId, 'mcp'],
     enabled: !!userId,
+    staleTime: Infinity,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
     queryFn: async () => {
-      const response = (await client.fetch('/api/v1/admin/mcp')) as { data: unknown };
+      const response = (await client.fetch('/api/v1/admin/mcp', { retry: false })) as {
+        data: unknown;
+      };
       return mcpAdministrationSchema.parse(response.data);
     },
   });
@@ -115,6 +120,13 @@ export function McpServiceCard(): ReactElement {
             </div>
           </dl>
           <div className="flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              disabled={busy || query.isFetching}
+              onClick={() => void query.refetch()}
+            >
+              {t('Refresh MCP settings')}
+            </Button>
             <Button
               variant="secondary"
               onClick={() => {

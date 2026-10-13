@@ -15,18 +15,23 @@ import { errorMessage } from '../../infrastructure/i18n/error-messages';
 import { useT } from '../../infrastructure/i18n/locale';
 import { McpCredentialForm } from './McpCredentialForm';
 import { McpCredentialList } from './McpCredentialList';
-import { authSessionQuery } from '../auth/auth-queries';
 
-export function PersonalMcpSettings(): ReactElement {
+export function PersonalMcpSettings({ userId }: { userId: string | undefined }): ReactElement {
   const t = useT();
   const client = useApiClient();
-  const userId = authSessionQuery().data?.userId;
   const query = useQuery({
     queryKey: ['personal-mcp', userId],
     enabled: !!userId,
-    refetchInterval: 30000,
+    // Refresh on each opening and explicit changes, without idle KV reads.
+    staleTime: Infinity,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
     queryFn: async () => {
-      const response = (await client.fetch('/api/v1/auth/me/mcp')) as { data: unknown };
+      const response = (await client.fetch('/api/v1/auth/me/mcp', { retry: false })) as {
+        data: unknown;
+      };
       return personalMcpSettingsSchema.parse(response.data);
     },
   });
@@ -78,7 +83,17 @@ export function PersonalMcpSettings(): ReactElement {
   }
   return (
     <section className="quick-settings-section" aria-label={t('MCP service')}>
-      <h3>{t('MCP service')}</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3>{t('MCP service')}</h3>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy || query.isFetching || !userId}
+          onClick={() => void query.refetch()}
+        >
+          {t('Refresh MCP settings')}
+        </Button>
+      </div>
       {query.isPending ? (
         <p role="status">{t('Loading…')}</p>
       ) : query.isError ? (
@@ -98,6 +113,7 @@ export function PersonalMcpSettings(): ReactElement {
             <Button
               size="sm"
               variant="secondary"
+              disabled={busy || query.isFetching}
               onClick={() => {
                 setMessage('');
                 setEditing(true);
@@ -108,7 +124,7 @@ export function PersonalMcpSettings(): ReactElement {
             <Button
               size="sm"
               variant="secondary"
-              disabled={busy}
+              disabled={busy || query.isFetching}
               onClick={() => copy(buildMcpPrompt(data.endpoint, data.promptTemplate))}
             >
               {t('Copy prompt')}

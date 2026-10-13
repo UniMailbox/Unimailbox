@@ -56,7 +56,7 @@ function mount(data = initial) {
   render(
     <QueryClientProvider client={queryClient}>
       <ApiClientProvider client={client}>
-        <McpServiceCard />
+        <McpServiceCard userId="fixture" />
       </ApiClientProvider>
     </QueryClientProvider>,
   );

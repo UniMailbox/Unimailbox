@@ -12,7 +12,7 @@ export function AiSettingsPage(): ReactElement {
   return (
     <main className="admin-page admin-ai-page" data-testid="admin-ai-page">
       <AiConfigurationPanel />
-      <McpServiceCard />
+      <McpServiceCard userId={session.data.userId} />
     </main>
   );
 }

@@ -12,9 +12,8 @@
 //     declared/actual byte checks with the route-specific upload policy.
 //   - `webhookV1` is a sibling sub-app that does NOT chain the body limit;
 //     it mounts `/api/v1/webhooks/*` only.
-// `requestId`, `setupGate`, `authn`, and `config` are still applied
-// globally to every sub-app because those policies are not body-size
-// related.
+// `requestId`, `setupGate` and `config` apply globally. Browser authentication
+// covers `/api/v1/*`; `/api/mcp` authenticates its separate credential in D1.
 //
 // Asset-first routing serves existing static files. The Worker supplies the SPA
 // shell only for browser routes; missing API paths/files remain real 404s.
@@ -67,7 +66,9 @@ export function buildRouter(): Hono<AppEnv> {
   router.use('*', requestId);
   router.use('*', setupGate);
   router.use('*', configMiddleware);
-  router.use('*', authn); // Sets userId only from a Bearer token bound to an active D1 session.
+  // MCP credentials never belong to the browser token cache. Looking them up
+  // there adds a billed KV miss before the independent D1 authentication.
+  router.use('/api/v1/*', authn);
 
   // CAP-031: `/api/v1/*` body-size enforcement. Mounted on the
   // `/api/v1` path so every sub-app route chained below it inherits the

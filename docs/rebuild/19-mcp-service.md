@@ -41,6 +41,14 @@ MCP credentials, not every possible secret; never enter provider keys or passwor
    `Authorization: Bearer <value of UNIMAILBOX_MCP_TOKEN>`. Clients must support
    custom Bearer headers. Automatic OAuth login is not provided in this phase.
 
+MCP settings refresh once whenever the personal panel or Admin card opens,
+after its mutations, and through **Refresh MCP settings**. They have no interval,
+focus/reconnect refetch or automatic request/query retries. The parent page
+supplies its already-known user ID rather than mounting another `/auth/me`
+query. An externally changed service/permission state appears on explicit refresh
+or reopening; every credential operation and tool still checks the live server
+state. This UI cache does not authorize a tool or preserve a revoked grant.
+
 Personal read/issue/revoke paths are `/api/v1/auth/me/mcp`,
 `/api/v1/auth/me/mcp/tokens` and `/api/v1/auth/me/mcp/tokens/:id/revoke`.
 They always derive the owner from the verified session, reject accounts requiring
@@ -94,6 +102,11 @@ and create external effects. This implementation supplies:
   not authenticate MCP, and MCP credentials do not authenticate ordinary APIs.
   MCP credentials are never forwarded upstream or to a caller-selected URL. AI
   and mail provider credentials remain inside their existing authorized adapters.
+- Browser authentication is confined to `/api/v1/*`. `/api/mcp` goes straight
+  to the separate D1 credential authority, with no browser-token KV lookup.
+  Read/draft tools and rejected credential/Origin/disabled-service requests have
+  zero CACHE operations in binding-backed tests. Ordinary session APIs retain
+  their KV lookup plus current D1 session/account checks.
 - Hash-only persistence, one-time disclosure, expiry and immediate rejection of
   subsequent requests after revocation, account deactivation, required password
   change or service disable. User permissions and mailbox grants are checked on

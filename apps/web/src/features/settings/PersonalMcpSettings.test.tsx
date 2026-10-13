@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  focusManager,
+  onlineManager,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query';
 import { buildMcpPrompt, type PersonalMcpSettings as McpSettings } from '@unimailbox/contracts';
 import { ApiClientProvider } from '../../infrastructure/api/client-provider';
 import { createApiClient } from '../../infrastructure/api/client';
 import { authQueryKeys } from '../auth/auth-queries';
 import { resetAuthSessionForTesting } from '../auth/auth-session-store';
-import { jsonResponse } from '../../test-utils';
+import { errorResponse, jsonResponse } from '../../test-utils';
 import { PersonalMcpSettings } from './PersonalMcpSettings';
 const box = '00000000-0000-4000-8000-000000000011';
 const id = '00000000-0000-4000-8000-000000000012';
@@ -21,12 +26,17 @@ const initial: McpSettings = {
 };
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  focusManager.setFocused(undefined);
+  onlineManager.setOnline(true);
   resetAuthSessionForTesting();
   vi.restoreAllMocks();
 });
 function mount(data = initial) {
+  let failReads = false;
   const calls: Array<{ path: string; init: RequestInit }> = [];
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const reads = { settings: 0, session: 0 };
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 0 } } });
   queryClient.setQueryData(authQueryKeys.session(), {
     userId: 'member-fixture',
     email: 'member@example.test',
@@ -38,13 +48,19 @@ function mount(data = initial) {
     getSessionToken: () => null,
     fetchImpl: async (input, init) => {
       const path = String(input);
-      if (path.endsWith('/auth/me'))
+      if (path.endsWith('/auth/me')) {
+        reads.session++;
         return jsonResponse({
           data: {
             user: { id: 'member-fixture', email: 'member@example.test', displayName: 'Member' },
             canAccessAdmin: false,
           },
         });
+      }
+      if (path.endsWith('/auth/me/mcp')) {
+        reads.settings++;
+        if (failReads) return errorResponse('INTERNAL', 'Fixture error', 503);
+      }
       if (init?.method === 'POST') {
         calls.push({ path, init });
         if (path.endsWith('/revoke')) {
@@ -68,16 +84,70 @@ function mount(data = initial) {
       return jsonResponse({ data });
     },
   });
-  const view = render(
+  const settings = (visible = true) => (
     <QueryClientProvider client={queryClient}>
       <ApiClientProvider client={client}>
-        <PersonalMcpSettings />
+        {visible ? <PersonalMcpSettings userId="member-fixture" /> : null}
       </ApiClientProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { calls, queryClient, view };
+  const view = render(settings());
+  return {
+    calls,
+    reads,
+    queryClient,
+    view,
+    setVisible: (visible: boolean) => view.rerender(settings(visible)),
+    setRemote: (next: McpSettings) => {
+      data = next;
+    },
+    failReads: () => {
+      failReads = true;
+    },
+  };
 }
 describe('personal MCP access in Quick settings', () => {
+  it('does not multiply a failed settings request through client or query retries', async () => {
+    const { reads, failReads } = mount();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Refresh MCP settings' })).toBeEnabled(),
+    );
+    failReads();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh MCP settings' }));
+    await screen.findByRole('alert');
+    expect(reads.settings).toBe(2);
+    expect(reads.session).toBe(0);
+  });
+  it.each([true, false])(
+    'refreshes on opening and request, without idle/focus/reconnect reads (enabled=%s)',
+    async (enabled) => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+      const { reads, setVisible, setRemote } = mount({ ...initial, enabled });
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Refresh MCP settings' })).toBeEnabled(),
+      );
+      expect(reads).toEqual({ settings: 1, session: 0 });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_600_000);
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      });
+      expect(reads).toEqual({ settings: 1, session: 0 });
+      setRemote({ ...initial, enabled: !enabled });
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh MCP settings' }));
+      await waitFor(() => expect(reads.settings).toBe(2));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Refresh MCP settings' })).toBeEnabled(),
+      );
+      expect(!!screen.queryByRole('button', { name: 'Manage agent access' })).toBe(!enabled);
+      act(() => setVisible(false));
+      act(() => setVisible(true));
+      await waitFor(() => expect(reads.settings).toBe(3));
+      expect(reads.session).toBe(0);
+    },
+  );
   it('allows members to select independent send access and keeps one-time credentials out of caches/prompts', async () => {
     const user = userEvent.setup();
     const clipboard = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();

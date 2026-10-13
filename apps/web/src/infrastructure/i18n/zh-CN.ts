@@ -1,4 +1,5 @@
 export const zhCN: Readonly<Record<string, string>> = {
+  'Refresh MCP settings': '刷新 MCP 设置',
   'Let users connect local AI agents with their own mailbox permissions.':
     '允许用户按自己的邮箱权限连接本地 AI agent。',
   'Users manage agent credentials in Quick settings. Sending requires their separate permission.':

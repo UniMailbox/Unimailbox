@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { env, SELF } from 'cloudflare:test';
+import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { encrypt, importEncryptionKey } from '../../platform/crypto';
 import { DEFAULT_MCP_PROMPT_TEMPLATE } from '@unimailbox/contracts';
 import { readSecret } from '../../platform/secrets';
+import { app } from '../../entrypoints/http';
 
 const user = '00000000-0000-4000-8000-000000000001';
 const box = '00000000-0000-4000-8000-000000000011';
@@ -129,6 +130,97 @@ beforeEach(async () => {
 });
 
 describe('MCP administration and Streamable HTTP', () => {
+  it('R-AUTHZ-003: MCP authenticates in D1 with zero KV operations while browser APIs retain authentication', async () => {
+    await save();
+    const credential = await token(true);
+    // Call the production Hono entry with the actual fixture bindings so the
+    // operation spies and both authentication paths share the same namespace.
+    const read = vi.spyOn(env.CACHE, 'get');
+    const write = vi.spyOn(env.CACHE, 'put');
+    const remove = vi.spyOn(env.CACHE, 'delete');
+    const list = vi.spyOn(env.CACHE, 'list');
+    const context = createExecutionContext();
+    const post = (
+      bearer: string,
+      headers: Record<string, string> = {},
+      method = 'tools/list',
+      params: unknown = {},
+    ) =>
+      app.fetch(
+        new Request(`${BASE}/api/mcp`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${bearer}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/event-stream',
+            'MCP-Protocol-Version': '2025-11-25',
+            ...headers,
+          },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        }),
+        env,
+        context,
+      );
+    try {
+      const browser = await app.fetch(
+        new Request(`${BASE}/api/v1/auth/me/mcp`, { headers: adminHeaders() }),
+        env,
+      );
+      expect(browser.status).toBe(200);
+      await browser.json();
+      expect(read).toHaveBeenCalledExactlyOnceWith(`auth:${user}`);
+      read.mockClear();
+      const anonymous = await app.fetch(new Request(`${BASE}/api/v1/auth/me/mcp`), env);
+      expect(anonymous.status).toBe(401);
+      await anonymous.json();
+      const accepted = await post(credential.token);
+      expect(accepted.status).toBe(200);
+      expect(await rpcJson(accepted)).toMatchObject({ result: { tools: expect.any(Array) } });
+      const messageRead = await post(credential.token, {}, 'tools/call', {
+        name: 'read_message',
+        arguments: { mailboxId: box, messageId: message },
+      });
+      expect(await rpcJson(messageRead)).toMatchObject({ result: { isError: false } });
+      const draft = await post(credential.token, {}, 'tools/call', {
+        name: 'create_draft',
+        arguments: {
+          mailboxId: box,
+          subject: 'KV fixture',
+          body: 'Synthetic draft',
+          to: ['recipient@example.test'],
+          idempotencyKey: 'fixture-kv-draft',
+        },
+      });
+      expect(await rpcJson(draft)).toMatchObject({ result: { isError: false } });
+      const wrongAudience = await post(user);
+      expect(wrongAudience.status).toBe(401);
+      await wrongAudience.json();
+      const hostile = await post(credential.token, { Origin: 'https://hostile.test' });
+      expect(hostile.status).toBe(403);
+      await hostile.json();
+      await env.DB.prepare('UPDATE mcp_tokens SET revoked_at=0 WHERE id=?')
+        .bind(credential.credential.id)
+        .run();
+      const revoked = await post(credential.token);
+      expect(revoked.status).toBe(401);
+      await revoked.json();
+      await env.DB.prepare('UPDATE mcp_configuration SET enabled=0').run();
+      const disabled = await post(credential.token);
+      expect(disabled.status).toBe(503);
+      await disabled.json();
+      await waitOnExecutionContext(context);
+      expect(read).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(list).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+      write.mockRestore();
+      remove.mockRestore();
+      list.mockRestore();
+    }
+  });
+
   it('R-AUTHZ-003 R-AUTHZ-004: members manage only their own credentials without settings permissions', async () => {
     await save();
     const member = '00000000-0000-4000-8000-000000000002';

@@ -238,7 +238,7 @@ export function QuickSettings({
                   update({ readingPane: readingPane as PersonalPreferences['readingPane'] })
                 }
               />
-              <PersonalMcpSettings key={session?.userId} />
+              <PersonalMcpSettings key={session?.userId} userId={session?.userId} />
               <section className="quick-settings-section">
                 <h3>{t('Security')}</h3>
                 <Button
