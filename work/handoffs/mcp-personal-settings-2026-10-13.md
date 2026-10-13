@@ -1,5 +1,8 @@
 # MCP personal settings revision
 
+Historical snapshot. Later refresh/authentication changes and the current release
+are in `work/handoffs/mcp-kv-reduction-2026-10-13.md`.
+
 Implemented and published to the existing staging installation on 2026-10-13.
 Application commit `eb72db8`; Worker `b5a54cc1-476f-4ee8-9d9d-4e887916412b`;
 schema 0036. The full release gate passed 2,389 tests and all 36 remote schema

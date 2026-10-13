@@ -1,5 +1,8 @@
 # MCP personal settings staging validation — 2026-10-13
 
+Historical settings-split release. The later KV reduction and current release
+are recorded in `docs/qa/mcp-kv-staging-2026-10-13.md`.
+
 This revision replaces the separate MCP administration page with a card in AI
 services and moves personal agent permissions into Quick settings. Design and
 API ownership: `docs/rebuild/19-mcp-service.md`. The 2026-10-12 report describes

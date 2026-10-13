@@ -10,6 +10,25 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-13 — MCP KV request amplification removed
+
+MCP cards refresh on opening, explicit refresh and mutations, with no interval,
+focus/reconnect fetches or layered retries. They reuse the parent's user ID
+rather than adding session-query observers. Browser authn covers `/api/v1/*`;
+`/api/mcp` retains its separate D1 credential, account, scope and rate checks
+without a browser-token KV lookup. No schema or resource change was needed.
+
+Application commit `e24bf27` passed 2,393 tests and all 36 remote companions and
+was deployed to staging as Worker `fd7fa1b2-5d45-49ea-9e70-9b90753edf72`.
+Actual binding spies count zero CACHE operations for MCP read/draft/rejection
+paths, with a positive browser authentication control. Controlled frontend timers
+show no idle/focus/reconnect requests. Live connection/scope/audience/Origin/
+revocation and maintenance passed; test credential revoked, original enabled
+configuration retained and diagnostic session logged out. No real mail was read
+or sent. Full-day usage and native browser/agent acceptance remain unverified.
+Self-review only. See `19-mcp-service.md`, `../qa/mcp-kv-staging-2026-10-13.md`
+and `../../work/handoffs/mcp-kv-reduction-2026-10-13.md`.
+
 ## 2026-10-13 — MCP settings split by service and user
 
 MCP is a card under Admin AI services with one service switch and an editable
