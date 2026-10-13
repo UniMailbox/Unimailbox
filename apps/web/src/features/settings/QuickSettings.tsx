@@ -18,6 +18,7 @@ import { mailboxListQuery } from '../mailbox/mailbox-queries';
 import { LogoutButton } from '../auth/LogoutButton';
 import { ChangePasswordForm } from '../auth/ChangePasswordPage';
 import { ApiError } from '../../infrastructure/api/errors';
+import { PersonalMcpSettings } from './PersonalMcpSettings';
 import { AppearanceControls } from './AppearanceControls';
 export function UserAvatar({ className = 'size-8' }: { className?: string }): ReactElement {
   const session = authSessionQuery().data;
@@ -237,6 +238,7 @@ export function QuickSettings({
                   update({ readingPane: readingPane as PersonalPreferences['readingPane'] })
                 }
               />
+              <PersonalMcpSettings key={session?.userId} />
               <section className="quick-settings-section">
                 <h3>{t('Security')}</h3>
                 <Button

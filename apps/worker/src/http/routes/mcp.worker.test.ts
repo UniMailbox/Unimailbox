@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { encrypt, importEncryptionKey } from '../../platform/crypto';
+import { DEFAULT_MCP_PROMPT_TEMPLATE } from '@unimailbox/contracts';
 import { readSecret } from '../../platform/secrets';
 
 const user = '00000000-0000-4000-8000-000000000001';
@@ -10,7 +11,7 @@ const otherBox = '00000000-0000-4000-8000-000000000012';
 const message = '00000000-0000-4000-8000-000000000021';
 const now = '2026-01-01 00:00:00';
 const BASE = 'http://localhost';
-const config = { enabled: true, allowSend: false, requestsPerMinute: 120 };
+const config = { enabled: true, promptTemplate: DEFAULT_MCP_PROMPT_TEMPLATE };
 const adminHeaders = () => ({
   Authorization: `Bearer ${user}`,
   'Content-Type': 'application/json',
@@ -29,7 +30,7 @@ async function issue(
   headers = adminHeaders(),
   mailboxIds = [box],
 ) {
-  return SELF.fetch(`${BASE}/api/v1/admin/mcp/tokens`, {
+  return SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -128,6 +129,120 @@ beforeEach(async () => {
 });
 
 describe('MCP administration and Streamable HTTP', () => {
+  it('R-AUTHZ-003 R-AUTHZ-004: members manage only their own credentials without settings permissions', async () => {
+    await save();
+    const member = '00000000-0000-4000-8000-000000000002';
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO users(id,email,status,password_algorithm,password_iterations,password_salt,password_hash,created_at,updated_at) SELECT ?,'member@example.test','active',password_algorithm,password_iterations,password_salt,password_hash,created_at,updated_at FROM users WHERE id=?`,
+      ).bind(member, user),
+      env.DB.prepare(
+        `INSERT INTO roles(id,name,description,is_system,created_at) VALUES('member','member','',1,?)`,
+      ).bind(now),
+      env.DB.prepare(
+        `INSERT INTO user_roles(user_id,role_id,granted_at) VALUES(?,'member',?)`,
+      ).bind(member, now),
+      ...['message.read', 'message.send'].map((permission) =>
+        env.DB.prepare(
+          `INSERT INTO role_permissions(role_id,permission_id,created_at) VALUES('member',?,?)`,
+        ).bind(permission, now),
+      ),
+      env.DB.prepare('INSERT INTO mailbox_members(mailbox_id,user_id,role) VALUES(?,?,?)').bind(
+        box,
+        member,
+        'sender',
+      ),
+      env.DB.prepare(
+        'INSERT INTO sessions(id,user_id,refresh_token_hash,expires_at,created_at) VALUES(?,?,?,2000000000,?)',
+      ).bind(member, member, member, now),
+    ]);
+    await env.CACHE.put(`auth:${member}`, JSON.stringify({ userId: member, sessionId: member }));
+    const headers = () => ({ ...adminHeaders(), Authorization: `Bearer ${member}` });
+    expect((await SELF.fetch(`${BASE}/api/v1/admin/mcp`, { headers: headers() })).status).toBe(403);
+    expect(
+      (
+        await SELF.fetch(`${BASE}/api/v1/admin/mcp`, {
+          method: 'PUT',
+          headers: { ...headers(), 'If-Match': '1' },
+          body: JSON.stringify(config),
+        })
+      ).status,
+    ).toBe(403);
+    const personal = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: headers() });
+    expect(await personal.json()).toMatchObject({
+      data: { enabled: true, mailboxes: [{ id: box, canWrite: true }], tokens: [] },
+    });
+    expect((await issue(false, false, headers(), [otherBox])).status).toBe(403);
+    const issued = await issue(false, true, headers());
+    expect(issued.status).toBe(200);
+    const mine = (await issued.json<{ data: { token: string; credential: { id: string } } }>())
+      .data;
+    const owner = await token();
+    const otherRevoke = await SELF.fetch(
+      `${BASE}/api/v1/auth/me/mcp/tokens/${owner.credential.id}/revoke`,
+      { method: 'POST', headers: headers() },
+    );
+    expect(otherRevoke.status).toBe(404);
+    const listing = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: headers() });
+    expect(await listing.json()).toMatchObject({ data: { tokens: [{ id: mine.credential.id }] } });
+    await env.DB.prepare("UPDATE mailbox_members SET role='viewer' WHERE user_id=?")
+      .bind(member)
+      .run();
+    expect((await issue(true, false, headers())).status).toBe(403);
+    expect((await issue(false, true, headers())).status).toBe(403);
+    expect((await issue(false, false, headers())).status).toBe(200);
+    const viewer = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: headers() });
+    expect(await viewer.json()).toMatchObject({
+      data: { mailboxes: [{ id: box, canWrite: false }] },
+    });
+    expect(
+      (
+        await call(mine.token, 'send_email', {
+          mailboxId: box,
+          subject: 'Fixture',
+          body: 'Synthetic',
+          to: ['recipient@example.test'],
+          confirmed: true,
+          idempotencyKey: 'viewer-denied-key',
+        })
+      ).result?.isError,
+    ).toBe(true);
+    await save({ ...config, enabled: false }, 1);
+    expect((await issue(false, false, headers())).status).toBe(503);
+    expect(
+      (
+        await SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens/${mine.credential.id}/revoke`, {
+          method: 'POST',
+          headers: headers(),
+        })
+      ).status,
+    ).toBe(200);
+    await env.DB.prepare('UPDATE users SET must_change_password=1 WHERE id=?').bind(member).run();
+    expect((await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: headers() })).status).toBe(
+      403,
+    );
+    expect((await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`)).status).toBe(401);
+  });
+
+  it('persists shared prompts with revision checks without accepting credentials', async () => {
+    const configuration = { ...config, promptTemplate: 'Fixture agent connects to {{endpoint}}.' };
+    expect((await save(configuration)).status).toBe(200);
+    const personal = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: adminHeaders() });
+    expect(await personal.json()).toMatchObject({
+      data: { promptTemplate: configuration.promptTemplate },
+    });
+    expect(
+      (await save({ ...configuration, promptTemplate: '{{endpoint}} umcp_' + 'a'.repeat(64) }, 1))
+        .status,
+    ).toBe(400);
+    expect((await save(config)).status).toBe(412);
+    const read = await SELF.fetch(`${BASE}/api/v1/admin/mcp`, { headers: adminHeaders() });
+    const result = await read.json<{ data: Record<string, unknown> }>();
+    expect(result.data).not.toHaveProperty('tokens');
+    expect(result.data).not.toHaveProperty('mailboxes');
+    expect(result.data).toMatchObject({ configuration, revision: 1 });
+  });
+
   it('defaults disabled, protects administration and rejects stale revisions', async () => {
     expect((await rpc('', 'tools/list')).status).toBe(503);
     expect((await SELF.fetch(`${BASE}/api/v1/admin/mcp`)).status).toBe(401);
@@ -136,9 +251,8 @@ describe('MCP administration and Streamable HTTP', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(await response.json()).toMatchObject({
       data: {
-        configuration: { enabled: false, allowSend: false },
+        configuration: { enabled: false, promptTemplate: DEFAULT_MCP_PROMPT_TEMPLATE },
         endpoint: `${BASE}/api/mcp`,
-        tokens: [],
       },
     });
     expect((await save()).status).toBe(200);
@@ -146,7 +260,8 @@ describe('MCP administration and Streamable HTTP', () => {
     await env.DB.prepare(
       "DELETE FROM role_permissions WHERE permission_id='settings.manage'",
     ).run();
-    expect((await issue()).status).toBe(403);
+    expect((await save(config, 1)).status).toBe(403);
+    expect((await issue()).status).toBe(200);
   });
 
   it('shows credentials only once and stores only hashes and safe replay metadata', async () => {
@@ -164,8 +279,8 @@ describe('MCP administration and Streamable HTTP', () => {
       JSON.stringify(await env.DB.prepare('SELECT * FROM idempotency_records').all()) +
       JSON.stringify(await env.DB.prepare('SELECT * FROM audit_events').all());
     expect(persisted).not.toContain(data.data.token);
-    expect(persisted).not.toContain('Bearer');
-    const read = await SELF.fetch(`${BASE}/api/v1/admin/mcp`, { headers: adminHeaders() });
+    expect(persisted).not.toContain(`Bearer ${data.data.token}`);
+    const read = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: adminHeaders() });
     expect(await read.text()).not.toContain(data.data.token);
     expect((await rpc(user, 'tools/list')).status).toBe(401);
     expect(
@@ -235,8 +350,7 @@ describe('MCP administration and Streamable HTTP', () => {
     expect(
       (await call(draft.token, 'send_email', { ...args, confirmed: true })).error,
     ).toBeDefined();
-    expect((await issue(false, true)).status).toBe(403);
-    await save({ ...config, allowSend: true }, 1);
+
     const send = await token(false, true);
     const tools = await rpc(send.token, 'tools/list');
     const names = (
@@ -245,14 +359,12 @@ describe('MCP administration and Streamable HTTP', () => {
     expect(names).toContain('send_email');
     expect(names).not.toContain('create_draft');
     expect((await call(send.token, 'send_email', args)).result?.isError).toBe(true);
-    await save({ ...config, allowSend: false }, 2);
-    expect(
-      (await call(send.token, 'send_email', { ...args, confirmed: true })).error,
-    ).toBeDefined();
+    await save({ ...config, enabled: false }, 1);
+    expect((await rpc(send.token, 'tools/list')).status).toBe(503);
   });
 
   it('queues an authorized send once and rejects retries after live send permission is removed', async () => {
-    await save({ ...config, allowSend: true });
+    await save();
     const credential = await token(false, true);
     const encrypted = await encrypt(
       'synthetic-brevo-key',
@@ -312,7 +424,7 @@ describe('MCP administration and Streamable HTTP', () => {
       body: JSON.stringify([{ jsonrpc: '2.0', id: 1, method: 'tools/list' }]),
     });
     expect(batch.status).toBe(400);
-    await save({ ...config, requestsPerMinute: 2 }, 1);
+    await env.DB.prepare('UPDATE mcp_configuration SET requests_per_minute=2').run();
     const fresh = await token();
     const results = await Promise.all(
       Array.from({ length: 4 }, () => rpc(fresh.token, 'tools/list')),
@@ -353,7 +465,7 @@ describe('MCP administration and Streamable HTTP', () => {
       .run();
     expect(
       (
-        await SELF.fetch(`${BASE}/api/v1/admin/mcp/tokens/${credential.credential.id}/revoke`, {
+        await SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens/${credential.credential.id}/revoke`, {
           method: 'POST',
           headers: adminHeaders(),
         })

@@ -10,7 +10,7 @@ import {
   sqliteTimestamp,
 } from '../../platform/idempotency';
 import { findUserById } from '../identity';
-import { assertCan, listMailboxesByUser, findMailboxById } from '../tenancy';
+import { assertCan, listMailboxesByUser, findMailboxById, findMailboxMember } from '../tenancy';
 import { checkPermission } from './permission-repository';
 import { prepareCreateAuditEvent } from './audit-event-repository';
 import {
@@ -23,16 +23,39 @@ import {
 } from './mcp-repository';
 
 export async function getMcpAdministration(db: Database, userId: string, endpoint: string) {
+  const { configuration, revision } = await readMcpConfiguration(db);
   return {
-    ...(await readMcpConfiguration(db)),
+    configuration,
+    revision,
     endpoint,
     canManage: await checkPermission(db, userId, 'settings.manage'),
-    tokens: await listMcpTokens(db, userId),
-    mailboxes: (await listMailboxesByUser(db, userId))
-      .filter((b) => b.status === 'active')
-      .map((b) => ({ id: b.id, address: b.address })),
   };
 }
+export async function getPersonalMcpSettings(db: Database, userId: string, endpoint: string) {
+  const { configuration } = await readMcpConfiguration(db);
+  const canRead = await checkPermission(db, userId, 'message.read');
+  const canSend = canRead && (await checkPermission(db, userId, 'message.send'));
+  const mailboxes = canRead
+    ? (await listMailboxesByUser(db, userId)).filter((b) => b.status === 'active')
+    : [];
+  return {
+    enabled: configuration.enabled,
+    endpoint,
+    promptTemplate: configuration.promptTemplate,
+    tokens: await listMcpTokens(db, userId),
+    mailboxes: await Promise.all(
+      mailboxes.map(async (b) => ({
+        id: b.id,
+        address: b.address,
+        canWrite:
+          canSend &&
+          (b.ownerUserId === userId ||
+            ['sender', 'admin'].includes((await findMailboxMember(db, b.id, userId))?.role ?? '')),
+      })),
+    ),
+  };
+}
+
 interface Mutation {
   actorUserId: string;
   idempotencyKey: string;
@@ -116,9 +139,12 @@ export async function updateMcpConfiguration(
       [
         db
           .prepare(
-            `UPDATE mcp_configuration SET enabled=?,allow_send=?,requests_per_minute=?,revision=CASE WHEN revision=? THEN revision+1 ELSE -1 END WHERE id='system'`,
+            `UPDATE mcp_configuration SET enabled=?,revision=CASE WHEN revision=? THEN revision+1 ELSE -1 END WHERE id='system'`,
           )
-          .bind(c.enabled ? 1 : 0, c.allowSend ? 1 : 0, c.requestsPerMinute, input.revision),
+          .bind(c.enabled ? 1 : 0, input.revision),
+        db
+          .prepare("UPDATE mcp_prompt SET prompt_template=? WHERE id='system'")
+          .bind(c.promptTemplate),
         audit(db, input, 'mcp.configuration_updated', 'system'),
       ],
       json,
@@ -137,7 +163,7 @@ export async function issueMcpToken(
   db: Database,
   input: Mutation & { request: CreateMcpToken },
 ): Promise<string> {
-  const operation = 'POST /api/v1/admin/mcp/tokens';
+  const operation = 'POST /api/v1/auth/me/mcp/tokens';
   const old = await replay(db, input, operation);
   if (old !== null) return old;
   const { configuration } = await readMcpConfiguration(db);
@@ -155,12 +181,6 @@ export async function issueMcpToken(
       httpStatus: 403,
     });
   const r = input.request;
-  if (r.allowSend && !configuration.allowSend)
-    throw new DomainError({
-      code: 'PERMISSION_DENIED',
-      message: 'MCP sending is disabled',
-      httpStatus: 403,
-    });
   for (const permission of (r.allowDraft || r.allowSend
     ? ['message.read', 'message.send']
     : ['message.read']) as Array<'message.read' | 'message.send'>) {
@@ -232,7 +252,7 @@ export async function revokeMcpToken(
   db: Database,
   input: Mutation & { id: string },
 ): Promise<string> {
-  const operation = `POST /api/v1/admin/mcp/tokens/${input.id}/revoke`;
+  const operation = `POST /api/v1/auth/me/mcp/tokens/${input.id}/revoke`;
   const old = await replay(db, input, operation);
   if (old !== null) return old;
   if (!(await readMcpTokenById(db, input.id, input.actorUserId)))
@@ -255,7 +275,7 @@ export async function revokeMcpToken(
   );
 }
 export async function authenticateMcp(db: Database, token: string) {
-  const { configuration } = await readMcpConfiguration(db);
+  const { configuration, requestsPerMinute } = await readMcpConfiguration(db);
   if (!configuration.enabled)
     throw new DomainError({
       code: 'MCP_DISABLED',
@@ -274,7 +294,7 @@ export async function authenticateMcp(db: Database, token: string) {
   if (!row || row.revoked_at !== null || row.expires_at <= now) throw fail();
   const user = await findUserById(db, row.user_id);
   if (!user || user.status !== 'active' || user.must_change_password === 1) throw fail();
-  if (!(await consumeMcpRateLimit(db, row.id, configuration.requestsPerMinute, now)))
+  if (!(await consumeMcpRateLimit(db, row.id, requestsPerMinute, now)))
     throw new DomainError({
       code: 'MCP_RATE_LIMITED',
       message: 'MCP request limit exceeded',

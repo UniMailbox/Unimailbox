@@ -1,4 +1,45 @@
 export const zhCN: Readonly<Record<string, string>> = {
+  'Let users connect local AI agents with their own mailbox permissions.':
+    '允许用户按自己的邮箱权限连接本地 AI agent。',
+  'Users manage agent credentials in Quick settings. Sending requires their separate permission.':
+    '用户在快捷设置中管理 agent 凭证，发送邮件需要单独授权。',
+  'View / edit setup prompt': '查看 / 编辑配置提示词',
+  'View setup prompt': '查看配置提示词',
+  'Agent setup prompt': 'Agent 配置提示词',
+  'Prompt template': '提示词模板',
+  'Preview copied prompt': '预览复制内容',
+  'Restore default prompt': '恢复默认提示词',
+  'Save prompt': '保存提示词',
+  'Shared with all users. Use {{endpoint}} for the service URL; never enter a real credential.':
+    '此模板供所有用户使用。使用 {{endpoint}} 表示接口地址，请勿填写真实凭证。',
+  'Credential protection and human approval instructions are appended automatically.':
+    '复制时会自动附加凭证保密与发送确认说明。',
+  'Enter a prompt containing {{endpoint}} without credentials.':
+    '请填写包含 {{endpoint}} 且不含真实凭证的提示词。',
+  'Could not copy. Select and copy the prompt manually.': '复制失败，请选中提示词手动复制。',
+  'Choose what your local AI agent can access. Read-only access is the default.':
+    '选择本地 AI agent 可访问的邮箱和权限，默认仅允许读取。',
+  'Manage agent access': '管理 agent 权限',
+  'Credentials only grant access within your current mailbox permissions.':
+    '凭证权限不会超出你当前拥有的邮箱权限。',
+  'Read and write available': '可读取和写入',
+  'Read-only mailbox': '只读邮箱',
+  'Agent permissions': 'Agent 权限',
+  'Read mail': '读取邮件',
+  'Creates drafts for review. Does not grant sending.': '创建草稿供你审阅，不包含发送授权。',
+  'Allows sending from selected mailboxes. Require human approval before each send.':
+    '可从所选邮箱发送邮件，每次发送前应由你明确确认。',
+  'Draft and send access require write permission for every selected mailbox.':
+    '草稿与发送权限要求所有所选邮箱均具有写入权限。',
+  'Existing credentials': '已有凭证',
+  'To change permissions, revoke the credential and create a replacement.':
+    '如需修改权限，请撤销旧凭证并重新创建。',
+  'Drafts / AI replies': '草稿 / AI 回复',
+  'Send mail': '发送邮件',
+  'Mailbox access removed': '邮箱权限已移除',
+  Expires: '到期时间',
+  'MCP service is disabled. Contact an administrator to enable it.':
+    'MCP 服务未开启，请联系管理员启用。',
   'MCP service': 'MCP 服务',
   'Connect local AI agents with scoped mailbox access.':
     '连接本地 AI agent，并限定其邮箱访问范围。',

@@ -1,15 +1,19 @@
-import { mcpConfigurationSchema, type McpTokenMetadata } from '@unimailbox/contracts';
+import {
+  DEFAULT_MCP_PROMPT_TEMPLATE,
+  mcpConfigurationSchema,
+  type McpTokenMetadata,
+} from '@unimailbox/contracts';
 import type { Database } from '../../platform/database';
 
 export async function readMcpConfiguration(db: Database) {
   const row = await db
     .prepare(
-      'SELECT enabled, allow_send, requests_per_minute, revision FROM mcp_configuration WHERE id=?',
+      'SELECT c.enabled,c.requests_per_minute,c.revision,p.prompt_template FROM mcp_configuration c JOIN mcp_prompt p ON p.id=c.id WHERE c.id=?',
     )
     .bind('system')
     .first<{
       enabled: number;
-      allow_send: number;
+      prompt_template: string | null;
       requests_per_minute: number;
       revision: number;
     }>();
@@ -17,10 +21,10 @@ export async function readMcpConfiguration(db: Database) {
   return {
     configuration: mcpConfigurationSchema.parse({
       enabled: row.enabled === 1,
-      allowSend: row.allow_send === 1,
-      requestsPerMinute: row.requests_per_minute,
+      promptTemplate: row.prompt_template ?? DEFAULT_MCP_PROMPT_TEMPLATE,
     }),
     revision: row.revision,
+    requestsPerMinute: row.requests_per_minute,
   };
 }
 export interface McpTokenRow {

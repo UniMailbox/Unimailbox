@@ -113,6 +113,7 @@ export {
 } from './ai-configuration-service';
 export {
   getMcpAdministration,
+  getPersonalMcpSettings,
   updateMcpConfiguration,
   issueMcpToken,
   revokeMcpToken,

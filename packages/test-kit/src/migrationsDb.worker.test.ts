@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { CURRENT_SCHEMA_VERSION as CONTRACT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { migrationsDb } from './migrationsDb';
 import mcpSql from '../../../migrations/0035_mcp_access.sql?raw';
+import mcpPromptSql from '../../../migrations/0036_mcp_prompt.sql?raw';
+import mcpPromptVerification from '../../../migrations/0036_mcp_prompt.verify.sql?raw';
 import mcpVerification from '../../../migrations/0035_mcp_access.verify.sql?raw';
 import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
 import aiConfigurationVerification from '../../../migrations/0034_ai_configuration.verify.sql?raw';
@@ -56,6 +58,46 @@ describe('migrationsDb (worker pool)', () => {
   beforeEach(async () => {
     const { reset } = await import('cloudflare:test');
     await reset();
+  });
+
+  it('0036 raw partial/repeated SQL registers the prompt and preserves existing configuration and credentials', async () => {
+    const db = await migrationsDb({ through: '0035_mcp_access' });
+    await insertUser(db, NEW_UUID, 'fixture@example.test');
+    await db.batch([
+      db.prepare(
+        'UPDATE mcp_configuration SET enabled=1,allow_send=0,requests_per_minute=17,revision=4',
+      ),
+      db
+        .prepare(
+          "INSERT INTO mcp_tokens(id,user_id,label,token_hash,allow_draft,allow_send,expires_at,created_at) VALUES('fixture-token',?,'Fixture',?,0,1,2000000000,?)",
+        )
+        .bind(NEW_UUID, 'a'.repeat(64), NOW),
+    ]);
+    const statements = mcpPromptSql
+      .replace(/^--.*$/gm, '')
+      .split(';')
+      .filter((sql) => sql.trim());
+    await db.batch(statements.slice(0, -1).map((sql) => db.prepare(sql)));
+    await db
+      .prepare("UPDATE mcp_prompt SET prompt_template='Custom {{endpoint}}' WHERE id='system'")
+      .run();
+    for (let i = 0; i < 2; i++) await db.batch(statements.map((sql) => db.prepare(sql)));
+    expect(
+      await db
+        .prepare('SELECT enabled,allow_send,requests_per_minute,revision FROM mcp_configuration')
+        .first(),
+    ).toEqual({ enabled: 1, allow_send: 0, requests_per_minute: 17, revision: 4 });
+    expect(await db.prepare('SELECT prompt_template FROM mcp_prompt').first()).toEqual({
+      prompt_template: 'Custom {{endpoint}}',
+    });
+    expect(await db.prepare('SELECT token_hash,allow_send FROM mcp_tokens').first()).toEqual({
+      token_hash: 'a'.repeat(64),
+      allow_send: 1,
+    });
+    for (const sql of mcpPromptVerification.split(';').filter((sql) => sql.trim())) {
+      const rows = await db.prepare(sql).all<{ assertion: string; pass: number }>();
+      for (const row of rows.results) expect(row.pass, row.assertion).toBe(1);
+    }
   });
 
   it('0035 raw SQL registers itself, seeds disabled MCP and safely resumes/replays', async () => {
@@ -509,7 +551,7 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
     // CAP-069: 0025 seeds the internal system-settings revision row.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0035');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0036');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {

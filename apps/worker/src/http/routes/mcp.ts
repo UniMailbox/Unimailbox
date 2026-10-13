@@ -115,7 +115,7 @@ export function mcpRoutes(): Hono<AppEnv> {
       if (!auth.token.mailboxIds.includes(box)) throw deny();
       if ((await findMailboxById(c.env.DB, box))?.status !== 'active') throw deny();
       if (kind === 'draft' && !auth.token.allowDraft) throw deny();
-      if (kind === 'send' && (!auth.token.allowSend || !auth.configuration.allowSend)) throw deny();
+      if (kind === 'send' && !auth.token.allowSend) throw deny();
       if (
         !(await checkPermission(
           c.env.DB,
@@ -315,7 +315,7 @@ export function mcpRoutes(): Hono<AppEnv> {
           }),
       );
     }
-    if (auth.token.allowSend && auth.configuration.allowSend)
+    if (auth.token.allowSend)
       server.registerTool(
         'send_email',
         {

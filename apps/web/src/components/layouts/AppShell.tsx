@@ -99,12 +99,6 @@ export const adminNavigation = [
     description: 'Configure AI backends and email reply assistance.',
   },
   {
-    to: '/admin/mcp',
-    label: 'MCP service',
-    icon: Unplug,
-    description: 'Connect local AI agents with scoped mailbox access.',
-  },
-  {
     to: '/admin/users',
     label: 'Users',
     icon: Users,
@@ -432,7 +426,7 @@ function ShellPending({ admin }: { admin: boolean }): ReactElement {
       <main className="admin-page">
         <ContentSkeleton
           variant={
-            pathname === '/admin/settings' || pathname === '/admin/ai' || pathname === '/admin/mcp'
+            pathname === '/admin/settings' || pathname === '/admin/ai'
               ? 'form'
               : pathname === '/admin'
                 ? 'overview'

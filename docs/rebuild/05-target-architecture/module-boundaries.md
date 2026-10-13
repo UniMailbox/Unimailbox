@@ -61,6 +61,7 @@ The full pairwise dependency policy also requires code review.
 | Domain signatures | signatures, D1, with editor-asset usage references |
 | Jobs, provider connections, encrypted credentials and webhook state | outbound-mail, D1 |
 | Roles, permissions, settings, audit, blocklists and role policies | admin, D1 |
+| MCP service/prompt configuration, personal credentials, scopes and rate windows | admin, D1; personal transport derives the credential owner from the session |
 | AI configuration and encrypted AI credentials | admin, D1; AI adapters and service wired by app-context |
 | Idempotency infrastructure | platform helpers; business modules batch their records with writes |
 

@@ -699,8 +699,20 @@ describe('router — CAP-067 production role route', () => {
       const apiClient = createApiClient({
         baseUrl: '',
         getSessionToken: () => null,
-        fetchImpl: (async () =>
-          jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })) as typeof fetch,
+        fetchImpl: (async (input) =>
+          String(input).endsWith('/setup/status')
+            ? jsonResponse({ data: { status: 'complete', currentStep: 'complete' } })
+            : jsonResponse({
+                data: {
+                  user: {
+                    id: 'role-route-admin',
+                    email: 'admin@example.test',
+                    displayName: 'Role admin',
+                  },
+                  canAccessAdmin: true,
+                  mustChangePassword: false,
+                },
+              })) as typeof fetch,
       });
       const queryClient = new QueryClient({
         defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -716,7 +728,7 @@ describe('router — CAP-067 production role route', () => {
 
       await router.load();
 
-      expect(history.location.pathname).toBe(path);
+      expect(history.location.pathname).toBe(path === '/admin/mcp' ? '/admin/ai' : path);
     },
   );
 

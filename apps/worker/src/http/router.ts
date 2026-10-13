@@ -39,6 +39,7 @@ import { adminRoleRoutes } from './routes/admin-roles';
 import { adminSignatureRoutes } from './routes/admin-signatures';
 import { adminAiRoutes } from './routes/admin-ai';
 import { adminMcpRoutes } from './routes/admin-mcp';
+import { personalMcpRoutes } from './routes/personal-mcp';
 import { mcpRoutes } from './routes/mcp';
 import { aiReplyRoutes } from './routes/ai-reply';
 import { adminSettingsRoutes } from './routes/admin-settings';
@@ -90,6 +91,7 @@ export function buildRouter(): Hono<AppEnv> {
   // CAP-019: Auth and admin API routes.
   apiV1.route('/auth', authRoutes());
   apiV1.route('/', personalSettingsRoutes());
+  apiV1.route('/', personalMcpRoutes());
   apiV1.route('/admin', adminRoutes());
 
   // D-CAP-021 / CAP-035: blocklist + per-role policies.

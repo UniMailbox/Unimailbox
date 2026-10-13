@@ -1,11 +1,6 @@
 import { Hono, type Context } from 'hono';
-import { createMcpTokenSchema, mcpConfigurationSchema, uuidSchema } from '@unimailbox/contracts';
-import {
-  getMcpAdministration,
-  updateMcpConfiguration,
-  issueMcpToken,
-  revokeMcpToken,
-} from '../../modules/admin';
+import { mcpConfigurationSchema } from '@unimailbox/contracts';
+import { getMcpAdministration, updateMcpConfiguration } from '../../modules/admin';
 import { DomainError } from '../../platform/errors';
 import { sha256Hex } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
@@ -93,15 +88,6 @@ export function adminMcpRoutes(): Hono<AppEnv> {
         revision: Number(revision),
       }),
     );
-  });
-  routes.post('/admin/mcp/tokens', async (c) => {
-    const raw = await c.req.text();
-    const request = parseJsonBody(raw, createMcpTokenSchema, { event: 'admin.mcp.invalid_json' });
-    return response(await issueMcpToken(c.env.DB, { ...(await mutation(c, raw)), request }));
-  });
-  routes.post('/admin/mcp/tokens/:id/revoke', async (c) => {
-    const id = uuidSchema.parse(c.req.param('id'));
-    return response(await revokeMcpToken(c.env.DB, { ...(await mutation(c, '')), id }));
   });
   return routes;
 }

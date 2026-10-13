@@ -1,31 +1,54 @@
 # Scoped MCP service
 
-Updated 2026-10-12. Local agents can connect to this installation through its
+Updated 2026-10-13. Local agents can connect to this installation through its
 Streamable HTTP MCP endpoint. The service starts disabled. It does not create a
 second Worker, listen on an additional TCP port or inherit an AI provider key.
 
 ## Administration and connection
 
-Open **Admin → MCP service** (`/admin/mcp`). `settings.read` permits viewing the
-configuration and the current user's credential metadata; `settings.manage`
-permits configuration changes, credential creation and revocation. Configuration
-writes require a revision (`If-Match`) and an idempotency key.
+Open **Admin → AI services** (`/admin/ai`). MCP has its own card on that page,
+with a single service enable/disable switch. The old `/admin/mcp` bookmark redirects
+to AI services; there is no separate navigation entry. `settings.read` permits
+viewing the card and shared prompt; `settings.manage` permits changing the switch
+and prompt. Configuration writes require a revision (`If-Match`) and an
+idempotency key. Admin does not manage personal credentials on this card.
 
-1. Enable MCP. Leave sending disabled unless the installation needs it.
-2. Create a named credential, selecting specific accessible mailboxes. Read access
-   is included; drafts/AI replies and sending are independent grants. Choose an
-   expiry of 1–90 days. Only grant what this agent needs.
+Administrators can view, edit, preview and reset the shared setup prompt even
+while MCP is disabled. The template accepts up to 8,000 characters and requires
+`{{endpoint}}`, replaced with the installation's actual URL when copied. A real
+`umcp_` credential is rejected. Credential protection, untrusted-email and human
+send-approval instructions are appended automatically. This validation detects
+MCP credentials, not every possible secret; never enter provider keys or passwords.
+
+1. An administrator enables MCP in the AI services card. There is no additional
+   installation send switch or rate-limit form.
+2. A signed-in user opens **Quick settings → MCP service → Manage agent access**.
+   This personal API needs no `settings.read` or `settings.manage` permission.
+   Select specific accessible mailboxes, a credential name and 1–90 day expiry.
+   Read-only is the default. Draft/AI and sending are independent optional grants;
+   both require write permission for every selected mailbox. A viewer can create
+   a read credential without gaining write access.
 3. Copy the one-time credential and store it privately in the agent's local
    environment as `UNIMAILBOX_MCP_TOKEN`. The server stores only its SHA-256 hash.
    Lost credentials cannot be recovered: revoke and replace them. A replay of
-   the creation request returns metadata and `token: null`.
-4. Select **Copy prompt** after enabling the service. Paste this configuration
-   prompt into the local agent. It includes the real endpoint, transport, secret
-   environment variable name and usage policy, without the credential itself.
-   The agent must use its actual supported MCP configuration syntax.
-5. Configure a Streamable HTTP client with the endpoint and the request header
+   the creation request returns metadata and `token: null`. Closing the personal
+   dialog, Quick settings or switching accounts clears plaintext UI state.
+4. Select **Copy prompt** after enabling the service. Admin and personal settings
+   use the same saved template. The copied prompt contains no credential and
+   points to Quick settings for credential creation. The agent must use its actual
+   supported MCP configuration syntax.
+5. Configure a Streamable HTTP client with the endpoint and request header
    `Authorization: Bearer <value of UNIMAILBOX_MCP_TOKEN>`. Clients must support
    custom Bearer headers. Automatic OAuth login is not provided in this phase.
+
+Personal read/issue/revoke paths are `/api/v1/auth/me/mcp`,
+`/api/v1/auth/me/mcp/tokens` and `/api/v1/auth/me/mcp/tokens/:id/revoke`.
+They always derive the owner from the verified session, reject accounts requiring
+password change, and cannot list or revoke another user's credentials. Issuance
+requires the service to be enabled; owner revocation remains available through
+the API while disabled. The UI shows no permission form or Copy prompt when the
+service is disabled. Existing credential permissions are immutable; revoke and
+create a replacement to change them.
 
 The endpoint is `<APP_ORIGIN>/api/mcp`, using HTTPS port **443** by default.
 Local Worker development can use its configured loopback origin/port (normally
@@ -44,10 +67,9 @@ The endpoint is stateless and has no persistent session identifier.
 | `read_message` | Read | Selected message, plain text capped at 24,000 characters, marked untrusted |
 | `create_draft` | Draft | Create a server draft from plain text, without sending |
 | `generate_ai_reply` | Draft and read | Existing configured AI reply service; may incur provider charges |
-| `send_email` | Send and installation send switch | Existing audited compose/outbox/queue workflow |
+| `send_email` | Send | Existing audited compose/outbox/queue workflow |
 
-Sending is allowed only if the installation's send switch is enabled, the
-credential grants send, the current account is active, its live global
+Sending is allowed only if MCP is enabled, the credential grants send, the current account is active, its live global
 `message.send` permission still exists, and its current mailbox ownership or
 membership permits sending from that selected mailbox. Administration alone
 never grants access to private mail. Draft access uses the application's existing
@@ -80,7 +102,8 @@ and create external effects. This implementation supplies:
 - Trusted configured endpoint origin and exact Origin checking when present;
   invalid origins receive 403. Credentials in URL query strings are rejected.
   HTTPS is required outside local loopback development; no permissive CORS.
-- Atomic D1 per-credential fixed-minute limits (default 30, configurable 1–120),
+- Atomic D1 per-credential fixed-minute limits (default 30; existing stored limits
+  are preserved, with no admin or personal rate-limit form),
   a bounded 128 KiB request reader, strict tool schemas and bounded output. JSON-RPC
   batch requests are rejected so batching cannot bypass the request limit.
 - Audited configuration, credential lifecycle and tool-call outcomes. Tool audit
@@ -104,15 +127,23 @@ Avoid logging Authorization headers in any reverse proxy or agent integration.
 
 ## Ownership, migration and provenance
 
-Admin owns configuration, credentials, mailbox scope relations and rate windows.
+Admin owns persistence for service configuration, the shared prompt, personal
+credentials, mailbox scope relations and rate windows. Personal HTTP routes
+expose owner-scoped credential operations without administrative permissions.
 The HTTP adapter composes public tenancy/admin services and a private fixed-route
 mail router with a verified identity injected directly into context. It reuses
 existing permission checks, use cases, idempotency and outbound persistence;
 there is no network request back to the application and no synthetic session.
 Migration `0035_mcp_access.sql` seeds disabled configuration and records its own
 `d1_migrations` row; its companion verifies the resulting schema. Raw partial
-application and repeated execution preserve configuration. Existing credentials
-and encryption keys are unchanged. Follow the release backup process before an
+application and repeated execution preserve configuration. Migration `0036_mcp_prompt.sql` adds a replay-safe shared prompt table, records
+its tracking row and preserves the service state, credential IDs/hashes/grants
+and request limits. NULL means the application default prompt. Toggle, template,
+revision, audit and replay response writes settle in one D1 batch. The legacy
+`mcp_configuration.allow_send` column remains for schema compatibility but is no
+longer an authorization gate. Read/draft credentials do not become send-enabled;
+previously send-enabled credentials can send when MCP and their live permissions
+allow it. Encryption keys are unchanged. Follow the release backup process before an
 existing installation is migrated.
 
 The official [TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
@@ -130,5 +161,6 @@ contracts retain Zod 3.
 Focused Worker tests exercise transport negotiation, scopes, draft/send
 idempotency, hash-only storage, replay redaction, origin/body/batch restrictions,
 revocation/expiry, current permissions and concurrent limits. Web tests exercise
-configuration revision, scoped creation and credential-free Copy prompt. These
+configuration revision, shared prompt editing, ordinary-user scoped creation,
+read-only grants and credential-free Copy prompt. These
 are local fixtures; they do not prove a real local agent or real mail delivery.

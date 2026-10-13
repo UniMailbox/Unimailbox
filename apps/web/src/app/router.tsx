@@ -155,12 +155,6 @@ const AiSettingsPage = lazy(() =>
   import('../features/admin/AiSettingsPage').then((module) => ({ default: module.AiSettingsPage })),
 );
 
-const McpSettingsPage = lazy(() =>
-  import('../features/admin/McpSettingsPage').then((module) => ({
-    default: module.McpSettingsPage,
-  })),
-);
-
 // B1 (CAP-041 fix) + CAP-042 Batch 5: typed router context. `beforeLoad`
 // reads `context.apiClient` and `context.queryClient` without React hooks.
 // Step / page components still use `useApiClient()` and `useQueryClient()`
@@ -613,15 +607,14 @@ const adminAiRoute = createRoute({
   ),
 });
 
+// Keep old bookmarks working after moving the service card into AI services.
 const adminMcpRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin/mcp',
-  beforeLoad: async ({ context }) => requireAdministrativeSession(context),
-  component: () => (
-    <AdminLayout>
-      <McpSettingsPage />
-    </AdminLayout>
-  ),
+  beforeLoad: async ({ context }) => {
+    await requireAdministrativeSession(context);
+    throw redirect({ to: '/admin/ai' });
+  },
 });
 
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
