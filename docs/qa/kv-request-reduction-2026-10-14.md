@@ -89,6 +89,16 @@ network capture and a full post-release usage day have not been demonstrated.
 The live authentication checks establish server behavior, not per-call remote
 KV counts. Those operation counts come from the local real-binding tests.
 
+At 05:50:49 UTC (13:50:49 Asia/Shanghai), a fresh GraphQL and deployment check
+confirmed this Worker still served 100% of traffic. The window from 02:07 UTC
+through that snapshot contained ten reads and one delete, confined to the
+02:00 UTC hour that included publication and diagnostic login/logout. This
+timing is consistent with acceptance traffic but is not unique attribution.
+From **03:00 through 05:50 UTC (11:00–13:50 Asia/Shanghai), read/delete were
+both zero**; only the existing cadence's heartbeat writes were present.
+This demonstrates a short quiet post-release period, not an entire usage day
+or a guaranteed rate when users actively operate the application.
+
 The pre-change low counters are evidence of the previous release, not a measured
 post-change saving. The exact ongoing reduction depends on browser/API activity;
 neither application tests nor one aggregate snapshot guarantees zero total KV

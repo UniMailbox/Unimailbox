@@ -19,6 +19,9 @@ Schema remains 0036; no migrations, resource/key or production changes.
   it did not show an ongoing idle-delete recurrence. The operator's exact alert
   window/threshold, native-browser request capture and a full post-release
   metric day remain separate. Refresh open tabs to load the new frontend.
+- Follow-up at 13:50 Asia/Shanghai: this Worker remained at 100%; read/delete
+  were zero from 11:00–13:50. Ten reads/one delete in the preceding publication
+  hour are consistent with diagnostic acceptance, not unique key attribution.
 
 Full counts, release identities, local versus runtime boundaries and references:
 `docs/qa/kv-request-reduction-2026-10-14.md`.
