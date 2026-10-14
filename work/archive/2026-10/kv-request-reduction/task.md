@@ -1,6 +1,6 @@
 # Reduce redundant browser KV requests
 
-Started 2026-10-14; focused verification passed on `codex/kv-request-reduction-20261014`.
+Completed 2026-10-14 on `codex/kv-request-reduction-20261014`.
 
 ## Goal and scope
 
@@ -18,12 +18,14 @@ schema, resource, key, mail or production changes are in scope.
   account, mailbox and permission checks remain fresh on every protected request.
 - R-SECRET-003: metrics reports contain aggregate counts and public identities,
   never credentials or private mail.
-- Additional session observers/focus within 60 seconds do not issue `/auth/me`;
-  stale focus/mount and explicit invalidation still refresh it.
+- Additional session observers within 60 seconds do not issue `/auth/me`;
+  stale mounts and explicit invalidation still refresh it. Production continues
+  to disable focus refetch.
 - Local focused tests and the canonical gate pass. Publish and verify only
   `staging.unimailbox.tech` in the user-specified account and CACHE namespace.
 - Live counters remain aggregate evidence, not per-key attribution or a future
-  usage guarantee. The operator's requested graph period/count question is pending.
+  usage guarantee. The operator's exact alert window/threshold remains unknown;
+  this does not prevent the scoped source reduction and verified publication.
 
 ## Ownership, delivery and review
 
@@ -55,3 +57,17 @@ reads, and the detail fixture used `??` to replace an explicit null identity
 with a logged-in value. Update the footprint to zero additional reads of the
 already-fresh identity and preserve the fixture's explicit null. No product
 authorization or expired-session behavior is relaxed for these corrections.
+
+## Final acceptance
+
+Application `72d86f6`, fixture/release source `79ceaf2`, Worker
+`1e0bdd33-1a59-4698-834b-10946a7bc7eb`: 2,397 tests, doctor 14/14,
+generated bindings, lint, TypeScript, builds and all 36 remote companions pass.
+Standard staging publication and operations readiness/maintenance pass. No
+migration, resource, key or production change. Live login/identity, valid,
+repeated and invalid logout, and access/refresh credential denial pass; the
+diagnostic session is logged out. No private mail read or mail sent.
+All scoped criteria are met at their reported evidence layer. Native browser
+request capture and a full post-release aggregate day remain unverified.
+See `docs/qa/kv-request-reduction-2026-10-14.md` and
+`work/handoffs/kv-request-reduction-2026-10-14.md`.

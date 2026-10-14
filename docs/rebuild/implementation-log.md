@@ -10,6 +10,29 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-14 — Redundant browser KV reads and logout deletes reduced
+
+Shared identity queries now reuse successful UI descriptors for 60 seconds,
+removing the two additional identity reads in the guarded inbox footprint and
+duplicate panel/query observers. Fresh admin entry checks, explicit cache
+updates/invalidation and every server D1/session/account/permission gate remain.
+Unauthenticated logout clears cookies without a billed KV delete; valid logout
+still revokes its session and deletes its access token exactly once.
+
+Live pre-change analytics confirmed 67 reads and zero deletes during the
+preceding 24 hours; the earlier continuous maintenance-delete amplification
+was absent. This is aggregate baseline evidence, not a post-change cost promise
+or attribution of the operator's unspecified alert window. No cadence change,
+migration or resource/key replacement was needed.
+
+Application `72d86f6` plus fixture correction/release source `79ceaf2` passed
+2,397 tests and all 36 remote SQL companions and deployed to staging as Worker
+`1e0bdd33-1a59-4698-834b-10946a7bc7eb`, schema 0036. Live login/identity/logout,
+repeat/invalid-token logout, access/refresh denial and maintenance passed.
+Diagnostic session logged out; no private mail, real mail or production change.
+Self-review only. See `../qa/kv-request-reduction-2026-10-14.md` and
+`../../work/handoffs/kv-request-reduction-2026-10-14.md` for the scoped evidence.
+
 ## 2026-10-13 — MCP KV request amplification removed
 
 MCP cards refresh on opening, explicit refresh and mutations, with no interval,

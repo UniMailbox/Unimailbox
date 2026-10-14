@@ -80,6 +80,21 @@ at most 2 MiB. All writes require an Idempotency-Key. These endpoints require
 authentication and completed password setup, without administrator permission.
 See `../17-personal-settings-localization.md` for persistence and UI behavior.
 
+Browser components share `/auth/me` identity results for 60 seconds to avoid
+repeated KV token lookups when pages and panels mount. This is a UI descriptor,
+not authorization: protected APIs still check the active D1 session, account,
+global permissions and target mailbox on every request. Admin workspace entry
+explicitly rechecks `/me` with zero stale time. Login/password changes and
+logout update the identity query immediately; explicit invalidation bypasses
+the freshness window. The production client still disables focus refetch and
+has no session polling interval.
+
+`POST /api/v1/auth/logout` remains idempotent and always clears the refresh
+cookie. An authenticated logout revokes its D1 session and deletes its live KV
+access token. An already expired, revoked or missing access token requires no
+additional KV delete; any retained cache entry expires under its existing TTL
+and cannot bypass the D1 session/account checks.
+
 ## Status codes
 
 | DomainError code | HTTP |
