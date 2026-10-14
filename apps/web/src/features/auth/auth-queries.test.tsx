@@ -7,10 +7,12 @@ import {
   authQueryKeys,
   useSignInMutation,
   useChangePasswordMutation,
+  authSessionQuery,
+  useSignOutMutation,
 } from './auth-queries';
 import { ApiError } from '../../infrastructure/api/errors';
 import type { ApiClient } from '../../infrastructure/api/client';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { ApiClientProvider } from '../../infrastructure/api/client-provider';
 import type { ReactElement, ReactNode } from 'react';
 import { useAuthSession, setAuthSession, resetAuthSessionForTesting } from './auth-session-store';
@@ -160,6 +162,7 @@ function makeClient(...responses: Response[]): ApiClient {
     async fetch<T>(): Promise<T> {
       const response = responses[Math.min(index++, responses.length - 1)];
       if (response === undefined) throw new Error('test response queue is empty');
+      if (response.status === 204) return undefined as T;
       if (!response.ok) {
         const body = (await response.json()) as { error?: { code?: string; message?: string } };
         throw new ApiError(
@@ -186,6 +189,94 @@ function errorResponse(code: string, message: string, status: number): Response 
     headers: { 'content-type': 'application/json' },
   });
 }
+
+describe('R-AUTHZ-002 bounded UI identity reuse', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetAuthSessionForTesting();
+  });
+
+  it('shares a recent identity across panel mounts, then rechecks a stale identity', async () => {
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const apiClient = makeClient(
+      jsonResponse({
+        data: { user: { id: VALID_USER_ID, email: VALID_EMAIL }, canAccessAdmin: true },
+      }),
+      jsonResponse({
+        data: { user: { id: VALID_USER_ID, email: VALID_EMAIL }, canAccessAdmin: false },
+      }),
+    );
+    const fetch = vi.spyOn(apiClient, 'fetch');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+    });
+    function Wrapper({ children }: { children: ReactNode }): ReactElement {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ApiClientProvider client={apiClient}>{children}</ApiClientProvider>
+        </QueryClientProvider>
+      );
+    }
+    const page = renderHook(() => authSessionQuery(), { wrapper: Wrapper });
+    await waitFor(() => expect(page.result.current.data?.canAccessAdmin).toBe(true));
+    now += 1_000;
+    const panel = renderHook(() => authSessionQuery(), { wrapper: Wrapper });
+    await waitFor(() => expect(panel.result.current.data?.userId).toBe(VALID_USER_ID));
+    panel.unmount();
+    const reopened = renderHook(() => authSessionQuery(), { wrapper: Wrapper });
+    await waitFor(() => expect(reopened.result.current.data?.userId).toBe(VALID_USER_ID));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    reopened.unmount();
+    now += 60_000;
+    const stale = renderHook(() => authSessionQuery(), { wrapper: Wrapper });
+    await waitFor(() => expect(stale.result.current.data?.canAccessAdmin).toBe(false));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(page.result.current.data?.canAccessAdmin).toBe(false);
+    page.unmount();
+    stale.unmount();
+    queryClient.clear();
+  });
+
+  it('explicit invalidation and sign-out update observers without waiting for freshness expiry', async () => {
+    const apiClient = makeClient(
+      jsonResponse({
+        data: { user: { id: VALID_USER_ID, email: VALID_EMAIL }, canAccessAdmin: true },
+      }),
+      jsonResponse({
+        data: { user: { id: VALID_USER_ID, email: VALID_EMAIL }, canAccessAdmin: false },
+      }),
+      new Response(null, { status: 204 }),
+    );
+    const fetch = vi.spyOn(apiClient, 'fetch');
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+    });
+    function Wrapper({ children }: { children: ReactNode }): ReactElement {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ApiClientProvider client={apiClient}>{children}</ApiClientProvider>
+        </QueryClientProvider>
+      );
+    }
+    const page = renderHook(
+      () => ({ session: authSessionQuery(), signOut: useSignOutMutation() }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(page.result.current.session.data?.canAccessAdmin).toBe(true));
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: authQueryKeys.session() });
+    });
+    await waitFor(() => expect(page.result.current.session.data?.canAccessAdmin).toBe(false));
+    await act(async () => {
+      await page.result.current.signOut.mutateAsync();
+    });
+    await waitFor(() => expect(page.result.current.session.data).toBeNull());
+    expect(fetch).toHaveBeenCalledTimes(3);
+    page.unmount();
+    queryClient.clear();
+  });
+});
 
 describe('useSignInMutation cache write', () => {
   it('writes the login response into the session cache without a refetch', async () => {

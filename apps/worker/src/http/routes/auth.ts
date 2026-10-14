@@ -601,8 +601,11 @@ export function authRoutes(): Hono<AppEnv> {
       await c.env.DB.prepare(`UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?`)
         .bind(sqliteTimestamp(systemClock.now()), sessionId, userId)
         .run();
+      // authn already established a live token. Unauthenticated logout only
+      // clears the cookie; missing keys need no delete and revoked entries
+      // are already unusable through D1 and disappear with their KV TTL.
+      if (token !== '') await c.env.CACHE.delete(`auth:${token}`);
     }
-    if (token !== '') await c.env.CACHE.delete(`auth:${token}`);
     return new Response(null, {
       status: 204,
       headers: { 'Set-Cookie': clearRefreshCookie(c.req.raw) },
