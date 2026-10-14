@@ -48,3 +48,10 @@ of an empty 204 response; its helper now follows the actual API client's 204
 behavior and rerun passed. Self-review retains fresh admin entry `/me` checks,
 per-request D1/session/account and permission gates, refresh-cookie clearing and
 valid-token deletion. No new dependency, schema or runtime binding is needed.
+
+The first canonical gate stopped before publication on two frontend tests:
+the old inbox request-footprint expectation required two redundant identity
+reads, and the detail fixture used `??` to replace an explicit null identity
+with a logged-in value. Update the footprint to zero additional reads of the
+already-fresh identity and preserve the fixture's explicit null. No product
+authorization or expired-session behavior is relaxed for these corrections.

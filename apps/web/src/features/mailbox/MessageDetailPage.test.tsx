@@ -265,7 +265,11 @@ async function renderDetailPage(options: RenderDetailOptions): Promise<{
       mutations: { retry: false },
     },
   });
-  queryClient.setQueryData(authQueryKeys.session(), options.session ?? SESSION);
+  // null is an explicitly unauthenticated fixture, not a missing option.
+  queryClient.setQueryData(
+    authQueryKeys.session(),
+    options.session === undefined ? SESSION : options.session,
+  );
   if (options.seedInboxWithActiveMessage === true) {
     // Pre-seed the inbox infinite-query cache exactly as the inbox page
     // would have left it: one page holding the active message unread.
