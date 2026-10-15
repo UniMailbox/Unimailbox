@@ -32,7 +32,10 @@ export function PersonalMcpSettings({ userId }: { userId: string | undefined }):
     refetchOnReconnect: false,
     retry: false,
     queryFn: async () => {
-      const response = (await client.fetch('/api/v1/auth/me/mcp', { retry: false })) as {
+      const response = (await client.fetch('/api/v1/auth/me/mcp', {
+        retry: false,
+        headers: { 'X-MCP-Token-Pagination': '1' },
+      })) as {
         data: unknown;
       };
       return personalMcpSettingsSchema.parse(response.data);

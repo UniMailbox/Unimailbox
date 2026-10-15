@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { encrypt, importEncryptionKey } from '../../platform/crypto';
-import { APPLICATION_VERSION, DEFAULT_MCP_PROMPT_TEMPLATE } from '@unimailbox/contracts';
+import {
+  APPLICATION_VERSION,
+  DEFAULT_MCP_PROMPT_TEMPLATE,
+  personalMcpSettingsSchema,
+} from '@unimailbox/contracts';
 import { readSecret } from '../../platform/secrets';
 import { app } from '../../entrypoints/http';
 
@@ -356,6 +360,26 @@ describe('MCP administration and Streamable HTTP', () => {
     expect((await issue()).status).toBe(200);
   });
 
+  it('keeps the strict legacy settings response unless the client opts into pagination', async () => {
+    const legacySchema = personalMcpSettingsSchema.omit({ nextCursor: true });
+    for (const pagination of [undefined, 'future']) {
+      const response = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, {
+        headers: {
+          ...adminHeaders(),
+          ...(pagination ? { 'X-MCP-Token-Pagination': pagination } : {}),
+        },
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json<{ data: unknown }>();
+      expect(legacySchema.safeParse(body.data).success).toBe(true);
+      expect(body.data).not.toHaveProperty('nextCursor');
+    }
+    const current = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, {
+      headers: { ...adminHeaders(), 'X-MCP-Token-Pagination': '1' },
+    });
+    expect(await current.json()).toMatchObject({ data: { nextCursor: null } });
+  });
+
   it('R-SECRET-003: pages older credentials so an active token remains discoverable and revocable', async () => {
     await save();
     const older = await token();
@@ -372,7 +396,9 @@ describe('MCP administration and Streamable HTTP', () => {
         ),
       ),
     );
-    const first = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: adminHeaders() });
+    const first = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, {
+      headers: { ...adminHeaders(), 'X-MCP-Token-Pagination': '1' },
+    });
     const page = (
       await first.json<{ data: { tokens: Array<{ id: string }>; nextCursor: string } }>()
     ).data;

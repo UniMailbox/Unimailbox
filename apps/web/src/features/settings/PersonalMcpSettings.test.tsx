@@ -38,6 +38,7 @@ function mount(data = initial) {
   let nextPage = { tokens: [] as McpSettings['tokens'], nextCursor: null as string | null };
   const calls: Array<{ path: string; init: RequestInit }> = [];
   const reads = { settings: 0, session: 0 };
+  const settingsHeaders: Headers[] = [];
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 0 } } });
   queryClient.setQueryData(authQueryKeys.session(), {
     userId: 'member-fixture',
@@ -65,6 +66,7 @@ function mount(data = initial) {
       }
       if (path.endsWith('/auth/me/mcp')) {
         reads.settings++;
+        settingsHeaders.push(new Headers(init?.headers));
         if (failReads) return errorResponse('INTERNAL', 'Fixture error', 503);
       }
       if (init?.method === 'POST') {
@@ -101,6 +103,7 @@ function mount(data = initial) {
   return {
     calls,
     reads,
+    settingsHeaders,
     queryClient,
     view,
     setVisible: (visible: boolean) => view.rerender(settings(visible)),
@@ -117,10 +120,11 @@ function mount(data = initial) {
 }
 describe('personal MCP access in Quick settings', () => {
   it('does not multiply a failed settings request through client or query retries', async () => {
-    const { reads, failReads } = mount();
+    const { reads, failReads, settingsHeaders } = mount();
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Refresh MCP settings' })).toBeEnabled(),
     );
+    expect(settingsHeaders[0]?.get('X-MCP-Token-Pagination')).toBe('1');
     failReads();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh MCP settings' }));
     await screen.findByRole('alert');

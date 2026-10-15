@@ -13,6 +13,7 @@ reviewer or external mail-delivery test is claimed.
 | --- | --- |
 | P2: service-off UI hid all personal controls, preventing revocation until an administrator re-enabled MCP | Keep existing credential management/revocation available while disabled; issuance and Copy prompt stay gated. New UI test failed before the fix and passes after it. |
 | P2: LIMIT 100 listing hid older credentials without any navigation, including still-active credentials | Owner-scoped 100-item keyset pages with an explicit Load more action. Worker regression first failed on the absent cursor; it now reaches/revokes an older live token after 100 archived records. Covers timestamp ties, insertions ahead of the cursor, foreign/missing anchors and disabled-service reads. |
+| P2: adding nextCursor to the old strict response broke cached clients without a page reload | Negotiate the extra field only when new clients send X-MCP-Token-Pagination: 1. Preserve the exact legacy response otherwise. A live staging assertion reproduced the incompatible response on the initial candidate; eight UI/twelve focused Worker tests and TypeScript pass with the correction. |
 | Release correctness: MCP initialize used a literal 1.0.0 | Use APPLICATION_VERSION and verify initialize metadata; bump product version to 1.0.1 before tagging. |
 
 The Quick settings parent already keys the personal panel by user ID; that
@@ -44,8 +45,11 @@ Local verification layers passed on the final source: 1,374 non-Worker,
 1,012 Worker and 28 migration tests (2,414 total), doctor 14/14, generated
 bindings, lint, TypeScript and builds. After removing the redundant component
 guard/test, the final non-Worker suite, lint and TypeScript were rerun; Worker
-source remained unchanged. Exact-head GitHub canonical gates and clean merged
-release preparations remain pending before publication.
+source remained unchanged. Both exact-head GitHub Verify runs, CodeQL and secret scans passed on
+`9ac32f1`. PR #48 merged as `316428d` on main, with its tree checked equal to
+the reviewed head. Both merge identities are JohnJiang. The staging release
+preparation repeated the canonical gate and passed **2,414 tests** on that
+merged source. Production preparation and the tag workflow are still pending.
 
 ## Merge, deployment and release
 
@@ -56,4 +60,30 @@ AI/MCP settings. Require backups/recovery bookmarks, exact-source publication,
 all 37 SQL companions, readiness/maintenance and actual scheduled D1 evidence.
 No application mail API reads, sends, DNS or routing changes are required.
 
-MERGE_DEPLOY_RELEASE_PENDING
+Fix commit `b054f69`, version/review commit `9ac32f1`; merged main `316428d`.
+No external review comments were present. Gitleaks v8.30.1 scanned all 15 PR
+commits and reviewed staged additions without findings.
+
+Fresh private D1 exports for both installations restored into SQLite with
+integrity/FK checks passing at schema 0037. Production/staging export sizes were
+521,671 and 475,361 bytes. Raw exports, private credentials and binding/config
+snapshots remain in ignored protected scratch. The normal publication flow
+captures a fresh Time Travel bookmark for each target.
+
+The initial staging candidate published Worker `fb7582f9-1e4e-4535-9d77-1ab2289d96fa`, source
+`316428d`, schema 0037. All 37 remote SQL companions passed, no new migration
+was applied and a recovery bookmark was captured. Exact-source release smoke,
+readiness and repeated maintenance checks passed. At 18:29 Asia/Shanghai,
+authenticated login/version/personal-page checks passed with product 1.0.1;
+a temporary read-only credential initialized MCP as 1.0.1 and was revoked,
+with subsequent MCP access rejected. Diagnostic login was logged out. No mail
+message was read or sent. Resource bindings and AI/MCP settings matched the
+pre-release snapshot; staging MCP remains enabled as before. This candidate also passed a real
+18:30:21 D1 scheduled update. A later compatibility assertion exposed its legacy
+response issue, so production publication of that prepared source was paused.
+It was never tagged as 1.0.1. A compatibility follow-up PR must pass exact-head
+checks and both deployments before the public release.
+
+PRODUCTION_AND_CRON_PENDING
+
+PUBLIC_RELEASE_PENDING
