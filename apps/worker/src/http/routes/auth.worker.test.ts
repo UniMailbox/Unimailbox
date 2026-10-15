@@ -3,10 +3,11 @@
 // Worker-pool tests for POST /register, POST /login, POST /refresh, GET /me.
 // Uses SELF.fetch to exercise the full request pipeline.
 
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { SELF, env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { hashPassword } from '../../platform/crypto';
+import { app } from '../../entrypoints/http';
 
 // Helper: hash a token (same as in auth routes)
 async function hashToken(token: string): Promise<string> {
@@ -230,6 +231,92 @@ describe('POST /api/v1/auth/login', () => {
       });
       expect(logout.status).toBe(204);
       expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+    });
+
+    it('R-AUTH-005 revokes once and avoids KV deletes for repeated or unauthenticated logout', async () => {
+      const login = await SELF.fetch('http://localhost/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: 'admin@example.com', password: 'adminPassword123' }),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      });
+      expect(login.status).toBe(200);
+      const { data } = (await login.json()) as {
+        data: { accessToken: string; refreshToken: string };
+      };
+      const remove = vi.spyOn(env.CACHE, 'delete');
+      const logout = (token?: string) =>
+        app.fetch(
+          new Request('http://localhost/api/v1/auth/logout', {
+            method: 'POST',
+            ...(token === undefined ? {} : { headers: { Authorization: `Bearer ${token}` } }),
+          }),
+          env,
+        );
+      try {
+        for (const token of [undefined, 'invalid-logout-token', 'invalid-logout-token']) {
+          const response = await logout(token);
+          expect(response.status).toBe(204);
+          expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
+        }
+        expect(remove).not.toHaveBeenCalled();
+        expect((await logout(data.accessToken)).status).toBe(204);
+        expect(remove).toHaveBeenCalledExactlyOnceWith(`auth:${data.accessToken}`);
+        expect((await logout(data.accessToken)).status).toBe(204);
+        expect(remove).toHaveBeenCalledTimes(1);
+        expect(
+          (
+            await SELF.fetch('http://localhost/api/v1/auth/me', {
+              headers: { Authorization: `Bearer ${data.accessToken}` },
+            })
+          ).status,
+        ).toBe(401);
+        const refresh = await SELF.fetch('http://localhost/api/v1/auth/refresh', {
+          method: 'POST',
+          body: JSON.stringify({ refreshToken: data.refreshToken }),
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        });
+        expect(refresh.status).toBe(401);
+      } finally {
+        remove.mockRestore();
+      }
+    });
+
+    it('R-AUTH-005 clears cookies without deleting tokens for expired D1 sessions', async () => {
+      const refreshToken = await createSession(userId);
+      const session = await env.DB.prepare('SELECT id FROM sessions WHERE refresh_token_hash = ?')
+        .bind(await hashToken(refreshToken))
+        .first<{ id: string }>();
+      expect(session).not.toBeNull();
+      if (session === null) throw new Error('Missing fixture session');
+      await env.DB.prepare('UPDATE sessions SET expires_at = 0 WHERE id = ?')
+        .bind(session.id)
+        .run();
+      const token = crypto.randomUUID();
+      await env.CACHE.put(`auth:${token}`, JSON.stringify({ userId, sessionId: session.id }), {
+        expirationTtl: 900,
+      });
+      const remove = vi.spyOn(env.CACHE, 'delete');
+      try {
+        const response = await app.fetch(
+          new Request('http://localhost/api/v1/auth/logout', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          env,
+        );
+        expect(response.status).toBe(204);
+        expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
+        expect(remove).not.toHaveBeenCalled();
+        expect(
+          (
+            await SELF.fetch('http://localhost/api/v1/auth/me', {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+          ).status,
+        ).toBe(401);
+      } finally {
+        remove.mockRestore();
+      }
     });
 
     it('stores access token in KV with 15-minute TTL', async () => {

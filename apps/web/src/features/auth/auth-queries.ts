@@ -92,7 +92,11 @@ export function authSessionQuery(): UseQueryResult<AuthSessionDescriptor | null,
   return useQuery({
     queryKey: authQueryKeys.session(),
     queryFn: () => fetchAuthSession(apiClient),
-    staleTime: 0,
+    // Many page/query consumers mount this same descriptor. Reuse a recent
+    // success instead of billing an auth KV read for each new observer.
+    // This UI snapshot is not authority: protected APIs still check D1 on
+    // every request, and mutations explicitly update/invalidate this query.
+    staleTime: 60_000,
   });
 }
 

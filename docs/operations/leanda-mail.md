@@ -38,6 +38,11 @@ storage. See [live acceptance](../qa/leanda-production-mail-2026-10-12.md) for
 the exact release identity and verification boundaries. Staging and legacy
 resources remain separate.
 
+The operator authorized synchronization of D1 maintenance status on 2026-10-15.
+See [production rollout evidence](../qa/d1-maintenance-production-2026-10-15.md)
+for the upgrade, resource/forwarding preservation and scoped runtime checks;
+this does not replace the dated mail-delivery acceptance above.
+
 ## Address routing and ownership
 
 Only the initial `admin@leanda.tech` application user will use this installation.

@@ -11,6 +11,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SELF } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
+import { CURRENT_SCHEMA_VERSION } from '@unimailbox/contracts';
 
 async function completeInstallation(): Promise<void> {
   await seedInstallationState({ status: 'complete', currentStep: 'complete' });
@@ -185,6 +186,6 @@ describe('deployment readiness', () => {
   it('checks the current schema and secret bindings before setup is complete', async () => {
     const response = await SELF.fetch('http://localhost/readyz');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, schema: '0034' });
+    expect(await response.json()).toMatchObject({ ok: true, schema: CURRENT_SCHEMA_VERSION });
   });
 });

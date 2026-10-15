@@ -58,6 +58,10 @@ export interface D1StatementLike {
 // scheduled attachment expiry transition.
 export const auditActionSchema = z.enum([
   'ai.configuration_updated',
+  'mcp.configuration_updated',
+  'mcp.token_created',
+  'mcp.token_revoked',
+  'mcp.tool_called',
   'message.ai_reply_generated',
   // CAP-026 / CAP-027 setup + admin
   'setup.claim',

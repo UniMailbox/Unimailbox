@@ -569,13 +569,10 @@ describe('InboxListPage', () => {
     expect(screen.getAllByTestId('inbox-list-row')).toHaveLength(2);
   });
 
-  it('QA L5 / fix (g): an inbox load costs exactly TWO get-session requests and ONE probe', async () => {
-    // Pin the request footprint (the code L2 acceptance): the page's
-    // own session observers (InboxListPage + InboxListContent) share one
-    // key and dedupe to ONE mount refetch; AppNav's session observer
-    // mounts LATE (after the first page resolves) and adds exactly one
-    // more; LogoutButton adds none (it only reads the query client).
-    // The probe fires once for the member.
+  it('R-AUTHZ-002: an inbox load reuses recent identity with ZERO extra session reads and ONE probe', async () => {
+    // Reuse the identity established by login/the route guard. The later
+    // AppNav observer must also use that recent result, without another
+    // auth KV read. The member permission probe still runs independently.
     const sessionGets: string[] = [];
     const probeGets: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL): Promise<Response> => {
@@ -618,7 +615,7 @@ describe('InboxListPage', () => {
     await waitFor(() => {
       expect(probeGets).toHaveLength(1);
     });
-    expect(sessionGets).toHaveLength(2);
+    expect(sessionGets).toHaveLength(0);
   });
 
   it('fix (f): an ADMIN probe renders the header Admin link pointing at /admin, in situ', async () => {

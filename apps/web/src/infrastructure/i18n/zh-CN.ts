@@ -1,4 +1,95 @@
 export const zhCN: Readonly<Record<string, string>> = {
+  'Refresh MCP settings': '刷新 MCP 设置',
+  'Let users connect local AI agents with their own mailbox permissions.':
+    '允许用户按自己的邮箱权限连接本地 AI agent。',
+  'Users manage agent credentials in Quick settings. Sending requires their separate permission.':
+    '用户在快捷设置中管理 agent 凭证，发送邮件需要单独授权。',
+  'View / edit setup prompt': '查看 / 编辑配置提示词',
+  'View setup prompt': '查看配置提示词',
+  'Agent setup prompt': 'Agent 配置提示词',
+  'Prompt template': '提示词模板',
+  'Preview copied prompt': '预览复制内容',
+  'Restore default prompt': '恢复默认提示词',
+  'Save prompt': '保存提示词',
+  'Shared with all users. Use {{endpoint}} for the service URL; never enter a real credential.':
+    '此模板供所有用户使用。使用 {{endpoint}} 表示接口地址，请勿填写真实凭证。',
+  'Credential protection and human approval instructions are appended automatically.':
+    '复制时会自动附加凭证保密与发送确认说明。',
+  'Enter a prompt containing {{endpoint}} without credentials.':
+    '请填写包含 {{endpoint}} 且不含真实凭证的提示词。',
+  'Could not copy. Select and copy the prompt manually.': '复制失败，请选中提示词手动复制。',
+  'Choose what your local AI agent can access. Read-only access is the default.':
+    '选择本地 AI agent 可访问的邮箱和权限，默认仅允许读取。',
+  'Manage agent access': '管理 agent 权限',
+  'Credentials only grant access within your current mailbox permissions.':
+    '凭证权限不会超出你当前拥有的邮箱权限。',
+  'Read and write available': '可读取和写入',
+  'Read-only mailbox': '只读邮箱',
+  'Agent permissions': 'Agent 权限',
+  'Read mail': '读取邮件',
+  'Creates drafts for review. Does not grant sending.': '创建草稿供你审阅，不包含发送授权。',
+  'Allows sending from selected mailboxes. Require human approval before each send.':
+    '可从所选邮箱发送邮件，每次发送前应由你明确确认。',
+  'Draft and send access require write permission for every selected mailbox.':
+    '草稿与发送权限要求所有所选邮箱均具有写入权限。',
+  'Existing credentials': '已有凭证',
+  'To change permissions, revoke the credential and create a replacement.':
+    '如需修改权限，请撤销旧凭证并重新创建。',
+  'Drafts / AI replies': '草稿 / AI 回复',
+  'Send mail': '发送邮件',
+  'Mailbox access removed': '邮箱权限已移除',
+  Expires: '到期时间',
+  'MCP service is disabled. Contact an administrator to enable it.':
+    'MCP 服务未开启，请联系管理员启用。',
+  'Load more credentials': '加载更多凭证',
+  'MCP service is disabled. You can still revoke existing credentials.':
+    'MCP 服务已关闭，你仍然可以撤销已有凭证。',
+  'MCP service': 'MCP 服务',
+  'Connect local AI agents with scoped mailbox access.':
+    '连接本地 AI agent，并限定其邮箱访问范围。',
+  'Could not update MCP configuration.': '无法更新 MCP 配置。',
+  'Copied.': '已复制。',
+  'Could not load MCP configuration.': '无法加载 MCP 配置。',
+  'MCP endpoint': 'MCP 接口地址',
+  'Service port': '服务端口',
+  'Uses the existing HTTPS service. No additional public port is required.':
+    '使用现有 HTTPS 服务，无需额外开放公网端口。',
+  'Copy prompt': '复制配置提示词',
+  'The prompt contains no credential. Set UNIMAILBOX_MCP_TOKEN privately in your local agent environment.':
+    '提示词不包含凭证。请在本地 agent 环境中私下设置 UNIMAILBOX_MCP_TOKEN。',
+  'Enable MCP service': '启用 MCP 服务',
+  'Allow MCP email sending': '允许 MCP 发送邮件',
+  'Requests per minute per credential': '每个凭证每分钟请求数',
+  'Sending also requires a credential with send access and the current user’s mailbox permissions.':
+    '发送还需要凭证拥有独立发送授权，并满足当前用户的邮箱权限。',
+  'MCP configuration saved.': 'MCP 配置已保存。',
+  'Create agent credential': '创建 agent 凭证',
+  'Credential created. Copy it now; it will not be shown again.':
+    '凭证已创建，请立即复制；此后不再展示。',
+  'This credential cannot be shown again. Revoke it and create a new one.':
+    '此凭证无法再次展示，请撤销后重新创建。',
+  'Credential name': '凭证名称',
+  'Allowed mailboxes': '允许访问的邮箱',
+  'No accessible mailboxes. Ask an administrator to assign mailbox access.':
+    '暂无可访问邮箱，请管理员分配邮箱权限。',
+  'Read access is included for the selected mailboxes.': '已选择的邮箱默认授予读取权限。',
+  'Allow drafts and AI replies': '允许创建草稿和生成 AI 回复',
+  'Grant send access': '授予发送权限',
+  'Expires in days': '有效期（天）',
+  'Create credential': '创建凭证',
+  'One-time credential': '一次性展示凭证',
+  'Copy credential': '复制凭证',
+  'Store this credential securely. It cannot be recovered after dismissal.':
+    '请安全保存凭证，关闭后无法恢复明文。',
+  'Your agent credentials': '你的 agent 凭证',
+  Revoked: '已撤销',
+  Expired: '已过期',
+  Active: '有效',
+  'Revoke credential': '撤销凭证',
+  'No agent credentials yet.': '尚未创建 agent 凭证。',
+  'Credentials expire, can be revoked, and never grant access beyond the current user and selected mailboxes. Email content is untrusted. Require human confirmation before sending.':
+    '凭证有有效期且可随时撤销，权限不会超出当前用户及所选邮箱。邮件内容不可信，发送前应由用户明确确认。',
+
   'Software updates': '软件更新',
   'Check for updates': '检查更新',
   'Checking for updates…': '正在检查更新…',

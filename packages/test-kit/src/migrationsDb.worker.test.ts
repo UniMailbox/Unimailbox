@@ -12,11 +12,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CURRENT_SCHEMA_VERSION as CONTRACT_SCHEMA_VERSION } from '@unimailbox/contracts';
 import { migrationsDb } from './migrationsDb';
+import mcpSql from '../../../migrations/0035_mcp_access.sql?raw';
+import mcpPromptSql from '../../../migrations/0036_mcp_prompt.sql?raw';
+import mcpPromptVerification from '../../../migrations/0036_mcp_prompt.verify.sql?raw';
+import mcpVerification from '../../../migrations/0035_mcp_access.verify.sql?raw';
 import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
 import aiConfigurationVerification from '../../../migrations/0034_ai_configuration.verify.sql?raw';
 import settingsRevisionVerification from '../../../migrations/0025_system_settings_revision.verify.sql?raw';
 import scheduledSendVerification from '../../../migrations/0033_scheduled_send.verify.sql?raw';
 import attachmentCleanupVerification from '../../../migrations/0032_attachment_cleanup.verify.sql?raw';
+import heartbeatSql from '../../../migrations/0037_maintenance_heartbeats.sql?raw';
+import heartbeatVerification from '../../../migrations/0037_maintenance_heartbeats.verify.sql?raw';
 
 const NEW_UUID = '00000000-0000-4000-8000-000000000001';
 const NOW = '2026-01-01 00:00:00';
@@ -54,6 +60,134 @@ describe('migrationsDb (worker pool)', () => {
   beforeEach(async () => {
     const { reset } = await import('cloudflare:test');
     await reset();
+  });
+
+  it.each(['fresh', 'partial'])(
+    'R-DATA-004 R-DATA-005: 0037 raw %s/repeated migration preserves heartbeat state without fabricating health',
+    async (mode) => {
+      const db = await migrationsDb({ through: '0036_mcp_prompt' });
+      const statements = heartbeatSql
+        .replace(/^--.*$/gm, '')
+        .split(';')
+        .filter((sql) => sql.trim());
+      if (mode === 'partial') {
+        await db.batch(statements.slice(0, 2).map((sql) => db.prepare(sql)));
+        await db.batch([
+          db.prepare(
+            "INSERT INTO maintenance_heartbeats(cadence,request_id,completed_at,failed_count,legacy_imported,initialized_at) VALUES('daily','existing','2020-01-01T00:00:00Z',1,1,'2020-01-01T00:00:00Z')",
+          ),
+          db.prepare(
+            "INSERT INTO maintenance_heartbeat_failures(cadence,task_name) VALUES('daily','retained.failure')",
+          ),
+        ]);
+      }
+      for (let i = 0; i < 2; i++) await db.batch(statements.map((sql) => db.prepare(sql)));
+      expect((await db.prepare('SELECT * FROM maintenance_heartbeats').all()).results).toHaveLength(
+        3,
+      );
+      const row = await db
+        .prepare(
+          "SELECT request_id,completed_at,failed_count,legacy_imported,initialized_at FROM maintenance_heartbeats WHERE cadence='daily'",
+        )
+        .first();
+      if (mode === 'partial')
+        expect(row).toEqual({
+          request_id: 'existing',
+          completed_at: '2020-01-01T00:00:00Z',
+          failed_count: 1,
+          legacy_imported: 1,
+          initialized_at: '2020-01-01T00:00:00Z',
+        });
+      else
+        expect(row).toMatchObject({
+          request_id: null,
+          completed_at: null,
+          failed_count: 0,
+          legacy_imported: 0,
+        });
+      for (const sql of heartbeatVerification.split(';').filter((sql) => sql.trim())) {
+        const result = await db.prepare(sql).all<{ assertion: string; pass: number }>();
+        for (const item of result.results) expect(item.pass, item.assertion).toBe(1);
+      }
+      await expect(
+        db.prepare("INSERT INTO maintenance_heartbeats(cadence) VALUES('invalid')").run(),
+      ).rejects.toThrow();
+      await expect(
+        db
+          .prepare(
+            "INSERT INTO maintenance_heartbeat_failures(cadence,task_name) VALUES('missing','failure')",
+          )
+          .run(),
+      ).rejects.toThrow();
+    },
+  );
+
+  it('0036 raw partial/repeated SQL registers the prompt and preserves existing configuration and credentials', async () => {
+    const db = await migrationsDb({ through: '0035_mcp_access' });
+    await insertUser(db, NEW_UUID, 'fixture@example.test');
+    await db.batch([
+      db.prepare(
+        'UPDATE mcp_configuration SET enabled=1,allow_send=0,requests_per_minute=17,revision=4',
+      ),
+      db
+        .prepare(
+          "INSERT INTO mcp_tokens(id,user_id,label,token_hash,allow_draft,allow_send,expires_at,created_at) VALUES('fixture-token',?,'Fixture',?,0,1,2000000000,?)",
+        )
+        .bind(NEW_UUID, 'a'.repeat(64), NOW),
+    ]);
+    const statements = mcpPromptSql
+      .replace(/^--.*$/gm, '')
+      .split(';')
+      .filter((sql) => sql.trim());
+    await db.batch(statements.slice(0, -1).map((sql) => db.prepare(sql)));
+    await db
+      .prepare("UPDATE mcp_prompt SET prompt_template='Custom {{endpoint}}' WHERE id='system'")
+      .run();
+    for (let i = 0; i < 2; i++) await db.batch(statements.map((sql) => db.prepare(sql)));
+    expect(
+      await db
+        .prepare('SELECT enabled,allow_send,requests_per_minute,revision FROM mcp_configuration')
+        .first(),
+    ).toEqual({ enabled: 1, allow_send: 0, requests_per_minute: 17, revision: 4 });
+    expect(await db.prepare('SELECT prompt_template FROM mcp_prompt').first()).toEqual({
+      prompt_template: 'Custom {{endpoint}}',
+    });
+    expect(await db.prepare('SELECT token_hash,allow_send FROM mcp_tokens').first()).toEqual({
+      token_hash: 'a'.repeat(64),
+      allow_send: 1,
+    });
+    for (const sql of mcpPromptVerification.split(';').filter((sql) => sql.trim())) {
+      const rows = await db.prepare(sql).all<{ assertion: string; pass: number }>();
+      for (const row of rows.results) expect(row.pass, row.assertion).toBe(1);
+    }
+  });
+
+  it('0035 raw SQL registers itself, seeds disabled MCP and safely resumes/replays', async () => {
+    const db = await migrationsDb({ through: '0034_ai_configuration' });
+    const statements = mcpSql
+      .replace(/^--.*$/gm, '')
+      .split(';')
+      .filter((sql) => sql.trim());
+    await db.batch(statements.slice(0, -1).map((sql) => db.prepare(sql)));
+    expect(
+      await db
+        .prepare('SELECT enabled,allow_send,requests_per_minute,revision FROM mcp_configuration')
+        .first(),
+    ).toEqual({ enabled: 0, allow_send: 0, requests_per_minute: 30, revision: 0 });
+    await db.prepare("UPDATE mcp_configuration SET enabled=1,revision=2 WHERE id='system'").run();
+    for (let i = 0; i < 2; i++) await db.batch(statements.map((sql) => db.prepare(sql)));
+    expect(await db.prepare('SELECT enabled,revision FROM mcp_configuration').first()).toEqual({
+      enabled: 1,
+      revision: 2,
+    });
+    for (const sql of mcpVerification.split(';').filter((sql) => sql.trim())) {
+      const rows = await db.prepare(sql).all<{ assertion?: string; pass: number }>();
+      for (const row of rows.results) expect(row.pass, row.assertion).toBe(1);
+    }
+    await expect(db.prepare('UPDATE mcp_configuration SET revision=-1').run()).rejects.toThrow();
+    await expect(
+      db.prepare('UPDATE mcp_configuration SET requests_per_minute=121').run(),
+    ).rejects.toThrow();
   });
 
   it('0034 seeds disabled AI and prevents incomplete credentials or invalid revisions', async () => {
@@ -479,7 +613,7 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
     // CAP-069: 0025 seeds the internal system-settings revision row.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0034');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0037');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {

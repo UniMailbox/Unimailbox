@@ -10,6 +10,125 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-15 — Production synchronized to D1 maintenance state
+
+The operator selected the existing Leanda production installation after staging
+acceptance. Source `cc9c9d4` passed a fresh 2,411-test production preparation gate
+and published as Worker `8ccd55d9-dd83-4d73-8be6-97bbfbe36d3f`, schema 0037.
+A restored private backup passed integrity/FK and pending-migration simulation;
+publication captured the recovery bookmark, applied additive 0034–0037 and
+verified all 37 remote companions. Existing mail resources, key bindings,
+catch-all and private forwarding metadata were retained; AI/MCP remain disabled.
+
+Exact-version smoke, readiness, repeated maintenance and direct D1 state passed.
+Real five-minute Cron advanced D1 at 17:20:43 Asia/Shanghai and three subsequent
+maintenance probes passed. This removes production's 313/day fixed KV heartbeat
+write baseline and three reads per steady probe, matching staging. Full-day
+metrics and a new mail-delivery retest remain separate. Old readiness requires
+schema 0033, so recovery must account for schema compatibility rather than blind
+code rollback. Source self-review only. See [production QA](../qa/d1-maintenance-production-2026-10-15.md)
+and [handoff](../../work/handoffs/production-d1-maintenance-2026-10-15.md).
+
+## 2026-10-15 — Maintenance heartbeat and failure state moved to D1
+
+The daily quota investigation found the fixed heartbeat write baseline remaining
+in both staging and production: 313 KV writes/day each. Staging now persists
+bounded cadence snapshots and relational failed-task names in D1. Atomic updates,
+late-run guards and one-time old-KV adoption preserve failure/freshness behavior;
+initialization grace cannot reset on deployment. Schedules and ordinary auth/
+attachment KV behavior are unchanged. Provider quota notification settings remain
+separate from the application's D1 maintenance state.
+
+Source `a104103` passed the 2,411-test canonical gate and all 37 remote SQL
+companions, then published as staging Worker
+`246d800c-b48d-46d5-9d36-9d610d9e0820`, schema 0037. Backup restore and recovery
+bookmark, repeated health/readiness and a real five-minute scheduled D1 heartbeat passed.
+Hourly/daily legacy results were retained; full post-release daily usage and new
+hourly/daily runs remain separate evidence boundaries. Production was unchanged.
+Self-review only. See [QA](../qa/d1-maintenance-heartbeats-2026-10-15.md) and
+[handoff](../../work/handoffs/d1-maintenance-heartbeats-2026-10-15.md).
+
+## 2026-10-14 — Redundant browser KV reads and logout deletes reduced
+
+Shared identity queries now reuse successful UI descriptors for 60 seconds,
+removing the two additional identity reads in the guarded inbox footprint and
+duplicate panel/query observers. Fresh admin entry checks, explicit cache
+updates/invalidation and every server D1/session/account/permission gate remain.
+Unauthenticated logout clears cookies without a billed KV delete; valid logout
+still revokes its session and deletes its access token exactly once.
+
+Live pre-change analytics confirmed 67 reads and zero deletes during the
+preceding 24 hours; the earlier continuous maintenance-delete amplification
+was absent. This is aggregate baseline evidence, not a post-change cost promise
+or attribution of the operator's unspecified alert window. No cadence change,
+migration or resource/key replacement was needed.
+
+Application `72d86f6` plus fixture correction/release source `79ceaf2` passed
+2,397 tests and all 36 remote SQL companions and deployed to staging as Worker
+`1e0bdd33-1a59-4698-834b-10946a7bc7eb`, schema 0036. Live login/identity/logout,
+repeat/invalid-token logout, access/refresh denial and maintenance passed.
+Diagnostic session logged out; no private mail, real mail or production change.
+Self-review only. See `../qa/kv-request-reduction-2026-10-14.md` and
+`../../work/handoffs/kv-request-reduction-2026-10-14.md` for the scoped evidence.
+
+## 2026-10-13 — MCP KV request amplification removed
+
+MCP cards refresh on opening, explicit refresh and mutations, with no interval,
+focus/reconnect fetches or layered retries. They reuse the parent's user ID
+rather than adding session-query observers. Browser authn covers `/api/v1/*`;
+`/api/mcp` retains its separate D1 credential, account, scope and rate checks
+without a browser-token KV lookup. No schema or resource change was needed.
+
+Application commit `e24bf27` passed 2,393 tests and all 36 remote companions and
+was deployed to staging as Worker `fd7fa1b2-5d45-49ea-9e70-9b90753edf72`.
+Actual binding spies count zero CACHE operations for MCP read/draft/rejection
+paths, with a positive browser authentication control. Controlled frontend timers
+show no idle/focus/reconnect requests. Live connection/scope/audience/Origin/
+revocation and maintenance passed; test credential revoked, original enabled
+configuration retained and diagnostic session logged out. No real mail was read
+or sent. Full-day usage and native browser/agent acceptance remain unverified.
+Self-review only. See `19-mcp-service.md`, `../qa/mcp-kv-staging-2026-10-13.md`
+and `../../work/handoffs/mcp-kv-reduction-2026-10-13.md`.
+
+## 2026-10-13 — MCP settings split by service and user
+
+MCP is a card under Admin AI services with one service switch and an editable
+shared setup prompt. The separate menu/page is removed (old bookmarks redirect).
+Ordinary users manage their own expiring mailbox-scoped credentials in Quick
+settings; read-only is default, draft/AI and send grants are independent and
+bounded by live permissions. Personal APIs no longer require administrative
+settings permissions. The retired installation send switch no longer gates sends;
+existing read/draft credentials keep their grants and server limits remain active.
+Migration 0036 adds the shared prompt without replacing credentials or keys.
+
+Application commit `eb72db8` passed 2,389 tests and all 36 remote SQL companions,
+then published to staging as Worker `b5a54cc1-476f-4ee8-9d9d-4e887916412b`.
+Ordinary-member scope/denial, prompt propagation, read negotiation, separate send
+discovery, Origin and revocation passed; all temporary access was removed and the
+original disabled configuration restored. Readiness and maintenance passed.
+No real mail was read or sent. UI evidence is synthetic; browser clipboard and
+actual local-agent configuration remain open. Review was a main-agent self-review.
+See `19-mcp-service.md`, `../qa/mcp-personal-settings-staging-2026-10-13.md` and
+`../../work/handoffs/mcp-personal-settings-2026-10-13.md`.
+
+## 2026-10-12 — Scoped MCP agent access
+
+Admin → MCP service now controls a stateless HTTPS endpoint at `/api/mcp` (443),
+one-time mailbox-scoped hashed credentials, separate draft/AI and send grants,
+expiry/revocation and rate limits. Current account/role/mailbox checks remain
+mandatory; send uses the existing audited/idempotent compose and outbox workflow.
+Copy prompt references a private environment variable without including a secret.
+Origin, bounded-body, batch, no-store and content-free tool-audit protections are
+part of the adapter; a send confirmation flag does not prove human approval.
+
+Commit `6701e04` was published to staging after the full 2,381-test gate, a D1
+recovery bookmark, migration 0035 and all 35 schema companions. Live read-only
+MCP negotiation, scope, Origin denial and revocation passed, then configuration
+was restored to disabled. No real mail was sent; actual local-agent setup and
+browser clipboard proof remain open. Design: `19-mcp-service.md`; QA:
+`../qa/mcp-staging-2026-10-12.md`; handoff:
+`../../work/handoffs/mcp-service-2026-10-12.md`. Review was a main-agent self-review.
+
 ## 2026-10-04 — CAP-A1 mailbox authorization boundary corrected
 
 The mailbox authorizer no longer accepts a global-administrator bypass. A `role.manage` grant

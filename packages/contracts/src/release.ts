@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // Product version, independent of Cloudflare's Worker version UUID. Bump before
 // tagging a stable release; 0.0.0 denotes the development baseline.
-export const APPLICATION_VERSION = '1.0.0';
+export const APPLICATION_VERSION = '1.0.1';
 export const UPSTREAM_REPOSITORY = 'UniMailbox/Unimailbox';
 export const UPSTREAM_URL = `https://github.com/${UPSTREAM_REPOSITORY}`;
 export const UPGRADE_GUIDE_URL = `${UPSTREAM_URL}/blob/main/docs/operations/updates.md`;

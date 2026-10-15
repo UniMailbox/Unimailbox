@@ -607,6 +607,16 @@ const adminAiRoute = createRoute({
   ),
 });
 
+// Keep old bookmarks working after moving the service card into AI services.
+const adminMcpRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/admin/mcp',
+  beforeLoad: async ({ context }) => {
+    await requireAdministrativeSession(context);
+    throw redirect({ to: '/admin/ai' });
+  },
+});
+
 // M7 (CAP-041 fix): derive STEP_PATHS from the contracts schema so the
 // router and the layout stay in lock-step with the zod enum.
 const STEP_PATHS: ReadonlyArray<InstallationStep> =
@@ -823,6 +833,7 @@ const routeTree = rootRoute.addChildren([
   adminSignaturesRoute,
   adminSettingsRoute,
   adminAiRoute,
+  adminMcpRoute,
   setupChildren,
 ]);
 

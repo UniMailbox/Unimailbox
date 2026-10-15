@@ -111,7 +111,9 @@ Run `pnpm verify` for the full implementation gate.
 The implementation includes administrator-managed accounts, shared mailbox
 access, incoming and outgoing mail, rich compose, drafts, replies, scheduled
 send, R2 attachments, personal settings, audit logs, and English/Simplified
-Chinese. AI assistance is optional and disabled by default.
+Chinese. AI assistance and the [scoped MCP service](docs/rebuild/19-mcp-service.md)
+are optional and disabled by default. MCP connects local agents through HTTPS;
+mailbox access, drafts and sending have explicit independent controls.
 
 The [capability ledger](docs/rebuild/capability-ledger.md#current-state) records
 current delivery status. [Dated QA reports](docs/qa/) describe observed behavior

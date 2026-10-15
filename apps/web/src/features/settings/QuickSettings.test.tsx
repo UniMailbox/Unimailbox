@@ -31,6 +31,16 @@ function harness(fail = false, pendingPreferences?: Promise<void>) {
       }
       return jsonResponse({ data: saved });
     }
+    if (path.endsWith('/auth/me/mcp'))
+      return jsonResponse({
+        data: {
+          enabled: false,
+          endpoint: 'https://mail.example.test/api/mcp',
+          promptTemplate: '{{endpoint}}',
+          tokens: [],
+          mailboxes: [],
+        },
+      });
     if (path.endsWith('/auth/me'))
       return jsonResponse({
         data: { user: { id: userId, email: 'member@example.com', displayName: 'Tester' } },

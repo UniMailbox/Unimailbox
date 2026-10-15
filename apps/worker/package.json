@@ -13,6 +13,7 @@
     "@anthropic-ai/sdk": "0.133.0",
     "@better-auth/drizzle-adapter": "1.7.1",
     "@cfworker/json-schema": "4.1.1",
+    "@modelcontextprotocol/server": "2.3.1",
     "@noble/hashes": "2.3.0",
     "@unimailbox/config": "workspace:*",
     "@unimailbox/contracts": "workspace:*",
@@ -22,7 +23,8 @@
     "hono": "4.13.3",
     "openai": "7.32.0",
     "sanitize-html": "2.18.0",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "zod-mcp": "npm:zod@4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.3.7",

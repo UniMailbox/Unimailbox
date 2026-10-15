@@ -59,4 +59,5 @@ migrations directly to a legacy installation.
 
 Agent conventions live in [CLAUDE.md](../../CLAUDE.md) and `.claude/`.
 
+- [19. Scoped MCP service](19-mcp-service.md) — administrator toggle, scoped agent credentials and independent send authorization.
 - [18. AI service foundation](18-ai-service-foundation.md) — selectable protocols, administrator configuration and unified inference seam.

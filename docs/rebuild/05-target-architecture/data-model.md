@@ -27,6 +27,18 @@ See `../E-proposed-domain-model.md` for full schemas. This document captures the
 | `outbound-mail` | `outbound_jobs`, `provider_connections`, `encrypted_credentials`, `webhook_deliveries`, `provider_message_state`, `webhook_events` |
 | `admin` | `roles`, `permissions`, `role_permissions`, `user_roles`, `system_settings`, `audit_events`, `maintenance_jobs` |
 
+## Operational heartbeat snapshots
+
+Platform operations owns `maintenance_heartbeats` (one row each for frequent,
+hourly and daily maintenance) and `maintenance_heartbeat_failures` (task names
+for each current failed snapshot). Migration 0037 seeds uninitialized rows,
+never a synthetic successful run. Snapshot/task changes are atomic; newer
+started runs and live D1 results take precedence over delayed/legacy results.
+These bounded operational rows retain normalized UTC ISO-8601 timestamps with
+milliseconds, matching Cron logs and preserving run ordering. This is an
+operational exception to the human-readable business timestamp format above.
+There are no new JSON-in-text columns or unbounded alert history tables.
+
 ## Soft-delete rule
 
 - Use `deleted_at TIMESTAMP NULL`.
