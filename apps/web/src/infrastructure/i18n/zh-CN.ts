@@ -41,6 +41,9 @@ export const zhCN: Readonly<Record<string, string>> = {
   Expires: '到期时间',
   'MCP service is disabled. Contact an administrator to enable it.':
     'MCP 服务未开启，请联系管理员启用。',
+  'Load more credentials': '加载更多凭证',
+  'MCP service is disabled. You can still revoke existing credentials.':
+    'MCP 服务已关闭，你仍然可以撤销已有凭证。',
   'MCP service': 'MCP 服务',
   'Connect local AI agents with scoped mailbox access.':
     '连接本地 AI agent，并限定其邮箱访问范围。',

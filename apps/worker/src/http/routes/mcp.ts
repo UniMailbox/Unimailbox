@@ -6,7 +6,7 @@ import sanitizeHtml from 'sanitize-html';
 import { authenticateMcp, auditMcpTool, checkPermission } from '../../modules/admin';
 import { assertCan, listMailboxesByUser, findMailboxById } from '../../modules/tenancy';
 import { DomainError } from '../../platform/errors';
-import { ERROR_CODES, type ErrorCode } from '@unimailbox/contracts';
+import { APPLICATION_VERSION, ERROR_CODES, type ErrorCode } from '@unimailbox/contracts';
 import { logger } from '../../platform/logger';
 import type { AppEnv } from '../../platform/env';
 import { errorMiddleware } from '../middleware/error';
@@ -82,7 +82,7 @@ export function mcpRoutes(): Hono<AppEnv> {
         httpStatus: 400,
       });
     const server = new McpServer(
-      { name: 'unimailbox', version: '1.0.0' },
+      { name: 'unimailbox', version: APPLICATION_VERSION },
       {
         jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
         instructions:

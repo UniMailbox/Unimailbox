@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   buildMcpPrompt,
   createMcpTokenSchema,
   issuedMcpTokenSchema,
+  mcpTokenPageSchema,
+  type PersonalMcpSettings as PersonalSettings,
   personalMcpSettingsSchema,
 } from '@unimailbox/contracts';
 import { Button } from '../../components/ui/Button';
@@ -19,6 +21,7 @@ import { McpCredentialList } from './McpCredentialList';
 export function PersonalMcpSettings({ userId }: { userId: string | undefined }): ReactElement {
   const t = useT();
   const client = useApiClient();
+  const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ['personal-mcp', userId],
     enabled: !!userId,
@@ -70,6 +73,30 @@ export function PersonalMcpSettings({ userId }: { userId: string | undefined }):
       setBusy(false);
     }
   }
+  function loadMore(): void {
+    const cursor = data?.nextCursor;
+    if (!cursor) return;
+    void run(async () => {
+      const response = (await client.fetch(`/api/v1/auth/me/mcp/tokens?cursor=${cursor}`, {
+        retry: false,
+      })) as { data: unknown };
+      const page = mcpTokenPageSchema.parse(response.data);
+      queryClient.setQueryData<PersonalSettings>(['personal-mcp', userId], (current) =>
+        current
+          ? {
+              ...current,
+              tokens: [
+                ...current.tokens,
+                ...page.tokens.filter(
+                  (token) => !current.tokens.some((old) => old.id === token.id),
+                ),
+              ],
+              nextCursor: page.nextCursor,
+            }
+          : current,
+      );
+    });
+  }
   function copy(text: string): void {
     void run(async () => {
       await navigator.clipboard.writeText(text);
@@ -104,10 +131,14 @@ export function PersonalMcpSettings({ userId }: { userId: string | undefined }):
           </Button>
         </p>
       ) : null}
-      {data?.enabled ? (
+      {data && (data.enabled || data.tokens.length > 0) ? (
         <>
           <p className="text-sm text-muted-foreground">
-            {t('Choose what your local AI agent can access. Read-only access is the default.')}
+            {t(
+              data.enabled
+                ? 'Choose what your local AI agent can access. Read-only access is the default.'
+                : 'MCP service is disabled. You can still revoke existing credentials.',
+            )}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -121,14 +152,16 @@ export function PersonalMcpSettings({ userId }: { userId: string | undefined }):
             >
               {t('Manage agent access')}
             </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy || query.isFetching}
-              onClick={() => copy(buildMcpPrompt(data.endpoint, data.promptTemplate))}
-            >
-              {t('Copy prompt')}
-            </Button>
+            {data.enabled ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy || query.isFetching}
+                onClick={() => copy(buildMcpPrompt(data.endpoint, data.promptTemplate))}
+              >
+                {t('Copy prompt')}
+              </Button>
+            ) : null}
           </div>
           <EditorDialog
             open={editing}
@@ -151,53 +184,55 @@ export function PersonalMcpSettings({ userId }: { userId: string | undefined }):
                   )}
                 </p>
               </div>
-              {secret ? (
-                <div className="space-y-3 rounded-md border border-primary/40 p-4">
-                  <Input
-                    id="mcp-personal-secret"
-                    label={t('One-time credential')}
-                    type="password"
-                    autoComplete="off"
-                    readOnly
-                    value={secret}
-                    help={t(
-                      'Store this credential securely. It cannot be recovered after dismissal.',
-                    )}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button disabled={busy} onClick={() => copy(secret)}>
-                      {t('Copy credential')}
-                    </Button>
-                    <Button variant="secondary" disabled={busy} onClick={() => setSecret(null)}>
-                      {t('Dismiss')}
-                    </Button>
+              {data.enabled ? (
+                secret ? (
+                  <div className="space-y-3 rounded-md border border-primary/40 p-4">
+                    <Input
+                      id="mcp-personal-secret"
+                      label={t('One-time credential')}
+                      type="password"
+                      autoComplete="off"
+                      readOnly
+                      value={secret}
+                      help={t(
+                        'Store this credential securely. It cannot be recovered after dismissal.',
+                      )}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <Button disabled={busy} onClick={() => copy(secret)}>
+                        {t('Copy credential')}
+                      </Button>
+                      <Button variant="secondary" disabled={busy} onClick={() => setSecret(null)}>
+                        {t('Dismiss')}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <McpCredentialForm
-                  mailboxes={data.mailboxes}
-                  busy={busy}
-                  onCreate={(request) => {
-                    void run(async () => {
-                      const response = (await client.fetch('/api/v1/auth/me/mcp/tokens', {
-                        method: 'POST',
-                        body: createMcpTokenSchema.parse(request),
-                        retry: false,
-                      })) as { data: unknown };
-                      const issued = issuedMcpTokenSchema.parse(response.data);
-                      if (canReveal.current) setSecret(issued.token);
-                      setMessage(
-                        t(
-                          issued.token
-                            ? 'Credential created. Copy it now; it will not be shown again.'
-                            : 'This credential cannot be shown again. Revoke it and create a new one.',
-                        ),
-                      );
-                      await query.refetch();
-                    });
-                  }}
-                />
-              )}
+                ) : (
+                  <McpCredentialForm
+                    mailboxes={data.mailboxes}
+                    busy={busy}
+                    onCreate={(request) => {
+                      void run(async () => {
+                        const response = (await client.fetch('/api/v1/auth/me/mcp/tokens', {
+                          method: 'POST',
+                          body: createMcpTokenSchema.parse(request),
+                          retry: false,
+                        })) as { data: unknown };
+                        const issued = issuedMcpTokenSchema.parse(response.data);
+                        if (canReveal.current) setSecret(issued.token);
+                        setMessage(
+                          t(
+                            issued.token
+                              ? 'Credential created. Copy it now; it will not be shown again.'
+                              : 'This credential cannot be shown again. Revoke it and create a new one.',
+                          ),
+                        );
+                        await query.refetch();
+                      });
+                    }}
+                  />
+                )
+              ) : null}
               {message ? (
                 <p role="status" className="text-sm">
                   {message}
@@ -218,14 +253,21 @@ export function PersonalMcpSettings({ userId }: { userId: string | undefined }):
                   })
                 }
               />
-              <div className="admin-dialog-actions">
-                <Button
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => copy(buildMcpPrompt(data.endpoint, data.promptTemplate))}
-                >
-                  {t('Copy prompt')}
+              {data.nextCursor ? (
+                <Button variant="secondary" disabled={busy || query.isFetching} onClick={loadMore}>
+                  {t('Load more credentials')}
                 </Button>
+              ) : null}
+              <div className="admin-dialog-actions">
+                {data.enabled ? (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => copy(buildMcpPrompt(data.endpoint, data.promptTemplate))}
+                  >
+                    {t('Copy prompt')}
+                  </Button>
+                ) : null}
                 <Button disabled={busy} onClick={close}>
                   {t('Done')}
                 </Button>

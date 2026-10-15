@@ -2,8 +2,10 @@ import {
   DEFAULT_MCP_PROMPT_TEMPLATE,
   mcpConfigurationSchema,
   type McpTokenMetadata,
+  type McpTokenPage,
 } from '@unimailbox/contracts';
 import type { Database } from '../../platform/database';
+import { DomainError } from '../../platform/errors';
 
 export async function readMcpConfiguration(db: Database) {
   const row = await db
@@ -71,14 +73,31 @@ export async function mcpTokenMetadata(db: Database, row: McpTokenRow): Promise<
     createdAt: row.created_at,
   };
 }
-export async function listMcpTokens(db: Database, userId: string): Promise<McpTokenMetadata[]> {
+export async function listMcpTokens(
+  db: Database,
+  userId: string,
+  cursor?: string,
+): Promise<McpTokenPage> {
+  const anchor = cursor ? await readMcpTokenById(db, cursor, userId) : null;
+  if (cursor && !anchor)
+    throw new DomainError({
+      code: 'INVALID_CURSOR',
+      message: 'Invalid credential cursor',
+      httpStatus: 400,
+    });
   const rows = await db
     .prepare(
-      `SELECT ${TOKEN_COLUMNS} FROM mcp_tokens WHERE user_id=? ORDER BY created_at DESC LIMIT 100`,
+      `SELECT ${TOKEN_COLUMNS} FROM mcp_tokens WHERE user_id=?
+       ${anchor ? 'AND (created_at < ? OR (created_at = ? AND id < ?))' : ''}
+       ORDER BY created_at DESC, id DESC LIMIT 101`,
     )
-    .bind(userId)
+    .bind(userId, ...(anchor ? [anchor.created_at, anchor.created_at, anchor.id] : []))
     .all<McpTokenRow>();
-  return Promise.all(rows.results.map((row) => mcpTokenMetadata(db, row)));
+  const page = rows.results.slice(0, 100);
+  return {
+    tokens: await Promise.all(page.map((row) => mcpTokenMetadata(db, row))),
+    nextCursor: rows.results.length > 100 ? (page.at(-1)?.id ?? null) : null,
+  };
 }
 export async function consumeMcpRateLimit(
   db: Database,

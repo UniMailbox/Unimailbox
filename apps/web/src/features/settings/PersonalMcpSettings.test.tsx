@@ -22,6 +22,7 @@ const initial: McpSettings = {
   endpoint: 'https://mail.example.test/api/mcp',
   promptTemplate: 'Shared administrator prompt: {{endpoint}}',
   tokens: [],
+  nextCursor: null,
   mailboxes: [{ id: box, address: 'fixture@example.test', canWrite: true }],
 };
 afterEach(() => {
@@ -34,6 +35,7 @@ afterEach(() => {
 });
 function mount(data = initial) {
   let failReads = false;
+  let nextPage = { tokens: [] as McpSettings['tokens'], nextCursor: null as string | null };
   const calls: Array<{ path: string; init: RequestInit }> = [];
   const reads = { settings: 0, session: 0 };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 3, retryDelay: 0 } } });
@@ -48,6 +50,10 @@ function mount(data = initial) {
     getSessionToken: () => null,
     fetchImpl: async (input, init) => {
       const path = String(input);
+      if (path.includes('/auth/me/mcp/tokens?')) {
+        calls.push({ path, init: init ?? {} });
+        return jsonResponse({ data: nextPage });
+      }
       if (path.endsWith('/auth/me')) {
         reads.session++;
         return jsonResponse({
@@ -98,6 +104,9 @@ function mount(data = initial) {
     queryClient,
     view,
     setVisible: (visible: boolean) => view.rerender(settings(visible)),
+    setNextPage: (page: typeof nextPage) => {
+      nextPage = page;
+    },
     setRemote: (next: McpSettings) => {
       data = next;
     },
@@ -201,6 +210,55 @@ describe('personal MCP access in Quick settings', () => {
     await user.click(screen.getByRole('button', { name: 'Manage agent access' }));
     expect(screen.queryByLabelText('One-time credential')).not.toBeInTheDocument();
   });
+  it('loads older credentials only on request and stops offering pagination at the last page', async () => {
+    const user = userEvent.setup();
+    const credential = {
+      id,
+      label: 'Recent agent',
+      allowDraft: false,
+      allowSend: false,
+      mailboxIds: [box],
+      expiresAt: 2000000000,
+      revokedAt: null,
+      createdAt: '2026-01-01',
+    };
+    const { calls, setNextPage } = mount({ ...initial, tokens: [credential], nextCursor: id });
+    setNextPage({ tokens: [{ ...credential, id: box, label: 'Older agent' }], nextCursor: null });
+    await user.click(await screen.findByRole('button', { name: 'Manage agent access' }));
+    expect(calls).toHaveLength(0);
+    expect(screen.queryByText('Older agent')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Load more credentials' }));
+    expect(await screen.findByText('Older agent')).toBeInTheDocument();
+    expect(calls.map((call) => call.path)).toEqual([`/api/v1/auth/me/mcp/tokens?cursor=${id}`]);
+    expect(screen.queryByRole('button', { name: 'Load more credentials' })).not.toBeInTheDocument();
+  });
+
+  it('keeps credential revocation available while the service is disabled without exposing issuance or prompts', async () => {
+    const user = userEvent.setup();
+    const { calls } = mount({
+      ...initial,
+      enabled: false,
+      tokens: [
+        {
+          id,
+          label: 'Existing agent',
+          allowDraft: false,
+          allowSend: false,
+          mailboxIds: [box],
+          expiresAt: 2000000000,
+          revokedAt: null,
+          createdAt: '2026-01-01',
+        },
+      ],
+    });
+    await user.click(await screen.findByRole('button', { name: 'Manage agent access' }));
+    expect(screen.queryByRole('button', { name: 'Create credential' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy prompt' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Revoke credential: Existing agent' }));
+    expect(await screen.findByText('Revoked')).toBeInTheDocument();
+    expect(calls[0]?.path).toBe(`/api/v1/auth/me/mcp/tokens/${id}/revoke`);
+  });
+
   it('does not expose personal configuration or Copy prompt when the administrator disables MCP', async () => {
     mount({ ...initial, enabled: false });
     await screen.findByText('MCP service is disabled. Contact an administrator to enable it.');

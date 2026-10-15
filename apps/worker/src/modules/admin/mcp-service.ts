@@ -42,7 +42,7 @@ export async function getPersonalMcpSettings(db: Database, userId: string, endpo
     enabled: configuration.enabled,
     endpoint,
     promptTemplate: configuration.promptTemplate,
-    tokens: await listMcpTokens(db, userId),
+    ...(await listMcpTokens(db, userId)),
     mailboxes: await Promise.all(
       mailboxes.map(async (b) => ({
         id: b.id,
@@ -54,6 +54,10 @@ export async function getPersonalMcpSettings(db: Database, userId: string, endpo
       })),
     ),
   };
+}
+
+export async function getPersonalMcpTokenPage(db: Database, userId: string, cursor?: string) {
+  return listMcpTokens(db, userId, cursor);
 }
 
 interface Mutation {

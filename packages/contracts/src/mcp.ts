@@ -74,12 +74,20 @@ export const mcpAdministrationSchema = z
   })
   .strict();
 export type McpAdministration = z.infer<typeof mcpAdministrationSchema>;
+export const mcpTokenPageSchema = z
+  .object({
+    tokens: z.array(mcpTokenMetadataSchema),
+    nextCursor: z.string().uuid().nullable().default(null),
+  })
+  .strict();
+export type McpTokenPage = z.infer<typeof mcpTokenPageSchema>;
 export const personalMcpSettingsSchema = z
   .object({
     enabled: z.boolean(),
     endpoint: z.string().url(),
     promptTemplate: mcpPromptTemplateSchema,
     tokens: z.array(mcpTokenMetadataSchema),
+    nextCursor: z.string().uuid().nullable().default(null),
     mailboxes: z.array(
       z.object({ id: z.string().uuid(), address: z.string(), canWrite: z.boolean() }).strict(),
     ),

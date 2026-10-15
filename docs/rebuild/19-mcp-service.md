@@ -1,6 +1,6 @@
 # Scoped MCP service
 
-Updated 2026-10-13. Local agents can connect to this installation through its
+Updated 2026-10-15. Local agents can connect to this installation through its
 Streamable HTTP MCP endpoint. The service starts disabled. It does not create a
 second Worker, listen on an additional TCP port or inherit an AI provider key.
 
@@ -54,9 +54,17 @@ Personal read/issue/revoke paths are `/api/v1/auth/me/mcp`,
 They always derive the owner from the verified session, reject accounts requiring
 password change, and cannot list or revoke another user's credentials. Issuance
 requires the service to be enabled; owner revocation remains available through
-the API while disabled. The UI shows no permission form or Copy prompt when the
-service is disabled. Existing credential permissions are immutable; revoke and
+the API and personal dialog while disabled. The UI shows existing credentials and
+revocation, with no permission form or Copy prompt, when the service is disabled. Existing credential permissions are immutable; revoke and
 create a replacement to change them.
+
+The personal settings response includes the first 100 credentials and `nextCursor`.
+**Load more credentials** calls `GET /api/v1/auth/me/mcp/tokens?cursor=<last-id>`
+only on demand, keeping older active credentials discoverable even after many
+revocations. Each page is owner-scoped and ordered by creation time then ID;
+foreign or missing cursor IDs return 400. No interval or layered retry is added.
+Quick settings retains its existing per-user remount for one-time plaintext state. The MCP initialize response advertises the same product version as the
+administrator version panel.
 
 The endpoint is `<APP_ORIGIN>/api/mcp`, using HTTPS port **443** by default.
 Local Worker development can use its configured loopback origin/port (normally

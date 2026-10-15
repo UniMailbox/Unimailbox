@@ -114,6 +114,7 @@ export {
 export {
   getMcpAdministration,
   getPersonalMcpSettings,
+  getPersonalMcpTokenPage,
   updateMcpConfiguration,
   issueMcpToken,
   revokeMcpToken,

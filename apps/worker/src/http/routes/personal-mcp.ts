@@ -1,6 +1,11 @@
 import { Hono, type Context } from 'hono';
 import { createMcpTokenSchema, uuidSchema } from '@unimailbox/contracts';
-import { getPersonalMcpSettings, issueMcpToken, revokeMcpToken } from '../../modules/admin';
+import {
+  getPersonalMcpSettings,
+  getPersonalMcpTokenPage,
+  issueMcpToken,
+  revokeMcpToken,
+} from '../../modules/admin';
 import { DomainError } from '../../platform/errors';
 import { sha256Hex } from '../../platform/idempotency';
 import type { AppEnv } from '../../platform/env';
@@ -34,6 +39,11 @@ export function personalMcpRoutes(): Hono<AppEnv> {
   routes.get('/auth/me/mcp', async (c) =>
     c.json({ data: await getPersonalMcpSettings(c.env.DB, actor(c), mcpEndpoint(c).href) }),
   );
+  routes.get('/auth/me/mcp/tokens', async (c) => {
+    const raw = c.req.query('cursor');
+    const cursor = raw === undefined ? undefined : uuidSchema.parse(raw);
+    return c.json({ data: await getPersonalMcpTokenPage(c.env.DB, actor(c), cursor) });
+  });
   routes.use('/auth/me/mcp*', requireIdempotencyKey);
   const mutation = async (c: Context<AppEnv>, raw: string) => {
     const key = c.get('idempotencyKey');

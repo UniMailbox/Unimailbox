@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { encrypt, importEncryptionKey } from '../../platform/crypto';
-import { DEFAULT_MCP_PROMPT_TEMPLATE } from '@unimailbox/contracts';
+import { APPLICATION_VERSION, DEFAULT_MCP_PROMPT_TEMPLATE } from '@unimailbox/contracts';
 import { readSecret } from '../../platform/secrets';
 import { app } from '../../entrypoints/http';
 
@@ -356,6 +356,82 @@ describe('MCP administration and Streamable HTTP', () => {
     expect((await issue()).status).toBe(200);
   });
 
+  it('R-SECRET-003: pages older credentials so an active token remains discoverable and revocable', async () => {
+    await save();
+    const older = await token();
+    await env.DB.batch(
+      Array.from({ length: 100 }, (_, index) =>
+        env.DB.prepare(
+          `INSERT INTO mcp_tokens(id,user_id,label,token_hash,allow_draft,allow_send,expires_at,revoked_at,created_at)
+        VALUES(?,?,?,?,0,0,2000000000,1,'2099-01-01 00:00:00')`,
+        ).bind(
+          `00000000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`,
+          user,
+          `Archived ${index}`,
+          String(index).padStart(64, '0'),
+        ),
+      ),
+    );
+    const first = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp`, { headers: adminHeaders() });
+    const page = (
+      await first.json<{ data: { tokens: Array<{ id: string }>; nextCursor: string } }>()
+    ).data;
+    expect(page.tokens).toHaveLength(100);
+    expect(page.nextCursor).toBe(page.tokens.at(-1)?.id);
+    // A newly inserted row ahead of the anchor must not shift later pages.
+    await env.DB.prepare(
+      `INSERT INTO mcp_tokens(id,user_id,label,token_hash,allow_draft,allow_send,expires_at,revoked_at,created_at)
+      VALUES(?,?,'Newer row',?,0,0,2000000000,1,'2100-01-01 00:00:00')`,
+    )
+      .bind(otherBox, user, 'e'.repeat(64))
+      .run();
+    const next = await SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens?cursor=${page.nextCursor}`, {
+      headers: adminHeaders(),
+    });
+    expect(next.status).toBe(200);
+    expect(await next.json()).toMatchObject({
+      data: { tokens: [{ id: older.credential.id }], nextCursor: null },
+    });
+    const revoked = await SELF.fetch(
+      `${BASE}/api/v1/auth/me/mcp/tokens/${older.credential.id}/revoke`,
+      { method: 'POST', headers: adminHeaders() },
+    );
+    expect(revoked.status).toBe(200);
+    expect((await rpc(older.token, 'tools/list')).status).toBe(401);
+    await save({ ...config, enabled: false }, 1);
+    expect(
+      (
+        await SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens?cursor=${page.nextCursor}`, {
+          headers: adminHeaders(),
+        })
+      ).status,
+    ).toBe(200);
+    await env.DB.prepare(
+      `INSERT INTO users(id,email,status,password_algorithm,password_iterations,password_salt,password_hash,created_at,updated_at)
+      SELECT ?,'another-owner@example.test','active',password_algorithm,password_iterations,password_salt,password_hash,created_at,updated_at FROM users WHERE id=?`,
+    )
+      .bind(otherBox, user)
+      .run();
+    await env.DB.prepare('UPDATE mcp_tokens SET user_id=? WHERE id=?')
+      .bind(otherBox, page.nextCursor)
+      .run();
+    expect(
+      (
+        await SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens?cursor=${page.nextCursor}`, {
+          headers: adminHeaders(),
+        })
+      ).status,
+    ).toBe(400);
+    expect((await SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens`)).status).toBe(401);
+    expect(
+      (
+        await SELF.fetch(`${BASE}/api/v1/auth/me/mcp/tokens?cursor=${message}`, {
+          headers: adminHeaders(),
+        })
+      ).status,
+    ).toBe(400);
+  });
+
   it('shows credentials only once and stores only hashes and safe replay metadata', async () => {
     expect((await save()).status).toBe(200);
     const headers = adminHeaders();
@@ -395,7 +471,7 @@ describe('MCP administration and Streamable HTTP', () => {
     expect(initialized.status).toBe(200);
     expect(initialized.headers.get('Cache-Control')).toBe('no-store');
     expect(await rpcJson(initialized)).toMatchObject({
-      result: { serverInfo: { name: 'unimailbox' } },
+      result: { serverInfo: { name: 'unimailbox', version: APPLICATION_VERSION } },
     });
     const listing = await rpc(credential.token, 'tools/list');
     expect(listing.status).toBe(200);
