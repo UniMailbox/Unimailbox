@@ -73,6 +73,7 @@ import attachmentCleanupSql from '../../../migrations/0032_attachment_cleanup.sq
 import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
 import mcpPromptSql from '../../../migrations/0036_mcp_prompt.sql?raw';
 import mcpAccessSql from '../../../migrations/0035_mcp_access.sql?raw';
+import maintenanceHeartbeatsSql from '../../../migrations/0037_maintenance_heartbeats.sql?raw';
 import scheduledSendSql from '../../../migrations/0033_scheduled_send.sql?raw';
 import userPreferencesSql from '../../../migrations/0031_user_preferences.sql?raw';
 import editorAssetSystemLimitSql from '../../../migrations/0030_editor_asset_system_limit.sql?raw';
@@ -242,6 +243,11 @@ const MIGRATIONS = [
   { name: '0034_ai_configuration', fileName: '0034_ai_configuration.sql', sql: aiConfigurationSql },
   { name: '0035_mcp_access', fileName: '0035_mcp_access.sql', sql: mcpAccessSql },
   { name: '0036_mcp_prompt', fileName: '0036_mcp_prompt.sql', sql: mcpPromptSql },
+  {
+    name: '0037_maintenance_heartbeats',
+    fileName: '0037_maintenance_heartbeats.sql',
+    sql: maintenanceHeartbeatsSql,
+  },
 ] as const;
 
 export interface MigrationsDbOptions {

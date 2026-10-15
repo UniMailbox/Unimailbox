@@ -1,5 +1,5 @@
 import type { Env } from './env';
-import { CRON_HEARTBEAT_KEY, HOURLY_CRON_HEARTBEAT_KEY, DAILY_CRON_HEARTBEAT_KEY } from './health';
+import { writeMaintenanceHeartbeat, type MaintenanceCadence } from './maintenance-heartbeats';
 import { logger } from './logger';
 
 export interface MaintenanceTask {
@@ -10,7 +10,7 @@ export async function runMaintenanceTasks(
   env: Env,
   requestId: string,
   tasks: readonly MaintenanceTask[],
-  cadence: 'frequent' | 'hourly' | 'daily' = 'frequent',
+  cadence: MaintenanceCadence = 'frequent',
 ): Promise<void> {
   const startedAt = new Date().toISOString();
   const failedTasks: string[] = [];
@@ -29,15 +29,13 @@ export async function runMaintenanceTasks(
   }
   const completedAt = new Date().toISOString();
   try {
-    await env.CACHE.put(
-      cadence === 'daily'
-        ? DAILY_CRON_HEARTBEAT_KEY
-        : cadence === 'hourly'
-          ? HOURLY_CRON_HEARTBEAT_KEY
-          : CRON_HEARTBEAT_KEY,
-      JSON.stringify({ requestId, startedAt, completedAt, failedTasks }),
-      { expirationTtl: cadence === 'daily' ? 3 * 86400 : cadence === 'hourly' ? 3 * 3600 : 86400 },
-    );
+    await writeMaintenanceHeartbeat(env.DB, {
+      cadence,
+      requestId,
+      startedAt,
+      completedAt,
+      failedTasks,
+    });
   } catch {
     failedTasks.push('heartbeat');
   }

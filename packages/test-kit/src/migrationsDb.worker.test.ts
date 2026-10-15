@@ -21,6 +21,8 @@ import aiConfigurationVerification from '../../../migrations/0034_ai_configurati
 import settingsRevisionVerification from '../../../migrations/0025_system_settings_revision.verify.sql?raw';
 import scheduledSendVerification from '../../../migrations/0033_scheduled_send.verify.sql?raw';
 import attachmentCleanupVerification from '../../../migrations/0032_attachment_cleanup.verify.sql?raw';
+import heartbeatSql from '../../../migrations/0037_maintenance_heartbeats.sql?raw';
+import heartbeatVerification from '../../../migrations/0037_maintenance_heartbeats.verify.sql?raw';
 
 const NEW_UUID = '00000000-0000-4000-8000-000000000001';
 const NOW = '2026-01-01 00:00:00';
@@ -59,6 +61,66 @@ describe('migrationsDb (worker pool)', () => {
     const { reset } = await import('cloudflare:test');
     await reset();
   });
+
+  it.each(['fresh', 'partial'])(
+    'R-DATA-004 R-DATA-005: 0037 raw %s/repeated migration preserves heartbeat state without fabricating health',
+    async (mode) => {
+      const db = await migrationsDb({ through: '0036_mcp_prompt' });
+      const statements = heartbeatSql
+        .replace(/^--.*$/gm, '')
+        .split(';')
+        .filter((sql) => sql.trim());
+      if (mode === 'partial') {
+        await db.batch(statements.slice(0, 2).map((sql) => db.prepare(sql)));
+        await db.batch([
+          db.prepare(
+            "INSERT INTO maintenance_heartbeats(cadence,request_id,completed_at,failed_count,legacy_imported,initialized_at) VALUES('daily','existing','2020-01-01T00:00:00Z',1,1,'2020-01-01T00:00:00Z')",
+          ),
+          db.prepare(
+            "INSERT INTO maintenance_heartbeat_failures(cadence,task_name) VALUES('daily','retained.failure')",
+          ),
+        ]);
+      }
+      for (let i = 0; i < 2; i++) await db.batch(statements.map((sql) => db.prepare(sql)));
+      expect((await db.prepare('SELECT * FROM maintenance_heartbeats').all()).results).toHaveLength(
+        3,
+      );
+      const row = await db
+        .prepare(
+          "SELECT request_id,completed_at,failed_count,legacy_imported,initialized_at FROM maintenance_heartbeats WHERE cadence='daily'",
+        )
+        .first();
+      if (mode === 'partial')
+        expect(row).toEqual({
+          request_id: 'existing',
+          completed_at: '2020-01-01T00:00:00Z',
+          failed_count: 1,
+          legacy_imported: 1,
+          initialized_at: '2020-01-01T00:00:00Z',
+        });
+      else
+        expect(row).toMatchObject({
+          request_id: null,
+          completed_at: null,
+          failed_count: 0,
+          legacy_imported: 0,
+        });
+      for (const sql of heartbeatVerification.split(';').filter((sql) => sql.trim())) {
+        const result = await db.prepare(sql).all<{ assertion: string; pass: number }>();
+        for (const item of result.results) expect(item.pass, item.assertion).toBe(1);
+      }
+      await expect(
+        db.prepare("INSERT INTO maintenance_heartbeats(cadence) VALUES('invalid')").run(),
+      ).rejects.toThrow();
+      await expect(
+        db
+          .prepare(
+            "INSERT INTO maintenance_heartbeat_failures(cadence,task_name) VALUES('missing','failure')",
+          )
+          .run(),
+      ).rejects.toThrow();
+    },
+  );
 
   it('0036 raw partial/repeated SQL registers the prompt and preserves existing configuration and credentials', async () => {
     const db = await migrationsDb({ through: '0035_mcp_access' });
@@ -551,7 +613,7 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
     // CAP-069: 0025 seeds the internal system-settings revision row.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0036');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0037');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {

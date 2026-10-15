@@ -11,12 +11,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import scheduled from './scheduled';
-import {
-  maintenanceHealth,
-  CRON_HEARTBEAT_KEY,
-  HOURLY_CRON_HEARTBEAT_KEY,
-  DAILY_CRON_HEARTBEAT_KEY,
-} from '../platform/health';
+import { maintenanceHealth } from '../platform/health';
 import { OUTBOX_LEASE_TTL_MS } from '../platform/outbox-config';
 
 /** SQLite datetime literal offset from the real clock by `offsetMs`. */
@@ -86,6 +81,21 @@ function controller(
 
 function dailyController() {
   return controller('*/5 * * * *', Date.UTC(2026, 9, 9, 19, 0));
+}
+
+async function heartbeat(cadence: string) {
+  const row = await env.DB.prepare(
+    'SELECT completed_at FROM maintenance_heartbeats WHERE cadence=?',
+  )
+    .bind(cadence)
+    .first<{ completed_at: string | null }>();
+  if (!row?.completed_at) return null;
+  const failures = await env.DB.prepare(
+    'SELECT task_name FROM maintenance_heartbeat_failures WHERE cadence=?',
+  )
+    .bind(cadence)
+    .all<{ task_name: string }>();
+  return { failedTasks: failures.results.map((item) => item.task_name) };
 }
 
 describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
@@ -191,29 +201,44 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
   it('keeps upload expiry hourly and preserves its failed heartbeat after frequent success', async () => {
     await env.DB.prepare('DROP TABLE editor_asset_usages').run();
     await expect(scheduled.scheduled(controller(), env)).resolves.toBeUndefined();
-    expect(await env.CACHE.get(HOURLY_CRON_HEARTBEAT_KEY)).toBeNull();
+    expect(await heartbeat('hourly')).toBeNull();
     await expect(
       scheduled.scheduled(controller('*/5 * * * *', Date.UTC(2026, 9, 9, 12, 0)), env),
     ).rejects.toThrow('Maintenance failed');
-    expect(await env.CACHE.get(HOURLY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+    expect(await heartbeat('hourly')).toMatchObject({
       failedTasks: ['editor-assets.expire'],
     });
     await scheduled.scheduled(controller(), env);
-    expect(await env.CACHE.get(HOURLY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+    expect(await heartbeat('hourly')).toMatchObject({
       failedTasks: ['editor-assets.expire'],
     });
   });
 
-  it('keeps frequent expiry/reclaim free of cursor reads, deletes and bucket scans', async () => {
+  it('keeps frequent expiry/reclaim and health free of all KV operations after handover', async () => {
     // Spies observe real binding calls; no return values or storage are replaced.
     const get = vi.spyOn(env.CACHE, 'get');
     const remove = vi.spyOn(env.CACHE, 'delete');
     const list = vi.spyOn(env.ATTACHMENTS, 'list');
+    const put = vi.spyOn(env.CACHE, 'put');
+    await env.DB.prepare('UPDATE maintenance_heartbeats SET legacy_imported=1').run();
     await scheduled.scheduled(controller(), env);
+    expect(await maintenanceHealth(env)).toBe(true);
     expect(get).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
     expect(list).not.toHaveBeenCalled();
-    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY, 'json')).toMatchObject({ failedTasks: [] });
+    expect(await heartbeat('frequent')).toMatchObject({ failedTasks: [] });
+  });
+
+  it('keeps empty hourly cleanup and health free of KV after handover', async () => {
+    await env.DB.prepare('UPDATE maintenance_heartbeats SET legacy_imported=1').run();
+    const get = vi.spyOn(env.CACHE, 'get');
+    const put = vi.spyOn(env.CACHE, 'put');
+    const remove = vi.spyOn(env.CACHE, 'delete');
+    const list = vi.spyOn(env.CACHE, 'list');
+    await scheduled.scheduled(controller('*/5 * * * *', Date.UTC(2026, 9, 9, 12, 0)), env);
+    expect(await maintenanceHealth(env)).toBe(true);
+    for (const operation of [get, put, remove, list]) expect(operation).not.toHaveBeenCalled();
   });
 
   it('runs five daily cursor reads with no empty deletes and an independent heartbeat', async () => {
@@ -222,10 +247,10 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
     await scheduled.scheduled(dailyController(), env);
     expect(get).toHaveBeenCalledTimes(5);
     expect(remove).not.toHaveBeenCalled();
-    expect(await env.CACHE.get(DAILY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+    expect(await heartbeat('daily')).toMatchObject({
       failedTasks: [],
     });
-    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY, 'json')).toMatchObject({ failedTasks: [] });
+    expect(await heartbeat('frequent')).toMatchObject({ failedTasks: [] });
   });
 
   it('persists daily pagination across invocations and removes only existing finished cursors', async () => {
@@ -249,7 +274,7 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
 
   it('rejects an unconfigured schedule without running maintenance', async () => {
     await expect(scheduled.scheduled(controller('* * * * *'), env)).rejects.toThrow('Unknown');
-    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY)).toBeNull();
+    expect(await heartbeat('frequent')).toBeNull();
   });
 
   it('skips daily scans on the ticks immediately before and after 19:00 UTC', async () => {
@@ -258,16 +283,16 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
       await scheduled.scheduled(controller('*/5 * * * *', time), env);
     }
     expect(get).not.toHaveBeenCalled();
-    expect(await env.CACHE.get(DAILY_CRON_HEARTBEAT_KEY)).toBeNull();
+    expect(await heartbeat('daily')).toBeNull();
   });
 
   it('still runs daily scans when frequent outbox recovery fails', async () => {
     await env.DB.prepare('DROP TABLE outbound_jobs').run();
     await expect(scheduled.scheduled(dailyController(), env)).rejects.toThrow('Maintenance failed');
-    expect(await env.CACHE.get(CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+    expect(await heartbeat('frequent')).toMatchObject({
       failedTasks: ['outbound.reclaim'],
     });
-    expect(await env.CACHE.get(DAILY_CRON_HEARTBEAT_KEY, 'json')).toMatchObject({
+    expect(await heartbeat('daily')).toMatchObject({
       failedTasks: [],
     });
   });
