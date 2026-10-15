@@ -58,7 +58,10 @@ the API and personal dialog while disabled. The UI shows existing credentials an
 revocation, with no permission form or Copy prompt, when the service is disabled. Existing credential permissions are immutable; revoke and
 create a replacement to change them.
 
-The personal settings response includes the first 100 credentials and `nextCursor`.
+New clients opt into `nextCursor` in personal settings using
+`X-MCP-Token-Pagination: 1`; clients without that header retain the exact original
+response shape so cached strict-schema clients continue to work. The response
+includes the first 100 credentials.
 **Load more credentials** calls `GET /api/v1/auth/me/mcp/tokens?cursor=<last-id>`
 only on demand, keeping older active credentials discoverable even after many
 revocations. Each page is owner-scoped and ordered by creation time then ID;

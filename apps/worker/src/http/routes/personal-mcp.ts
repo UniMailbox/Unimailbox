@@ -37,7 +37,14 @@ export function personalMcpRoutes(): Hono<AppEnv> {
     await next();
   });
   routes.get('/auth/me/mcp', async (c) =>
-    c.json({ data: await getPersonalMcpSettings(c.env.DB, actor(c), mcpEndpoint(c).href) }),
+    c.json({
+      data: await getPersonalMcpSettings(
+        c.env.DB,
+        actor(c),
+        mcpEndpoint(c).href,
+        c.req.header('X-MCP-Token-Pagination') === '1',
+      ),
+    }),
   );
   routes.get('/auth/me/mcp/tokens', async (c) => {
     const raw = c.req.query('cursor');

@@ -19,4 +19,12 @@ GitHub checks before merge. Deploy exact merged source to staging then productio
 with backups/recovery bookmarks and all schema assertions, compare preserved
 bindings/configuration and real D1 Cron/health. Tag the verified main source,
 wait for release workflow gate, publish stable/latest GitHub Release and verify
-public metadata. No new mail sends, credentials, DNS or service enabling.
+public metadata. No mail sends, DNS or service enabling. Any temporary read-only staging
+diagnostic credential must be revoked and diagnostic sessions logged out.
+
+PR #48 merged as 316428d after exact-head CI passed. Initial staging publication
+passed tests/health/login/new API/MCP version and real D1 Cron, but a cached-client
+response compatibility regression was reproduced before production publication.
+Fix it in a follow-up branch/PR via explicit pagination opt-in, preserving the
+old strict response. The old prepared production artifact is superseded and must
+not be published. Final deploy/tag source must include the compatibility fix.

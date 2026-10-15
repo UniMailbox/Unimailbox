@@ -31,18 +31,26 @@ export async function getMcpAdministration(db: Database, userId: string, endpoin
     canManage: await checkPermission(db, userId, 'settings.manage'),
   };
 }
-export async function getPersonalMcpSettings(db: Database, userId: string, endpoint: string) {
+export async function getPersonalMcpSettings(
+  db: Database,
+  userId: string,
+  endpoint: string,
+  includeCursor = false,
+) {
   const { configuration } = await readMcpConfiguration(db);
   const canRead = await checkPermission(db, userId, 'message.read');
   const canSend = canRead && (await checkPermission(db, userId, 'message.send'));
   const mailboxes = canRead
     ? (await listMailboxesByUser(db, userId)).filter((b) => b.status === 'active')
     : [];
+  const page = await listMcpTokens(db, userId);
   return {
     enabled: configuration.enabled,
     endpoint,
     promptTemplate: configuration.promptTemplate,
-    ...(await listMcpTokens(db, userId)),
+    // Cached clients validate the old response strictly. Pagination is opt-in.
+    tokens: page.tokens,
+    ...(includeCursor ? { nextCursor: page.nextCursor } : {}),
     mailboxes: await Promise.all(
       mailboxes.map(async (b) => ({
         id: b.id,
