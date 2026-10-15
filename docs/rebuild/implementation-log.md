@@ -10,6 +10,25 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-15 — Maintenance heartbeat and failure state moved to D1
+
+The daily quota investigation found the fixed heartbeat write baseline remaining
+in both staging and production: 313 KV writes/day each. Staging now persists
+bounded cadence snapshots and relational failed-task names in D1. Atomic updates,
+late-run guards and one-time old-KV adoption preserve failure/freshness behavior;
+initialization grace cannot reset on deployment. Schedules and ordinary auth/
+attachment KV behavior are unchanged. Provider quota notification settings remain
+separate from the application's D1 maintenance state.
+
+Source `a104103` passed the 2,411-test canonical gate and all 37 remote SQL
+companions, then published as staging Worker
+`246d800c-b48d-46d5-9d36-9d610d9e0820`, schema 0037. Backup restore and recovery
+bookmark, repeated health/readiness and a real five-minute scheduled D1 heartbeat passed.
+Hourly/daily legacy results were retained; full post-release daily usage and new
+hourly/daily runs remain separate evidence boundaries. Production was unchanged.
+Self-review only. See [QA](../qa/d1-maintenance-heartbeats-2026-10-15.md) and
+[handoff](../../work/handoffs/d1-maintenance-heartbeats-2026-10-15.md).
+
 ## 2026-10-14 — Redundant browser KV reads and logout deletes reduced
 
 Shared identity queries now reuse successful UI descriptors for 60 seconds,

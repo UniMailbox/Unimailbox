@@ -108,6 +108,13 @@ D1 Time Travel retention depends on the account plan; confirm it in Cloudflare. 
 
 Migration 0037 adds `maintenance_heartbeats` and relational `maintenance_heartbeat_failures`. Heartbeat writes and steady-state health reads use D1, removing 313 fixed KV writes per environment/day and three KV reads per health probe. On first health inspection, each pending cadence imports its old KV snapshot (including failure/staleness), or records the key's absence durably. Concurrent first probes may duplicate a bounded legacy read; conditional atomic writes prevent a late import from replacing live D1 results. Malformed/unavailable legacy data becomes an explicit failed snapshot until that cadence recovers. Later probes do not fall back to KV. Old keys are left to their existing TTL, without deletion. Daily orphan cursors and ordinary auth/attachment caches retain their separate KV behavior.
 
+Inspect safe operational state in the selected installation's D1 console:
+
+```sql
+SELECT cadence, completed_at, failed_count FROM maintenance_heartbeats;
+SELECT cadence, task_name FROM maintenance_heartbeat_failures;
+```
+
 Wrangler configures one `*/5 * * * *` UTC schedule per environment. Each tick runs bounded outbox recovery; only UTC minute zero also expires temporary attachments/editor uploads. Only the 19:00 UTC tick additionally purges expired identity/idempotency records (at most 1,000 per table) and runs avatar, editor and inbound/legacy attachment orphan scans: **once daily at 03:00 Asia/Shanghai**. All three cadences are isolated and have independent heartbeats. Normal sending remains Queue-driven; five-minute scanning increases exceptional recovery latency. The handler temporarily also accepts the previous two-minute expression during trigger propagation. Each R2 orphan prefix scans at most 100 objects per day with durable KV pagination. Grace periods remain 24 hours for avatar/inbound/legacy objects and seven days for editor orphans. Monitor growth before increasing batch sizes. [Cloudflare Cron changes](https://developers.cloudflare.com/workers/configuration/cron-triggers/) can take up to 15 minutes to propagate.
 
 On 2026-10-09 the operator retired legacy `unimailbox` scheduling: its three old Cron expressions were removed and the empty schedule list was read back. Its historical D1/KV data, custom domain and other bindings remain available for the gradual migration; no production cutover or data migration was performed. The BBY Cron belongs to a separate project and is unchanged. The optional GitHub Operations workflow now checks every 15 minutes rather than five; this is separate from Cloudflare scheduling. See [resource reduction QA](../qa/resource-reduction-2026-10-09.md).

@@ -29,5 +29,15 @@ boundaries passed. Source self-review only; no independent review claimed.
 
 Before migration, a private 0600 staging D1 export (schema 0036) restored into
 in-memory SQLite with integrity and foreign-key checks passing. The publication
-flow must also capture its D1 Time Travel bookmark. No migration/deployment has
-yet occurred at this checkpoint. Keep raw SQL and auth helpers in ignored scratch.
+flow also captured its D1 Time Travel bookmark. Keep raw SQL and auth helpers
+in ignored scratch.
+
+Completed 2026-10-15: application `a104103`, canonical gate 2,411 tests,
+all 37 remote schema companions, staging Worker
+`246d800c-b48d-46d5-9d36-9d610d9e0820`, schema 0037. Readiness, repeated
+maintenance probes, adopted hourly/daily snapshots and a real 16:20:40
+Asia/Shanghai frequent D1 scheduled write passed. The first publication stopped
+after 0037 on a read-only provider network error; the same prepared release
+resumed successfully. Production unchanged. Full-day KV usage and actual new
+hourly/daily runs remain separate from this bounded acceptance. Detailed evidence:
+`docs/qa/d1-maintenance-heartbeats-2026-10-15.md`.
