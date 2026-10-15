@@ -10,6 +10,25 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-15 — Production synchronized to D1 maintenance state
+
+The operator selected the existing Leanda production installation after staging
+acceptance. Source `cc9c9d4` passed a fresh 2,411-test production preparation gate
+and published as Worker `8ccd55d9-dd83-4d73-8be6-97bbfbe36d3f`, schema 0037.
+A restored private backup passed integrity/FK and pending-migration simulation;
+publication captured the recovery bookmark, applied additive 0034–0037 and
+verified all 37 remote companions. Existing mail resources, key bindings,
+catch-all and private forwarding metadata were retained; AI/MCP remain disabled.
+
+Exact-version smoke, readiness, repeated maintenance and direct D1 state passed.
+Real five-minute Cron advanced D1 at 17:20:43 Asia/Shanghai and three subsequent
+maintenance probes passed. This removes production's 313/day fixed KV heartbeat
+write baseline and three reads per steady probe, matching staging. Full-day
+metrics and a new mail-delivery retest remain separate. Old readiness requires
+schema 0033, so recovery must account for schema compatibility rather than blind
+code rollback. Source self-review only. See [production QA](../qa/d1-maintenance-production-2026-10-15.md)
+and [handoff](../../work/handoffs/production-d1-maintenance-2026-10-15.md).
+
 ## 2026-10-15 — Maintenance heartbeat and failure state moved to D1
 
 The daily quota investigation found the fixed heartbeat write baseline remaining
