@@ -136,8 +136,8 @@ overview's stable version check. Reuse an existing draft on workflow retries;
 never move a published tag. Issue a new version for corrections. Prereleases
 created separately do not appear in this stable update panel.
 
-The first published stable Release is still required. Adding this workflow and
-UI does not itself announce a release or upgrade existing installations.
+The workflow and UI announce a release only after an operator publishes the
+reviewed draft. They do not upgrade an installation automatically.
 
 References: [GitHub notifications](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications),
 [syncing a fork](https://docs.github.com/en/pull-requests/how-tos/work-with-forks/syncing-a-fork),

@@ -10,6 +10,24 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-15 — PR 48 reviewed and stable 1.0.1 released
+
+PR #48 and compatibility follow-up #49 merged after exact-head gates passed.
+Review fixed unreachable credential revocation while MCP is disabled, hidden
+older credentials and strict cached-client response compatibility. Pagination
+is explicit and owner-scoped; it introduces no polling. MCP initialize reports
+the product version. Existing account-bound secret handling was retained.
+
+Final main source `b4b7ca3` passed 2,415-test staging/production preparations,
+all 37 remote SQL companions, exact-source smoke, authenticated legacy/new-client
+checks and real scheduled D1 updates in both environments. No migration was
+pending. Resources/keys and settings were preserved; production MCP stays off.
+The matching tag workflow passed, and reviewed stable v1.0.1 was published as
+Latest. Existing dependency advisories, full-day quota observation and full mail
+acceptance remain separate. This was source self-review, not an independent
+review. See [QA](../qa/release-1.0.1-2026-10-15.md), [release notes](../releases/1.0.1.md)
+and [handoff](../../work/handoffs/release-1-0-1-2026-10-15.md).
+
 ## 2026-10-15 — Production synchronized to D1 maintenance state
 
 The operator selected the existing Leanda production installation after staging
