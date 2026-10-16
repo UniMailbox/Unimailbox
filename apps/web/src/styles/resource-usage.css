@@ -1,0 +1,230 @@
+.usage-toolbar,
+.usage-range,
+.usage-services {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.usage-toolbar {
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+.usage-services {
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.usage-services button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0 0.75rem;
+  color: var(--muted-foreground);
+  border-bottom: 2px solid transparent;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.usage-services button[aria-pressed='true'] {
+  color: var(--foreground);
+  border-color: var(--primary);
+}
+.usage-services button:hover {
+  color: var(--foreground);
+}
+.usage-workspace {
+  display: grid;
+  grid-template-columns: 11.5rem minmax(0, 1fr);
+  gap: 1.75rem;
+  padding-top: 1.5rem;
+}
+.usage-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.usage-metrics button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  padding: 0.75rem;
+  text-align: left;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+}
+.usage-metrics button:hover {
+  background: var(--muted);
+}
+.usage-metrics button[aria-pressed='true'] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.usage-metrics span {
+  font-size: 0.8125rem;
+}
+.usage-metrics strong {
+  font-size: 1.375rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+.usage-metrics small {
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+}
+.usage-chart {
+  margin: 0;
+  min-width: 0;
+  overflow-x: auto;
+}
+.usage-chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  justify-content: space-between;
+  padding: 0.75rem 0 1.5rem;
+  font-size: 0.8125rem;
+}
+.usage-chart figcaption span {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.usage-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.usage-axis line {
+  stroke: var(--border);
+  stroke-dasharray: 3 4;
+}
+.usage-axis text,
+.usage-date {
+  fill: var(--muted-foreground);
+  font-size: 12px;
+  font-family: inherit;
+}
+.usage-bar {
+  fill: var(--chart-2);
+}
+.usage-bar.is-active,
+.usage-bar:focus-visible {
+  fill: var(--primary);
+  outline: 2px solid var(--ring);
+}
+.usage-bar.is-missing {
+  fill: var(--muted-foreground);
+}
+.usage-data {
+  margin-top: 1rem;
+  max-height: 22rem;
+  overflow: auto;
+}
+.usage-data summary {
+  cursor: pointer;
+  padding: 0.75rem 0;
+  font-size: 0.8125rem;
+}
+.usage-data table {
+  width: 100%;
+  font-size: 0.8125rem;
+  border-collapse: collapse;
+}
+.usage-data caption {
+  text-align: left;
+  color: var(--muted-foreground);
+  padding: 0.75rem 0;
+}
+.usage-data th,
+.usage-data td {
+  padding: 0.625rem 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.usage-data td,
+.usage-data thead th:last-child {
+  text-align: right;
+}
+.usage-footnote,
+.usage-updated {
+  margin: 1rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  max-width: 75ch;
+}
+.usage-updated {
+  margin-top: 0.35rem;
+}
+.usage-empty {
+  min-height: 15rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.75rem;
+  padding: 2rem 1rem;
+}
+.usage-empty-icon {
+  color: var(--muted-foreground);
+}
+.usage-empty h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+}
+.usage-empty p {
+  max-width: 50ch;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.usage-empty a {
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.usage-no-data {
+  min-height: 12rem;
+  display: grid;
+  place-content: center;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.usage-loading {
+  padding: 2rem 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.usage-loading div {
+  height: 1.25rem;
+  margin-top: 1rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+.usage-loading div:nth-child(2) {
+  width: 70%;
+}
+.usage-loading div:nth-child(3) {
+  width: 90%;
+}
+@media (max-width: 700px) {
+  .usage-services {
+    gap: 1rem;
+  }
+  .usage-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+  .usage-metrics {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .usage-metrics button {
+    flex: 0 0 9rem;
+  }
+}

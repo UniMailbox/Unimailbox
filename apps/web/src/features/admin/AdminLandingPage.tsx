@@ -11,6 +11,8 @@ import { adminDomainsQuery, adminOverviewQuery } from './admin-queries';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { UpdatePanel } from './UpdatePanel';
+import { ResourceUsagePanel } from './ResourceUsagePanel';
+import { MailProcessingPanel } from './MailProcessingPanel';
 export function AdminLandingPage(): ReactElement {
   const t = useT();
   const session = authSessionQuery();
@@ -36,6 +38,8 @@ export function AdminLandingPage(): ReactElement {
     <main className="admin-page" data-testid="admin-landing">
       <PageHeader title={t('Overview')} />
       <UpdatePanel />
+      <ResourceUsagePanel />
+      <MailProcessingPanel />
       <Card title={t('Mailbox overview')}>
         <div className="overview-toolbar">
           <div className="overview-scope-field">

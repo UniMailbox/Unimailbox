@@ -25,6 +25,10 @@ export type Env = Omit<
   RELEASE_TREE?: string;
   /** Set to "false" to disable anonymous GitHub release checks. */
   UPDATE_CHECK_ENABLED?: string;
+  /** Optional installation-scoped analytics resource map; contains no credentials. */
+  CLOUDFLARE_ANALYTICS_CONFIG?: string;
+  /** Dedicated read-only analytics token, never the deployment credential. */
+  CLOUDFLARE_ANALYTICS_TOKEN?: SecretsStoreSecret | string;
   APP_ORIGIN?: string;
   /** Domain-scoped fallback for unknown inbound envelope recipients. */
   INBOUND_CATCH_ALL_MAILBOX?: string;

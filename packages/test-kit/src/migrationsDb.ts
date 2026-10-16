@@ -74,6 +74,7 @@ import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?ra
 import mcpPromptSql from '../../../migrations/0036_mcp_prompt.sql?raw';
 import mcpAccessSql from '../../../migrations/0035_mcp_access.sql?raw';
 import outboundSendAttemptsSql from '../../../migrations/0039_outbound_send_attempts.sql?raw';
+import mailAnalyticsIndexesSql from '../../../migrations/0040_mail_analytics_indexes.sql?raw';
 import inboundReceiptsSql from '../../../migrations/0038_inbound_receipts.sql?raw';
 import maintenanceHeartbeatsSql from '../../../migrations/0037_maintenance_heartbeats.sql?raw';
 import scheduledSendSql from '../../../migrations/0033_scheduled_send.sql?raw';
@@ -255,6 +256,11 @@ const MIGRATIONS = [
     name: '0039_outbound_send_attempts',
     fileName: '0039_outbound_send_attempts.sql',
     sql: outboundSendAttemptsSql,
+  },
+  {
+    name: '0040_mail_analytics_indexes',
+    fileName: '0040_mail_analytics_indexes.sql',
+    sql: mailAnalyticsIndexesSql,
   },
 ] as const;
 

@@ -4,6 +4,8 @@ import { readAiConfiguration } from './modules/admin';
 import { decrypt, importEncryptionKey } from './platform/crypto';
 import { readSecret } from './platform/secrets';
 import type { AiService } from '@unimailbox/contracts';
+import type { ResourceUsageReader } from '@unimailbox/contracts';
+import { createResourceUsageReader } from './integrations/cloudflare/resource-usage';
 // Composition root — the only place wiring happens.
 // CAP-001 stub: returns named collaborators so use cases cannot reach back
 // into the raw Cloudflare `Env` (per ADR-007 + .claude/rules/security.md
@@ -29,6 +31,7 @@ import {
 } from './modules/admin';
 
 export interface AppContext {
+  readonly resourceUsage: ResourceUsageReader;
   readonly ai: AiService<AbortSignal>;
   readonly db: Database;
   readonly cache: Cache;
@@ -57,8 +60,14 @@ export interface AppContext {
 
 export function buildAppContext(env: Env): AppContext {
   const db = getDatabase(env);
+  const analyticsToken = env.CLOUDFLARE_ANALYTICS_TOKEN;
   return {
     db,
+    resourceUsage: createResourceUsageReader({
+      ...(env.CLOUDFLARE_ANALYTICS_CONFIG ? { config: env.CLOUDFLARE_ANALYTICS_CONFIG } : {}),
+      ...(analyticsToken ? { token: () => readSecret(analyticsToken) } : {}),
+      cache: caches.default,
+    }),
     ai: createAiService({
       adapters: createAiAdapters(env.AI),
       loadConfiguration: async () => {
