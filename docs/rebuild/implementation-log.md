@@ -10,6 +10,101 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-16 — CAP-070 shared draft, send and message-state use cases
+
+Move draft creation/read/save, compose/draft submission and per-user read/star/
+soft-delete orchestration from HTTP routes into public messages/outbound-mail
+operations. MCP draft/send invokes the same operations directly, preserving its
+independent D1 authentication and token scopes. Modules receive narrow service
+collaborators and return serialized results. Authored-message persistence remains
+messages-owned; admin owns optional marker-guarded audit statements. Outbound
+signature orchestration is declared in the dependency table and doctor policy.
+Raw-request hashes, save concurrency, transactional replay/audit writes, scheduled
+send, attachment consumption and durable outbox recovery are preserved. Draft-send
+cached responses now require current mailbox access, including after revocation.
+No schema or frontend changes. See
+[module boundaries](05-target-architecture/module-boundaries.md#shared-mail-mutation-use-cases).
+
+Final isolated `pnpm verify` passed doctor 14/14, generated bindings, lint, types,
+builds and 2,526 tests (1,422 non-Worker, 1,076 Worker, 28 migration fixtures).
+Fifteen new direct-operation tests cover authorization, replay/conflict, concurrent
+save, stale state, audit rollback and Queue-failure recovery. All 718 checked
+source paths match the shared checkout; the unrelated personal MCP UI edit is
+preserved/excluded. Self-review caught and corrected the HTTP star request-ID
+header during extraction; the final correlated-audit regression passes. Local
+binding and synthetic input evidence only; no independent review, commit, push,
+deployment or provider/mail acceptance. See
+[handoff](../../work/handoffs/mail-use-cases-2026-10-16.md).
+
+## 2026-10-16 — Resource dashboard split into platform and mail processing
+
+The user clarified that both data sources are required. Admin Overview now has
+separate platform and local mail-processing sections with independent date
+controls, queries and failure states. Local metadata covers retained mail and
+attachment/hosted-asset counts/bytes, outbox states/retry reservations and valid
+end-to-end latency, plus explicitly limited retained-receipt raw-size/latency
+samples. Weighted averages use sample counts; cleanup/deletion and scheduling
+semantics are stated in the UI. No body/byte reads, telemetry writes or polling.
+Migration 0040 adds bounded-cohort and hosted-usage lookup indexes; cohorts over
+5,000 records withhold affected results rather than publishing truncated totals.
+See [design](22-resource-usage-dashboard.md).
+
+Final isolated pnpm verify passed 2,511 tests (1,422 non-Worker, 1,061 Worker,
+28 migration fixtures), doctor 14/14, bindings, lint, types and builds. All 72
+changed source paths match the shared checkout; the unrelated personal MCP edit
+is retained/excluded. Synthetic real-browser desktop/mobile, independent ranges,
+30-row daily tables and zero page errors/overflow passed. Source self-review;
+no commit, deployment, remote migration or real account/mail access. See
+[handoff](../../work/handoffs/resource-dashboard-two-sections-2026-10-16.md).
+
+## 2026-10-16 — Administrator resource usage dashboard
+
+The existing Admin overview now shows installation-scoped Cloudflare resource
+charts with 7/30-day UTC windows, manual refresh, keyboard-readable values, daily
+tables, responsive layout and English/Simplified Chinese. The protected endpoint
+requires analytics.read before reading credentials/cache/provider data. A dedicated
+optional read-only token and explicit resource map prevent account-wide fallback.
+Missing data stays distinct from zero, counters sum and storage uses maxima;
+provider failures are isolated. No new schema, telemetry writes or polling.
+Canonical configuration, source definitions and limits:
+[resource dashboard](22-resource-usage-dashboard.md).
+
+Final isolated owned-source pnpm verify passed doctor 14/14, generated bindings,
+lint, types, builds and 2,500 tests (1,417 non-Worker, 1,055 Worker, 28 migration
+fixtures). All 63 changed application/contracts/test-kit/migration paths match
+the shared source. Synthetic browser checks passed desktop/mobile range/resource
+switching, 30 daily rows, denied-provider state and zero page errors/viewport
+overflow. The unrelated personal MCP edit remains unchanged and excluded. An
+initial run hit two local runtime reset-hook timeouts in unchanged migration
+fixtures; the standalone 28-case rerun and final complete gate both passed without
+a timeout or migration change. Source self-review only. No commit, push, deployment,
+Cloudflare account query or real analytics entitlement acceptance. See
+[handoff](../../work/handoffs/resource-dashboard-2026-10-16.md).
+
+## 2026-10-16 — Durable outbound submission outcomes
+
+Commit prepared/submitted attempt markers before provider I/O and preserve a
+send fence for submitted, unknown and accepted work. Save acceptance separately
+before atomic job/message/audit finalization; repair failures without another
+provider submission. Authenticated connection/attempt callbacks or bounded Brevo
+event queries resolve unknown work only with positive evidence. Conflicting
+callback races roll back inside the transaction. Submission deadlines fit within
+the lease; confirmed rejection persists backoff and Retry-After across Queue and
+Cron. Migration 0039 holds legacy sending/due queued work without acceptance
+proof and preserves future schedules. Canonical design and release restrictions:
+[submission outcomes](21-outbound-submission-outcomes.md).
+
+Final isolated `pnpm verify` passed doctor 14/14, bindings, lint, types, builds and
+2,478 tests (1,399 non-Worker, 1,051 Worker, 28 migration fixtures). All 44 owned
+application/contracts/test-kit/migration paths match that validated snapshot.
+The unrelated personal MCP UI edit remains intact and excluded; its three
+previously demonstrated frontend failures remain outside this acceptance.
+The callback conflict regression was reproduced before the transaction guard,
+then passed with all 19 outcome tests. Evidence uses synthetic provider HTTP and
+local bindings; main-agent self-review only. No commit, push, deployment, remote
+migration or real provider/mail operation. See
+[handoff](../../work/handoffs/outbound-outcomes-2026-10-16.md).
+
 ## 2026-10-15 — PR 48 reviewed and stable 1.0.1 released
 
 PR #48 and compatibility follow-up #49 merged after exact-head gates passed.
@@ -4491,3 +4586,25 @@ unresolved status and lack of a deployed exploitability assessment are recorded
 in [release QA](../qa/release-1.0.0-2026-10-12.md) and the public release notes.
 Dependency upgrades are outside this publication change. Local links, Actionlint,
 diff and redacted staged/all-history secret scans passed. Self-review only.
+
+
+## 2026-10-15 — Inbound validation and durable receipt recovery
+
+Resolve SMTP envelope recipients before reading MIME; enforce declared and actual
+raw size with a bounded reader. Preserve synchronous content/role rejection and
+external-copy forwarding order. After policy acceptance, store original R2 bytes
+and a D1 receipt with scoped content/envelope deduplication. Finalize message,
+relations, receive audit and receipt together under a fenced lease; recover
+post-acceptance failures through versioned work on the existing Queue and bounded
+five-minute dispatch. Pending raw references are protected from cleanup, completed
+receipt retention is bounded, and stalled inbound work contributes to health.
+Migration 0038 and operational/rollback boundaries are documented in
+[inbound recovery](20-inbound-recovery.md).
+
+Final isolated owned-source `pnpm verify` passed doctor 14/14, bindings, lint,
+types, builds and 2,442 tests (1,382 non-Worker, 1,032 Worker, 28 migration fixtures).
+The shared checkout's unrelated personal MCP UI edit causes three frontend test
+failures and was preserved. Application/contracts/test-kit/migration sources match
+the validated snapshot. Local binding and synthetic-mail evidence only; self-review.
+No commit, push, deployment, remote migration or real-mail/provider operation.
+See [handoff](../../work/handoffs/inbound-recovery-2026-10-15.md).

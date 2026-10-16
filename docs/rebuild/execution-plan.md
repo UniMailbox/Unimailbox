@@ -1,8 +1,20 @@
 # Execution plan
 
-Current priorities as of 2026-10-10. The [ledger](capability-ledger.md#current-state)
+Current priorities as of 2026-10-16. The [ledger](capability-ledger.md#current-state)
 owns status; user priorities determine the next authorized slice. No feature
 capability is currently active.
+
+CAP-070 shared mail mutation use cases are locally implemented and validated:
+HTTP and MCP draft/send entrypoints call common operations, while message state
+mutations retain their transactional policies. See
+[architecture](05-target-architecture/module-boundaries.md#shared-mail-mutation-use-cases)
+and [handoff](../../work/handoffs/mail-use-cases-2026-10-16.md).
+
+The selected two-section resource dashboard and inbound/outbound reliability slices are locally implemented. Resource analytics installation configuration and live dataset acceptance remain open; see [resource dashboard](22-resource-usage-dashboard.md).
+Schemas 0038–0040, installation deployment and real-mail/provider recovery
+acceptance remain unpublished. See [inbound recovery](20-inbound-recovery.md),
+[outbound outcomes](21-outbound-submission-outcomes.md) and the
+[outbound handoff](../../work/handoffs/outbound-outcomes-2026-10-16.md).
 
 ## Current ordering
 
@@ -12,9 +24,11 @@ capability is currently active.
 2. Close the remaining comprehensive acceptance gaps with recorded allowed,
    denied, failure and recovery scenarios. Focused staging success does not close
    every case in the [acceptance catalog](../qa/acceptance-test-cases.md).
-3. Extend provider/reliability work only when selected: provider-side duplicate
-   suppression proof, event-level webhook replay policy, synchronization contract
-   and an SMTP adapter. Brevo is the only registered provider today.
+3. Complete controlled installation acceptance for the prepared reliability
+   changes, including correlated callbacks/provider lookup and legacy unknown
+   work reconciliation. Further selected provider work includes provider-side
+   duplicate suppression proof, event-level webhook replay policy, synchronization
+   contract and an SMTP adapter. Brevo is the only registered provider today.
 4. Plan legacy data import and production cutover as separate work, with backup,
    migration mapping, isolation and rollback evidence. Existing legacy databases
    must not receive this application's migration chain directly.

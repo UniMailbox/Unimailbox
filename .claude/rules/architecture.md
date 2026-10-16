@@ -8,7 +8,9 @@ own transport details. This file records the constraints to enforce in changes.
 
 One Cloudflare Worker, four entrypoints (HTTP, inbound email, Queue, scheduled),
 and one React/Vite client. D1 owns relational state, R2 owns file bytes, Queue
-drives outbound work, and KV holds temporary setup/cache/access-token data.
+drives outbound work and accepted inbound recovery, and KV holds temporary
+setup/cache/access-token data. Inbound rejection remains synchronous; see
+[inbound recovery](../../docs/rebuild/20-inbound-recovery.md).
 D1 sessions remain authentication authority. Do not add a mailbox Durable Object
 without the evidence and decision required by document 14.
 

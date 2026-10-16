@@ -129,7 +129,32 @@ pnpm wrangler queues info unimailbox-staging-outbound-dlq --config wrangler.stag
 
 Each maintenance task records safe task identity, duration and success. Failures do not prevent other tasks from running; the final `cron.complete` includes cadence and the D1 heartbeat snapshot records the aggregate result and failed task names for each cadence. A frequent success cannot overwrite a daily failure, and the invocation fails when any task fails. Queue retry exhaustion routes to the environment's separate DLQ. No consumer automatically acknowledges or replays DLQ messages. Inspect queue retention in Cloudflare and respond before it expires. Monitor the scheduled Operations workflow and enable failure notifications for its owners; GitHub schedules can be delayed and are not an availability SLA.
 
-For a DLQ incident, preserve diagnostic evidence, inspect the payload and look up the corresponding D1 job before changing anything. `sent`/terminal jobs must not be reset or resent automatically. Existing stale `sending` leases and orphan `queued` rows are re-enqueued by the Cron reclaim path using the same job IDs. Fix the cause first, let that path recover eligible jobs, and remove only messages confirmed resolved. Poison/unknown payloads require investigation, not blind bulk replay.
+For a DLQ incident, preserve diagnostic evidence, inspect the payload and look up the corresponding D1 job before changing anything. `sent`/terminal jobs must not be reset or resent automatically. Eligible stale `sending` leases and orphan `queued` rows are re-enqueued by the Cron reclaim path using the same job IDs; schema 0039 excludes any submitted/unknown/accepted attempt from that path. Fix the cause first, let recovery handle eligible jobs, and remove only messages confirmed resolved. Poison/unknown payloads require investigation, not blind bulk replay.
+
+From schema 0038, the existing `OUTBOUND` queue also carries versioned inbound
+receipt recovery envelopes. Frequent maintenance dispatches bounded pending or
+expired-lease inbound work; hourly maintenance expires completed receipt records.
+Maintenance health additionally rejects incomplete inbound receipts older than
+15 minutes. Pending raw MIME remains protected from orphan cleanup. For receipt
+inspection, acceptance/deduplication limits and the rollback restriction, follow
+[inbound recovery](../rebuild/20-inbound-recovery.md).
+
+Schema 0039 adds submission attempts and persistent retry timing. Drain/pause old
+sending activity and inspect due queued jobs before migration: legacy due work
+without a saved provider ID is conservatively held for private reconciliation,
+including genuinely unsent rows whose history cannot be proven. Future schedules
+remain queued. Unknown outcomes must not be bulk reset or replayed. The existing
+frequent maintenance reconciles bounded work using authenticated callbacks or
+positive provider-event evidence. See [submission outcomes](../rebuild/21-outbound-submission-outcomes.md)
+for limits, provider behavior and the pre-0039 rollback restriction.
+
+## Resource dashboards
+
+Schema 0040 adds the indexes used by the Admin mail-processing charts. Apply it
+before matching source; keep schemas 0038–0039 and their recovery restrictions.
+The mail section needs `analytics.read` and existing metadata, while platform
+usage additionally needs optional read-only analytics configuration. See
+[resource dashboards](../rebuild/22-resource-usage-dashboard.md).
 
 ## CI activation and troubleshooting
 
