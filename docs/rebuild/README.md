@@ -24,6 +24,8 @@ for implementation status.
 
 ## Current design decisions
 
+AI quotas, concurrency and unknown outcome accounting: [AI usage governance](24-ai-usage-governance.md).
+
 Measured D1 queries and mailbox cache freshness: [query optimization](23-query-cache-optimization.md).
 
 Administrator resource charts and optional Cloudflare Analytics configuration:

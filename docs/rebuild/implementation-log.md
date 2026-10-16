@@ -10,6 +10,27 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-16 — CAP-072 AI usage governance
+
+AI-owned normalized policy history and migration 0042 add atomic installation/user
+quota and concurrency admission. Durable attempts retain uncertain execution
+holds beyond response expiry; adapters preserve usage before content validation.
+The existing Cron classifies crashed attempts and settles persisted terminal
+observations without resubmission. Admin policy, usage and explicit terminal
+reconciliation have independent permissions and atomic replay/audit. Personal
+usage and a memory-only operation key cache accompany the reply dialog.
+
+Default observation mode does not enforce token quotas. Enforcement requires
+operator evidence for the input bound/output cap at the exact configuration
+revision; arbitrary compatible models are not certified. Final isolated pnpm
+verify passed 2,565 tests (1,431 non-Worker, 1,104 Worker, 30 migrations), doctor
+14/14, bindings/lint/types/builds. Personal MCP edit preserved/excluded. Self-review
+only, no paid/provider call, browser runtime demonstration or deployment. General
+release compatibility and coordinated disaster recovery remain separate.
+
+See [design](24-ai-usage-governance.md) and
+[handoff](../../work/handoffs/ai-governance-2026-10-16.md).
+
 ## 2026-10-16 — CAP-071 measured D1 queries and cache freshness
 
 Commit the earlier inbound recovery (`2f8b8ad`), outbound uncertainty handling

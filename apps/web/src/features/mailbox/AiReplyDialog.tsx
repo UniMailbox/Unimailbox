@@ -1,9 +1,12 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import {
   aiReplyRequestSchema,
   aiReplyResponseSchema,
   type AiReplyRequest,
 } from '@unimailbox/contracts';
+import { AiUsagePanel } from '../admin/AiUsagePanel';
+import { authSessionQuery } from '../auth/auth-queries';
 import { EditorDialog } from '../../components/ui/EditorDialog';
 import { Button } from '../../components/ui/Button';
 import { Label } from '../../components/ui/shadcn/label';
@@ -36,6 +39,9 @@ export function AiReplyDialog({
 }) {
   const t = useT();
   const client = useApiClient();
+  const cache = useQueryClient();
+  const userId = authSessionQuery().data?.userId;
+  const operation = useRef<{ fingerprint: string; key: string } | null>(null);
   const [instructions, setInstructions] = useState('');
   const [preview, setPreview] = useState('');
   const [pending, setPending] = useState(false);
@@ -65,9 +71,41 @@ export function AiReplyDialog({
     setError(null);
     setPreview('');
     try {
+      const operationKey = ['ai-operation', userId ?? 'anonymous', mailboxId];
+      const fingerprint = Array.from(
+        new Uint8Array(
+          await crypto.subtle.digest(
+            'SHA-256',
+            new TextEncoder().encode(JSON.stringify(parsed.data)),
+          ),
+        ),
+      )
+        .map((x) => x.toString(16).padStart(2, '0'))
+        .join('');
+      const saved: unknown = cache.getQueryData(operationKey);
+      if (
+        saved &&
+        typeof saved === 'object' &&
+        'fingerprint' in saved &&
+        'key' in saved &&
+        saved.fingerprint === fingerprint &&
+        typeof saved.key === 'string' &&
+        /^[A-Za-z0-9_-]{8,128}$/.test(saved.key)
+      )
+        operation.current = { fingerprint, key: saved.key };
+      if (operation.current?.fingerprint !== fingerprint)
+        operation.current = { fingerprint, key: crypto.randomUUID() };
+      cache.setQueryDefaults(operationKey, { gcTime: 24 * 60 * 60_000 });
+      cache.setQueryData(operationKey, operation.current);
       const response = await client.fetch<{ data: unknown }>(
         `/api/v1/mailboxes/${encodeURIComponent(mailboxId)}/ai-reply`,
-        { method: 'POST', body: parsed.data, signal: active.signal, retry: false },
+        {
+          method: 'POST',
+          body: parsed.data,
+          signal: active.signal,
+          retry: false,
+          headers: { 'Idempotency-Key': operation.current.key },
+        },
       );
       const result = aiReplyResponseSchema.safeParse(response?.data);
       if (!result.success) throw new ApiError('AI_INVALID_RESPONSE', 'Invalid AI reply', 502);
@@ -80,6 +118,7 @@ export function AiReplyDialog({
             : new ApiError('AI_UPSTREAM_ERROR', 'Could not generate an AI reply', 502),
         );
     } finally {
+      void cache.invalidateQueries({ queryKey: ['ai-usage', userId] });
       if (!active.signal.aborted) {
         controller.current = null;
         setPending(false);
@@ -98,6 +137,25 @@ export function AiReplyDialog({
         if (!open) close();
       }}
     >
+      <p className="text-sm text-muted-foreground">
+        {t('Closing stops waiting. Upstream processing and billing may continue.')}
+      </p>
+      <AiUsagePanel />
+      <Button
+        variant="secondary"
+        disabled={pending}
+        onClick={() => {
+          operation.current = null;
+          cache.removeQueries({
+            queryKey: ['ai-operation', userId ?? 'anonymous', mailboxId],
+            exact: true,
+          });
+          setPreview('');
+          setError(null);
+        }}
+      >
+        {t('Start a new AI request (may consume tokens again)')}
+      </Button>
       <div className="grid gap-2">
         <Label htmlFor="ai-reply-instructions">{t('Instructions (optional)')}</Label>
         <Textarea

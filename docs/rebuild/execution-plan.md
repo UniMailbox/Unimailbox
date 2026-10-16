@@ -4,6 +4,14 @@ Current priorities as of 2026-10-16. The [ledger](capability-ledger.md#current-s
 owns status; user priorities determine the next authorized slice. No feature
 capability is currently active.
 
+Research for AI usage governance, historical-client compatibility and coordinated
+recovery is recorded in [INV-004](../../work/investigations/INV-004-ai-governance-release-recovery-2026-10-16.md).
+The user selected installation plus per-user token limits with estimated costs;
+recovery targets and the remaining release/recovery slices are proposals.
+CAP-072 implements the AI portion locally; see [AI governance](24-ai-usage-governance.md).
+Model upper-bound verification and installation acceptance remain external gates.
+General historical-client release checks and coordinated recovery are still planned.
+
 CAP-071 measured D1 identity/thread queries and mailbox cache freshness are
 locally implemented and validated. The new reader requires schema 0041 before
 publication. Local scan reduction does not establish a live latency win; see
@@ -17,7 +25,7 @@ mutations retain their transactional policies. See
 and [handoff](../../work/handoffs/mail-use-cases-2026-10-16.md).
 
 The selected two-section resource dashboard and inbound/outbound reliability slices are locally implemented. Resource analytics installation configuration and live dataset acceptance remain open; see [resource dashboard](22-resource-usage-dashboard.md).
-Schemas 0038–0041, installation deployment and real-mail/provider recovery
+Schemas 0038–0042, installation deployment and real-mail/provider recovery
 acceptance remain unpublished. See [inbound recovery](20-inbound-recovery.md),
 [outbound outcomes](21-outbound-submission-outcomes.md) and the
 [outbound handoff](../../work/handoffs/outbound-outcomes-2026-10-16.md).
