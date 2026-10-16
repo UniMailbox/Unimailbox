@@ -10,6 +10,18 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-16 — Combined staging publication
+
+Published the separately committed reliability, two-section resource dashboard,
+mail use-case, query/cache and AI governance changes through PR #51 source
+`ccbf09e`. Staging Worker `aab643b4-cace-476e-9c20-33a150bc6721` runs schema
+0042; production and stable tags remain unchanged. Prepared-source gate and all
+42 remote schema companions passed, with private D1/R2/key recovery evidence,
+exact-version smoke and authenticated governance/usage checks. The optional
+platform Analytics credential is absent; mail-metadata groups are ready. AI
+remains in observe mode pending actual model-bound evidence for enforcement.
+See [staging QA](../qa/ai-governance-staging-2026-10-16.md) for scope and limits.
+
 ## 2026-10-16 — CAP-072 AI usage governance
 
 AI-owned normalized policy history and migration 0042 add atomic installation/user

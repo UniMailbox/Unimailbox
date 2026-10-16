@@ -36,3 +36,12 @@ page memory only; it does not survive hard reloads/tabs/devices. General release
 compatibility and D1/R2/key recovery are still planned separately in INV-004.
 
 Owning design: docs/rebuild/24-ai-usage-governance.md.
+
+## Subsequent staging publication
+
+User-authorized PR #51 and staging release published source `ccbf09e`, Worker
+`aab643b4-cace-476e-9c20-33a150bc6721`, schema 0042. See
+[staging QA](../../docs/qa/ai-governance-staging-2026-10-16.md) for current live
+metadata/operations evidence and backup checks. AI remains observe; actual
+model/billing bounds, provider/mail recovery, visual browser acceptance and full
+disaster-recovery acceptance remain open. Production and stable tags unchanged.
