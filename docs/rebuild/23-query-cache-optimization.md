@@ -89,3 +89,12 @@ mailboxes are unaffected.
 
 Validation and publication status are owned by the current ledger and
 [handoff](../../work/handoffs/query-cache-2026-10-16.md).
+
+## Review repair — delayed reads
+
+Read/star/delete mutations cancel scoped folder/detail/thread reads, including
+first reads without cached data, before dispatch and before applying confirmed
+results. This prevents a late snapshot from reverting read state or restoring
+a deleted row. Other callers/mailboxes and scheduled-send projections remain
+outside that cancellation. Delayed-response regression cases are recorded in
+[PR #51 review](../../work/reviews/PR-051-resource-ai-review-2026-10-16.md).

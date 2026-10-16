@@ -239,3 +239,80 @@ it('CAP-071: compose invalidates fresh mail views only inside the sending accoun
     client.getQueryState(mailboxQueryKeys.message('other-mailbox', id, 'actor'))?.isInvalidated,
   ).toBe(false);
 });
+
+it('R-MESSAGE-005: a stale in-flight thread read cannot overwrite a confirmed read', async () => {
+  const { client, wrapper } = setup();
+  const key = mailboxQueryKeys.thread(box, 'other-anchor', 'actor');
+  client.setQueryData<MessageThreadResponse>(key, {
+    rootId: '<fixture@example.test>',
+    items: [row],
+  });
+  let complete: ((data: MessageThreadResponse) => void) | undefined;
+  const pending = client
+    .fetchQuery({
+      queryKey: key,
+      queryFn: () =>
+        new Promise<MessageThreadResponse>((resolve) => {
+          complete = resolve;
+        }),
+    })
+    .catch(() => undefined);
+  const hook = renderHook(useMarkMessageReadMutation, { wrapper });
+  await act(async () => {
+    await hook.result.current.mutateAsync({ mailboxId: box, messageId: id });
+  });
+  complete?.({ rootId: '<fixture@example.test>', items: [row] });
+  await act(async () => {
+    await pending;
+  });
+  expect(client.getQueryData<MessageThreadResponse>(key)?.items[0]?.isRead).toBe(1);
+});
+
+it('R-MESSAGE-005: a first thread fetch cannot resurrect a message after deletion', async () => {
+  const { client, wrapper } = setup();
+  const key = mailboxQueryKeys.thread(box, 'other-anchor', 'actor');
+  let complete: ((data: MessageThreadResponse) => void) | undefined;
+  const pending = client
+    .fetchQuery({
+      queryKey: key,
+      queryFn: () =>
+        new Promise<MessageThreadResponse>((resolve) => {
+          complete = resolve;
+        }),
+    })
+    .catch(() => undefined);
+  const hook = renderHook(useDeleteMessageMutation, { wrapper });
+  await act(async () => {
+    await hook.result.current.mutateAsync({ mailboxId: box, messageId: id });
+  });
+  complete?.({ rootId: '<fixture@example.test>', items: [row] });
+  await act(async () => {
+    await pending;
+  });
+  expect(client.getQueryData<MessageThreadResponse>(key)?.items ?? []).toEqual([]);
+});
+
+it.each([
+  ['another caller', mailboxQueryKeys.thread(box, id, 'other-user')],
+  ['another mailbox', mailboxQueryKeys.thread('other-mailbox', id, 'actor')],
+  ['scheduled sends', [...mailboxQueryKeys.messagesFamily(box, 'actor'), 'scheduled-sends']],
+])('R-AUTHZ-004: message mutations keep pending reads for %s running', async (_label, key) => {
+  const { client, wrapper } = setup();
+  let complete: ((value: string) => void) | undefined;
+  const pending = client.fetchQuery({
+    queryKey: key,
+    queryFn: () =>
+      new Promise<string>((resolve) => {
+        complete = resolve;
+      }),
+  });
+  const hook = renderHook(useMarkMessageReadMutation, { wrapper });
+  await act(async () => {
+    await hook.result.current.mutateAsync({ mailboxId: box, messageId: id });
+  });
+  complete?.('fresh scoped data');
+  await act(async () => {
+    await pending;
+  });
+  expect(client.getQueryData(key)).toBe('fresh scoped data');
+});

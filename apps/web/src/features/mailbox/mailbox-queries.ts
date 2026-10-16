@@ -126,6 +126,19 @@ export const mailboxQueryKeys = {
     [...mailboxQueryKeys.all(userId), 'members', mailboxId] as const,
 };
 
+/** Cancel both cached refetches and first reads before confirming local message state. */
+function cancelMessageViewReads(client: QueryClient, userId: string | null, mailboxId: string) {
+  const family = mailboxQueryKeys.messagesFamily(mailboxId, userId);
+  return client.cancelQueries({
+    queryKey: family,
+    predicate: ({ queryKey }) =>
+      (queryKey.length === family.length + 1 &&
+        messageFolderSchema.safeParse(queryKey[family.length]).success) ||
+      (queryKey.length === family.length + 2 &&
+        (queryKey[family.length] === 'detail' || queryKey[family.length] === 'thread')),
+  });
+}
+
 /** Keep every cached view of the same caller's message coherent after a confirmed write. */
 function updateMessageViews(
   client: QueryClient,
@@ -650,7 +663,9 @@ export function useMarkMessageReadMutation() {
         { method: 'PATCH' },
       );
     },
-    onSuccess: (_result, input) => {
+    onMutate: (input) => cancelMessageViewReads(queryClient, userId, input.mailboxId),
+    onSuccess: async (_result, input) => {
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
       updateMessageViews(queryClient, userId, input.mailboxId, input.messageId, { isRead: 1 });
     },
     onError: (error, input) => {
@@ -713,10 +728,7 @@ export function useToggleMessageStarMutation() {
     },
     onMutate: async (input): Promise<void> => {
       // Stop in-flight refetches from clobbering the optimistic write.
-      await queryClient.cancelQueries({
-        queryKey: mailboxQueryKeys.messagesFamily(input.mailboxId, userId),
-        predicate: (query) => query.state.data !== undefined,
-      });
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
       // Structural additive copy — only this message's row changes.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
         mailboxQueryKeys.messages(input.mailboxId, userId, input.folder),
@@ -736,7 +748,8 @@ export function useToggleMessageStarMutation() {
               },
       );
     },
-    onSuccess: (isStarred, input) => {
+    onSuccess: async (isStarred, input) => {
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
       updateMessageViews(queryClient, userId, input.mailboxId, input.messageId, { isStarred });
     },
     onError: (error, input) => {
@@ -813,12 +826,10 @@ export function useDeleteMessageMutation() {
     onMutate: async (input): Promise<void> => {
       // H11: stop in-flight refetches of the active folder key so the success
       // filter is the last write.
-      await queryClient.cancelQueries({
-        queryKey: mailboxQueryKeys.messagesFamily(input.mailboxId, userId),
-        predicate: (query) => query.state.data !== undefined,
-      });
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
     },
-    onSuccess: (_result, input) => {
+    onSuccess: async (_result, input) => {
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
       // Soft-deleted-for-this-user messages 404 at the detail and thread
       // routes; cached entries for them must not render again.
       queryClient.removeQueries({
