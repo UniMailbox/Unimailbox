@@ -9,6 +9,7 @@ import {
   type AiAdapter,
 } from '@unimailbox/contracts';
 import { createAiGovernance, createAiService } from './index';
+import { createAiAdapters } from '../../integrations/ai/registry';
 import { createAuditEventWriter } from '../admin';
 import { DomainError } from '../../platform/errors';
 
@@ -279,5 +280,87 @@ describe('CAP-072 crash and late-result recovery', () => {
       chargedTokens: 0,
       active: 1,
     });
+  });
+});
+
+describe('R-API-004 terminal AI rejection recovery', () => {
+  for (const protocol of ['openai', 'anthropic'] as const) {
+    it.each([401, 402, 429])(
+      `${protocol} releases concurrency after a definite HTTP %i rejection`,
+      async (status) => {
+        const fetchImpl = vi.fn(async () =>
+          Response.json(
+            {
+              error: {
+                message: 'synthetic private provider response',
+                type: 'invalid_request_error',
+              },
+            },
+            { status },
+          ),
+        );
+        const ai = createAiService({
+          governance: governance(),
+          loadConfiguration: async () => ({
+            configuration: { ...configuration, protocol },
+            apiKey: 'synthetic',
+            revision: 0,
+          }),
+          adapters: createAiAdapters(undefined, fetchImpl),
+        });
+        await expect(ai.generate(request, { invocation: invocation() })).rejects.toMatchObject({
+          code: 'AI_UPSTREAM_ERROR',
+        });
+        expect((await governance().usage(actor)).summary).toMatchObject({ active: 0, unknown: 0 });
+        expect((await governance().usage(actor)).attempts[0]).toMatchObject({
+          status: 'completed',
+          usageKind: 'conservative',
+          contentOutcome: 'failed',
+        });
+        await expect(reserve()).resolves.toBeTypeOf('string');
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+      },
+    );
+    it.each([408, 500])(
+      `${protocol} retains unknown capacity for HTTP %i without terminal evidence`,
+      async (status) => {
+        const ai = createAiService({
+          governance: governance(),
+          loadConfiguration: async () => ({
+            configuration: { ...configuration, protocol },
+            apiKey: 'synthetic',
+            revision: 0,
+          }),
+          adapters: createAiAdapters(undefined, async () =>
+            Response.json({ error: { message: 'synthetic' } }, { status }),
+          ),
+        });
+        await expect(ai.generate(request, { invocation: invocation() })).rejects.toMatchObject({
+          code: 'AI_UPSTREAM_ERROR',
+        });
+        expect((await governance().usage(actor)).summary).toMatchObject({ active: 0, unknown: 1 });
+        await expect(reserve()).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+      },
+    );
+  }
+  it('does not retain capacity when the native binding is absent before submission', async () => {
+    const ai = createAiService({
+      governance: governance(),
+      loadConfiguration: async () => ({
+        configuration: { ...configuration, protocol: 'workers-ai' },
+        apiKey: null,
+        revision: 0,
+      }),
+      adapters: createAiAdapters(),
+    });
+    await expect(ai.generate(request, { invocation: invocation() })).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+    });
+    expect((await governance().usage(actor)).summary).toMatchObject({
+      chargedTokens: 0,
+      active: 0,
+      unknown: 0,
+    });
+    await expect(reserve()).resolves.toBeTypeOf('string');
   });
 });

@@ -7,6 +7,7 @@ import type {
   AiGenerateRequest,
   AiGenerateResult,
   AiProtocol,
+  AiUsageEvidence,
 } from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 
@@ -88,6 +89,30 @@ function result(
   };
 }
 
+// An explicit request rejection ends remote execution, even if the provider
+// omits usage. Persist terminal evidence so concurrency can be released while
+// the token charge remains conservative. Transport/408/5xx errors stay unknown.
+async function generateWithRejectionEvidence<T>(
+  submit: () => PromiseLike<T>,
+  observeUsage?: (evidence: AiUsageEvidence) => Promise<void>,
+): Promise<T> {
+  try {
+    return await submit();
+  } catch (error) {
+    if (
+      (error instanceof OpenAI.APIError || error instanceof Anthropic.APIError) &&
+      [400, 401, 402, 403, 404, 413, 422, 429].includes(error.status ?? 0)
+    )
+      await observeUsage?.({ inputTokens: null, outputTokens: null });
+    // SDK error payloads can contain credentials, prompts and upstream bodies.
+    throw new DomainError({
+      code: 'AI_UPSTREAM_ERROR',
+      message: 'AI service request failed',
+      httpStatus: 502,
+    });
+  }
+}
+
 export function createAiAdapters(
   ai?: Ai,
   fetchImpl?: typeof fetch,
@@ -95,12 +120,15 @@ export function createAiAdapters(
   return {
     'workers-ai': {
       async generate(configuration, _apiKey, request, signal, observeUsage) {
-        if (!ai)
+        if (!ai) {
+          // No binding means no provider operation or billable work was started.
+          await observeUsage?.({ inputTokens: 0, outputTokens: 0 });
           throw new DomainError({
             code: 'AI_NOT_CONFIGURED',
             message: 'Workers AI binding is unavailable',
             httpStatus: 503,
           });
+        }
         if (signal.aborted) throw signal.reason;
         const raw = await ai.run(configuration.model, {
           messages: [
@@ -145,29 +173,33 @@ export function createAiAdapters(
           maxRetries: 0,
           ...(fetchImpl ? { fetch: fetchImpl } : {}),
         });
-        const response = await client.chat.completions.create(
-          {
-            model: configuration.model,
-            messages: [
-              ...(request.system ? [{ role: 'system' as const, content: request.system }] : []),
-              ...request.messages,
-            ],
-            max_completion_tokens: configuration.maxOutputTokens,
-            stream: false,
-            ...(request.output.type === 'json_schema'
-              ? {
-                  response_format: {
-                    type: 'json_schema' as const,
-                    json_schema: {
-                      name: request.output.name,
-                      schema: request.output.schema,
-                      strict: true,
-                    },
-                  },
-                }
-              : {}),
-          },
-          { signal },
+        const response = await generateWithRejectionEvidence(
+          () =>
+            client.chat.completions.create(
+              {
+                model: configuration.model,
+                messages: [
+                  ...(request.system ? [{ role: 'system' as const, content: request.system }] : []),
+                  ...request.messages,
+                ],
+                max_completion_tokens: configuration.maxOutputTokens,
+                stream: false,
+                ...(request.output.type === 'json_schema'
+                  ? {
+                      response_format: {
+                        type: 'json_schema' as const,
+                        json_schema: {
+                          name: request.output.name,
+                          schema: request.output.schema,
+                          strict: true,
+                        },
+                      },
+                    }
+                  : {}),
+              },
+              { signal },
+            ),
+          observeUsage,
         );
         await observeUsage?.({
           inputTokens: safeUsage(response.usage?.prompt_tokens),
@@ -198,22 +230,26 @@ export function createAiAdapters(
           maxRetries: 0,
           ...(fetchImpl ? { fetch: fetchImpl } : {}),
         });
-        const response = await client.messages.create(
-          {
-            model: configuration.model,
-            messages: request.messages,
-            ...(request.system ? { system: request.system } : {}),
-            max_tokens: configuration.maxOutputTokens,
-            stream: false,
-            ...(request.output.type === 'json_schema'
-              ? {
-                  output_config: {
-                    format: { type: 'json_schema' as const, schema: request.output.schema },
-                  },
-                }
-              : {}),
-          },
-          { signal },
+        const response = await generateWithRejectionEvidence(
+          () =>
+            client.messages.create(
+              {
+                model: configuration.model,
+                messages: request.messages,
+                ...(request.system ? { system: request.system } : {}),
+                max_tokens: configuration.maxOutputTokens,
+                stream: false,
+                ...(request.output.type === 'json_schema'
+                  ? {
+                      output_config: {
+                        format: { type: 'json_schema' as const, schema: request.output.schema },
+                      },
+                    }
+                  : {}),
+              },
+              { signal },
+            ),
+          observeUsage,
         );
         const inputParts = [
           response.usage?.input_tokens,

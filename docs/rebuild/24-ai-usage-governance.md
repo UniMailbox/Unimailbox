@@ -80,6 +80,12 @@ its remote concurrency slot is released. A timeout, connection loss or lost
 local process retains both quota and uncertain in-flight capacity. A lease or
 calendar reset does not imply upstream work ended.
 
+Explicit SDK request-rejection responses (400/401/402/403/404/413/422/429)
+record terminal evidence and release remote concurrency. Missing provider usage
+still charges the reservation conservatively; an HTTP rejection does not invent
+zero usage. Transport errors, 408, 409 and 5xx remain unknown. An absent native
+Workers AI binding is known to precede provider work and settles with zero tokens.
+
 The existing five-minute maintenance tick classifies at most 100 submitted
 attempts older than three minutes as unknown (longer than the configurable
 120-second service timeout). It never resubmits inference or releases capacity.
