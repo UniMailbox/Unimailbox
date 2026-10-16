@@ -10,6 +10,17 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-16 — PR #51 rejection and cache recovery repairs
+
+Self-review reproduced terminal AI errors retaining remote concurrency and late
+query snapshots reverting confirmed message changes. Explicit SDK request
+rejections now record terminal evidence with conservative token charges; a
+missing native binding settles known zero-work. Transport/408/409/5xx outcomes
+retain uncertainty. Read/star/delete cancel only the caller/mailbox's message
+views, including initial reads, before dispatch and confirmed writes. Scheduled
+send and foreign-scope reads continue normally. See
+[review evidence](../../work/reviews/PR-051-resource-ai-review-2026-10-16.md).
+
 ## 2026-10-16 — Combined staging publication
 
 Published the separately committed reliability, two-section resource dashboard,
