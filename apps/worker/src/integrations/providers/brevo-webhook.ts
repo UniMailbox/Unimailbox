@@ -1,9 +1,10 @@
 import type { MessageStatus, WebhookProviderAdapter } from '@unimailbox/contracts';
-import { parseProviderKey } from '@unimailbox/contracts';
+import { parseProviderKey, parseOutboundAttemptTag } from '@unimailbox/contracts';
 import { constantTimeCompare } from '../../platform/crypto';
 import { DomainError } from '../../platform/errors';
 
 interface BrevoWebhookBody {
+  readonly 'X-Mailin-custom'?: unknown;
   readonly event?: unknown;
   readonly messageId?: unknown;
   readonly 'message-id'?: unknown;
@@ -123,9 +124,16 @@ export const brevoWebhookAdapter: WebhookProviderAdapter = {
     const eventType = typeof body.event === 'string' ? body.event : 'unknown';
     const time = eventTime(body, receivedAtMs);
     const providerMessageId = body['message-id'] ?? body.messageId;
+    const attemptId = parseOutboundAttemptTag(body['X-Mailin-custom']);
     return {
+      ...(attemptId ? { attemptId } : {}),
       eventType,
-      providerMessageId: typeof providerMessageId === 'string' ? providerMessageId : null,
+      providerMessageId:
+        typeof providerMessageId === 'string' &&
+        providerMessageId.trim() &&
+        providerMessageId.length <= 1024
+          ? providerMessageId
+          : null,
       status: mapBrevoEventStatus(eventType),
       eventTimeMs: time.value,
       eventTimeSource: time.source,

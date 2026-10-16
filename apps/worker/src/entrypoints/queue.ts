@@ -27,7 +27,7 @@ import { providerRegistry } from '../integrations/providers/provider-registry';
 import { buildAppContext } from '../app-context';
 import { systemIds } from '../platform/ids';
 import { getAttachmentByteStore, getAttachmentObjectStore } from '../platform/cache';
-import { inboundWorkPayloadSchema } from '@unimailbox/contracts';
+import { inboundWorkPayloadSchema, RetryableProviderError } from '@unimailbox/contracts';
 import { processInboundReceipt } from '../modules/inbound-mail';
 import { logger } from '../platform/logger';
 
@@ -78,14 +78,16 @@ export default {
         });
         if (deferred) msg.retry({ delaySeconds: deferred.delaySeconds });
         else msg.ack();
-      } catch {
+      } catch (error) {
         // Retry transport/validation/persistence failures without leaking an
         // SDK error, malformed Queue body or its nested cause (R-LOG-001).
         logger.error(
           { event: 'queue.processing_failed', requestId },
           { code: 'QUEUE_PROCESSING_FAILED' },
         );
-        msg.retry();
+        if (error instanceof RetryableProviderError && error.retryAfterSeconds !== undefined)
+          msg.retry({ delaySeconds: Math.min(86400, Math.max(1, error.retryAfterSeconds)) });
+        else msg.retry();
       }
     }
   },

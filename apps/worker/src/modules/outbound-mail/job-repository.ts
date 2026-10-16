@@ -53,6 +53,7 @@ export interface OutboundJobRow {
   readonly error_message: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+  readonly next_attempt_at: string | null;
 }
 
 /**
@@ -274,10 +275,13 @@ export async function claimOutboundJob(
              updated_at = ?
        WHERE id = ?
          AND status = 'queued'
+         AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+         AND NOT EXISTS(SELECT 1 FROM outbound_send_attempts a WHERE a.job_id=outbound_jobs.id
+           AND a.status IN ('submitted','unknown','accepted'))
          AND (scheduled_at IS NULL OR scheduled_at <= ?)
          AND (locked_at IS NULL OR locked_at < ?)`,
     )
-    .bind(leaseUntil, lockedBy, now, jobId, now, leaseUntil)
+    .bind(leaseUntil, lockedBy, now, jobId, now, now, leaseUntil)
     .run();
 
   if (!result.meta || result.meta.changes === undefined || result.meta.changes === 0) {
@@ -356,6 +360,7 @@ export async function markOutboundJobRetryable(
   lockedBy: string,
   errorCode: string,
   errorMessage: string,
+  nextAttemptAt: string | null = null,
 ): Promise<void> {
   const now = sqliteTimestamp(new Date());
   await db
@@ -367,12 +372,14 @@ export async function markOutboundJobRetryable(
              error_message = ?,
              locked_at = NULL,
              locked_by = NULL,
-             updated_at = ?
+             updated_at = ?, next_attempt_at = ?
        WHERE id = ?
          AND status = 'sending'
-         AND locked_by = ?`,
+         AND locked_by = ?
+         AND NOT EXISTS(SELECT 1 FROM outbound_send_attempts a WHERE a.job_id=outbound_jobs.id
+           AND a.status IN ('submitted','unknown','accepted'))`,
     )
-    .bind(errorCode, errorMessage, now, jobId, lockedBy)
+    .bind(errorCode, errorMessage, now, nextAttemptAt, jobId, lockedBy)
     .run();
 }
 
@@ -477,6 +484,8 @@ export async function reclaimStaleOutboundJobs(
       `SELECT id, attempts, max_attempts
          FROM outbound_jobs
         WHERE status = 'sending'
+          AND NOT EXISTS(SELECT 1 FROM outbound_send_attempts a WHERE a.job_id=outbound_jobs.id
+            AND a.status IN ('submitted','unknown','accepted'))
           AND locked_at IS NOT NULL
           AND locked_at < ?
         ORDER BY locked_at, id LIMIT 100`,
@@ -504,7 +513,9 @@ export async function reclaimStaleOutboundJobs(
                  updated_at = ?
            WHERE id = ?
              AND status = 'sending'
-             AND locked_at < ?`,
+             AND locked_at < ?
+             AND NOT EXISTS(SELECT 1 FROM outbound_send_attempts a WHERE a.job_id=outbound_jobs.id
+               AND a.status IN ('submitted','unknown','accepted'))`,
         )
         .bind(sqliteTimestamp(new Date()), row.id, leaseCutoffSql)
         .run();
@@ -524,7 +535,9 @@ export async function reclaimStaleOutboundJobs(
                  updated_at = ?
            WHERE id = ?
              AND status = 'sending'
-             AND locked_at < ?`,
+             AND locked_at < ?
+             AND NOT EXISTS(SELECT 1 FROM outbound_send_attempts a WHERE a.job_id=outbound_jobs.id
+               AND a.status IN ('submitted','unknown','accepted'))`,
         )
         .bind(sqliteTimestamp(new Date()), row.id, leaseCutoffSql)
         .run();
@@ -572,11 +585,14 @@ export async function claimOrphanedQueuedJobs(
       `UPDATE outbound_jobs SET updated_at = ?
        WHERE (scheduled_at IS NULL OR scheduled_at <= datetime(?, '+24 hours')) AND status = 'queued' AND updated_at < ? AND id IN (
          SELECT id FROM outbound_jobs WHERE status = 'queued' AND updated_at < ?
+         AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+         AND NOT EXISTS(SELECT 1 FROM outbound_send_attempts a WHERE a.job_id=outbound_jobs.id
+           AND a.status IN ('submitted','unknown','accepted'))
          AND (scheduled_at IS NULL OR scheduled_at <= datetime(?, '+24 hours'))
          ORDER BY updated_at, id LIMIT 100
        ) RETURNING id, scheduled_at`,
     )
-    .bind(nowSql, nowSql, cutoffSql, cutoffSql, nowSql)
+    .bind(nowSql, nowSql, cutoffSql, cutoffSql, nowSql, nowSql)
     .all<{ id: string; scheduled_at: string | null }>();
   return (orphans.results ?? []).map((row) => ({ id: row.id, scheduledAt: row.scheduled_at }));
 }

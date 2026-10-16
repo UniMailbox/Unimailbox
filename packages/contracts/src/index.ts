@@ -7,6 +7,7 @@
  * pipeline has something to type-check. Real contracts land with CAP-004+.
  */
 import { z } from 'zod';
+export { outboundAttemptTag, parseOutboundAttemptTag } from './outbound-attempt';
 import { attachmentContentTypeSchema, attachmentFilenameSchema } from './attachments';
 import { domainNameSchema } from './domain-name';
 import { uuidSchema } from './ids';
@@ -81,6 +82,7 @@ export interface ProviderAttachment {
 /** Provider-neutral send payload. */
 export interface SendProviderMessage {
   readonly idempotencyKey: string;
+  readonly attemptId?: string;
   readonly from: MailAddress;
   readonly to: ReadonlyArray<MailAddress>;
   readonly cc: ReadonlyArray<MailAddress>;
@@ -105,6 +107,7 @@ export interface ProviderSendResult {
  * accessor) lands with the outbound-mail module.
  */
 export interface ProviderRuntimeContext {
+  readonly timeoutMs?: number;
   readonly env: {
     readonly ENVIRONMENT?: string;
     [key: string]: unknown;
@@ -123,10 +126,16 @@ export interface OutboundProviderAdapter {
   readonly key: ProviderKey;
   validateConnection(ctx: ProviderRuntimeContext): Promise<void>;
   send(ctx: ProviderRuntimeContext, msg: SendProviderMessage): Promise<ProviderSendResult>;
+  /** Positive evidence only; null never authorizes a resend. */
+  findSubmission?(
+    ctx: ProviderRuntimeContext,
+    attemptId: string,
+  ): Promise<ProviderSendResult | null>;
 }
 
 /** Verified, provider-neutral delivery event. Times are UTC epoch milliseconds. */
 export interface ProviderWebhookEvent {
+  readonly attemptId?: string;
   readonly eventType: string;
   readonly providerMessageId: string | null;
   readonly status: MessageStatus | null;
@@ -473,13 +482,13 @@ export function allowedFromForMessageStatus(to: MessageStatus): ReadonlyArray<Me
  * the SDK boundary; the queue consumer never sees an SDK error.
  *
  * R-OUTBOUND-008: a `terminal` error marks the job failed immediately —
- * not after max_attempts retries. A `retryable` error keeps the existing
- * attempts-budget logic.
+ * not after max_attempts retries. A `retryable` error proves nonacceptance and uses persisted backoff.
+ * An unknown/transport outcome never authorizes automatic replay.
  */
-export type ProviderErrorKind = 'retryable' | 'terminal';
+export type ProviderErrorKind = 'retryable' | 'terminal' | 'unknown';
 
 /**
- * Common shape for the two provider error types. Carries the HTTP status
+ * Common options for provider errors. Carries the HTTP status
  * (when applicable) and chains the underlying SDK error via `cause` per the
  * ES2022 Error chain (Q4 decision in CAP-029 task.md). R-LOG-001 is preserved:
  * the chain carries the message and stack, never bodies or API keys.
@@ -488,6 +497,7 @@ interface ProviderErrorOptions {
   readonly message: string;
   readonly httpStatus?: number;
   readonly cause?: unknown;
+  readonly retryAfterSeconds?: number;
 }
 
 function chainCause(options: ProviderErrorOptions): { cause: unknown } | undefined {
@@ -497,6 +507,7 @@ function chainCause(options: ProviderErrorOptions): { cause: unknown } | undefin
 export class RetryableProviderError extends Error {
   readonly kind: ProviderErrorKind = 'retryable';
   readonly httpStatus: number | undefined;
+  readonly retryAfterSeconds: number | undefined;
   // `cause` is inherited from Error.prototype; do NOT redeclare it as a class
   // field — with `useDefineForClassFields: true` (TS default for ES2022 +
   // module ESNext) the field declaration would shadow Error's instance
@@ -505,6 +516,18 @@ export class RetryableProviderError extends Error {
   constructor(options: ProviderErrorOptions) {
     super(options.message, chainCause(options));
     this.name = 'RetryableProviderError';
+    this.httpStatus = options.httpStatus;
+    this.retryAfterSeconds = options.retryAfterSeconds;
+  }
+}
+
+/** A request may have been accepted; automatic replay is unsafe. */
+export class UnknownProviderOutcomeError extends Error {
+  readonly kind: ProviderErrorKind = 'unknown';
+  readonly httpStatus: number | undefined;
+  constructor(options: ProviderErrorOptions) {
+    super(options.message);
+    this.name = 'UnknownProviderOutcomeError';
     this.httpStatus = options.httpStatus;
   }
 }
@@ -523,14 +546,18 @@ export class TerminalProviderError extends Error {
 
 /**
  * Type-guard helper: returns true when `error` is a recognised provider
- * error (`RetryableProviderError` or `TerminalProviderError`). The
+ * retryable, terminal or unknown-outcome provider error. The
  * queue-consumer use case uses this to decide whether to take the typed
  * fast-path or fall back to the existing SEND_FAILED path (B6 acceptance).
  */
 export function isProviderError(
   error: unknown,
-): error is RetryableProviderError | TerminalProviderError {
-  return error instanceof RetryableProviderError || error instanceof TerminalProviderError;
+): error is RetryableProviderError | TerminalProviderError | UnknownProviderOutcomeError {
+  return (
+    error instanceof RetryableProviderError ||
+    error instanceof TerminalProviderError ||
+    error instanceof UnknownProviderOutcomeError
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -592,7 +619,7 @@ export type InstallationStateInfo = z.infer<typeof installationStateInfoSchema>;
  * `'0027'` for provider-neutral webhook event projections, and `'0028'` for
  * received MIME attachment metadata.
  */
-export const CURRENT_SCHEMA_VERSION = '0038' as const;
+export const CURRENT_SCHEMA_VERSION = '0039' as const;
 
 // ---------------------------------------------------------------------------
 // Setup claim request — CAP-008

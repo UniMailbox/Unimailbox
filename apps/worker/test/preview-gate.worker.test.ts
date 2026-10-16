@@ -668,7 +668,7 @@ Preview body`;
         subject?: string;
         headers?: Record<string, string | undefined>;
       };
-      expect(sendBody.headers?.['Idempotency-Key']).toBe(messageId);
+      expect(sendBody.headers?.['idempotencyKey']).toBe(messageId);
       expect(sendBody.sender?.email).toBe('sender@example.com');
       expect(sendBody.to?.[0]?.email).toBe('recipient@example.com');
       expect(sendBody.subject).toBe('Preview subject');
@@ -890,7 +890,7 @@ describe('AC 6 — Step (d): retry/replay + unauthorized + early webhook + queue
     expect(row?.status).toBe('processed');
   });
 
-  it('AC 6d — queue handler retries on adapter throw (R-OUTBOUND-008)', async () => {
+  it('AC 6d — queue holds an unknown 5xx submission for reconciliation (R-OUTBOUND-013)', async () => {
     const db = await migrationsDb();
     const userId = await seedUser(db, 'sender@example.com');
     const domainId = await seedDomain(db);
@@ -960,22 +960,19 @@ describe('AC 6 — Step (d): retry/replay + unauthorized + early webhook + queue
       // the redaction assertion.
       await queueEntry.queue(batch, env);
 
-      // msg.retry() was called (NOT ackAll).
-      expect(stubMessage.acked).toBe(false);
-      expect(stubMessage.retried).toBe(true);
+      // Durable unknown work is acknowledged here and recovered by evidence reconciliation.
+      expect(stubMessage.acked).toBe(true);
+      expect(stubMessage.retried).toBe(false);
 
-      // The job row's attempts counter incremented (R-OUTBOUND-008).
-      // The load-bearing assertions per the contract (AC 6d): retry path
-      // exercised, attempts incremented, error recorded. The recorded
-      // error_message string contains the adapter's "Brevo 503" text,
-      // which is the strongest signal the retry path saw the failure.
+      // An untyped post-submit failure must neither consume a rejection budget
+      // nor expose the SDK error text. It cannot authorize automatic replay.
       const job = await db
         .prepare('SELECT status, attempts, error_message FROM outbound_jobs WHERE id = ?')
         .bind(jobId)
         .first<{ status: string; attempts: number; error_message: string | null }>();
-      expect(job?.attempts).toBe(1);
-      expect(job?.status).toBe('queued'); // retryable budget not exhausted
-      expect(job?.error_message).toMatch(/Brevo 503/);
+      expect(job?.attempts).toBe(0);
+      expect(job?.status).toBe('sending'); // retryable budget not exhausted
+      expect(job?.error_message).toMatch(/requires reconciliation/);
     } finally {
       getSpy.mockRestore();
     }

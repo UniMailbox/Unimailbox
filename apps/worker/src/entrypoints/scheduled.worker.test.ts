@@ -320,7 +320,7 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
     await env.DB.prepare('DROP TABLE outbound_jobs').run();
     await expect(scheduled.scheduled(dailyController(), env)).rejects.toThrow('Maintenance failed');
     expect(await heartbeat('frequent')).toMatchObject({
-      failedTasks: ['outbound.reclaim'],
+      failedTasks: ['outbound.reclaim', 'outbound.reconcile'],
     });
     expect(await heartbeat('daily')).toMatchObject({
       failedTasks: [],

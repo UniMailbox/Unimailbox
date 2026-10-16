@@ -1,7 +1,9 @@
 // Scheduled maintenance: isolate failures, persist heartbeat and emit an overall result.
 import type { ScheduledController } from '@cloudflare/workers-types';
 import type { Env } from '../platform/env';
-import { reclaimStaleJobs } from '../modules/outbound-mail';
+import { reclaimStaleJobs, reconcileOutboundSubmissions } from '../modules/outbound-mail';
+import { readSecret } from '../platform/secrets';
+import { providerRegistry } from '../integrations/providers/provider-registry';
 import { expireAttachments } from '../modules/attachments';
 import { systemIds } from '../platform/ids';
 import { buildAppContext } from '../app-context';
@@ -22,6 +24,16 @@ export default {
       throw new Error('Unknown maintenance schedule');
     const runs = [
       runMaintenanceTasks(env, requestId, [
+        {
+          name: 'outbound.reconcile',
+          run: () =>
+            reconcileOutboundSubmissions({
+              db: env.DB,
+              encryptionKey: () => readSecret(env.CREDENTIAL_ENCRYPTION_KEY),
+              resolveAdapter: (key) => providerRegistry.get(key),
+              auditEventWriter: buildAppContext(env).auditEventWriter,
+            }),
+        },
         {
           name: 'outbound.reclaim',
           run: () => reclaimStaleJobs(env.DB, new Date(), env.OUTBOUND, requestId),

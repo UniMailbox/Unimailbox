@@ -48,6 +48,7 @@ export {
 } from './job-repository';
 
 export { processOutboundJob, type ProcessJobDeps } from './process-outbound-job';
+export { reconcileOutboundSubmissions } from './reconcile-submissions';
 
 export { reclaimStaleJobs, type OutboundJobEnqueuer } from './reclaim-stale-jobs';
 

@@ -7,12 +7,21 @@ import type { Database } from '../../platform/database';
 import { DomainError } from '../../platform/errors';
 import { systemIds } from '../../platform/ids';
 import { sqliteTimestamp } from '../../platform/idempotency';
-import { prepareUpdateMessageStatus } from '../messages';
+import { prepareUpdateMessageStatus, prepareScheduledMessageSentFolder } from '../messages';
 import {
   findJobByProviderMessageId,
   getProviderConnection,
   prepareCreateWebhookDelivery,
 } from './webhook-repository';
+import {
+  findAttemptForWebhook,
+  prepareAcceptAttempt,
+  prepareFinalizeAcceptedJob,
+  prepareRestoreAcceptedJob,
+  prepareFinishAttemptReconciliation,
+  prepareRequireAttemptTransition,
+} from './attempt-repository';
+import { getOutboundJob } from './job-repository';
 
 export interface VerifyAndProcessEventInput {
   readonly db: Database;
@@ -70,9 +79,58 @@ export async function verifyAndProcessEvent(
   const job = event.providerMessageId
     ? await findJobByProviderMessageId(db, connectionId, event.providerMessageId)
     : null;
-  const messageId = job?.message_id ?? null;
+  const attempt =
+    event.attemptId && event.providerMessageId
+      ? await findAttemptForWebhook(
+          db,
+          connectionId,
+          providerKey,
+          event.attemptId,
+          event.providerMessageId,
+        )
+      : null;
+  const attemptJob = attempt ? await getOutboundJob(db, attempt.job_id) : null;
+  const messageId = attemptJob?.message_id ?? job?.message_id ?? null;
   const now = sqliteTimestamp(new Date());
   const statements: D1PreparedStatement[] = [];
+  if (attempt && event.providerMessageId) {
+    const acceptedAt = new Date(event.eventTimeMs).toISOString();
+    statements.push(
+      prepareAcceptAttempt(
+        db,
+        attempt.id,
+        { providerMessageId: event.providerMessageId, acceptedAt },
+        new Date(),
+      ),
+      // Recheck evidence inside the transaction: a concurrent callback may have
+      // accepted a different provider ID since the initial lookup.
+      prepareRequireAttemptTransition(db),
+    );
+    statements.push(
+      prepareRestoreAcceptedJob(db, attempt),
+      prepareFinalizeAcceptedJob(
+        db,
+        { ...attempt, provider_message_id: event.providerMessageId },
+        new Date(),
+      ),
+    );
+    if (messageId)
+      statements.push(
+        prepareUpdateMessageStatus(db, {
+          messageId,
+          status: 'sent',
+          providerEventTimeMs: event.eventTimeMs,
+          sentAt: sqliteTimestamp(new Date(event.eventTimeMs)),
+          preserveProviderEventTime: true,
+          now,
+        }),
+      );
+    statements.push(prepareFinishAttemptReconciliation(db, attempt.id));
+    if (attemptJob?.scheduled_at && attemptJob.mailbox_id)
+      statements.push(
+        prepareScheduledMessageSentFolder(db, attemptJob.message_id, attemptJob.mailbox_id),
+      );
+  }
   if (messageId !== null && event.status !== null) {
     statements.push(
       prepareUpdateMessageStatus(db, {

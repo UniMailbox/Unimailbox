@@ -1,13 +1,4 @@
-// apps/worker/src/integrations/providers/brevo.ts — CAP-014.
-// Brevo provider adapter implementing OutboundProviderAdapter.
-//
-// ADR-002: Modules call adapters through the OutboundProviderAdapter
-// interface — never the SDK directly. Adapters live in integrations/providers/*
-// and own the SDK calls.
-//
-// This adapter validates the connection by fetching the Brevo account info
-// and sends messages via the Brevo SMTP API.
-
+// Brevo adapter: bounded submission with explicit unknown outcomes and positive-evidence lookup.
 import type {
   OutboundProviderAdapter,
   ProviderRuntimeContext,
@@ -21,32 +12,14 @@ import {
   parseProviderKey,
   RetryableProviderError,
   TerminalProviderError,
+  UnknownProviderOutcomeError,
+  outboundAttemptTag,
 } from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 
 const BREVO_API_BASE = 'https://api.brevo.com/v3';
 
-/**
- * Brevo adapter — validates and sends via the Brevo API.
- *
- * validateConnection: GET /v3/account — verifies the API key is valid.
- * send: POST /v3/smtp/email — sends a transactional email.
- *
- * The adapter expects BREVO_API_KEY in the runtime context env. During
- * setupBrevo, we pass the plaintext key from the request body; at send time,
- * we'll pass the decrypted key from the credential store.
- *
- * CAP-029 D-CAP-028-A: HTTP failures are translated into typed provider
- * errors at the SDK boundary so the queue consumer (process-outbound-job)
- * can branch on `kind` instead of parsing status codes. Translation rules:
- *   - 2xx                        → success
- *   - 4xx (incl. 408, 429)       → TerminalProviderError (request will never succeed as-is;
- *                                   retrying identical payload wastes attempts — D-CAP-028-A)
- *   - 5xx / network / malformed  → RetryableProviderError (transient; the queue retry +
- *                                   provider-idempotency key make this safe)
- * validateConnection keeps its DomainError path — it runs once at setup, not
- * inside the queue loop, and surfaces a 502 to the operator's setup UI.
- */
+/** HTTP adapter; unknown submission outcomes are reconciled, never blindly retried. */
 export const brevoAdapter: OutboundProviderAdapter = {
   key: parseProviderKey('brevo'),
 
@@ -78,25 +51,7 @@ export const brevoAdapter: OutboundProviderAdapter = {
     }
   },
 
-  /**
-   * Send a message via the Brevo SMTP API.
-   *
-   * CAP-029 D-CAP-028-A: HTTP failures throw typed provider errors.
-   *   - 4xx → TerminalProviderError (B2 — a malformed request will not
-   *     succeed on retry; the queue consumer marks the job failed on the
-   *     first attempt instead of burning `max_attempts` retries)
-   *   - 5xx → RetryableProviderError (transient; existing attempts-budget
-   *     path applies)
-   *   - Network error / non-JSON 2xx → RetryableProviderError (treated as
-   *     transient — the provider idempotency key keeps us safe from
-   *     double-send on retry, R-OUTBOUND-004)
-   *
-   * @param ctx — Runtime context with env.BREVO_API_KEY set to the API key
-   * @param msg — Provider-neutral send payload
-   * @returns ProviderSendResult with the Brevo message ID and accepted timestamp
-   * @throws {TerminalProviderError} on 4xx (incl. malformed request)
-   * @throws {RetryableProviderError} on 5xx, network failure, or malformed response
-   */
+  /** 429 is confirmed nonacceptance; network/408/5xx/malformed success remain unknown. */
   async send(ctx: ProviderRuntimeContext, msg: SendProviderMessage): Promise<ProviderSendResult> {
     const apiKey = ctx.env.PROVIDER_API_KEY ?? ctx.env.BREVO_API_KEY;
     if (typeof apiKey !== 'string') {
@@ -129,6 +84,7 @@ export const brevoAdapter: OutboundProviderAdapter = {
     });
 
     const payload = {
+      ...(msg.attemptId ? { tags: [outboundAttemptTag(msg.attemptId)] } : {}),
       sender: formatAddress(msg.from),
       to: msg.to.map(formatAddress),
       cc: msg.cc.length > 0 ? msg.cc.map(formatAddress) : undefined,
@@ -145,14 +101,11 @@ export const brevoAdapter: OutboundProviderAdapter = {
             })),
           }
         : {}),
-      // R-OUTBOUND-004: provider idempotency is sent as a JSON body header.
-      // Brevo's sendTransacEmail contract (developers.brevo.com/reference/sendtransacemail)
-      // accepts `headers` as part of the JSON body; Idempotency-Key belongs there, NOT in
-      // fetch RequestInit.headers. Preserves Message-ID / In-Reply-To / References when supplied.
-      // Idempotency-Key is always present (even when msg.messageId is absent) — the canonical
-      // message ID is the queue's idempotencyKey, not the optional RFC 5322 Message-ID.
+      // Brevo documents headers.idempotencyKey; local safety does not depend on
+      // its TTL or duplicate suppression. Attempt correlation supports reconciliation.
       headers: {
-        'Idempotency-Key': msg.idempotencyKey,
+        idempotencyKey: msg.idempotencyKey,
+        ...(msg.attemptId ? { 'X-Mailin-custom': outboundAttemptTag(msg.attemptId) } : {}),
         ...(msg.messageId ? { 'Message-ID': msg.messageId } : {}),
         ...(msg.inReplyTo ? { 'In-Reply-To': msg.inReplyTo } : {}),
         ...(msg.references ? { References: msg.references } : {}),
@@ -160,6 +113,7 @@ export const brevoAdapter: OutboundProviderAdapter = {
     };
 
     let response: Response;
+    const signal = AbortSignal.timeout(ctx.timeoutMs ?? 20_000);
     try {
       response = await fetch(`${BREVO_API_BASE}/smtp/email`, {
         method: 'POST',
@@ -169,79 +123,150 @@ export const brevoAdapter: OutboundProviderAdapter = {
           Accept: 'application/json',
         },
         body: JSON.stringify(payload),
+        signal,
       });
-    } catch (cause) {
-      // Network error (DNS, TLS, dropped connection, abort). The provider
-      // idempotency key (R-OUTBOUND-004) keeps the retry safe from a
-      // duplicate send if the first request actually reached Brevo.
-      throw new RetryableProviderError({
-        message: `Brevo send network error: ${cause instanceof Error ? cause.message : String(cause)}`,
-        cause,
-      });
+    } catch {
+      throw new UnknownProviderOutcomeError({ message: 'Brevo submission response unavailable' });
     }
-
     if (!response.ok) {
-      // R-SECRET-003 / R-LOG-001 (CAP-029 H2 review-triage): the raw
-      // response body is NOT included in the error `message` — it may carry
-      // PII (recipient addresses), secret prefixes (e.g. "xkeysib-abc..."),
-      // or other details that must not land in the log stream. The body
-      // is attached as `cause` on a structured Error so the audit trail
-      // retains it for triage (operator can inspect the chain) without
-      // spilling into the standard `error.message` surface that flows
-      // through the queue consumer's logger calls.
-      const body = await response.text().catch(() => '');
       const status = response.status;
-      const errorMessage = `Brevo send failed: status ${status}`.trim();
-      // 429 is retryable per CAP-029 M3 review-triage — Brevo's rate-limit
-      // window is short and the queue's attempts budget + provider
-      // idempotency key (R-OUTBOUND-004) make retries safe. All other 4xx
-      // are terminal: a repeated identical payload will never succeed and
-      // burning attempts wastes the budget.
       if (status === 429) {
+        const retryAfterSeconds = parseRetryAfter(response.headers.get('Retry-After'));
+        await response.body?.cancel().catch(() => {});
         throw new RetryableProviderError({
-          message: errorMessage,
+          message: 'Brevo throttled submission',
           httpStatus: status,
-          cause: body ? new Error(`provider body: ${body}`) : undefined,
+          ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
         });
       }
-      if (status >= 400 && status < 500) {
-        throw new TerminalProviderError({
-          message: errorMessage,
+      if (status === 408 || status >= 500) {
+        await response.body?.cancel().catch(() => {});
+        throw new UnknownProviderOutcomeError({
+          message: 'Brevo submission outcome unknown',
           httpStatus: status,
-          cause: body ? new Error(`provider body: ${body}`) : undefined,
         });
       }
-      // 5xx (and anything outside 4xx/5xx we haven't classified) → retryable.
-      throw new RetryableProviderError({
-        message: errorMessage,
+      let duplicate = false;
+      try {
+        const data = await readBoundedJson(response);
+        duplicate =
+          isRecord(data) &&
+          (data.code === 'duplicate_parameter' || data.code === 'duplicate_request');
+      } catch {
+        /* Error body is not required to classify other definite 4xx rejection. */
+      }
+      if (duplicate)
+        throw new UnknownProviderOutcomeError({
+          message: 'Brevo reported duplicate submission',
+          httpStatus: status,
+        });
+      throw new TerminalProviderError({
+        message: `Brevo rejected submission: status ${status}`,
         httpStatus: status,
-        cause: body ? new Error(`provider body: ${body}`) : undefined,
       });
     }
-
-    let data: { messageId?: string };
+    let data: unknown;
     try {
-      data = (await response.json()) as { messageId?: string };
-    } catch (cause) {
-      // 2xx with malformed JSON — treat as retryable. The provider may have
-      // accepted the message; the idempotency key handles the dedupe.
-      throw new RetryableProviderError({
-        message: 'Brevo response was not valid JSON',
-        httpStatus: response.status,
-        cause,
-      });
-    }
-
-    if (!data.messageId) {
-      throw new RetryableProviderError({
-        message: 'Brevo response missing messageId',
+      data = await readBoundedJson(response);
+    } catch {
+      throw new UnknownProviderOutcomeError({
+        message: 'Brevo acceptance response unreadable',
         httpStatus: response.status,
       });
     }
+    if (
+      !isRecord(data) ||
+      typeof data.messageId !== 'string' ||
+      !data.messageId.trim() ||
+      data.messageId.length > 1024
+    )
+      throw new UnknownProviderOutcomeError({
+        message: 'Brevo acceptance response missing messageId',
+        httpStatus: response.status,
+      });
+    return { providerMessageId: data.messageId, acceptedAt: new Date().toISOString() };
+  },
 
-    return {
-      providerMessageId: data.messageId,
-      acceptedAt: new Date().toISOString(),
-    };
+  async findSubmission(ctx, attemptId) {
+    const apiKey = ctx.env.PROVIDER_API_KEY ?? ctx.env.BREVO_API_KEY;
+    if (typeof apiKey !== 'string') throw new Error('Provider lookup credentials unavailable');
+    const tag = outboundAttemptTag(attemptId);
+    const params = new URLSearchParams({
+      tags: JSON.stringify([tag]),
+      limit: '100',
+      days: '30',
+      sort: 'desc',
+    });
+    const response = await fetch(`${BREVO_API_BASE}/smtp/statistics/events?${params}`, {
+      headers: { 'api-key': apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(ctx.timeoutMs ?? 5_000),
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error('Provider lookup unavailable');
+    }
+    const body = await readBoundedJson(response, 262_144);
+    if (!isRecord(body) || !Array.isArray(body.events)) return null;
+    const found = new Map<string, string>();
+    for (const event of body.events) {
+      if (
+        !isRecord(event) ||
+        event.tag !== tag ||
+        typeof event.messageId !== 'string' ||
+        !event.messageId.trim() ||
+        event.messageId.length > 1024 ||
+        typeof event.date !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(event.date) ||
+        !Number.isFinite(Date.parse(event.date))
+      )
+        continue;
+      const previous = found.get(event.messageId);
+      if (!previous || Date.parse(event.date) < Date.parse(previous))
+        found.set(event.messageId, event.date);
+    }
+    // Empty/incomplete/conflicting evidence is never permission to resubmit.
+    if (found.size !== 1) return null;
+    const result = found.entries().next().value;
+    return result ? { providerMessageId: result[0], acceptedAt: result[1] } : null;
   },
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function parseRetryAfter(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const value = /^\d+$/.test(raw.trim())
+    ? Number(raw)
+    : Math.ceil((Date.parse(raw) - Date.now()) / 1000);
+  return Number.isFinite(value) && value >= 0 && Date.now() + value * 1000 <= 253402300799000
+    ? Math.ceil(value)
+    : undefined;
+}
+async function readBoundedJson(response: Response, maxBytes = 65_536): Promise<unknown> {
+  if (!response.body) throw new Error('Provider response missing');
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error('Provider response too large');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
+}

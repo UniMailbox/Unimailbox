@@ -46,6 +46,7 @@ export {
 } from './stubs';
 export { migrationsDb } from './migrationsDb';
 export { seedInboundMailbox, INBOUND_RAW_FIXTURE } from './inbound';
+export { seedOutboundSubmission, outboundMessageFixture } from './outbound';
 export {
   FIXED_TIMESTAMP,
   resetAndMigrate,

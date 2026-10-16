@@ -24,6 +24,9 @@ import { sqliteTimestamp } from './idempotency';
  * (every 5 minutes) reclaims rows whose lease has expired.
  */
 export const OUTBOX_LEASE_TTL_MS = 60_000;
+export const OUTBOUND_REQUEST_TIMEOUT_MS = 20_000;
+export const OUTBOUND_LEASE_WRITE_MARGIN_MS = 5_000;
+export const OUTBOUND_RECONCILE_TIMEOUT_MS = 5_000;
 
 /**
  * Grace period before a `queued` row is treated as orphaned by the scheduled
