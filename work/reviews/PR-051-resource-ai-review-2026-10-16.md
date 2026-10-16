@@ -62,3 +62,15 @@ fixture (29 passed); its unchanged isolated rerun passed all 30 in 4.16 seconds.
 Combined passing coverage is 2,581 tests, including 16 new cases. The single
 full command had that initialization failure; it is not reported as a clean
 full-command pass. No timeout was relaxed or test skipped.
+
+## Publication
+
+The unchanged prepared source subsequently passed the complete canonical gate
+cleanly: **2,581 tests** (1,436 non-Worker, 1,115 Worker, 30 migrations),
+doctor 14/14, binding drift, lint, types and builds. Repository-configured
+Gitleaks scanned all 432 reachable commits without leaks before deployment.
+PR #51 includes separate AI and cache repair commits. Staging published
+`5331214`, Worker `5e09edb5-68a1-4a2f-ae5d-8e995240defa`, schema 0042, with all 42 remote SQL
+companions, exact-source smoke, preserved configuration, authenticated metadata
+and a real scheduled tick passing. See [dated QA](../../docs/qa/ai-governance-staging-2026-10-16.md).
+No live paid inference, email, browser or full disaster-recovery acceptance.

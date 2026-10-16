@@ -18,7 +18,7 @@ rejections now record terminal evidence with conservative token charges; a
 missing native binding settles known zero-work. Transport/408/409/5xx outcomes
 retain uncertainty. Read/star/delete cancel only the caller/mailbox's message
 views, including initial reads, before dispatch and confirmed writes. Scheduled
-send and foreign-scope reads continue normally. See
+send and foreign-scope reads continue normally. Prepared release passed complete pnpm verify with 2,581 tests; staging `5331214` / Worker `5e09edb5-68a1-4a2f-ae5d-8e995240defa` passed all 42 SQL companions, exact-source smoke, authorized metadata and real Cron checks. See
 [review evidence](../../work/reviews/PR-051-resource-ai-review-2026-10-16.md).
 
 ## 2026-10-16 — Combined staging publication

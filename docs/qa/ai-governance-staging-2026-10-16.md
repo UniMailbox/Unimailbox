@@ -79,3 +79,38 @@ See [AI governance](../rebuild/24-ai-usage-governance.md),
 [resource dashboard](../rebuild/22-resource-usage-dashboard.md),
 [deployment recovery](../operations/deploy.md#rollback-and-data-recovery) and
 [AI handoff](../../work/handoffs/ai-governance-2026-10-16.md).
+
+## Subsequent PR #51 review-fix release
+
+Published source `53312142d3b01cdb4a348a38a49fbe33d753a92f` (review record commit `5331214`, AI fix
+`dfd59a2`, cache fix `56ed4a5`) as Worker `5e09edb5-68a1-4a2f-ae5d-8e995240defa`.
+Schema remains 0042; no migrations were pending. The subsequent evidence-only
+commit does not change application code.
+
+The prepared release passed complete `pnpm verify` cleanly: 2,581 tests
+(1,436 non-Worker, 1,115 Worker, 30 migration fixtures), doctor 14/14,
+generated bindings, lint, types and builds. This includes 16 new regression
+cases. An earlier run's historical migration beforeEach/reset timeout and its
+unchanged passing rerun are retained in the [review record](../../work/reviews/PR-051-resource-ai-review-2026-10-16.md).
+
+Before publication, a fresh schema-0042 D1 export restored into private SQLite
+with integrity/foreign-key checks passing. All 37 R2 objects (74,681,619 bytes)
+were copied and saved hashes verified; both credentials decrypted with the
+retained recovery key. The encrypted archive authenticated/decrypted and its
+tar index was readable. Publisher captured a new Time Travel bookmark and
+verified all 42 SQL companions. The earlier backups remain preserved.
+
+Exact-source/version/assets smoke and `ops:check` passed. Authenticated
+governance/personal/installation usage and mail metadata responses passed shared
+contract checks; anonymous routes returned 401, own-user scope matched, legacy
+MCP projection remained compatible, and the diagnostic session logged out.
+Existing bindings and AI/MCP configuration matched the pre-release snapshot.
+A real scheduled tick ran at `2026-10-16T14:40:21.082Z`–`2026-10-16T14:40:21.244Z`,
+after the initial post-release probe, with zero failures.
+
+AI remains **observe**, with no verified model profile; no real inference or
+email was invoked. Platform Analytics services remain `not_configured`; all
+four mail-processing metadata groups remain `ready`. Live API/health acceptance
+does not replace the synthetic rejection/late-read tests or establish real
+provider billing/token bounds, browser behavior, external mail recovery or a
+full disaster-recovery drill.
