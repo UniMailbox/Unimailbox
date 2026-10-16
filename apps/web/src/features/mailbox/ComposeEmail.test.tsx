@@ -397,6 +397,7 @@ async function renderCompose(options: RenderComposeOptions): Promise<{
     queryClient.setQueryData(
       mailboxQueryKeys.message(MAILBOX_ID, PARENT_ID, SESSION.userId),
       options.seedParentDetail,
+      { updatedAt: 1 },
     );
   }
 
