@@ -556,29 +556,24 @@ export function authRoutes(): Hono<AppEnv> {
       });
     }
 
-    // Find user by ID
-    const user = await c.env.DB.prepare(
-      `SELECT id, email, display_name FROM users WHERE id = ? AND status = 'active'`,
-    )
-      .bind(userId)
-      .first<{ id: string; email: string; display_name: string | null }>();
-
-    if (!user) {
+    // Reuse only the projection authenticated within this request; D1 is still
+    // consulted again on the next request, including after revocation.
+    const principal = c.get('principal');
+    if (!principal || principal.userId !== userId)
       throw new DomainError({
         code: 'AUTHENTICATION_REQUIRED',
         message: 'Authentication required',
         httpStatus: 401,
       });
-    }
 
     const canAccessAdmin = await hasAdministrativePermission(c.env.DB, userId);
 
     return c.json({
       data: {
         user: {
-          id: user.id,
-          email: user.email,
-          displayName: user.display_name,
+          id: principal.userId,
+          email: principal.email,
+          displayName: principal.displayName,
         },
         mustChangePassword: c.get('mustChangePassword') === true,
         canAccessAdmin,

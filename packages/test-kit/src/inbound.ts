@@ -1,8 +1,8 @@
-import { migrationsDb } from './migrationsDb';
+import { migrationsDb, type MigrationsDbOptions } from './migrationsDb';
 
 /** A small, independent mailbox fixture for inbound/storage/recovery tests. */
-export async function seedInboundMailbox() {
-  const db = await migrationsDb();
+export async function seedInboundMailbox(options: MigrationsDbOptions = {}) {
+  const db = await migrationsDb(options);
   const ownerId = '10000000-0000-4000-8000-000000000001';
   const domainId = '20000000-0000-4000-8000-000000000001';
   const mailboxId = '30000000-0000-4000-8000-000000000001';

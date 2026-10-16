@@ -1,3 +1,4 @@
+import type { AuthenticatedPrincipal } from './authenticated-principal';
 // Runtime resource types come from Wrangler; application and migration-only extensions live here.
 export type AuthProviderName = 'legacy' | 'dual' | 'better-auth';
 
@@ -65,6 +66,7 @@ export type AppEnv = {
     requestId?: string;
     userId?: string;
     sessionId?: string;
+    principal?: AuthenticatedPrincipal;
     mustChangePassword?: boolean;
     /** Idempotency-Key header (CAP-027 / ADR-004). Set by
      *  http/middleware/idempotency.ts after format validation. */
