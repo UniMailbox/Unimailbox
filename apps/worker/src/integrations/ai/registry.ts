@@ -10,7 +10,11 @@ import type {
 } from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 
-const usageNumber = z.number().int().nonnegative();
+const usageNumber = z.number().int().nonnegative().max(1_000_000_000);
+const safeUsage = (value: unknown): number | null => {
+  const parsed = usageNumber.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
 const nativeResponse = z.object({
   response: z.union([z.string(), z.record(z.unknown())]),
   usage: z
@@ -90,7 +94,7 @@ export function createAiAdapters(
 ): Readonly<Record<AiProtocol, AiAdapter<AbortSignal>>> {
   return {
     'workers-ai': {
-      async generate(configuration, _apiKey, request, signal) {
+      async generate(configuration, _apiKey, request, signal, observeUsage) {
         if (!ai)
           throw new DomainError({
             code: 'AI_NOT_CONFIGURED',
@@ -111,6 +115,11 @@ export function createAiAdapters(
               }
             : {}),
         });
+        const metering = nativeResponse.omit({ response: true }).safeParse(raw);
+        await observeUsage?.({
+          inputTokens: safeUsage(metering.success ? metering.data.usage?.prompt_tokens : null),
+          outputTokens: safeUsage(metering.success ? metering.data.usage?.completion_tokens : null),
+        });
         const parsed = nativeResponse.safeParse(raw);
         if (!parsed.success) throw invalidResponse();
         const value = parsed.data;
@@ -128,7 +137,7 @@ export function createAiAdapters(
       },
     },
     openai: {
-      async generate(configuration, apiKey, request, signal) {
+      async generate(configuration, apiKey, request, signal, observeUsage) {
         const client = new OpenAI({
           apiKey: apiKey ?? '',
           baseURL: configuration.baseUrl ?? 'https://api.openai.com/v1',
@@ -160,6 +169,13 @@ export function createAiAdapters(
           },
           { signal },
         );
+        await observeUsage?.({
+          inputTokens: safeUsage(response.usage?.prompt_tokens),
+          outputTokens: safeUsage(response.usage?.completion_tokens),
+          cachedInputTokens: safeUsage(response.usage?.prompt_tokens_details?.cached_tokens),
+          reasoningTokens: safeUsage(response.usage?.completion_tokens_details?.reasoning_tokens),
+          providerRequestId: response.id,
+        });
         const choice = response.choices?.[0];
         if (!choice?.message?.content || choice.message.refusal) throw invalidResponse();
         return result(
@@ -174,7 +190,7 @@ export function createAiAdapters(
       },
     },
     anthropic: {
-      async generate(configuration, apiKey, request, signal) {
+      async generate(configuration, apiKey, request, signal, observeUsage) {
         const client = new Anthropic({
           apiKey: apiKey ?? '',
           baseURL: configuration.baseUrl ?? 'https://api.anthropic.com',
@@ -199,6 +215,20 @@ export function createAiAdapters(
           },
           { signal },
         );
+        const inputParts = [
+          response.usage?.input_tokens,
+          response.usage?.cache_read_input_tokens ?? 0,
+          response.usage?.cache_creation_input_tokens ?? 0,
+        ].map(safeUsage);
+        const totalInput = inputParts.every((x) => x !== null)
+          ? inputParts.reduce<number>((sum, x) => sum + (x ?? 0), 0)
+          : null;
+        await observeUsage?.({
+          inputTokens: totalInput,
+          outputTokens: safeUsage(response.usage?.output_tokens),
+          cachedInputTokens: safeUsage(response.usage?.cache_read_input_tokens),
+          providerRequestId: response.id,
+        });
         const text = response.content
           .filter((block) => block.type === 'text')
           .map((block) => block.text)
@@ -208,8 +238,8 @@ export function createAiAdapters(
           response.model,
           text,
           response.stop_reason,
-          response.usage.input_tokens,
-          response.usage.output_tokens,
+          totalInput,
+          safeUsage(response.usage?.output_tokens),
           request,
         );
       },

@@ -75,6 +75,7 @@ import mcpPromptSql from '../../../migrations/0036_mcp_prompt.sql?raw';
 import mcpAccessSql from '../../../migrations/0035_mcp_access.sql?raw';
 import outboundSendAttemptsSql from '../../../migrations/0039_outbound_send_attempts.sql?raw';
 import mailAnalyticsIndexesSql from '../../../migrations/0040_mail_analytics_indexes.sql?raw';
+import aiGovernanceSql from '../../../migrations/0042_ai_governance.sql?raw';
 import mailboxThreadRootsSql from '../../../migrations/0041_mailbox_thread_roots.sql?raw';
 import inboundReceiptsSql from '../../../migrations/0038_inbound_receipts.sql?raw';
 import maintenanceHeartbeatsSql from '../../../migrations/0037_maintenance_heartbeats.sql?raw';
@@ -268,6 +269,7 @@ const MIGRATIONS = [
     fileName: '0041_mailbox_thread_roots.sql',
     sql: mailboxThreadRootsSql,
   },
+  { name: '0042_ai_governance', fileName: '0042_ai_governance.sql', sql: aiGovernanceSql },
 ] as const;
 
 export interface MigrationsDbOptions {

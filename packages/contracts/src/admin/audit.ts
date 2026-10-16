@@ -58,6 +58,12 @@ export interface D1StatementLike {
 // scheduled attachment expiry transition.
 export const auditActionSchema = z.enum([
   'ai.configuration_updated',
+  'ai.governance_updated',
+  'ai.attempt_reserved',
+  'ai.usage_recorded',
+  'ai.attempt_unknown',
+  'ai.attempt_settled',
+  'ai.attempt_reconciled',
   'mcp.configuration_updated',
   'mcp.token_created',
   'mcp.token_revoked',
@@ -173,7 +179,7 @@ export interface AuditEventInput {
 export interface AuditEventWriter {
   prepare(
     input: AuditEventInput,
-    guard?: { readonly idempotencyMarkerId: string },
+    guard?: { readonly idempotencyMarkerId: string } | { readonly aiAttemptMarker: string },
   ): { statement: D1StatementLike };
 }
 

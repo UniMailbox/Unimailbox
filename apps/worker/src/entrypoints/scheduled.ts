@@ -1,5 +1,6 @@
 // Scheduled maintenance: isolate failures, persist heartbeat and emit an overall result.
 import type { ScheduledController } from '@cloudflare/workers-types';
+import { createAiGovernance } from '../modules/ai';
 import type { Env } from '../platform/env';
 import { reclaimStaleJobs, reconcileOutboundSubmissions } from '../modules/outbound-mail';
 import { readSecret } from '../platform/secrets';
@@ -24,6 +25,11 @@ export default {
       throw new Error('Unknown maintenance schedule');
     const runs = [
       runMaintenanceTasks(env, requestId, [
+        {
+          name: 'ai.classify-stale',
+          run: () =>
+            createAiGovernance(env.DB, buildAppContext(env).auditEventWriter).classifyStale(),
+        },
         {
           name: 'outbound.reconcile',
           run: () =>

@@ -63,6 +63,7 @@ The full pairwise dependency policy also requires code review.
 | Roles, permissions, settings, audit, blocklists and role policies | admin, D1 |
 | MCP service/prompt configuration, personal credentials, scopes and rate windows | admin, D1; personal transport derives the credential owner from the session |
 | AI configuration and encrypted AI credentials | admin, D1; AI adapters and service wired by app-context |
+| AI governance policies, attempts, quota/concurrency admission and usage | ai, D1; audit writer injected through contracts, no admin-private persistence dependency |
 | Idempotency infrastructure | platform helpers; business modules batch their records with writes |
 
 Resource cleanup goes through these ownership boundaries. Published editor
@@ -130,3 +131,9 @@ CAP-071 keeps derived thread-root persistence inside messages (schema 0041).
 Identity exposes a safe joined session/user projection; HTTP reuses it only
 within the authenticated request. Cache freshness and measured query boundaries:
 [query optimization](../23-query-cache-optimization.md).
+
+The shared audit writer accepts the named `aiAttemptMarker` read seam for
+`ai_attempts.settlement_marker` so AI transition audit stays in the same D1
+transaction. This is a narrow public contract, not general access to AI
+persistence from other modules. AI policy versions and quota admission remain
+AI-owned.

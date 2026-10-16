@@ -102,29 +102,32 @@ export async function generateAiReply(
           })
         ).slice(0, 24000)
       : '';
-    const result = await ai.generate({
-      system: SYSTEM,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            `Task: ${source ? 'Reply to the original email' : 'Draft a new email'}`,
-            `Language: ${request.language}`,
-            `Subject: ${request.subject}`,
-            `User instructions:\n${request.instructions || 'Write a concise, professional email.'}`,
-            `User draft:\n${request.draftBody}`,
-            ...(source
-              ? [
-                  `Original sender: ${(source.fromName ?? '').slice(0, 200)} <${source.fromAddress.slice(0, 320)}>`,
-                  `Original subject: ${source.subject.slice(0, 998)}`,
-                  `Original email (quoted data, possibly shortened):\n${sourceBody}`,
-                ]
-              : []),
-          ].join('\n\n'),
-        },
-      ],
-      output: { type: 'text' },
-    });
+    const result = await ai.generate(
+      {
+        system: SYSTEM,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              `Task: ${source ? 'Reply to the original email' : 'Draft a new email'}`,
+              `Language: ${request.language}`,
+              `Subject: ${request.subject}`,
+              `User instructions:\n${request.instructions || 'Write a concise, professional email.'}`,
+              `User draft:\n${request.draftBody}`,
+              ...(source
+                ? [
+                    `Original sender: ${(source.fromName ?? '').slice(0, 200)} <${source.fromAddress.slice(0, 320)}>`,
+                    `Original subject: ${source.subject.slice(0, 998)}`,
+                    `Original email (quoted data, possibly shortened):\n${sourceBody}`,
+                  ]
+                : []),
+            ].join('\n\n'),
+          },
+        ],
+        output: { type: 'text' },
+      },
+      { invocation: { actorUserId, idempotencyKey, requestHash, requestId: input.requestId } },
+    );
     const parsed = aiReplyResponseSchema.safeParse({ text: result.text });
     if (!parsed.success)
       throw new DomainError({

@@ -39,7 +39,7 @@ export function createAuditEventWriter(db: Database): AuditEventWriter {
   return {
     prepare(
       input: AuditEventInput,
-      guard?: { readonly idempotencyMarkerId: string },
+      guard?: { readonly idempotencyMarkerId: string } | { readonly aiAttemptMarker: string },
     ): { statement: D1StatementLike } {
       const prepared = guard
         ? db
@@ -47,7 +47,11 @@ export function createAuditEventWriter(db: Database): AuditEventWriter {
               `INSERT INTO audit_events
           (id, actor_user_id, action, resource_type, resource_id, request_id, metadata, created_at)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?
-         WHERE EXISTS (SELECT 1 FROM idempotency_records WHERE id = ?)`,
+         WHERE ${
+           'idempotencyMarkerId' in guard
+             ? 'EXISTS (SELECT 1 FROM idempotency_records WHERE id = ?)'
+             : 'EXISTS (SELECT 1 FROM ai_attempts WHERE settlement_marker = ?)'
+         }`,
             )
             .bind(
               input.id,
@@ -58,7 +62,7 @@ export function createAuditEventWriter(db: Database): AuditEventWriter {
               input.requestId ?? null,
               input.metadata ?? null,
               input.createdAt,
-              guard.idempotencyMarkerId,
+              'idempotencyMarkerId' in guard ? guard.idempotencyMarkerId : guard.aiAttemptMarker,
             )
         : prepareCreateAuditEvent(db, input);
       return { statement: prepared as unknown as D1StatementLike };

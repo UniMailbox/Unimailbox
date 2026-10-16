@@ -1,5 +1,5 @@
 import { createAiAdapters } from './integrations/ai/registry';
-import { createAiService } from './modules/ai';
+import { createAiService, createAiGovernance } from './modules/ai';
 import { readAiConfiguration } from './modules/admin';
 import { decrypt, importEncryptionKey } from './platform/crypto';
 import { readSecret } from './platform/secrets';
@@ -70,6 +70,7 @@ export function buildAppContext(env: Env): AppContext {
     }),
     ai: createAiService({
       adapters: createAiAdapters(env.AI),
+      governance: createAiGovernance(db, createAuditEventWriter(db)),
       loadConfiguration: async () => {
         const snapshot = await readAiConfiguration(db);
         const apiKey =
@@ -79,7 +80,7 @@ export function buildAppContext(env: Env): AppContext {
                 await importEncryptionKey(await readSecret(env.CREDENTIAL_ENCRYPTION_KEY)),
               )
             : null;
-        return { configuration: snapshot.configuration, apiKey };
+        return { configuration: snapshot.configuration, apiKey, revision: snapshot.revision };
       },
     }),
     cache: getCache(env),
