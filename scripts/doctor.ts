@@ -269,6 +269,7 @@ const ALLOWED: Record<string, ReadonlySet<string>> = {
     'messages',
     'email-core',
     'editor-assets',
+    'signatures',
   ]),
   'provider-sync': new Set(['platform', 'contracts', 'messages']),
   attachments: new Set(['platform', 'contracts', 'messages', 'tenancy']),

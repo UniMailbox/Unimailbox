@@ -135,3 +135,12 @@ export {
   INBOUND_LEASE_MS,
 } from './inbound-receipt-repository';
 export type { InboundReceipt } from './inbound-receipt-repository';
+
+export { createDraft, readDraft, updateDraft } from './draft-use-cases';
+export { markRead, toggleStar, softDeleteMessage } from './change-message-state';
+export {
+  prepareAuthoredMessage,
+  prepareAuthoredMailboxMessage,
+  prepareDraftSentFolder,
+  resolveAuthorizedMessageMailbox,
+} from './authored-message-repository';

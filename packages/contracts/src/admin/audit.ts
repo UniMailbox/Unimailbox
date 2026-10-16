@@ -171,7 +171,10 @@ export interface AuditEventInput {
  * (R-AUDIT-001 + D-CAP-029-A).
  */
 export interface AuditEventWriter {
-  prepare(input: AuditEventInput): { statement: D1StatementLike };
+  prepare(
+    input: AuditEventInput,
+    guard?: { readonly idempotencyMarkerId: string },
+  ): { statement: D1StatementLike };
 }
 
 // ---------------------------------------------------------------------------
