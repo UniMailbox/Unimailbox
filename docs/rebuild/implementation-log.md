@@ -10,6 +10,36 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-16 — CAP-071 measured D1 queries and cache freshness
+
+Commit the earlier inbound recovery (`2f8b8ad`), outbound uncertainty handling
+(`c99ee92`), two-section resource dashboard (`1d50e47`) and shared mail use cases
+(`9bb6a3d`) separately, with shared documentation in `db88efa`. Preserve the
+unrelated personal MCP edit. Every behavior boundary passed isolated staged-tree
+doctor/typecheck and focused tests; staged redacted Gitleaks scans passed.
+
+Combine browser session/user validation into a safe D1 join and reuse its identity
+projection inside `/auth/me`, preserving request-by-request revocation, exact
+owner, active-account and forced-password-change checks. Schema 0041 backfills
+unchanged thread-root precedence on mailbox associations and maintains it through
+transactional header/association triggers. The composite mailbox/root index
+reduces a synthetic 1,000-mail/10-member query from 2,010 to 30 rows read. A
+foreign mailbox with 1,000 common-root messages remains excluded at index entry.
+Twenty-five local samples have 1 ms P95 before/after; no live latency improvement
+is claimed. Retain the newest-50 response and per-user deletion semantics.
+
+Use 60/10/30/10-second mailbox/folder/detail/thread freshness; editable drafts and
+membership remain immediately stale. Confirmed read/star/delete update cached
+sibling views only for the same user/mailbox, excluding scheduled-send projections.
+Compose invalidation stays mailbox-scoped. See [design](23-query-cache-optimization.md).
+
+Final isolated `pnpm verify` passed doctor 14/14, bindings, lint, types, builds
+and 2,543 tests (1,428 non-Worker, 1,086 Worker, 29 migration fixtures). All 699
+checked application/contracts/test-kit/migration sources match the shared tree.
+Personal MCP UI remains unchanged/excluded. Main-session self-review only;
+no push, deployment, remote migration, live browser or real-mail/provider test.
+See [handoff](../../work/handoffs/query-cache-2026-10-16.md).
+
 ## 2026-10-16 — CAP-070 shared draft, send and message-state use cases
 
 Move draft creation/read/save, compose/draft submission and per-user read/star/

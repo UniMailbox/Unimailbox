@@ -24,6 +24,8 @@ for implementation status.
 
 ## Current design decisions
 
+Measured D1 queries and mailbox cache freshness: [query optimization](23-query-cache-optimization.md).
+
 Administrator resource charts and optional Cloudflare Analytics configuration:
 [resource usage dashboard](22-resource-usage-dashboard.md).
 

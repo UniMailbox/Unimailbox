@@ -125,3 +125,8 @@ recipient/folder writes, audit and idempotency remain in one D1 batch. Queue
 notification follows commit; durable outbox recovery retains authority if it
 fails. Per-user mark-read retains the existing rerunnable best-effort replay
 record policy (D-CAP-043-I); star/delete remain atomic. No schema change.
+
+CAP-071 keeps derived thread-root persistence inside messages (schema 0041).
+Identity exposes a safe joined session/user projection; HTTP reuses it only
+within the authenticated request. Cache freshness and measured query boundaries:
+[query optimization](../23-query-cache-optimization.md).

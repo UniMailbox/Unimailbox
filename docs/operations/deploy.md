@@ -156,6 +156,14 @@ The mail section needs `analytics.read` and existing metadata, while platform
 usage additionally needs optional read-only analytics configuration. See
 [resource dashboards](../rebuild/22-resource-usage-dashboard.md).
 
+## Mailbox query substrate
+
+Schema 0041 backfills per-mailbox thread roots and installs their index/maintenance
+triggers. Back up and assess migration time on the selected installation, then
+apply it before the matching reader. Old source can run with this additive
+schema during code rollback. See [query optimization](../rebuild/23-query-cache-optimization.md)
+for measured scope and cache freshness. No deployment is implied by local tests.
+
 ## CI activation and troubleshooting
 
 `.github/workflows/ci.yml` verifies pushes/PRs; `secret-scan.yml` checks fetched history with redacted Gitleaks output and narrowly scoped synthetic-fixture exceptions. `deploy.yml` is manual, uses environment concurrency, runs the same entry point and saves private release artifacts for 30 days. Configure GitHub Environments for staging/production, the scoped Cloudflare API token and production protection rules before running deployment. `operations.yml` checks staging every 15 minutes without a Cloudflare token. The workflows are published with the rebuilt source in `UniMailbox/Unimailbox`; a source push runs verification without invoking the manual deployment workflow. Read the exact commit's GitHub Actions result separately from local test evidence. The previous implementation is preserved at `legacy/pre-rebuild-2026-10-10`; its migration chain and deployment workflow are not part of the rebuilt application's environment configs.

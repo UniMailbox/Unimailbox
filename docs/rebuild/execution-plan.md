@@ -4,6 +4,12 @@ Current priorities as of 2026-10-16. The [ledger](capability-ledger.md#current-s
 owns status; user priorities determine the next authorized slice. No feature
 capability is currently active.
 
+CAP-071 measured D1 identity/thread queries and mailbox cache freshness are
+locally implemented and validated. The new reader requires schema 0041 before
+publication. Local scan reduction does not establish a live latency win; see
+[query optimization](23-query-cache-optimization.md) and
+[handoff](../../work/handoffs/query-cache-2026-10-16.md).
+
 CAP-070 shared mail mutation use cases are locally implemented and validated:
 HTTP and MCP draft/send entrypoints call common operations, while message state
 mutations retain their transactional policies. See
@@ -11,7 +17,7 @@ mutations retain their transactional policies. See
 and [handoff](../../work/handoffs/mail-use-cases-2026-10-16.md).
 
 The selected two-section resource dashboard and inbound/outbound reliability slices are locally implemented. Resource analytics installation configuration and live dataset acceptance remain open; see [resource dashboard](22-resource-usage-dashboard.md).
-Schemas 0038–0040, installation deployment and real-mail/provider recovery
+Schemas 0038–0041, installation deployment and real-mail/provider recovery
 acceptance remain unpublished. See [inbound recovery](20-inbound-recovery.md),
 [outbound outcomes](21-outbound-submission-outcomes.md) and the
 [outbound handoff](../../work/handoffs/outbound-outcomes-2026-10-16.md).

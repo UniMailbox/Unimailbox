@@ -139,3 +139,8 @@ expired upload sets it; existing rows start null. A partial index covers pending
 cleanup in expiry/ID order, and each sweep handles at most 100 rows. Consumed
 uploads are excluded. See [maintenance operations](../../operations/deploy.md#monitoring-dlq-and-safe-redrive)
 for cadence, retry and storage compatibility details.
+
+Mailbox thread membership now has a derived `mailbox_messages.thread_root`
+column, a mailbox/root index and transactional header/association triggers from
+schema 0041. Existing header precedence is unchanged; see
+[query optimization](../23-query-cache-optimization.md#thread-root-persistence).
