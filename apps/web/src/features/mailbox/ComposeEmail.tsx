@@ -133,8 +133,8 @@ function ReplyComposer({ mailboxId, parentMessageId }: ReplyComposerProps): Reac
   const t = useT();
   const parentQuery = messageDetailQuery(mailboxId, parentMessageId);
 
-  // Fix pass (c): data-first ordering. `staleTime: 0` means mounting
-  // with a cached parent still fires a background refetch; when that
+  // Fix pass (c): data-first ordering. An expired or invalidated cached
+  // parent can trigger a background refetch; when that
   // refetch fails, `error` becomes non-null while `data` stays defined.
   // The old error-before-data branch then unmounted the live form —
   // destroying a typed draft — and after a successful send, the

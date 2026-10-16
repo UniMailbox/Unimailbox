@@ -1,36 +1,5 @@
-// process-outbound-job — CAP-023 + CAP-028 queue consumer use case.
-// Owner: outbound-mail module. Private file — export through
-// modules/outbound-mail/index.ts.
-//
-// This is the seam between the Cloudflare Queue plumbing (entrypoints/queue.ts)
-// and the actual send. It is intentionally callable directly from tests so the
-// happy / failure / idempotent-skip / stale-worker paths can be exercised
-// without queue plumbing (per .claude/rules/testing.md §Failure paths).
-//
-// CAP-028 flow (replaces the unconditional 'sending' write of CAP-023):
-//   1. claimOutboundJob with a per-invocation UUID (lockedBy) — R-OUTBOUND-007.
-//      On null: throw DomainError(LOCK_CONTENTION). The queue consumer's catch
-//      block calls msg.retry(); the lease expiry is the eventual backstop.
-//   2. read everything else, decrypt the API key (R-SECRET-002, ADR-007).
-//   3. adapter.send — R-OUTBOUND-004: provider idempotency key = message id.
-//   4. success  → markOutboundJobSent (predicate locked_by = lockedBy)
-//   5. retryable → if attempts+1 >= max_attempts, markOutboundJobTerminal,
-//                  else markOutboundJobRetryable. Use case rethrows for retry.
-//   6. terminal  → markOutboundJobTerminal, do NOT rethrow (job is acked).
-//
-// Steps 3–9 share one failure path: a failure anywhere AFTER the claim but
-// BEFORE the send result exists (missing message/connection/credential,
-// decrypt failure, provider error) goes through the same retryable/terminal
-// decision (R-OUTBOUND-008), so no post-claim failure can strand the row in
-// 'sending' with a held lease and no attempts increment. The success writes
-// (steps 10–11) are deliberately OUTSIDE that catch — see the comment at the
-// post-send block (CAP-028 F2).
-//
-// The caller supplies an adapter resolver (or a direct test adapter) through
-// the provider-neutral contract. Registry lookup happens after the claim.
-
+// Durable outbound submission; accepted/unknown evidence fences provider replay.
 import { scheduleDelaySeconds, QUEUE_DELAY_MAX_SECONDS } from './schedule-time';
-import { prepareScheduledMessageSentFolder } from '../messages';
 import type { Database } from '../../platform/database';
 import type {
   AuditEventWriter,
@@ -40,27 +9,44 @@ import type {
   ProviderKey,
   SendProviderMessage,
 } from '@unimailbox/contracts';
-import { parseProviderKey, TerminalProviderError } from '@unimailbox/contracts';
+import {
+  parseProviderKey,
+  TerminalProviderError,
+  RetryableProviderError,
+  UnknownProviderOutcomeError,
+} from '@unimailbox/contracts';
 import type { AttachmentByteStore, AttachmentObjectStore } from '../../platform/cache';
 import { DomainError } from '../../platform/errors';
 import { systemIds } from '../../platform/ids';
-import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
+import {
+  OUTBOX_LEASE_TTL_MS,
+  OUTBOUND_REQUEST_TIMEOUT_MS,
+  OUTBOUND_LEASE_WRITE_MARGIN_MS,
+} from '../../platform/outbox-config';
 import { sqliteTimestamp } from '../../platform/idempotency';
 import { importEncryptionKey, decrypt } from '../../platform/crypto';
 import { systemClock, type Clock } from '../../platform/clock';
 import { logger } from '../../platform/logger';
-import { listMessageAttachmentsForSend, updateMessageStatus } from '../messages';
+import { listMessageAttachmentsForSend } from '../messages';
 import { listHostedMessageObjectKeys } from '../editor-assets';
 import {
   claimOutboundJob,
   getOutboundJob,
   markOutboundJobRetryable,
-  markOutboundJobSent,
   markOutboundJobTerminal,
   isJobTerminal,
   type OutboundJobRow,
 } from './job-repository';
-import { reconcileWebhookDeliveries } from './reconcile-webhook-deliveries';
+import {
+  findUnresolvedAttempt,
+  getOutboundAttempt,
+  prepareOutboundAttempt,
+  submitOutboundAttempt,
+  acceptOutboundAttempt,
+  markAttemptUnknown,
+  prepareRejectAttempt,
+} from './attempt-repository';
+import { finalizeAcceptedSubmission } from './finalize-submission';
 
 export interface ProcessJobDeps {
   readonly db: Database;
@@ -174,6 +160,19 @@ export async function processOutboundJob(
     return;
   }
 
+  const evidence = await findUnresolvedAttempt(db, jobId);
+  if (evidence) {
+    if (evidence.status === 'accepted')
+      await finalizeAcceptedSubmission(db, evidence.id, clock.now(), deps.auditEventWriter);
+    return; // Submitted/unknown work waits for authenticated evidence, never automatic replay.
+  }
+  if (precheckJob.next_attempt_at) {
+    const retryDelay = Math.ceil(
+      (Date.parse(precheckJob.next_attempt_at.replace(' ', 'T') + 'Z') - clock.unixMs()) / 1000,
+    );
+    if (retryDelay > 0) return { delaySeconds: Math.min(QUEUE_DELAY_MAX_SECONDS, retryDelay) };
+  }
+
   const delaySeconds = scheduleDelaySeconds(precheckJob.scheduled_at, clock.now());
   if (delaySeconds > 0) {
     // A moved far-future task will be picked up by recovery within 24h.
@@ -203,14 +202,11 @@ export async function processOutboundJob(
     });
   }
 
-  // Steps 3–9 share one try/catch: any failure after the claim (missing
-  // message/connection/credential, decrypt failure, provider error) goes
-  // through the same retryable/terminal decision so the row can never be
-  // stranded in 'sending' with a held lease and no attempts increment.
+  // Preparation failures are safe to retry. Once the submitted marker commits,
+  // only explicit provider rejection can release the durable send fence.
   let sendResult: Awaited<ReturnType<OutboundProviderAdapter['send']>>;
+  let attemptId: string | null = null;
   try {
-    if (claimed.scheduled_at && claimed.mailbox_id)
-      await prepareScheduledMessageSentFolder(db, claimed.message_id, claimed.mailbox_id).run();
     // 3. Read message. We only select the columns we need to build the send.
     const msg = await db
       .prepare(
@@ -327,7 +323,7 @@ export async function processOutboundJob(
 
     const sendMsg: SendProviderMessage = {
       // R-OUTBOUND-004: provider calls use the canonical message ID as their
-      // idempotency key so a redelivery cannot double-send.
+      // idempotency key; the durable attempt fence separately guards replay.
       idempotencyKey: claimed.message_id,
       from: {
         address: msg.from_address,
@@ -357,6 +353,7 @@ export async function processOutboundJob(
     };
 
     const ctx: ProviderRuntimeContext = {
+      timeoutMs: OUTBOUND_REQUEST_TIMEOUT_MS,
       env: {
         // Provider-neutral adapters consume this key. BREVO_API_KEY remains
         // as a compatibility alias for the existing Brevo adapter contract.
@@ -365,156 +362,109 @@ export async function processOutboundJob(
       },
     };
 
-    // 9. Send. Declared outside the try so the success writes below can read
-    // it without widening the steps-3–9 catch to cover them.
-    sendResult = await adapter.send(ctx, sendMsg);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-
-    // CAP-029 D-CAP-028-A + B3: a typed TerminalProviderError short-circuits
-    // the attempts budget — retrying an identical 4xx payload will never
-    // succeed, so we mark the job failed on the first attempt instead of
-    // burning `max_attempts` retries. The error code is recorded verbatim
-    // ('TERMINAL_PROVIDER_ERROR' is stable for the audit trail); the
-    // underlying provider HTTP status (when carried) goes in the message
-    // via the underlying error's message, not as a separate column.
-    if (error instanceof TerminalProviderError) {
-      await markOutboundJobTerminal(db, jobId, lockedBy, 'TERMINAL_PROVIDER_ERROR', message);
-      return;
-    }
-
-    // The only error code we trust from the remaining failure modes is a
-    // DomainError's stable `code` field (closed catalog, CAP-032). Anything
-    // else — a RetryableProviderError, an SDK error, a DOMException's legacy
-    // numeric `code`, library strings like 'ECONNRESET' — is not in the
-    // catalog and becomes 'SEND_FAILED'.
-    const code = error instanceof DomainError ? error.code : 'SEND_FAILED';
-
-    // R-OUTBOUND-008: retryable vs terminal is decided by the attempts
-    // counter only. If the next attempt would reach max_attempts, mark
-    // terminal (no retry, no rethrow → queue acks).
-    const nextAttempts = claimed.attempts + 1;
-    const isTerminal = nextAttempts >= claimed.max_attempts;
-
-    if (isTerminal) {
-      await markOutboundJobTerminal(db, jobId, lockedBy, code, message);
-      // Do NOT rethrow — terminal failure means the queue should ack.
-      return;
-    }
-
-    await markOutboundJobRetryable(db, jobId, lockedBy, code, message);
-    throw error;
-  }
-
-  // Steps 10–11 — the success writes. These sit OUTSIDE the steps-3–9 catch
-  // on purpose (CAP-028 F2): the send already succeeded, so a failure here is
-  // bookkeeping, not a send failure. Routing it into the retryable/terminal
-  // path would burn an attempt (or write `failed`!) on a send that succeeded
-  // and would never fire the divergence warn. Instead: log the failure and
-  // rethrow without any attempts logic — the row stays `sending` with this
-  // worker's lease held, and the lease-expiry + cron reclaim path recovers
-  // it. The resend on the recovered attempt is deduped by the provider
-  // idempotency key (R-OUTBOUND-004), so no double-delivery.
-  try {
-    const now = sqliteTimestamp(new Date());
-    const nowMs = Date.now();
-    // CAP-029 D-CAP-028-D: the messages row write is the public messages-
-    // module surface. updateMessageStatus owns the rank-aware predicate
-    // (R-MESSAGE-007) so an out-of-order webhook arriving mid-send cannot
-    // clobber the 'sent' status. sent_at is supplied by this call (Q3
-    // decision: updateMessageStatus owns sent_at to keep `messages` row
-    // writes consolidated inside the messages module).
-    // CAP-029 L2 review-triage: capture the boolean return so the
-    // divergence warn below can name which surface rejected the write
-    // (cross-module = message row rejected by rank-aware predicate too).
-    const messageAdvanced = await updateMessageStatus(db, {
-      messageId: claimed.message_id,
-      status: 'sent',
-      providerEventTimeMs: nowMs,
-      sentAt: now,
-      preserveProviderEventTime: true,
-      now,
+    // Reserve and fence before the provider boundary. Prepared work is safe to
+    // recover; a committed submitted record makes a later crash outcome unknown.
+    const currentAttemptId = systemIds.uuid();
+    attemptId = currentAttemptId;
+    await prepareOutboundAttempt(db, {
+      id: attemptId,
+      jobId,
+      providerKey,
+      lockedBy,
+      now: clock.now(),
+      requestId: deps.requestId ?? null,
     });
-
-    // R-OUTBOUND-007 / R-OUTBOUND-009: the predicate locked_by = lockedBy
-    // makes this write a no-op if a reclaim stole the row mid-send. The
-    // boolean return surfaces that divergence as a warn (adjudicated at
-    // CAP-028 review triage) — the row was resolved by whoever stole the
-    // lock and the provider did report success, so throwing here would
-    // re-drive an already-resolved job.
-    const jobAdvanced = await markOutboundJobSent(
+    await submitOutboundAttempt(
+      db,
+      attemptId,
+      lockedBy,
+      clock.now(),
+      new Date(clock.unixMs() + OUTBOUND_REQUEST_TIMEOUT_MS + OUTBOUND_LEASE_WRITE_MARGIN_MS),
+    );
+    sendResult = await boundedSubmission(() =>
+      adapter.send(ctx, { ...sendMsg, attemptId: currentAttemptId }),
+    );
+    if (
+      typeof sendResult?.providerMessageId !== 'string' ||
+      !sendResult.providerMessageId.trim() ||
+      sendResult.providerMessageId.length > 1024 ||
+      !Number.isFinite(Date.parse(sendResult.acceptedAt))
+    )
+      throw new UnknownProviderOutcomeError({
+        message: 'Provider returned invalid acceptance evidence',
+      });
+  } catch (error) {
+    const recorded = attemptId ? await getOutboundAttempt(db, attemptId) : null;
+    if (recorded?.status === 'accepted') {
+      await finalizeAcceptedSubmission(db, recorded.id, clock.now(), deps.auditEventWriter);
+      return;
+    }
+    if (
+      recorded?.status === 'submitted' &&
+      !(error instanceof RetryableProviderError) &&
+      !(error instanceof TerminalProviderError)
+    ) {
+      await markAttemptUnknown(db, recorded, lockedBy, clock.now());
+      logger.warn(
+        {
+          event: 'outbound.outcome_unknown',
+          ...(deps.requestId ? { requestId: deps.requestId } : {}),
+        },
+        { code: 'SEND_OUTCOME_UNKNOWN' },
+      );
+      return;
+    }
+    if (recorded) await prepareRejectAttempt(db, recorded.id, clock.now()).run();
+    const code = error instanceof TerminalProviderError ? 'TERMINAL_PROVIDER_ERROR' : 'SEND_FAILED';
+    if (error instanceof TerminalProviderError || claimed.attempts + 1 >= claimed.max_attempts) {
+      await markOutboundJobTerminal(
+        db,
+        jobId,
+        lockedBy,
+        code,
+        error instanceof TerminalProviderError
+          ? `Provider rejected submission: status ${error.httpStatus ?? 'unavailable'}`
+          : 'Confirmed rejection exhausted attempts',
+      );
+      return;
+    }
+    const backoff = Math.min(3600, 30 * 2 ** Math.min(claimed.attempts, 7));
+    const delay = Math.max(
+      backoff,
+      error instanceof RetryableProviderError ? (error.retryAfterSeconds ?? 0) : 0,
+    );
+    await markOutboundJobRetryable(
       db,
       jobId,
       lockedBy,
-      sendResult.providerMessageId,
-    );
-
-    // CAP-040 / D-CAP-040-ARCH-H1: gate reconciliation on
-    // `sendResult.providerMessageId`, NOT on `jobAdvanced`. The provider has
-    // already accepted the message — the canonical id is real — so even when
-    // a reclaim stole the lock mid-send and `markOutboundJobSent` is a no-op,
-    // any webhook_deliveries row that landed with `message_id = NULL`
-    // (the early-event case) must still be back-filled. Skipping this would
-    // orphan the delivery row forever: a sibling job that re-runs sees a
-    // `sent` job and a `processed` delivery with no message link.
-    //
-    // Idempotent: a second pass with no unmatched rows back-fills nothing;
-    // the audit row is still emitted for traceability.
-    if (sendResult.providerMessageId && deps.auditEventWriter) {
-      try {
-        await reconcileWebhookDeliveries(db, {
-          connectionId: claimed.provider_connection_id,
-          providerMessageId: sendResult.providerMessageId,
-          messageId: claimed.message_id,
-          actorUserId: null,
-          requestId: deps.requestId ?? null,
-          createdAt: now,
-          auditEventWriter: deps.auditEventWriter,
-        });
-      } catch (error) {
-        // R-LOG-001: job ID only — no bodies, no provider payload. The
-        // reconciliation is best-effort: the row stays in `sent` and any
-        // future reconcile pass (e.g. a stuck-but-eventually-completed
-        // sibling job) will catch up. Failing the whole send path on a
-        // reconciliation miss would overstate the impact.
-        logger.warn(
-          { event: 'outbound.reconcile_failed' },
-          {
-            source: 'process-outbound-job',
-            jobId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        );
-      }
-    }
-    if (!jobAdvanced || !messageAdvanced) {
-      // CAP-029 L2 review-triage: a single combined warn names which
-      // surface(s) rejected the write so an operator triaging a "lock
-      // stolen before success write" can see whether the message-row
-      // write was also rejected (cross-module divergence) or succeeded
-      // (intra-module only). R-LOG-001: job ID + boolean flags only —
-      // no bodies, no provider payload, no stack traces.
-      logger.warn(
-        { event: 'outbound.job_sent_divergence' },
-        {
-          source: 'process-outbound-job',
-          jobId,
-          reason: 'lock stolen before success write; row resolved elsewhere',
-          jobAdvanced,
-          messageAdvanced,
-        },
-      );
-    }
-  } catch (error) {
-    // R-LOG-001: job ID only — no bodies, no provider payload.
-    logger.error(
-      { event: 'outbound.job_post_send_write_failed' },
-      {
-        source: 'process-outbound-job',
-        jobId,
-        error: error instanceof Error ? error.message : String(error),
-      },
+      code,
+      'Confirmed unsent work deferred',
+      sqliteTimestamp(new Date(clock.unixMs() + delay * 1000)),
     );
     throw error;
+  }
+
+  // Persist provider acceptance independently before the business finalization
+  // batch. A failed message/audit write can then be repaired without another send.
+  if (!attemptId) throw new Error('Outbound attempt was not reserved');
+  await acceptOutboundAttempt(db, attemptId, sendResult, clock.now());
+  await finalizeAcceptedSubmission(db, attemptId, clock.now(), deps.auditEventWriter);
+}
+
+async function boundedSubmission<T>(send: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(send),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(new UnknownProviderOutcomeError({ message: 'Provider submission timed out' })),
+          OUTBOUND_REQUEST_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }

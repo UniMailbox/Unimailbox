@@ -24,6 +24,13 @@ for implementation status.
 
 ## Current design decisions
 
+AI quotas, concurrency and unknown outcome accounting: [AI usage governance](24-ai-usage-governance.md).
+
+Measured D1 queries and mailbox cache freshness: [query optimization](23-query-cache-optimization.md).
+
+Administrator resource charts and optional Cloudflare Analytics configuration:
+[resource usage dashboard](22-resource-usage-dashboard.md).
+
 | Topic | Owning document |
 | --- | --- |
 | Business constraints and terminology | [Business rules](02-business-discovery/business-rules.md), [glossary](02-business-discovery/business-glossary.md) |
@@ -60,4 +67,6 @@ migrations directly to a legacy installation.
 Agent conventions live in [CLAUDE.md](../../CLAUDE.md) and `.claude/`.
 
 - [19. Scoped MCP service](19-mcp-service.md) — administrator toggle, scoped agent credentials and independent send authorization.
+- [20. Inbound receipt recovery](20-inbound-recovery.md) — synchronous rejection, scoped deduplication and durable Queue/Cron recovery.
+- [21. Outbound submission outcomes](21-outbound-submission-outcomes.md) — durable acceptance evidence, unknown-outcome reconciliation and fenced retries.
 - [18. AI service foundation](18-ai-service-foundation.md) — selectable protocols, administrator configuration and unified inference seam.

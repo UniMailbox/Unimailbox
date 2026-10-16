@@ -7,7 +7,7 @@
 // cookies, or external identity assertions are accepted here.
 
 import type { MiddlewareHandler } from 'hono';
-import { findActiveSessionById, findUserById } from '../../modules/identity';
+import { findAuthenticatedPrincipal } from '../../modules/identity';
 import type { AppEnv } from '../../platform/env';
 import { systemClock } from '../../platform/clock';
 
@@ -43,22 +43,17 @@ export const authn: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
 
   if (payload) {
-    const session = await findActiveSessionById(
+    const principal = await findAuthenticatedPrincipal(
       c.env.DB,
       payload.sessionId,
+      payload.userId,
       Math.floor(systemClock.unixMs() / 1000),
     );
-    if (!session || session.user_id !== payload.userId) {
-      payload = null;
-    }
-  }
-
-  if (payload) {
-    const user = await findUserById(c.env.DB, payload.userId);
-    if (user?.status === 'active') {
-      c.set('userId', user.id);
-      c.set('sessionId', payload.sessionId);
-      c.set('mustChangePassword', user.must_change_password === 1);
+    if (principal) {
+      c.set('principal', principal);
+      c.set('userId', principal.userId);
+      c.set('sessionId', principal.sessionId);
+      c.set('mustChangePassword', principal.mustChangePassword);
     }
   }
 

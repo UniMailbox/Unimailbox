@@ -7,6 +7,10 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./resource-usage": {
+      "types": "./dist/resource-usage.d.ts",
+      "default": "./dist/resource-usage.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

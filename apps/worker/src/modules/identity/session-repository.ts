@@ -1,3 +1,4 @@
+import type { AuthenticatedPrincipal } from '../../platform/authenticated-principal';
 // session-repository — sessions table CRUD.
 // Owner: identity module. Private file — export through modules/identity/index.ts.
 //
@@ -153,4 +154,38 @@ export async function revokeAllUserSessions(db: Database, userId: string): Promi
     )
     .bind(userId)
     .run();
+}
+
+/** R-AUTH-005: join session and active owner once; revocation is checked on every request. */
+export async function findAuthenticatedPrincipal(
+  db: Database,
+  sessionId: string,
+  userId: string,
+  nowSeconds: number,
+): Promise<AuthenticatedPrincipal | null> {
+  const row = await db
+    .prepare(
+      `SELECT u.id AS user_id, s.id AS session_id,
+    u.email, u.display_name, u.must_change_password
+    FROM sessions s JOIN users u ON u.id = s.user_id
+    WHERE s.id = ? AND s.user_id = ? AND s.revoked_at IS NULL
+      AND s.expires_at > ? AND u.status = 'active'`,
+    )
+    .bind(sessionId, userId, nowSeconds)
+    .first<{
+      user_id: string;
+      session_id: string;
+      email: string;
+      display_name: string | null;
+      must_change_password: number;
+    }>();
+  return row
+    ? {
+        userId: row.user_id,
+        sessionId: row.session_id,
+        email: row.email,
+        displayName: row.display_name,
+        mustChangePassword: row.must_change_password === 1,
+      }
+    : null;
 }

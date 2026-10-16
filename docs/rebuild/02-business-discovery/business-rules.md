@@ -68,7 +68,9 @@ exact validation and transport behavior.
 | R-INBOUND-008 | The message + recipients + attachments + mailbox-message rows are inserted in a single D1 batch |
 | R-INBOUND-009 | Optional `INBOUND_CATCH_ALL_MAILBOX` routes absent envelope addresses only within that mailbox's active managed domain. Exact addresses take precedence, including disabled/deleted addresses which remain rejected. The catch-all does not create mailbox rows. |
 | R-INBOUND-010 | Optional private `INBOUND_FORWARD_TO` preserves a verified external copy for the configured catch-all domain before local policy and storage. Same-domain forwarding is refused to prevent loops. Forwarding failures propagate; R2/D1 and external forwarding have no shared transaction or exactly-once guarantee. |
-| R-INBOUND-009 | A message with `status=SAVING` is recovered by a scheduled job (status promoted to `received` or rejected) |
+| R-INBOUND-011 | Inbound raw MIME is limited to 25 MiB. Check declared size before reading and actual stream length while reading; unknown envelope recipients are resolved before MIME parsing. |
+| R-INBOUND-012 | Within 24 hours of completed local receipt, an identical raw MIME SHA-256, normalized SMTP sender/recipient and mailbox identify the same local delivery. Pending receipts remain deduplicated until resolved. MIME Message-ID alone is never a deduplication key. Byte-identical intentional deliveries inside this scope/window are indistinguishable from retries. |
+| R-INBOUND-013 | After synchronous recipient/size/content policy acceptance, persist raw R2 bytes before a D1 inbound receipt. Complete receipt, message, relations and receive audit atomically. Post-acceptance failures use leased Queue processing plus bounded five-minute recovery; pending raw references remain protected from cleanup. No upstream retry or external-forward exactly-once guarantee is assumed. |
 
 ## R-OUTBOUND — Outbound mail
 
@@ -86,6 +88,17 @@ exact validation and transport behavior.
 | R-OUTBOUND-010 | CC and BCC are real recipient types and must be passed through to the provider |
 | R-OUTBOUND-011 | On-site delivery creates a `mailbox_messages` row per internal recipient |
 | R-OUTBOUND-012 | A TO bounce marks the sender message `bounced`; CC/BCC bounces do not |
+| R-OUTBOUND-013 | Commit a fenced submission-attempt marker before provider I/O. Submitted/unknown/accepted evidence blocks all automatic provider replay, including expired-lease recovery. Generic post-submit failures never prove nonacceptance. |
+| R-OUTBOUND-014 | Save provider acceptance durably before atomic job/message/audit finalization. Resolve unknown work only through provider/connection/attempt-scoped positive evidence; empty or failed lookup never authorizes a resend. |
+| R-OUTBOUND-015 | Bound submission time below the remaining lease with write margin. Confirmed rejection uses persisted backoff/Retry-After honored by Queue and Cron; unknown work uses bounded reconciliation instead. |
+
+## R-ANALYTICS — Resource monitoring
+
+| ID | Rule |
+| --- | --- |
+| R-ANALYTICS-001 | Resource analytics requires authenticated `analytics.read` access before credentials/cache/provider reads. Only explicitly configured installation resources may be queried; browser parameters cannot widen scope. No private mail or provider credential/diagnostic is returned. |
+| R-ANALYTICS-002 | Resource charts preserve missing samples separately from zero, sum counters and take storage maxima. Clearly label source, UTC window, partial/sampled data and cache age policy; never infer bills, quotas or runtime memory from unrelated sizes. Bound provider requests/responses and avoid polling or per-request telemetry writes. |
+| R-ANALYTICS-003 | Mail processing statistics read aggregate retained metadata only, separately from platform usage. Label receipt retention, creation-day/current-state cohorts and queue/schedule/recovery latency. Weight averages by valid sample counts, avoid relation multiplication, and reject truncated cohorts rather than presenting partial totals. |
 
 ## R-ATTACHMENT — Attachments
 

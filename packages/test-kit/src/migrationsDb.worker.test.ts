@@ -22,6 +22,8 @@ import settingsRevisionVerification from '../../../migrations/0025_system_settin
 import scheduledSendVerification from '../../../migrations/0033_scheduled_send.verify.sql?raw';
 import attachmentCleanupVerification from '../../../migrations/0032_attachment_cleanup.verify.sql?raw';
 import heartbeatSql from '../../../migrations/0037_maintenance_heartbeats.sql?raw';
+import aiGovernanceVerification from '../../../migrations/0042_ai_governance.verify.sql?raw';
+import threadRootVerification from '../../../migrations/0041_mailbox_thread_roots.verify.sql?raw';
 import heartbeatVerification from '../../../migrations/0037_maintenance_heartbeats.verify.sql?raw';
 
 const NEW_UUID = '00000000-0000-4000-8000-000000000001';
@@ -263,7 +265,7 @@ describe('migrationsDb (worker pool)', () => {
         )
         .bind(now, now),
     ]);
-    await migrationsDb();
+    await migrationsDb({ through: '0033_scheduled_send' });
     expect(
       await db
         .prepare(
@@ -613,7 +615,7 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(tracking?.count).toBe(1);
     // CAP-069: 0025 seeds the internal system-settings revision row.
-    expect(CONTRACT_SCHEMA_VERSION).toBe('0037');
+    expect(CONTRACT_SCHEMA_VERSION).toBe('0042');
   });
 
   it('R-MESSAGE-005 R-DATA-004 R-DATA-005: 0023 shape and legacy-star backfill cover the owner and explicit members', async () => {
@@ -1067,5 +1069,56 @@ describe('migrationsDb (worker pool)', () => {
       .first<{ count: number }>();
     expect(accountCount?.count).toBe(0);
     expect(sessionCount?.count).toBe(0);
+  });
+  it('R-DATA-004: 0041 verification proves the derived-root substrate and repeat migration is a no-op', async () => {
+    const db = await migrationsDb();
+    for (const sql of threadRootVerification.split(';').filter((sql) => sql.trim())) {
+      const result = await db.prepare(sql).first<{ assertion: string; pass: number }>();
+      expect(result?.pass, result?.assertion).toBe(1);
+    }
+    await migrationsDb();
+    expect(
+      (
+        await db
+          .prepare(
+            "SELECT count(*) AS count FROM d1_migrations WHERE name='0041_mailbox_thread_roots.sql'",
+          )
+          .first<{ count: number }>()
+      )?.count,
+    ).toBe(1);
+  });
+});
+
+describe('CAP-072 AI governance migration', () => {
+  it('preserves legacy AI deduplication across response expiry and verifies the additive schema', async () => {
+    const { reset } = await import('cloudflare:test');
+    await reset();
+    const db = await migrationsDb({ through: '0041_mailbox_thread_roots' });
+    await db
+      .prepare(
+        `INSERT INTO idempotency_records(id,actor_id,operation,idempotency_key,request_hash,response_status,response_json,created_at,expires_at)
+      VALUES('legacy-ai','legacy-user','POST /api/v1/mailboxes/:mailboxId/ai-reply','legacy-operation','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',409,'{"pending":true}','2026-01-01 00:00:00','2026-01-02 00:00:00')`,
+      )
+      .run();
+    await migrationsDb();
+    expect(
+      await db
+        .prepare(
+          "SELECT request_hash FROM ai_legacy_requests WHERE idempotency_key='legacy-operation'",
+        )
+        .first('request_hash'),
+    ).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    await db.prepare("DELETE FROM idempotency_records WHERE id='legacy-ai'").run();
+    expect(await db.prepare('SELECT count(*) n FROM ai_legacy_requests').first('n')).toBe(1);
+    for (const query of aiGovernanceVerification.split(';').filter((sql) => sql.trim())) {
+      const result = await db.prepare(query).first<{ assertion: string; pass: number }>();
+      expect(result?.pass, result?.assertion).toBe(1);
+    }
+    await migrationsDb();
+    expect(
+      await db
+        .prepare("SELECT count(*) n FROM d1_migrations WHERE name='0042_ai_governance.sql'")
+        .first('n'),
+    ).toBe(1);
   });
 });

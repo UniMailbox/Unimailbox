@@ -185,3 +185,10 @@ References: [Workers AI bindings](https://developers.cloudflare.com/workers-ai/c
 [Workers AI JSON mode](https://developers.cloudflare.com/workers-ai/features/json-mode/),
 [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
 [OpenAI Chat Completions](https://platform.openai.com/docs/api-reference/chat/create).
+
+## Usage governance
+
+[AI usage governance](24-ai-usage-governance.md) adds durable attempts, two-level
+token admission, shared concurrency and uncertain-outcome accounting. Its local
+implementation and external model-verification boundary supersede the original
+usage-only description for code containing schema 0042.

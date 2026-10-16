@@ -37,6 +37,7 @@ import { adminDomainRoutes } from './routes/admin-domains';
 import { adminRoleRoutes } from './routes/admin-roles';
 import { adminSignatureRoutes } from './routes/admin-signatures';
 import { adminAiRoutes } from './routes/admin-ai';
+import { aiGovernanceRoutes } from './routes/ai-governance';
 import { adminMcpRoutes } from './routes/admin-mcp';
 import { personalMcpRoutes } from './routes/personal-mcp';
 import { mcpRoutes } from './routes/mcp';
@@ -128,6 +129,7 @@ export function buildRouter(): Hono<AppEnv> {
   // CAP-069: typed, allowlisted global system settings.
   apiV1.route('/', adminSettingsRoutes());
   apiV1.route('/', adminAiRoutes());
+  apiV1.route('/', aiGovernanceRoutes());
   apiV1.route('/', adminMcpRoutes());
   apiV1.route('/', adminOverviewRoutes());
   apiV1.route('/', adminUpdateRoutes());

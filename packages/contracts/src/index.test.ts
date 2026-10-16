@@ -1459,6 +1459,12 @@ describe('auditActionSchema — closed enum (D-CAP-043-I)', () => {
     expect([...auditActionSchema.options].sort()).toEqual(
       [
         'ai.configuration_updated',
+        'ai.governance_updated',
+        'ai.attempt_reserved',
+        'ai.usage_recorded',
+        'ai.attempt_unknown',
+        'ai.attempt_settled',
+        'ai.attempt_reconciled',
         'mcp.configuration_updated',
         'mcp.token_created',
         'mcp.token_revoked',
