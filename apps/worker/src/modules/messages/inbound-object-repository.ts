@@ -10,7 +10,11 @@ export async function findReferencedInboundObjectKeys(
   const placeholders = keys.map(() => '?').join(', ');
   const sql =
     prefix === 'raw-mime/'
-      ? `SELECT raw_object_key AS object_key FROM messages WHERE raw_object_key IN (${placeholders})`
+      ? `WITH requested(object_key) AS (VALUES ${keys.map(() => '(?)').join(', ')})
+         SELECT raw_object_key AS object_key FROM messages
+          WHERE raw_object_key IN (SELECT object_key FROM requested)
+         UNION SELECT raw_object_key AS object_key FROM inbound_receipts
+          WHERE raw_object_key IN (SELECT object_key FROM requested)`
       : prefix === 'inbound-attachment/'
         ? `SELECT object_key FROM inbound_message_attachments WHERE object_key IN (${placeholders})`
         : `SELECT kv_key AS object_key FROM attachment_uploads

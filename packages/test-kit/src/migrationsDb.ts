@@ -73,6 +73,7 @@ import attachmentCleanupSql from '../../../migrations/0032_attachment_cleanup.sq
 import aiConfigurationSql from '../../../migrations/0034_ai_configuration.sql?raw';
 import mcpPromptSql from '../../../migrations/0036_mcp_prompt.sql?raw';
 import mcpAccessSql from '../../../migrations/0035_mcp_access.sql?raw';
+import inboundReceiptsSql from '../../../migrations/0038_inbound_receipts.sql?raw';
 import maintenanceHeartbeatsSql from '../../../migrations/0037_maintenance_heartbeats.sql?raw';
 import scheduledSendSql from '../../../migrations/0033_scheduled_send.sql?raw';
 import userPreferencesSql from '../../../migrations/0031_user_preferences.sql?raw';
@@ -248,6 +249,7 @@ const MIGRATIONS = [
     fileName: '0037_maintenance_heartbeats.sql',
     sql: maintenanceHeartbeatsSql,
   },
+  { name: '0038_inbound_receipts', fileName: '0038_inbound_receipts.sql', sql: inboundReceiptsSql },
 ] as const;
 
 export interface MigrationsDbOptions {

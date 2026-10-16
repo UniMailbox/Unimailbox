@@ -1,51 +1,21 @@
-// Inbound-email entry — Email Routing handler.
-// CAP-021: Real inbound mail processing with MIME parsing.
-// D-CAP-021 / CAP-035: Blocklist + per-role policy evaluation before
-// persistence.
-//
-// Flow:
-// 1. Check if this is a smoke test message (CAP-013 backward compatibility)
-// 2. Read raw email stream
-// 3. Parse MIME headers and body
-// 4. Resolve the Cloudflare envelope recipient to one active mailbox
-// 5. If no mailbox found: reject (unknown recipient)
-// 6. D-CAP-021: load blocklist + recipient mailbox owners' role policies and
-//    evaluate the policy. If rejected, call message.setReject(reason) and
-//    return — no DB writes, no audit (per Decision §Q4).
-// 7. If mailbox found: create message + recipients + mailbox_messages in one
-//    D1 batch (R-INBOUND-008).
-// 8. R-AUDIT-001: write audit event for the success transition.
-//
-// R-INBOUND-008: Message + recipients + mailbox_messages inserted in one D1 batch
-// R-INBOUND-005: Blocklist matches on subject/content/from
-// R-INBOUND-006: Per-role banEmail + availDomain policies
-// R-DATA-001:    Email addresses are case-insensitive
-
+// Inbound: forward external copy, validate envelope/size/policy synchronously, then durably receive.
 import type { ForwardableEmailMessage } from '@cloudflare/workers-types';
 import type { Env } from '../platform/env';
 import { handleSmokeTestMessage } from '../modules/onboarding';
 import { normalizeAddress, parseInboundMime } from '@unimailbox/email-core';
-import {
-  attachmentContentTypeSchema,
-  attachmentFilenameSchema,
-  emailAddressSchema,
-} from '@unimailbox/contracts';
+import { emailAddressSchema } from '@unimailbox/contracts';
 import { resolveInboundMailbox } from '../modules/tenancy';
-import {
-  prepareCreateMessage,
-  prepareCreateRecipient,
-  prepareCreateMailboxMessage,
-  createMessageWithRelations,
-  prepareCreateInboundAttachment,
-  type CreateMessageInput,
-  type CreateRecipientInput,
-  type CreateMailboxMessageInput,
-} from '../modules/messages';
-import { getUserRoleIds, prepareCreateAuditEvent } from '../modules/admin';
+import { getUserRoleIds } from '../modules/admin';
 import { buildAppContext } from '../app-context';
-import { evaluateInboundPolicy } from '../modules/inbound-mail';
+import {
+  evaluateInboundPolicy,
+  readInboundBytes,
+  InboundSizeError,
+  acceptInboundReceipt,
+  processInboundReceipt,
+} from '../modules/inbound-mail';
 import { systemIds } from '../platform/ids';
-import { getObjectStore } from '../platform/object-store';
+import { logger } from '../platform/logger';
 
 const UNKNOWN_RECIPIENT_REASON = 'Unknown recipient. No mailbox found for this address.';
 
@@ -71,12 +41,6 @@ export default {
         await message.forward(destination.data);
     }
 
-    // Parse the raw email
-    const rawBytes = await new Response(message.raw).arrayBuffer();
-    // Decode transfer encodings and nested multipart parts from the original
-    // bytes. The raw RFC 5322 message is still preserved verbatim in R2.
-    const { parsed, attachments } = await parseInboundMime(new Uint8Array(rawBytes));
-
     // To/Cc headers are sender-authored display data. Cloudflare invokes this
     // handler for the SMTP envelope recipient in message.to; only that address
     // is allowed to determine the mailbox that receives the message. This
@@ -86,6 +50,17 @@ export default {
       await message.setReject(UNKNOWN_RECIPIENT_REASON);
       return;
     }
+
+    let rawBytes: ArrayBuffer;
+    try {
+      rawBytes = await readInboundBytes(message.raw, message.rawSize);
+    } catch (error) {
+      if (!(error instanceof InboundSizeError)) throw error;
+      message.setReject(error.message);
+      return;
+    }
+    const mime = await parseInboundMime(new Uint8Array(rawBytes));
+    const { parsed } = mime;
 
     // D-CAP-021 / CAP-035: evaluate blocklist + per-role policy before any
     // DB write. Architecture edge: inbound-mail reads admin-owned data via
@@ -113,149 +88,26 @@ export default {
       return;
     }
 
-    // Generate IDs for message and all related rows
-    const messageId = systemIds.uuid();
-    const rawObjectKey = `raw-mime/${messageId}`;
-    const objectStore = getObjectStore(env);
-    const writtenKeys: string[] = [];
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-    // CAP-040 / R-AUDIT-001: synthesise one correlation UUID for this
-    // inbound message. Threaded through to the audit row so a reader of
-    // audit_events can group all operations of one message together.
     const requestId = systemIds.uuid();
-
-    // Prepare message statement
-    const messageInput: CreateMessageInput = {
-      id: messageId,
-      parsed,
-      receivedAt: now,
-      createdAt: now,
-      updatedAt: now,
-      rawObjectKey,
-    };
-
-    // Prepare recipient statements (to + cc)
-    const recipientStatements: D1PreparedStatement[] = [];
-    const recipientInputs: CreateRecipientInput[] = [];
-
-    for (const recipient of parsed.to) {
-      const recipientId = systemIds.uuid();
-      const recipientInput: CreateRecipientInput = {
-        id: recipientId,
-        messageId,
-        address: recipient.address,
-        displayName: recipient.name,
-        type: 'to',
-        createdAt: now,
-      };
-      recipientInputs.push(recipientInput);
-      recipientStatements.push(prepareCreateRecipient(env.DB, recipientInput));
-    }
-
-    for (const recipient of parsed.cc) {
-      const recipientId = systemIds.uuid();
-      const recipientInput: CreateRecipientInput = {
-        id: recipientId,
-        messageId,
-        address: recipient.address,
-        displayName: recipient.name,
-        type: 'cc',
-        createdAt: now,
-      };
-      recipientInputs.push(recipientInput);
-      recipientStatements.push(prepareCreateRecipient(env.DB, recipientInput));
-    }
-
-    // Bcc and catch-all delivery must retain the actual envelope address even
-    // when the sender's MIME headers omit it. Headers never choose the mailbox.
-    const envelopeAddress = normalizeAddress(message.to);
-    if (
-      !recipientInputs.some((recipient) => normalizeAddress(recipient.address) === envelopeAddress)
-    ) {
-      const input: CreateRecipientInput = {
-        id: systemIds.uuid(),
-        messageId,
-        address: envelopeAddress,
-        displayName: '',
-        type: 'bcc',
-        createdAt: now,
-      };
-      recipientInputs.push(input);
-      recipientStatements.push(prepareCreateRecipient(env.DB, input));
-    }
-
-    const mailboxMessageInput: CreateMailboxMessageInput = {
-      id: systemIds.uuid(),
+    const receiptId = await acceptInboundReceipt(ctx, {
       mailboxId: mailbox.id,
-      messageId,
-      createdAt: now,
-    };
-    const mailboxMessageStatement = prepareCreateMailboxMessage(env.DB, mailboxMessageInput);
-
-    const attachmentStatements: D1PreparedStatement[] = [];
-    const attachmentObjects: { key: string; content: Uint8Array }[] = [];
-    for (const attachment of attachments) {
-      const attachmentId = systemIds.uuid();
-      const objectKey = `inbound-attachment/${messageId}/${attachmentId}`;
-      const safeFilename = attachmentFilenameSchema.safeParse(
-        attachment.filename.replace(/[\\/\0\r\n]/g, '_').slice(0, 255),
-      );
-      const safeContentType = attachmentContentTypeSchema.safeParse(attachment.contentType);
-      const contentId = attachment.contentId?.replace(/[\0\r\n]/g, '').slice(0, 255) || null;
-      attachmentObjects.push({ key: objectKey, content: attachment.content });
-      attachmentStatements.push(
-        prepareCreateInboundAttachment(env.DB, {
-          id: attachmentId,
-          messageId,
-          objectKey,
-          filename: safeFilename.success ? safeFilename.data : 'attachment',
-          contentType: safeContentType.success ? safeContentType.data : 'application/octet-stream',
-          sizeBytes: attachment.content.byteLength,
-          disposition: attachment.disposition,
-          contentId,
-          createdAt: now,
-        }),
-      );
-    }
-
-    // Execute all statements in one atomic batch (R-INBOUND-008 +
-    // CAP-046 / D-CAP-046-B: the audit_events INSERT is folded into the
-    // same batch so the message INSERT + recipients + mailbox_messages +
-    // audit row land atomically. A crash between the business writes
-    // and the audit row would violate R-AUDIT-001.)
-    const messageStatement = prepareCreateMessage(env.DB, messageInput);
-    const auditStatement = prepareCreateAuditEvent(env.DB, {
-      id: systemIds.uuid(),
-      actorUserId: null,
-      action: 'message.receive',
-      resourceType: 'message',
-      resourceId: messageId,
+      from: message.from,
+      to: message.to,
+      raw: rawBytes,
       requestId,
-      createdAt: now,
     });
-    const allStatements = [
-      messageStatement,
-      ...recipientStatements,
-      mailboxMessageStatement,
-      ...attachmentStatements,
-      auditStatement,
-    ];
-
+    // SMTP acceptance is safe once both raw bytes and the durable receipt exist.
+    // Keep normal delivery immediate; Queue and Cron repair post-acceptance failure.
     try {
-      writtenKeys.push(rawObjectKey);
-      await objectStore.put(rawObjectKey, rawBytes);
-      for (const attachment of attachmentObjects) {
-        writtenKeys.push(attachment.key);
-        await objectStore.put(attachment.key, attachment.content);
-      }
-      await createMessageWithRelations(env.DB, allStatements);
-    } catch (error) {
-      // R2 and D1 cannot share a transaction. A failed D1 batch leaves no
-      // visible attachment rows; clean up the new opaque objects before the
-      // Email Routing retry. A failed cleanup leaves only orphaned R2 bytes.
-      await Promise.allSettled(writtenKeys.map((key) => objectStore.delete(key)));
-      throw error;
+      const deferred = await processInboundReceipt(receiptId, ctx, mime);
+      if (!deferred) return;
+      await env.OUTBOUND.send({ kind: 'inbound', version: 1, receiptId }, deferred);
+    } catch {
+      // The five-minute receipt dispatcher repairs even a lost Queue enqueue.
+      logger.warn(
+        { event: 'inbound.recovery_pending', requestId },
+        { code: 'INBOUND_RECOVERY_PENDING' },
+      );
     }
   },
 };

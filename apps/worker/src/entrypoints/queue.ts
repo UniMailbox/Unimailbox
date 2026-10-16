@@ -1,6 +1,7 @@
 // Queue entry — outbound job consumer. CAP-023 + CAP-040.
 //
-// Drains the OUTBOUND queue. For each message body `{ jobId }`, looks up the
+// Drains the mail-work queue (historical OUTBOUND binding). Versioned inbound
+// envelopes recover accepted receipts; legacy `{ jobId }` bodies look up the
 // provider adapter selected after claiming the job's assigned connection, reads +
 // decrypts the stored credential, sends via the adapter, and updates the
 // message + job status.
@@ -26,6 +27,9 @@ import { providerRegistry } from '../integrations/providers/provider-registry';
 import { buildAppContext } from '../app-context';
 import { systemIds } from '../platform/ids';
 import { getAttachmentByteStore, getAttachmentObjectStore } from '../platform/cache';
+import { inboundWorkPayloadSchema } from '@unimailbox/contracts';
+import { processInboundReceipt } from '../modules/inbound-mail';
+import { logger } from '../platform/logger';
 
 interface OutboundJobPayload {
   readonly jobId: string;
@@ -33,10 +37,9 @@ interface OutboundJobPayload {
 
 export default {
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    // ADR-007: read the encryption key per batch, not per message. Decrypted
-    // credential plaintext still lives only for one request inside
-    // processOutboundJob.
-    const encryptionKey = await readSecret(env.CREDENTIAL_ENCRYPTION_KEY);
+    // ADR-007: read once on the first outbound job; inbound work does not
+    // depend on outbound credentials. Provider plaintext stays request-scoped.
+    let encryptionKey: string | undefined;
 
     // CAP-040 / R-AUDIT-001: synthesise one correlation UUID for the whole
     // batch. processOutboundJob receives it via ProcessJobDeps.requestId and
@@ -53,10 +56,16 @@ export default {
       try {
         // The body may arrive as a string (the producer serialised JSON) or
         // already-parsed by the runtime; handle both.
-        const payload: OutboundJobPayload =
-          typeof msg.body === 'string'
-            ? (JSON.parse(msg.body) as OutboundJobPayload)
-            : (msg.body as OutboundJobPayload);
+        const body: unknown = typeof msg.body === 'string' ? JSON.parse(msg.body) : msg.body;
+        if (body && typeof body === 'object' && 'kind' in body) {
+          const payload = inboundWorkPayloadSchema.parse(body);
+          const deferred = await processInboundReceipt(payload.receiptId, ctx);
+          if (deferred) msg.retry(deferred);
+          else msg.ack();
+          continue;
+        }
+        const payload = body as OutboundJobPayload;
+        encryptionKey ??= await readSecret(env.CREDENTIAL_ENCRYPTION_KEY);
 
         const deferred = await processOutboundJob(payload.jobId, {
           db: env.DB,
@@ -69,15 +78,13 @@ export default {
         });
         if (deferred) msg.retry({ delaySeconds: deferred.delaySeconds });
         else msg.ack();
-      } catch (error) {
-        // processOutboundJob has already recorded the failure on the job row.
-        // Retry lets Cloudflare apply backoff up to the queue's max retries.
-        // CAP-040 / D-CAP-029-B: the logger surface takes the error message
-        // only — no `error.cause` traversal, no body bytes, no provider
-        // payload, no Idempotency-Key value (R-LOG-001).
-        console.error('Queue processing failed', {
-          error: error instanceof Error ? error.message : String(error),
-        });
+      } catch {
+        // Retry transport/validation/persistence failures without leaking an
+        // SDK error, malformed Queue body or its nested cause (R-LOG-001).
+        logger.error(
+          { event: 'queue.processing_failed', requestId },
+          { code: 'QUEUE_PROCESSING_FAILED' },
+        );
         msg.retry();
       }
     }

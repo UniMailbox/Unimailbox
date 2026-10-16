@@ -45,6 +45,7 @@ export {
   type FetchHandler,
 } from './stubs';
 export { migrationsDb } from './migrationsDb';
+export { seedInboundMailbox, INBOUND_RAW_FIXTURE } from './inbound';
 export {
   FIXED_TIMESTAMP,
   resetAndMigrate,

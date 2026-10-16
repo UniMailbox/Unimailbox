@@ -10,6 +10,7 @@ import { sweepOrphanedInboundObjects } from '../modules/messages';
 import { expireEditorAssets, sweepOrphanedEditorAssets } from '../modules/editor-assets';
 import { expireIdentityRecords, sweepPersonalAvatars } from '../modules/identity';
 import { logger } from '../platform/logger';
+import { recoverInboundReceipts, expireCompletedInboundReceipts } from '../modules/inbound-mail';
 
 import { runMaintenanceTasks } from '../platform/maintenance';
 
@@ -25,6 +26,10 @@ export default {
           name: 'outbound.reclaim',
           run: () => reclaimStaleJobs(env.DB, new Date(), env.OUTBOUND, requestId),
         },
+        {
+          name: 'inbound.recover',
+          run: () => recoverInboundReceipts({ db: env.DB, queue: env.OUTBOUND }),
+        },
       ]),
     ];
     const due = new Date(controller.scheduledTime);
@@ -34,6 +39,10 @@ export default {
           env,
           requestId,
           [
+            {
+              name: 'inbound.receipts.expire',
+              run: () => expireCompletedInboundReceipts(env.DB, new Date()),
+            },
             {
               name: 'attachments.expire',
               run: async () => {

@@ -9,10 +9,17 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
-import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
+import {
+  resetAndMigrate,
+  seedInstallationState,
+  seedInboundMailbox,
+  INBOUND_RAW_FIXTURE,
+} from '@unimailbox/test-kit';
 import scheduled from './scheduled';
 import { maintenanceHealth } from '../platform/health';
 import { OUTBOX_LEASE_TTL_MS } from '../platform/outbox-config';
+import { buildAppContext } from '../app-context';
+import { acceptInboundReceipt, processInboundReceipt } from '../modules/inbound-mail';
 
 /** SQLite datetime literal offset from the real clock by `offsetMs`. */
 function at(offsetMs: number): string {
@@ -103,6 +110,29 @@ describe('scheduled entrypoint (AC7 — reclaim wiring)', () => {
   beforeEach(async () => {
     await resetAndMigrate();
     await seedInstallationState({ status: 'complete', currentStep: 'complete' });
+  });
+
+  it('R-INBOUND-013 dispatches stalled accepted mail and keeps maintenance unhealthy until recovery completes', async () => {
+    const { mailboxId } = await seedInboundMailbox();
+    const ctx = buildAppContext(env);
+    const id = await acceptInboundReceipt(ctx, {
+      mailboxId,
+      from: 'sender@example.net',
+      to: 'inbox@example.test',
+      raw: new TextEncoder().encode(INBOUND_RAW_FIXTURE).buffer,
+      requestId: crypto.randomUUID(),
+    });
+    await env.DB.prepare(
+      "UPDATE inbound_receipts SET created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-16 minutes') WHERE id=?",
+    )
+      .bind(id)
+      .run();
+    const send = vi.spyOn(env.OUTBOUND, 'send').mockResolvedValue(undefined);
+    await scheduled.scheduled(controller(), env);
+    expect(send).toHaveBeenCalledWith({ kind: 'inbound', version: 1, receiptId: id });
+    expect(await maintenanceHealth(env)).toBe(false);
+    await processInboundReceipt(id, ctx);
+    expect(await maintenanceHealth(env)).toBe(true);
   });
 
   it('reclaims an expired lease through the cron handler, with no attempts++, and re-enqueues it on the OUTBOUND queue (H2)', async () => {
