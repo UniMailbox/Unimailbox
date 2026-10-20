@@ -441,6 +441,7 @@ export function createAiGovernance(db: Database, audit: AuditEventWriter, now = 
         input.actorUserId,
         operation,
         input.idempotencyKey,
+        now(),
       );
       if (!row) return null;
       assertSameRequestHash(row, input.requestHash);
@@ -523,6 +524,7 @@ export function createAiGovernance(db: Database, audit: AuditEventWriter, now = 
         input.actorUserId,
         operation,
         input.idempotencyKey,
+        now(),
       );
       if (!row) return null;
       assertSameRequestHash(row, input.requestHash);

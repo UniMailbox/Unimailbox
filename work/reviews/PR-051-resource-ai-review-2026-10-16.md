@@ -74,3 +74,19 @@ PR #51 includes separate AI and cache repair commits. Staging published
 companions, exact-source smoke, preserved configuration, authenticated metadata
 and a real scheduled tick passing. See [dated QA](../../docs/qa/ai-governance-staging-2026-10-16.md).
 No live paid inference, email, browser or full disaster-recovery acceptance.
+
+## 2026-10-20 release follow-up
+
+The 1.0.2 version commit exposed a deterministic clock mismatch in both GitHub
+Verify runs: governance created replay records using its injected clock, while
+the shared lookup compared expiry to the database wall clock. A replay fixture
+dated October 16 was expired when executed on October 20, so manual reconciliation
+incorrectly missed its stored response and reached the completed-attempt guard.
+
+The shared lookup now accepts an optional clock instant and retains database
+time by default. Both governance mutations supply their existing injected clock
+for reads as well as writes. Local D1 coverage verifies policy and reconciliation
+replay just before 24 hours, expiry at the boundary, request-hash conflicts and
+protection against settling an attempt twice. The focused suite passes all 27
+cases; lint and TypeScript pass. No timeout, expiry period or test was skipped.
+Final release gates and installation evidence belong to the dated release QA.

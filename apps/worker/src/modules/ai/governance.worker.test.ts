@@ -195,10 +195,34 @@ describe('CAP-072 AI governance R-API-004 R-AUDIT-001', () => {
     };
     const first = await governance().reconcile(input);
     expect(await governance().reconcile(input)).toBe(first);
+    at = new Date('2026-10-16T23:59:59Z');
+    expect(await governance().reconcile(input)).toBe(first);
+    at = new Date('2026-10-17T00:00:00Z');
+    await expect(governance().reconcile(input)).rejects.toMatchObject({
+      code: 'IDEMPOTENCY_CONFLICT',
+    });
     await expect(
       governance().reconcile({ ...input, idempotencyKey: crypto.randomUUID() }),
     ).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
     expect((await governance().usage(actor)).summary.chargedTokens).toBe(7);
+  });
+  it('uses the governance clock for policy replay and expires it exactly after 24 hours', async () => {
+    const input = {
+      ...invocation(),
+      policy: { ...DEFAULT_AI_GOVERNANCE_POLICY, monthlyTokens: 1000 },
+      expectedRevision: 0,
+    };
+    const first = await governance().updatePolicy(input);
+    at = new Date('2026-10-16T23:59:59Z');
+    expect(await governance().updatePolicy(input)).toBe(first);
+    await expect(
+      governance().updatePolicy({ ...input, requestHash: 'b'.repeat(64) }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+    at = new Date('2026-10-17T00:00:00Z');
+    await expect(governance().updatePolicy(input)).rejects.toMatchObject({
+      code: 'STALE_IF_MATCH',
+    });
+    expect((await governance().policy()).revision).toBe(1);
   });
 });
 
