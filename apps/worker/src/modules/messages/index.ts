@@ -121,3 +121,26 @@ export {
   prepareScheduledMessageSentFolder,
 } from './scheduled-message';
 export { generateAiReply } from './ai-reply';
+
+export {
+  findInboundReceipt,
+  findInboundReceiptByKey,
+  reserveInboundReceipt,
+  claimInboundReceipt,
+  prepareCompleteInboundReceipt,
+  retryInboundReceipt,
+  claimRecoverableInboundReceipts,
+  expireCompletedInboundReceipts,
+  INBOUND_DEDUP_WINDOW_MS,
+  INBOUND_LEASE_MS,
+} from './inbound-receipt-repository';
+export type { InboundReceipt } from './inbound-receipt-repository';
+
+export { createDraft, readDraft, updateDraft } from './draft-use-cases';
+export { markRead, toggleStar, softDeleteMessage } from './change-message-state';
+export {
+  prepareAuthoredMessage,
+  prepareAuthoredMailboxMessage,
+  prepareDraftSentFolder,
+  resolveAuthorizedMessageMailbox,
+} from './authored-message-repository';

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AiInvocationContext, AiUsageEvidence } from './ai-governance';
 
 export const aiProtocolSchema = z.enum(['workers-ai', 'anthropic', 'openai']);
 export type AiProtocol = z.infer<typeof aiProtocolSchema>;
@@ -108,12 +109,13 @@ export interface AiAdapter<Signal> {
     apiKey: string | null,
     request: AiGenerateRequest,
     signal: Signal,
+    observeUsage?: (evidence: AiUsageEvidence) => Promise<void>,
   ): Promise<AiGenerateResult>;
 }
 export interface AiService<Signal> {
   generate(
     request: AiGenerateRequest,
-    options?: { readonly signal?: Signal },
+    options?: { readonly signal?: Signal; readonly invocation?: AiInvocationContext },
   ): Promise<AiGenerateResult>;
 }
 

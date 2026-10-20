@@ -1,3 +1,4 @@
+import type { AuthenticatedPrincipal } from './authenticated-principal';
 // Runtime resource types come from Wrangler; application and migration-only extensions live here.
 export type AuthProviderName = 'legacy' | 'dual' | 'better-auth';
 
@@ -25,6 +26,10 @@ export type Env = Omit<
   RELEASE_TREE?: string;
   /** Set to "false" to disable anonymous GitHub release checks. */
   UPDATE_CHECK_ENABLED?: string;
+  /** Optional installation-scoped analytics resource map; contains no credentials. */
+  CLOUDFLARE_ANALYTICS_CONFIG?: string;
+  /** Dedicated read-only analytics token, never the deployment credential. */
+  CLOUDFLARE_ANALYTICS_TOKEN?: SecretsStoreSecret | string;
   APP_ORIGIN?: string;
   /** Domain-scoped fallback for unknown inbound envelope recipients. */
   INBOUND_CATCH_ALL_MAILBOX?: string;
@@ -61,6 +66,7 @@ export type AppEnv = {
     requestId?: string;
     userId?: string;
     sessionId?: string;
+    principal?: AuthenticatedPrincipal;
     mustChangePassword?: boolean;
     /** Idempotency-Key header (CAP-027 / ADR-004). Set by
      *  http/middleware/idempotency.ts after format validation. */

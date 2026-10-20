@@ -28,6 +28,7 @@ export {
   createSession,
   findSessionByRefreshHash,
   findActiveSessionById,
+  findAuthenticatedPrincipal,
   revokeSession,
   revokeUserSessions,
   revokeAllUserSessions,

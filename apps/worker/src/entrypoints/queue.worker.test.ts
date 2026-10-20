@@ -25,7 +25,11 @@ import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
 import { importEncryptionKey, encrypt } from '../platform/crypto';
 import { processOutboundJob } from '../modules/outbound-mail';
 import { updateJobStatus } from '../modules/outbound-mail/job-repository';
-import { parseProviderKey, type OutboundProviderAdapter } from '@unimailbox/contracts';
+import {
+  parseProviderKey,
+  RetryableProviderError,
+  type OutboundProviderAdapter,
+} from '@unimailbox/contracts';
 import queueHandler from './queue';
 import { providerRegistry } from '../integrations/providers/provider-registry';
 
@@ -160,7 +164,7 @@ describe('processOutboundJob', () => {
     const { jobId, messageId } = await seedJob();
 
     const adapter = makeMockAdapter(async () => {
-      throw new Error('Brevo 503');
+      throw new RetryableProviderError({ message: 'Brevo 429', httpStatus: 429 });
     });
 
     // The use case rethrows so the queue consumer can retry. Use try/catch
@@ -173,7 +177,7 @@ describe('processOutboundJob', () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toBe('Brevo 503');
+    expect((caught as Error).message).toBe('Brevo 429');
 
     // Job recorded the failure.
     const job = await env.DB.prepare(
@@ -189,7 +193,7 @@ describe('processOutboundJob', () => {
     // CAP-028: a first failure on a fresh attempts budget is retryable — the
     // row goes back to 'queued' (attempts 0 + 1 = 1 < max 3), not 'failed'.
     expect(job?.status).toBe('queued');
-    expect(job?.error_message).toBe('Brevo 503');
+    expect(job?.error_message).toBe('Confirmed unsent work deferred');
     expect(job?.attempts).toBe(1);
 
     // The message stays 'queued' — only the queue consumer advancing the job

@@ -21,7 +21,7 @@
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { env } from 'cloudflare:test';
-import { resetAndMigrate, seedInstallationState } from '@unimailbox/test-kit';
+import { resetAndMigrate, seedInstallationState, fakeClock } from '@unimailbox/test-kit';
 import { importEncryptionKey, encrypt } from '../../platform/crypto';
 import { DomainError } from '../../platform/errors';
 import { OUTBOX_LEASE_TTL_MS } from '../../platform/outbox-config';
@@ -374,47 +374,20 @@ describe('processOutboundJob (AC2 — claim-first, R-OUTBOUND-007/009)', () => {
     expect((await fetchJob(jobId))?.status).toBe('sent');
   });
 
-  it('leaves the row alone when the lock is stolen mid-send (stale worker no-op, R-OUTBOUND-007)', async () => {
+  it('repairs accepted evidence after a legacy reclaim resets the job, without resending', async () => {
     const { jobId } = await seedJob();
-    // Simulate a reclaim firing while this worker is inside adapter.send: the
-    // send hook steals the row back to 'queued' before the success write runs.
     const adapter = makeMockAdapter(async () => {
       await env.DB.prepare(
-        `UPDATE outbound_jobs
-              SET status = 'queued', locked_at = NULL, locked_by = NULL
-            WHERE id = ?`,
+        "UPDATE outbound_jobs SET status='queued',locked_at=NULL,locked_by=NULL WHERE id=?",
       )
         .bind(jobId)
         .run();
       return { providerMessageId: 'brevo-raced', acceptedAt: new Date().toISOString() };
     });
-
-    // Must not throw — the divergence is resolved by whoever stole the lock.
-    // H3: the swallow is surfaced as a warn carrying the job ID only
-    // (R-LOG-001 — no bodies, no provider payload). The setup file's console
-    // spy lives in the node context; re-spy here so mock.calls is inspectable
-    // inside workerd.
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await processOutboundJob(jobId, {
-      db: env.DB,
-      encryptionKey: ENCRYPTION_KEY,
-      adapter,
-      lockedBy: 'worker-a',
-    });
-
-    const warnCalls = warnSpy.mock.calls;
-    warnSpy.mockRestore();
-    const divergence = warnCalls.filter((args) =>
-      String(args[0]).includes('outbound.job_sent_divergence'),
-    );
-    expect(divergence).toHaveLength(1);
-    const line = JSON.parse(String(divergence[0]?.[0])) as Record<string, unknown>;
-    expect(line.jobId).toBe(jobId);
-    expect(String(line.reason)).not.toMatch(/<p>|body|html/i);
-
-    const job = await fetchJob(jobId);
-    expect(job?.status).toBe('queued'); // stale success write was a no-op
-    expect(job?.locked_by).toBeNull();
+    await processOutboundJob(jobId, { db: env.DB, encryptionKey: ENCRYPTION_KEY, adapter });
+    await processOutboundJob(jobId, { db: env.DB, encryptionKey: ENCRYPTION_KEY, adapter });
+    expect(adapter.sendCalls.count).toBe(1);
+    expect((await fetchJob(jobId))?.status).toBe('sent');
   });
 });
 
@@ -427,7 +400,7 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
   it('re-queues with attempts+1 and rethrows on a retryable error (attempts budget remains)', async () => {
     const { jobId } = await seedJob({ attempts: 0 });
     const adapter = makeMockAdapter(async () => {
-      throw new Error('Brevo 503');
+      throw new RetryableProviderError({ message: 'Brevo 429', httpStatus: 429 });
     });
 
     let caught: unknown;
@@ -443,12 +416,12 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
     }
 
     expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toBe('Brevo 503'); // rethrown for the queue retry
+    expect((caught as Error).message).toBe('Brevo 429'); // rethrown for the queue retry
 
     const job = await fetchJob(jobId);
     expect(job?.status).toBe('queued');
     expect(job?.attempts).toBe(1);
-    expect(job?.error_message).toBe('Brevo 503');
+    expect(job?.error_message).toMatch(/deferred|exhausted/);
     expect(job?.locked_by).toBeNull(); // lock released for the next claim
   });
 
@@ -456,7 +429,7 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
     const { jobId } = await seedJob({ attempts: 2 });
     // attempts=2, max_attempts=3 → this failure is the last permitted attempt.
     const adapter = makeMockAdapter(async () => {
-      throw new Error('Brevo 503 final');
+      throw new RetryableProviderError({ message: 'Brevo 429 final', httpStatus: 429 });
     });
 
     // No try/catch: a terminal failure must resolve (job acked, not retried).
@@ -469,7 +442,7 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
 
     const job = await fetchJob(jobId);
     expect(job?.status).toBe('failed');
-    expect(job?.error_message).toBe('Brevo 503 final');
+    expect(job?.error_message).toMatch(/exhausted/);
     expect(job?.locked_by).toBeNull();
   });
 
@@ -561,7 +534,7 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
   // DNS resolution fails AFTER the typed-error paths) must still take the
   // existing `SEND_FAILED` fallback — retries up to the budget, then
   // terminal. This is the "unknown error" branch in the steps-3–9 catch.
-  it('B6b: an untyped SDK error (raw Error) routes through the SEND_FAILED fallback path', async () => {
+  it('R-OUTBOUND-013: an untyped post-submit error holds unknown work without retrying', async () => {
     const { jobId } = await seedJob({ attempts: 0, maxAttempts: 2 });
     const adapter = makeMockAdapter(async () => {
       // A bare Error — NOT a RetryableProviderError, NOT a TerminalProviderError.
@@ -580,18 +553,16 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
     } catch (e) {
       caught = e;
     }
-    // Fallback is retryable: the consumer rethrows so the queue can retry.
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toMatch(/ECONNRESET/);
-
+    expect(caught).toBeUndefined();
     const job = await fetchJob(jobId);
-    expect(job?.status).toBe('queued');
-    expect(job?.attempts).toBe(1);
-    // SEND_FAILED is the closed-catalog code for non-typed failures.
-    expect(job?.error_code).toBe('SEND_FAILED');
+    expect(job?.status).toBe('sending');
+    expect(job?.attempts).toBe(0);
+    expect(job?.error_code).toBe('SEND_OUTCOME_UNKNOWN');
+    await processOutboundJob(jobId, { db: env.DB, encryptionKey: ENCRYPTION_KEY, adapter });
+    expect(adapter.sendCalls.count).toBe(1);
   });
 
-  it('B6c: an untyped SDK error on the last attempt goes terminal with SEND_FAILED', async () => {
+  it('R-OUTBOUND-013: unknown outcome is not turned into a false terminal failure at the attempts limit', async () => {
     const { jobId } = await seedJob({ attempts: 1, maxAttempts: 2 });
     const adapter = makeMockAdapter(async () => {
       throw new Error('parse failed: missing closing brace');
@@ -605,9 +576,9 @@ describe('processOutboundJob failure split (AC4/AC5 — R-OUTBOUND-008)', () => 
     });
 
     const job = await fetchJob(jobId);
-    expect(job?.status).toBe('failed');
+    expect(job?.status).toBe('sending');
     expect(job?.attempts).toBe(1); // terminal path does not increment
-    expect(job?.error_code).toBe('SEND_FAILED');
+    expect(job?.error_code).toBe('SEND_OUTCOME_UNKNOWN');
   });
 
   it('throws when the job does not exist', async () => {
@@ -765,207 +736,80 @@ describe('processOutboundJob sequential attempts exhaustion (M4b — R-OUTBOUND-
   it('drives retryable failures 0→1→2→3: the third failure routes terminal', async () => {
     const { jobId } = await seedJob({ attempts: 0 });
     const adapter = makeMockAdapter(async () => {
-      throw new Error('Brevo 503');
+      throw new RetryableProviderError({ message: 'Brevo 429', httpStatus: 429 });
     });
 
+    const clock = fakeClock(new Date());
     // Attempt 1: 0 → 1, rethrown, row queued.
     await expect(
       processOutboundJob(jobId, {
         db: env.DB,
         encryptionKey: ENCRYPTION_KEY,
+        clock,
         adapter,
         lockedBy: 'worker-a',
       }),
-    ).rejects.toThrow('Brevo 503');
+    ).rejects.toThrow('Brevo 429');
     let job = await fetchJob(jobId);
     expect(job?.status).toBe('queued');
     expect(job?.attempts).toBe(1);
 
+    clock.advance(30_000);
     // Attempt 2: 1 → 2, rethrown, row queued.
     await expect(
       processOutboundJob(jobId, {
         db: env.DB,
         encryptionKey: ENCRYPTION_KEY,
+        clock,
         adapter,
         lockedBy: 'worker-b',
       }),
-    ).rejects.toThrow('Brevo 503');
+    ).rejects.toThrow('Brevo 429');
     job = await fetchJob(jobId);
     expect(job?.status).toBe('queued');
     expect(job?.attempts).toBe(2);
 
+    clock.advance(60_000);
     // Attempt 3: 2 → 3 = max_attempts → terminal, resolved (no rethrow).
     await processOutboundJob(jobId, {
       db: env.DB,
       encryptionKey: ENCRYPTION_KEY,
+      clock,
       adapter,
       lockedBy: 'worker-c',
     });
     job = await fetchJob(jobId);
     expect(job?.status).toBe('failed');
-    expect(job?.error_message).toBe('Brevo 503');
+    expect(job?.error_message).toMatch(/deferred|exhausted/);
     expect(job?.attempts).toBe(2); // terminal write keeps the last count
     expect(job?.locked_by).toBeNull();
   });
 });
 
-describe('processOutboundJob post-send write failure (CAP-028 F2 — R-OUTBOUND-007/008/009)', () => {
-  beforeEach(async () => {
-    await resetAndMigrate();
-    await seedInstallationState({ status: 'complete', currentStep: 'complete' });
-  });
-
-  it('leaves the row sending with the lease held, attempts unchanged, and recoverable by reclaim when the post-success messages UPDATE fails', async () => {
-    // attempts=1 so "unchanged" is distinguishable from a fresh 0-seed write.
-    const { jobId } = await seedJob({ attempts: 1 });
+describe('R-OUTBOUND-014 post-acceptance finalization repair', () => {
+  beforeEach(resetAndMigrate);
+  it('keeps accepted evidence after a real D1 message failure and repairs without provider replay', async () => {
+    const { jobId } = await seedJob();
     const adapter = makeMockAdapter(async () => ({
-      providerMessageId: 'brevo-sent-once',
+      providerMessageId: 'accepted-before-write',
       acceptedAt: new Date().toISOString(),
     }));
-
-    // CAP-029 M3 review-triage + CAP-030 direction guard: the precise SQL of the
-    // post-send `updateMessageStatus` statement. Matched as a full string
-    // (whitespace-normalised) so a future change that adds `provider_event_time`
-    // to another statement cannot silently re-route that statement through the
-    // failing proxy. The CAP-030 direction clause
-    // `AND status IN (SELECT value FROM json_each(?))` now sits alongside the
-    // CAP-029 rank CASE in the WHERE — both must be present for the proxy to
-    // match. Update this constant when `updateMessageStatus` is refactored.
-    const UPDATE_MESSAGE_STATUS_SQL = `UPDATE messages
-          SET status = ?,
-              provider_event_time = CASE WHEN ? = 1 THEN provider_event_time ELSE ? END,
-              sent_at = COALESCE(?, sent_at),
-              updated_at = ?
-        WHERE id = ?
-          AND status IN (SELECT value FROM json_each(?))
-          AND (
-            (? = 1 AND provider_event_time IS NULL)
-            OR (
-              ? = 0
-              AND (
-                provider_event_time IS NULL
-                OR provider_event_time < ?
-                OR (
-                  provider_event_time = ?
-                  AND CASE status
-                    WHEN 'failed' THEN 100
-                    WHEN 'bounced' THEN 100
-                    WHEN 'complained' THEN 100
-                    WHEN 'delivered' THEN 80
-                    WHEN 'delayed' THEN 60
-                    WHEN 'queued' THEN 40
-                    WHEN 'sending' THEN 30
-                    WHEN 'sent' THEN 20
-                    WHEN 'draft' THEN 10
-                    ELSE -1
-                  END < ?
-                )
-              )
-            )
-          )`;
-
-    function normalizeSql(s: string): string {
-      return s.replace(/\s+/g, ' ').trim();
-    }
-
-    // Same delegating-Proxy seam as the message-vanished test: every call
-    // forwards to real D1 except the ONE post-send `updateMessageStatus`
-    // statement (CAP-029 D-CAP-028-D — the only `messages` row writer for
-    // status transitions outside inbound-mail). We detect it by exact
-    // SQL match (whitespace-normalised) so a future change that adds
-    // `provider_event_time` to another statement cannot silently re-route
-    // that statement through the failing proxy. The pre-send reads and
-    // the claim still hit the real binding.
-    const realDb = env.DB;
-    const wrapStmt = (stmt: unknown): unknown =>
-      new Proxy(stmt, {
-        get(s, prop, receiver) {
-          if (prop === 'bind') {
-            return (...args: unknown[]) =>
-              wrapStmt((Reflect.get(s, 'bind', s) as (...a: unknown[]) => unknown).apply(s, args));
-          }
-          if (prop === 'run') {
-            return async (): Promise<never> => {
-              throw new Error('simulated D1 failure in messages UPDATE');
-            };
-          }
-          const value = Reflect.get(s, prop, receiver);
-          return typeof value === 'function'
-            ? (value as (...a: unknown[]) => unknown).bind(s)
-            : value;
-        },
-      });
-    const failingDb = new Proxy(realDb, {
-      get(target, prop, receiver) {
-        if (prop !== 'prepare') return Reflect.get(target, prop, receiver);
-        return (query: string) => {
-          const stmt = target.prepare(query);
-          // CAP-029 M3 review-triage: full-statement identity match
-          // (whitespace-normalised) rather than the previous substring
-          // `provider_event_time = ?` which silently tripped any future
-          // statement that referenced the column.
-          if (normalizeSql(query) === normalizeSql(UPDATE_MESSAGE_STATUS_SQL)) {
-            return wrapStmt(stmt);
-          }
-          return stmt;
-        };
-      },
-    });
-
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    let caught: unknown;
-    try {
-      await processOutboundJob(jobId, {
-        db: failingDb as unknown as typeof env.DB,
-        encryptionKey: ENCRYPTION_KEY,
-        adapter,
-        lockedBy: 'worker-a',
-      });
-    } catch (e) {
-      caught = e;
-    }
-    // Capture calls before restore — mockRestore clears them (same pattern as
-    // the H3 divergence-warn test).
-    const errorCalls = errorSpy.mock.calls;
-    errorSpy.mockRestore();
-
-    // Rethrown raw — NOT routed through the attempts logic (that is the F2
-    // fix: a successful send must not burn an attempt or go terminal).
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toBe('simulated D1 failure in messages UPDATE');
-    expect(adapter.sendCalls.count).toBe(1); // the send itself succeeded
-
-    const postSendErrors = errorCalls.filter((args) =>
-      String(args[0]).includes('outbound.job_post_send_write_failed'),
+    await env.DB.exec(
+      "CREATE TRIGGER fail_finalize BEFORE UPDATE ON messages BEGIN SELECT RAISE(ABORT,'fixture finalization'); END;",
     );
-    expect(postSendErrors).toHaveLength(1);
-    const line = JSON.parse(String(postSendErrors[0]?.[0])) as Record<string, unknown>;
-    // R-LOG-001: job ID only — no bodies, no provider payload.
-    expect(line.jobId).toBe(jobId);
-
-    // The row keeps its lease and its attempts count: recoverable by the
-    // lease-expiry + reclaim path, not by queue retry.
-    const job = await fetchJob(jobId);
-    expect(job?.status).toBe('sending');
-    expect(job?.attempts).toBe(1); // F2: no attempts++ on a successful send
-    expect(job?.error_code).toBeNull(); // no terminal/retryable write happened
-    expect(job?.locked_by).toBe('worker-a'); // lease held
-    expect(job?.locked_at).not.toBeNull();
-
-    // Recovery: once the lease expires, the cron reclaim pulls the row back
-    // to queued. leaseCutoff(now) = now − OUTBOX_LEASE_TTL_MS, so pass a
-    // `now` a full TTL past the lease — no real time has to pass.
-    const leaseUntil = new Date(String(job?.locked_at).replace(' ', 'T') + 'Z').getTime();
-    const reclaimed = await reclaimStaleJobs(
-      env.DB,
-      new Date(leaseUntil + OUTBOX_LEASE_TTL_MS + 60_000),
-      { send: async () => {} },
-    );
-    expect(reclaimed.reclaimed).toBe(1);
-    const recovered = await fetchJob(jobId);
-    expect(recovered?.status).toBe('queued');
-    expect(recovered?.attempts).toBe(1); // reclaim never increments (R-OUTBOUND-007)
-    expect(recovered?.locked_by).toBeNull();
+    await expect(
+      processOutboundJob(jobId, { db: env.DB, encryptionKey: ENCRYPTION_KEY, adapter }),
+    ).rejects.toThrow();
+    expect((await fetchJob(jobId))?.status).toBe('sending');
+    expect(
+      await env.DB.prepare('SELECT status FROM outbound_send_attempts WHERE job_id=?')
+        .bind(jobId)
+        .first(),
+    ).toMatchObject({ status: 'accepted' });
+    await env.DB.exec('DROP TRIGGER fail_finalize;');
+    await processOutboundJob(jobId, { db: env.DB, encryptionKey: ENCRYPTION_KEY, adapter });
+    expect(adapter.sendCalls.count).toBe(1);
+    expect((await fetchJob(jobId))?.status).toBe('sent');
   });
 });
 

@@ -11,7 +11,11 @@
 // runs under the unit vitest project.
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { RetryableProviderError, TerminalProviderError } from '@unimailbox/contracts';
+import {
+  RetryableProviderError,
+  TerminalProviderError,
+  UnknownProviderOutcomeError,
+} from '@unimailbox/contracts';
 import { brevoAdapter } from './brevo';
 
 function makeJsonResponse(status: number, body: unknown): Response {
@@ -72,14 +76,10 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
     expect(err.message).not.toContain('recipient=alice');
     expect(err.message).not.toContain(SECRET_LOOKING_BODY);
     // It must still surface the status code for operator triage.
-    expect(err.message).toMatch(/Brevo send failed/);
+    expect(err.message).toMatch(/Brevo rejected submission/);
     expect(err.message).toMatch(/401/);
 
-    // The body must be preserved on the cause chain so an operator can
-    // inspect it without it leaking into the standard log stream.
-    expect(err.cause).toBeInstanceOf(Error);
-    expect((err.cause as Error).message).toContain('xkeysib-');
-    expect((err.cause as Error).message).toContain('recipient=alice');
+    expect(err.cause).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -112,13 +112,10 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
     expect(caught).toBeInstanceOf(RetryableProviderError);
     const err = caught as RetryableProviderError;
     expect(err.httpStatus).toBe(429);
-    // Body is attached as cause, not in the message.
-    expect(err.message).not.toContain('rate limit');
-    expect(err.cause).toBeInstanceOf(Error);
-    expect((err.cause as Error).message).toContain('rate limit');
+    expect(err.cause).toBeUndefined();
   });
 
-  it('5xx routes through RetryableProviderError with body attached as cause', async () => {
+  it('5xx routes through UnknownProviderOutcomeError with an unknown submission outcome', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeTextResponse(503, 'upstream overloaded'));
 
     let caught: unknown;
@@ -142,11 +139,11 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
       caught = e;
     }
 
-    expect(caught).toBeInstanceOf(RetryableProviderError);
-    expect((caught as RetryableProviderError).httpStatus).toBe(503);
+    expect(caught).toBeInstanceOf(UnknownProviderOutcomeError);
+    expect((caught as UnknownProviderOutcomeError).httpStatus).toBe(503);
   });
 
-  it('400 (other 4xx) routes through TerminalProviderError with body attached as cause', async () => {
+  it('400 rejects without retaining provider bodies', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       makeTextResponse(400, 'invalid recipient address format'),
     );
@@ -174,11 +171,7 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
 
     expect(caught).toBeInstanceOf(TerminalProviderError);
     expect((caught as TerminalProviderError).httpStatus).toBe(400);
-    // Body preserved as cause for operator triage.
-    expect((caught as TerminalProviderError).cause).toBeInstanceOf(Error);
-    expect(((caught as TerminalProviderError).cause as Error).message).toContain(
-      'invalid recipient address format',
-    );
+    expect((caught as TerminalProviderError).cause).toBeUndefined();
   });
 
   it('empty body does not attach a cause (no spurious "provider body: " line)', async () => {
@@ -209,7 +202,7 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
     expect((caught as TerminalProviderError).cause).toBeUndefined();
   });
 
-  it('network failure (fetch rejection) routes through RetryableProviderError with cause', async () => {
+  it('network failure (fetch rejection) routes through UnknownProviderOutcomeError without replay permission', async () => {
     const networkError = new Error('socket hang up');
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(networkError);
 
@@ -234,9 +227,9 @@ describe('brevoAdapter.send — error translation (CAP-029 D-CAP-028-A + H2 revi
       caught = e;
     }
 
-    expect(caught).toBeInstanceOf(RetryableProviderError);
+    expect(caught).toBeInstanceOf(UnknownProviderOutcomeError);
     // The cause is the original network error — preserves the chain.
-    expect((caught as RetryableProviderError).cause).toBe(networkError);
+    expect((caught as UnknownProviderOutcomeError).cause).toBeUndefined();
   });
 });
 
@@ -300,7 +293,7 @@ describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', ()
 
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const body = parseBrevoSendBody(init);
-    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-uuid-1');
+    expect(body.headers?.['idempotencyKey']).toBe('canonical-msg-id-uuid-1');
 
     // R-OUTBOUND-004: Idempotency-Key is in the JSON body, NOT in fetch HTTP headers.
     const requestHeaders = (init?.headers ?? {}) as Record<string, string>;
@@ -347,7 +340,7 @@ describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', ()
 
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const body = parseBrevoSendBody(init);
-    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-no-message-id');
+    expect(body.headers?.['idempotencyKey']).toBe('canonical-msg-id-no-message-id');
     // No Message-ID header in the JSON body when messageId is absent.
     expect(body.headers?.['Message-ID']).toBeUndefined();
   });
@@ -375,7 +368,7 @@ describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', ()
 
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const body = parseBrevoSendBody(init);
-    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-with-headers');
+    expect(body.headers?.['idempotencyKey']).toBe('canonical-msg-id-with-headers');
     expect(body.headers?.['Message-ID']).toBe('<m1@example.com>');
     expect(body.headers?.['In-Reply-To']).toBe('<m0@example.com>');
     expect(body.headers?.['References']).toBe('<m0@example.com>');
@@ -404,7 +397,7 @@ describe('brevoAdapter.send — payload wire shape (CAP-054 R-OUTBOUND-004)', ()
     const body = parseBrevoSendBody(init);
     expect(body.to?.[0]?.email).toBe('to@example.com');
     expect(body.cc?.[0]?.email).toBe('cc@example.com');
-    expect(body.headers?.['Idempotency-Key']).toBe('canonical-msg-id-cc');
+    expect(body.headers?.['idempotencyKey']).toBe('canonical-msg-id-cc');
   });
 });
 

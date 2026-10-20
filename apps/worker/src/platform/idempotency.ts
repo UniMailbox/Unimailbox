@@ -125,12 +125,14 @@ export async function sha256Hex(input: string): Promise<string> {
  * Expiry is enforced at read time so a future purge cron can simply
  * delete rows without the handler's knowledge. Reads after expiry
  * always miss — the client should send a fresh key.
+ * Callers with an injected clock must use that same clock for lookup and creation.
  */
 export async function findIdempotencyRecord(
   db: Database,
   actorId: string,
   operation: string,
   idempotencyKey: string,
+  now?: Date,
 ): Promise<IdempotencyRecord | null> {
   const row = await db
     .prepare(
@@ -138,10 +140,10 @@ export async function findIdempotencyRecord(
               response_status, response_json, created_at, expires_at
        FROM idempotency_records
        WHERE actor_id = ? AND operation = ? AND idempotency_key = ?
-         AND expires_at > datetime('now')
+         AND expires_at > datetime(?)
        LIMIT 1`,
     )
-    .bind(actorId, operation, idempotencyKey)
+    .bind(actorId, operation, idempotencyKey, now ? sqliteTimestamp(now) : 'now')
     .first<{
       actor_id: string;
       operation: string;

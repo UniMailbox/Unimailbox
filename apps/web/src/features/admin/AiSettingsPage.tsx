@@ -3,6 +3,7 @@ import { ContentSkeleton } from '../../components/ui/ContentSkeleton';
 import { authSessionQuery } from '../auth/auth-queries';
 import { Unauthorized } from '../auth/Unauthorized';
 import { McpServiceCard } from './McpServiceCard';
+import { AiGovernancePanel } from './AiGovernancePanel';
 import { AiConfigurationPanel } from './AiConfigurationPanel';
 
 export function AiSettingsPage(): ReactElement {
@@ -12,6 +13,7 @@ export function AiSettingsPage(): ReactElement {
   return (
     <main className="admin-page admin-ai-page" data-testid="admin-ai-page">
       <AiConfigurationPanel />
+      <AiGovernancePanel />
       <McpServiceCard userId={session.data.userId} />
     </main>
   );

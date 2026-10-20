@@ -43,10 +43,12 @@ import {
   useQuery,
   useQueryClient,
   type InfiniteData,
+  type QueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query';
 import {
   composeResponseSchema,
+  messageFolderSchema,
   draftDetailResponseSchema,
   addMailboxMemberResponseSchema,
   deleteMailboxMemberResponseSchema,
@@ -99,6 +101,14 @@ function invertedStar(value: 0 | 1): 0 | 1 {
 // forking the definition — one fact, one home.
 export type { MailboxListItem };
 
+// Bounded UI snapshots; server authorization is checked on every network request.
+export const mailboxCachePolicy = {
+  list: 60_000,
+  messages: 10_000,
+  detail: 30_000,
+  thread: 10_000,
+} as const;
+
 export const mailboxQueryKeys = {
   all: (userId?: string | null) => ['mailbox', scopedUserKey(userId)] as const,
   list: (userId?: string | null) => [...mailboxQueryKeys.all(userId), 'list'] as const,
@@ -115,6 +125,71 @@ export const mailboxQueryKeys = {
   members: (mailboxId: string, userId?: string | null) =>
     [...mailboxQueryKeys.all(userId), 'members', mailboxId] as const,
 };
+
+/** Cancel both cached refetches and first reads before confirming local message state. */
+function cancelMessageViewReads(client: QueryClient, userId: string | null, mailboxId: string) {
+  const family = mailboxQueryKeys.messagesFamily(mailboxId, userId);
+  return client.cancelQueries({
+    queryKey: family,
+    predicate: ({ queryKey }) =>
+      (queryKey.length === family.length + 1 &&
+        messageFolderSchema.safeParse(queryKey[family.length]).success) ||
+      (queryKey.length === family.length + 2 &&
+        (queryKey[family.length] === 'detail' || queryKey[family.length] === 'thread')),
+  });
+}
+
+/** Keep every cached view of the same caller's message coherent after a confirmed write. */
+function updateMessageViews(
+  client: QueryClient,
+  userId: string | null,
+  mailboxId: string,
+  messageId: string,
+  patch: Pick<Partial<MessageDetail>, 'isRead' | 'isStarred'> | null,
+): void {
+  const family = mailboxQueryKeys.messagesFamily(mailboxId, userId);
+  client.setQueriesData<InfiniteData<MessageListResponse>>(
+    {
+      queryKey: family,
+      predicate: (query) =>
+        query.queryKey.length === family.length + 1 &&
+        messageFolderSchema.safeParse(query.queryKey[family.length]).success,
+    },
+    (existing) =>
+      existing === undefined
+        ? existing
+        : {
+            ...existing,
+            pages: existing.pages.map((page) => ({
+              ...page,
+              items:
+                patch === null
+                  ? page.items.filter((item) => item.id !== messageId)
+                  : page.items.map((item) =>
+                      item.id === messageId ? { ...item, ...patch } : item,
+                    ),
+            })),
+          },
+  );
+  client.setQueriesData<MessageThreadResponse>({ queryKey: [...family, 'thread'] }, (existing) =>
+    existing === undefined
+      ? existing
+      : {
+          ...existing,
+          items:
+            patch === null
+              ? existing.items.filter((item) => item.id !== messageId)
+              : existing.items.map((item) =>
+                  item.id === messageId ? { ...item, ...patch } : item,
+                ),
+        },
+  );
+  if (patch !== null)
+    client.setQueryData<MessageDetail>(
+      mailboxQueryKeys.message(mailboxId, messageId, userId),
+      (existing) => (existing === undefined ? existing : { ...existing, ...patch }),
+    );
+}
 
 /**
  * Fetcher for `GET /api/v1/mailboxes`.
@@ -140,7 +215,7 @@ export function mailboxListQuery(): UseQueryResult<MailboxListItem[], ApiError> 
     queryKey: mailboxQueryKeys.list(userId),
     queryFn: () => fetchMailboxList(apiClient),
     enabled: userId !== null,
-    staleTime: 0,
+    staleTime: mailboxCachePolicy.list,
   });
 }
 
@@ -200,7 +275,7 @@ export function mailboxMessagesInfiniteQuery(mailboxId: string, folder: MessageF
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: userId !== null,
-    staleTime: 0,
+    staleTime: mailboxCachePolicy.messages,
   });
 }
 
@@ -241,7 +316,7 @@ export function messageDetailQuery(
     queryKey: mailboxQueryKeys.message(mailboxId, messageId, userId),
     queryFn: () => fetchMessageDetail(apiClient, mailboxId, messageId),
     enabled: userId !== null,
-    staleTime: 0,
+    staleTime: mailboxCachePolicy.detail,
   });
 }
 
@@ -543,7 +618,7 @@ export function messageThreadQuery(
     queryKey: mailboxQueryKeys.thread(mailboxId, messageId, userId),
     queryFn: () => fetchMessageThread(apiClient, mailboxId, messageId),
     enabled: userId !== null,
-    staleTime: 0,
+    staleTime: mailboxCachePolicy.thread,
   });
 }
 
@@ -588,33 +663,10 @@ export function useMarkMessageReadMutation() {
         { method: 'PATCH' },
       );
     },
-    onSuccess: (_result, input) => {
-      // R-MESSAGE-005: flip the inbox row for THIS message only. The
-      // write is structurally additive (pages/items copies) so an
-      // in-flight fetch of the same key is not torn.
-      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId, userId, input.folder),
-        (existing) => {
-          if (existing === undefined) {
-            return existing;
-          }
-          return {
-            ...existing,
-            pages: existing.pages.map((page) => ({
-              ...page,
-              items: page.items.map((item) =>
-                item.id === input.messageId ? { ...item, isRead: 1 } : item,
-              ),
-            })),
-          };
-        },
-      );
-      // G6: flip the detail cache with the same additive-copy strategy —
-      // a cached entry that is absent stays absent (nothing to correct).
-      queryClient.setQueryData<MessageDetail>(
-        mailboxQueryKeys.message(input.mailboxId, input.messageId, userId),
-        (existing) => (existing === undefined ? existing : { ...existing, isRead: 1 }),
-      );
+    onMutate: (input) => cancelMessageViewReads(queryClient, userId, input.mailboxId),
+    onSuccess: async (_result, input) => {
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
+      updateMessageViews(queryClient, userId, input.mailboxId, input.messageId, { isRead: 1 });
     },
     onError: (error, input) => {
       // G9: the code lives on ApiError at runtime (every ApiClient
@@ -676,9 +728,7 @@ export function useToggleMessageStarMutation() {
     },
     onMutate: async (input): Promise<void> => {
       // Stop in-flight refetches from clobbering the optimistic write.
-      await queryClient.cancelQueries({
-        queryKey: mailboxQueryKeys.messages(input.mailboxId, userId, input.folder),
-      });
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
       // Structural additive copy — only this message's row changes.
       queryClient.setQueryData<InfiniteData<MessageListResponse>>(
         mailboxQueryKeys.messages(input.mailboxId, userId, input.folder),
@@ -698,23 +748,9 @@ export function useToggleMessageStarMutation() {
               },
       );
     },
-    onSuccess: (isStarred, input) => {
-      // Server truth replaces the optimistic guess.
-      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId, userId, input.folder),
-        (existing) =>
-          existing === undefined
-            ? existing
-            : {
-                ...existing,
-                pages: existing.pages.map((page) => ({
-                  ...page,
-                  items: page.items.map((item) =>
-                    item.id === input.messageId ? { ...item, isStarred } : item,
-                  ),
-                })),
-              },
-      );
+    onSuccess: async (isStarred, input) => {
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
+      updateMessageViews(queryClient, userId, input.mailboxId, input.messageId, { isStarred });
     },
     onError: (error, input) => {
       // H7: row-scoped inverse flip — undo THIS row's optimistic change
@@ -790,26 +826,10 @@ export function useDeleteMessageMutation() {
     onMutate: async (input): Promise<void> => {
       // H11: stop in-flight refetches of the active folder key so the success
       // filter is the last write.
-      await queryClient.cancelQueries({
-        queryKey: mailboxQueryKeys.messages(input.mailboxId, userId, input.folder),
-      });
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
     },
-    onSuccess: (_result, input) => {
-      // Structural removal: pages/items copies with this message
-      // filtered out; an absent cache stays absent.
-      queryClient.setQueryData<InfiniteData<MessageListResponse>>(
-        mailboxQueryKeys.messages(input.mailboxId, userId, input.folder),
-        (existing) =>
-          existing === undefined
-            ? existing
-            : {
-                ...existing,
-                pages: existing.pages.map((page) => ({
-                  ...page,
-                  items: page.items.filter((item) => item.id !== input.messageId),
-                })),
-              },
-      );
+    onSuccess: async (_result, input) => {
+      await cancelMessageViewReads(queryClient, userId, input.mailboxId);
       // Soft-deleted-for-this-user messages 404 at the detail and thread
       // routes; cached entries for them must not render again.
       queryClient.removeQueries({
@@ -818,6 +838,7 @@ export function useDeleteMessageMutation() {
       queryClient.removeQueries({
         queryKey: mailboxQueryKeys.thread(input.mailboxId, input.messageId, userId),
       });
+      updateMessageViews(queryClient, userId, input.mailboxId, input.messageId, null);
     },
     onError: (error, input) => {
       const code = error instanceof ApiError ? error.code : 'UNKNOWN';

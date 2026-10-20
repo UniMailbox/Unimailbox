@@ -58,7 +58,11 @@ export async function maintenanceHealth(env: Env): Promise<boolean> {
     const [dlq, stalled] = await Promise.all([
       env.OUTBOUND_DLQ.metrics(),
       env.DB.prepare(
-        "SELECT count(*) AS count FROM outbound_jobs WHERE status IN ('queued', 'sending') AND created_at < datetime('now', '-15 minutes') AND (scheduled_at IS NULL OR scheduled_at < datetime('now', '-15 minutes'))",
+        `SELECT (EXISTS(SELECT 1 FROM outbound_jobs WHERE status IN ('queued', 'sending')
+          AND created_at < datetime('now', '-15 minutes')
+          AND (scheduled_at IS NULL OR scheduled_at < datetime('now', '-15 minutes')))
+          OR EXISTS(SELECT 1 FROM inbound_receipts WHERE status!='completed'
+          AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-15 minutes'))) AS count`,
       ).first<{ count: number }>(),
     ]);
     return dlq.backlogCount === 0 && stalled?.count === 0;

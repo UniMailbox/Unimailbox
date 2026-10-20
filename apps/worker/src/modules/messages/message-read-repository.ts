@@ -25,11 +25,8 @@
 // the repository throws CursorInvalidError so the route can map it to
 // a stable 400 INVALID_CURSOR envelope.
 //
-// CAP-043 Slice 2 / D-CAP-043-C: getMessageThread computes the thread
-// root at READ time (thread_id → first <…> token of references_header →
-// in_reply_to_header → own message_id_header). See THREAD_ROOT_SQL —
-// the priority order exists only there so the anchor and the candidate
-// rows can never drift apart.
+// CAP-071: migration 0041 materializes the established root on mailbox_messages.
+// Triggers maintain header precedence atomically; the mailbox/root index bounds reads.
 
 import {
   messageFolderSchema,
@@ -148,45 +145,6 @@ const MAX_LIMIT = 50;
 // The window is the NEWEST 50 members; the oldest-first presentation
 // order is restored in JS after the fetch.
 const THREAD_MAX_ITEMS = 50;
-
-/**
- * D-CAP-043-C: the thread root, resolved at read time. One SQL
- * expression, interpolated into both thread queries so the anchor and
- * the candidate rows can never drift apart on priority order.
- *
- * Priority (first non-empty wins):
- *   1. `m.thread_id` — the column wins when set (it will become the
- *      authoritative value once a future capability backfills it).
- *   2. The first `<…>` msg-id token of `references_header`, brackets
- *      KEPT. Threading headers are stored verbatim from RFC 5322
- *      (§3.6.3: msg-id includes the angle brackets), so `message_id_header`
- *      and `in_reply_to_header` carry `<id@host>` strings. A bracket-
- *      stripped token would never equal them and threads would never
- *      assemble.
- *   3. `m.in_reply_to_header` (verbatim).
- *   4. `m.message_id_header` (verbatim) — the singleton case. An EMPTY
- *      string normalises to NULL via NULLIF (G3): an empty-string
- *      Message-ID must resolve like a missing one, otherwise every
- *      header-less message whose writer stored `''` would share the
- *      root `''` and unrelated messages would fuse into one thread.
- *
- * The References guard is `instr(…) > instr(… '<')` so a malformed
- * value with a `>` before any `<` cannot produce a negative-length
- * substr; a references value with no `<…>` pair falls through to the
- * next priority.
- *
- * Resolves to NULL only when all four sources are empty/NULL — the
- * caller treats that as a singleton thread (the anchor alone).
- */
-const THREAD_ROOT_SQL = `CASE
-  WHEN m.thread_id IS NOT NULL AND m.thread_id != '' THEN m.thread_id
-  WHEN instr(m.references_header, '<') > 0
-       AND instr(m.references_header, '>') > instr(m.references_header, '<') THEN
-    substr(m.references_header, instr(m.references_header, '<'),
-           instr(m.references_header, '>') - instr(m.references_header, '<') + 1)
-  WHEN m.in_reply_to_header IS NOT NULL AND m.in_reply_to_header != '' THEN m.in_reply_to_header
-  ELSE NULLIF(m.message_id_header, '')
-END`;
 
 /**
  * Thrown when the cursor the client supplied cannot be verified.
@@ -496,7 +454,7 @@ export async function getMessageDetail(
  *
  * The thread root of the ANCHOR message is resolved first (query A),
  * then every message in the SAME MAILBOX whose own resolved root equals
- * it is returned (query B). Both sides use THREAD_ROOT_SQL, so the
+ * it is returned (query B). Both sides use the persisted mailbox thread_root, so the
  * D-CAP-043-C priority order lives in exactly one place. Cross-mailbox:
  * only rows joined through this mailbox's `mailbox_messages` are
  * considered — a message that exists in another mailbox is invisible
@@ -539,7 +497,7 @@ export async function getMessageThread(
   // instead of a thread the caller's inbox would not link to.
   const anchor = await db
     .prepare(
-      `SELECT ${THREAD_ROOT_SQL} AS resolved_root
+      `SELECT mm.thread_root AS resolved_root
          FROM mailbox_messages mm
          JOIN messages m ON mm.message_id = m.id
     LEFT JOIN message_user_state mus
@@ -588,7 +546,7 @@ export async function getMessageThread(
                  AND mus.user_id = ?
             WHERE mm.mailbox_id = ?
               AND COALESCE(mus.is_deleted, 0) = 0
-              AND ${THREAD_ROOT_SQL} = ?
+              AND mm.thread_root = ?
          ORDER BY m.created_at DESC, m.id DESC
             LIMIT ?`,
     )

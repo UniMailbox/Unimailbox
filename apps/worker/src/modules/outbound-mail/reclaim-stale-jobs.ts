@@ -97,9 +97,9 @@ export async function reclaimStaleJobs(
   // same body format. Double-enqueue safety when a sweep races a fresh queue
   // delivery is guaranteed downstream: the atomic claim means exactly one
   // consumer wins (the loser gets LOCK_CONTENTION → msg.retry()), the
-  // pre-claim `sent` skip is idempotent (R-OUTBOUND-009), and the provider
-  // call carries the message ID as its idempotency key (R-OUTBOUND-004) so a
-  // duplicate send cannot double-deliver.
+  // pre-claim terminal skip is idempotent (R-OUTBOUND-009). Submitted,
+  // unknown or accepted attempts additionally fence every claim/reclaim;
+  // provider duplicate suppression is not assumed (R-OUTBOUND-013).
   let enqueuedOrphans = 0;
   const orphanedIds = await claimOrphanedQueuedJobs(
     db,

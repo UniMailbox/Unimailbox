@@ -16,6 +16,8 @@ import { prepareCreateDomain } from '../modules/tenancy';
 import { hashPassword } from '../platform/crypto';
 import { downloadAttachment } from '../modules/attachments';
 import { getAttachmentByteStore, getAttachmentObjectStore } from '../platform/cache';
+import { buildAppContext } from '../app-context';
+import { processInboundReceipt } from '../modules/inbound-mail';
 
 // Module-scope helpers — used by both describe blocks (CAP-021 base
 // behaviour + D-CAP-021 / CAP-035 rejection paths).
@@ -414,6 +416,84 @@ Body`;
     expect(message._getRejectReason()).toBe(
       'Unknown recipient. No mailbox found for this address.',
     );
+  });
+
+  it('R-INBOUND-003 rejects an unknown envelope without consuming MIME bytes', async () => {
+    const message = makeMessage('missing@example.com', 'sender@example.net', '', 'unused');
+    const getReader = vi.spyOn(message.raw, 'getReader');
+    await inboundEmail.email(message, env);
+    expect(message._getRejectReason()).toContain('Unknown recipient');
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it('R-INBOUND-011 rejects an oversized declared message before reading MIME', async () => {
+    const db = await migrationsDb();
+    const userId = await createTestUser(db);
+    const domainId = await createTestDomain(db);
+    await createTestMailbox(db, domainId, userId, 'inbox');
+    const message = makeMessage('inbox@example.com', 'sender@example.net', '', 'small');
+    Object.defineProperty(message, 'rawSize', { value: 25 * 1024 * 1024 + 1 });
+    const getReader = vi.spyOn(message.raw, 'getReader');
+    await inboundEmail.email(message, env);
+    expect(message._getRejectReason()).toContain('size');
+    expect(getReader).not.toHaveBeenCalled();
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM messages').first()).toMatchObject({ n: 0 });
+  });
+
+  it('R-INBOUND-012 deduplicates identical envelope deliveries without relying on Message-ID', async () => {
+    const db = await migrationsDb();
+    const owner = await createTestUser(db);
+    const domain = await createTestDomain(db);
+    await createTestMailbox(db, domain, owner, 'inbox');
+    const raw = 'From: sender@example.net\r\nTo: inbox@example.com\r\nSubject: Retry\r\n\r\nBody';
+    await inboundEmail.email(makeMessage('inbox@example.com', 'sender@example.net', '', raw), env);
+    await inboundEmail.email(makeMessage('INBOX@example.com', 'SENDER@example.net', '', raw), env);
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM messages').first()).toMatchObject({ n: 1 });
+    expect(
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM audit_events WHERE action='message.receive' AND resource_id IN (SELECT id FROM messages)",
+        )
+        .first(),
+    ).toMatchObject({ n: 1 });
+  });
+
+  it('R-INBOUND-013 accepts durable mail when finalization and Queue enqueue fail, then recovers it', async () => {
+    const db = await migrationsDb();
+    const owner = await createTestUser(db);
+    const domain = await createTestDomain(db);
+    await createTestMailbox(db, domain, owner, 'inbox');
+    await db.exec(
+      "CREATE TRIGGER fail_inbound BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'fixture'); END;",
+    );
+    const send = vi.spyOn(env.OUTBOUND, 'send').mockRejectedValue(new Error('queue unavailable'));
+    const raw = 'From: sender@example.net\r\nTo: inbox@example.com\r\nSubject: Durable\r\n\r\nBody';
+    const message = makeMessage('inbox@example.com', 'sender@example.net', '', raw);
+    let receiptId: string | undefined;
+    try {
+      await inboundEmail.email(message, env);
+      expect(message._getRejectReason()).toBeNull();
+      expect(send).toHaveBeenCalledOnce();
+      const receipt = await db
+        .prepare('SELECT id,status,raw_object_key FROM inbound_receipts')
+        .first<{ id: string; status: string; raw_object_key: string }>();
+      receiptId = receipt?.id;
+      expect(receipt?.status).toBe('pending');
+      expect(await env.ATTACHMENTS.get(receipt?.raw_object_key ?? '')).not.toBeNull();
+      expect(await db.prepare('SELECT COUNT(*) AS n FROM messages').first()).toMatchObject({
+        n: 0,
+      });
+    } finally {
+      send.mockRestore();
+      await db.exec('DROP TRIGGER fail_inbound;');
+    }
+    if (!receiptId) throw new Error('Missing durable receipt');
+    await db
+      .prepare("UPDATE inbound_receipts SET next_attempt_at='2000-01-01T00:00:00.000Z' WHERE id=?")
+      .bind(receiptId)
+      .run();
+    expect(await processInboundReceipt(receiptId, buildAppContext(env))).toBeUndefined();
+    expect(await db.prepare('SELECT COUNT(*) AS n FROM messages').first()).toMatchObject({ n: 1 });
   });
 
   it('handles multiple recipients with some known and some unknown', async () => {

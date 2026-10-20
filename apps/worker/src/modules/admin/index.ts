@@ -104,6 +104,8 @@ export {
   type SystemSettingsSnapshot,
 } from './settings-repository';
 export { readAdminOverview } from './overview-repository';
+export { readResourceUsage } from './resource-usage-service';
+export { readMailProcessing } from './mail-processing-repository';
 export { getEditorUploadPolicy } from './editor-upload-policy';
 
 export {

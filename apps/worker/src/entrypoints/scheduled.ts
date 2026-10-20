@@ -1,7 +1,10 @@
 // Scheduled maintenance: isolate failures, persist heartbeat and emit an overall result.
 import type { ScheduledController } from '@cloudflare/workers-types';
+import { createAiGovernance } from '../modules/ai';
 import type { Env } from '../platform/env';
-import { reclaimStaleJobs } from '../modules/outbound-mail';
+import { reclaimStaleJobs, reconcileOutboundSubmissions } from '../modules/outbound-mail';
+import { readSecret } from '../platform/secrets';
+import { providerRegistry } from '../integrations/providers/provider-registry';
 import { expireAttachments } from '../modules/attachments';
 import { systemIds } from '../platform/ids';
 import { buildAppContext } from '../app-context';
@@ -10,6 +13,7 @@ import { sweepOrphanedInboundObjects } from '../modules/messages';
 import { expireEditorAssets, sweepOrphanedEditorAssets } from '../modules/editor-assets';
 import { expireIdentityRecords, sweepPersonalAvatars } from '../modules/identity';
 import { logger } from '../platform/logger';
+import { recoverInboundReceipts, expireCompletedInboundReceipts } from '../modules/inbound-mail';
 
 import { runMaintenanceTasks } from '../platform/maintenance';
 
@@ -22,8 +26,27 @@ export default {
     const runs = [
       runMaintenanceTasks(env, requestId, [
         {
+          name: 'ai.classify-stale',
+          run: () =>
+            createAiGovernance(env.DB, buildAppContext(env).auditEventWriter).classifyStale(),
+        },
+        {
+          name: 'outbound.reconcile',
+          run: () =>
+            reconcileOutboundSubmissions({
+              db: env.DB,
+              encryptionKey: () => readSecret(env.CREDENTIAL_ENCRYPTION_KEY),
+              resolveAdapter: (key) => providerRegistry.get(key),
+              auditEventWriter: buildAppContext(env).auditEventWriter,
+            }),
+        },
+        {
           name: 'outbound.reclaim',
           run: () => reclaimStaleJobs(env.DB, new Date(), env.OUTBOUND, requestId),
+        },
+        {
+          name: 'inbound.recover',
+          run: () => recoverInboundReceipts({ db: env.DB, queue: env.OUTBOUND }),
         },
       ]),
     ];
@@ -34,6 +57,10 @@ export default {
           env,
           requestId,
           [
+            {
+              name: 'inbound.receipts.expire',
+              run: () => expireCompletedInboundReceipts(env.DB, new Date()),
+            },
             {
               name: 'attachments.expire',
               run: async () => {

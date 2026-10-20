@@ -7,10 +7,15 @@ import type {
   AiGenerateRequest,
   AiGenerateResult,
   AiProtocol,
+  AiUsageEvidence,
 } from '@unimailbox/contracts';
 import { DomainError } from '../../platform/errors';
 
-const usageNumber = z.number().int().nonnegative();
+const usageNumber = z.number().int().nonnegative().max(1_000_000_000);
+const safeUsage = (value: unknown): number | null => {
+  const parsed = usageNumber.safeParse(value);
+  return parsed.success ? parsed.data : null;
+};
 const nativeResponse = z.object({
   response: z.union([z.string(), z.record(z.unknown())]),
   usage: z
@@ -84,19 +89,46 @@ function result(
   };
 }
 
+// An explicit request rejection ends remote execution, even if the provider
+// omits usage. Persist terminal evidence so concurrency can be released while
+// the token charge remains conservative. Transport/408/5xx errors stay unknown.
+async function generateWithRejectionEvidence<T>(
+  submit: () => PromiseLike<T>,
+  observeUsage?: (evidence: AiUsageEvidence) => Promise<void>,
+): Promise<T> {
+  try {
+    return await submit();
+  } catch (error) {
+    if (
+      (error instanceof OpenAI.APIError || error instanceof Anthropic.APIError) &&
+      [400, 401, 402, 403, 404, 413, 422, 429].includes(error.status ?? 0)
+    )
+      await observeUsage?.({ inputTokens: null, outputTokens: null });
+    // SDK error payloads can contain credentials, prompts and upstream bodies.
+    throw new DomainError({
+      code: 'AI_UPSTREAM_ERROR',
+      message: 'AI service request failed',
+      httpStatus: 502,
+    });
+  }
+}
+
 export function createAiAdapters(
   ai?: Ai,
   fetchImpl?: typeof fetch,
 ): Readonly<Record<AiProtocol, AiAdapter<AbortSignal>>> {
   return {
     'workers-ai': {
-      async generate(configuration, _apiKey, request, signal) {
-        if (!ai)
+      async generate(configuration, _apiKey, request, signal, observeUsage) {
+        if (!ai) {
+          // No binding means no provider operation or billable work was started.
+          await observeUsage?.({ inputTokens: 0, outputTokens: 0 });
           throw new DomainError({
             code: 'AI_NOT_CONFIGURED',
             message: 'Workers AI binding is unavailable',
             httpStatus: 503,
           });
+        }
         if (signal.aborted) throw signal.reason;
         const raw = await ai.run(configuration.model, {
           messages: [
@@ -110,6 +142,11 @@ export function createAiAdapters(
                 response_format: { type: 'json_schema', json_schema: request.output.schema },
               }
             : {}),
+        });
+        const metering = nativeResponse.omit({ response: true }).safeParse(raw);
+        await observeUsage?.({
+          inputTokens: safeUsage(metering.success ? metering.data.usage?.prompt_tokens : null),
+          outputTokens: safeUsage(metering.success ? metering.data.usage?.completion_tokens : null),
         });
         const parsed = nativeResponse.safeParse(raw);
         if (!parsed.success) throw invalidResponse();
@@ -128,7 +165,7 @@ export function createAiAdapters(
       },
     },
     openai: {
-      async generate(configuration, apiKey, request, signal) {
+      async generate(configuration, apiKey, request, signal, observeUsage) {
         const client = new OpenAI({
           apiKey: apiKey ?? '',
           baseURL: configuration.baseUrl ?? 'https://api.openai.com/v1',
@@ -136,30 +173,41 @@ export function createAiAdapters(
           maxRetries: 0,
           ...(fetchImpl ? { fetch: fetchImpl } : {}),
         });
-        const response = await client.chat.completions.create(
-          {
-            model: configuration.model,
-            messages: [
-              ...(request.system ? [{ role: 'system' as const, content: request.system }] : []),
-              ...request.messages,
-            ],
-            max_completion_tokens: configuration.maxOutputTokens,
-            stream: false,
-            ...(request.output.type === 'json_schema'
-              ? {
-                  response_format: {
-                    type: 'json_schema' as const,
-                    json_schema: {
-                      name: request.output.name,
-                      schema: request.output.schema,
-                      strict: true,
-                    },
-                  },
-                }
-              : {}),
-          },
-          { signal },
+        const response = await generateWithRejectionEvidence(
+          () =>
+            client.chat.completions.create(
+              {
+                model: configuration.model,
+                messages: [
+                  ...(request.system ? [{ role: 'system' as const, content: request.system }] : []),
+                  ...request.messages,
+                ],
+                max_completion_tokens: configuration.maxOutputTokens,
+                stream: false,
+                ...(request.output.type === 'json_schema'
+                  ? {
+                      response_format: {
+                        type: 'json_schema' as const,
+                        json_schema: {
+                          name: request.output.name,
+                          schema: request.output.schema,
+                          strict: true,
+                        },
+                      },
+                    }
+                  : {}),
+              },
+              { signal },
+            ),
+          observeUsage,
         );
+        await observeUsage?.({
+          inputTokens: safeUsage(response.usage?.prompt_tokens),
+          outputTokens: safeUsage(response.usage?.completion_tokens),
+          cachedInputTokens: safeUsage(response.usage?.prompt_tokens_details?.cached_tokens),
+          reasoningTokens: safeUsage(response.usage?.completion_tokens_details?.reasoning_tokens),
+          providerRequestId: response.id,
+        });
         const choice = response.choices?.[0];
         if (!choice?.message?.content || choice.message.refusal) throw invalidResponse();
         return result(
@@ -174,7 +222,7 @@ export function createAiAdapters(
       },
     },
     anthropic: {
-      async generate(configuration, apiKey, request, signal) {
+      async generate(configuration, apiKey, request, signal, observeUsage) {
         const client = new Anthropic({
           apiKey: apiKey ?? '',
           baseURL: configuration.baseUrl ?? 'https://api.anthropic.com',
@@ -182,23 +230,41 @@ export function createAiAdapters(
           maxRetries: 0,
           ...(fetchImpl ? { fetch: fetchImpl } : {}),
         });
-        const response = await client.messages.create(
-          {
-            model: configuration.model,
-            messages: request.messages,
-            ...(request.system ? { system: request.system } : {}),
-            max_tokens: configuration.maxOutputTokens,
-            stream: false,
-            ...(request.output.type === 'json_schema'
-              ? {
-                  output_config: {
-                    format: { type: 'json_schema' as const, schema: request.output.schema },
-                  },
-                }
-              : {}),
-          },
-          { signal },
+        const response = await generateWithRejectionEvidence(
+          () =>
+            client.messages.create(
+              {
+                model: configuration.model,
+                messages: request.messages,
+                ...(request.system ? { system: request.system } : {}),
+                max_tokens: configuration.maxOutputTokens,
+                stream: false,
+                ...(request.output.type === 'json_schema'
+                  ? {
+                      output_config: {
+                        format: { type: 'json_schema' as const, schema: request.output.schema },
+                      },
+                    }
+                  : {}),
+              },
+              { signal },
+            ),
+          observeUsage,
         );
+        const inputParts = [
+          response.usage?.input_tokens,
+          response.usage?.cache_read_input_tokens ?? 0,
+          response.usage?.cache_creation_input_tokens ?? 0,
+        ].map(safeUsage);
+        const totalInput = inputParts.every((x) => x !== null)
+          ? inputParts.reduce<number>((sum, x) => sum + (x ?? 0), 0)
+          : null;
+        await observeUsage?.({
+          inputTokens: totalInput,
+          outputTokens: safeUsage(response.usage?.output_tokens),
+          cachedInputTokens: safeUsage(response.usage?.cache_read_input_tokens),
+          providerRequestId: response.id,
+        });
         const text = response.content
           .filter((block) => block.type === 'text')
           .map((block) => block.text)
@@ -208,8 +274,8 @@ export function createAiAdapters(
           response.model,
           text,
           response.stop_reason,
-          response.usage.input_tokens,
-          response.usage.output_tokens,
+          totalInput,
+          safeUsage(response.usage?.output_tokens),
           request,
         );
       },

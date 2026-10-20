@@ -48,6 +48,7 @@ export {
 } from './job-repository';
 
 export { processOutboundJob, type ProcessJobDeps } from './process-outbound-job';
+export { reconcileOutboundSubmissions } from './reconcile-submissions';
 
 export { reclaimStaleJobs, type OutboundJobEnqueuer } from './reclaim-stale-jobs';
 
@@ -89,3 +90,6 @@ export {
 export { validateScheduledAt, scheduleRecoveryAt } from './schedule-time';
 export { enqueueScheduledJob } from './enqueue-scheduled-job';
 export { listScheduledSends, changeScheduledSend } from './scheduled-send';
+
+export { submitMessage } from './submit-message';
+export { sendDraft } from './send-draft';

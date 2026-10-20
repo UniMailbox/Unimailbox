@@ -1,8 +1,33 @@
 # Execution plan
 
-Current priorities as of 2026-10-10. The [ledger](capability-ledger.md#current-state)
+Current priorities as of 2026-10-16. The [ledger](capability-ledger.md#current-state)
 owns status; user priorities determine the next authorized slice. No feature
 capability is currently active.
+
+Research for AI usage governance, historical-client compatibility and coordinated
+recovery is recorded in [INV-004](../../work/investigations/INV-004-ai-governance-release-recovery-2026-10-16.md).
+The user selected installation plus per-user token limits with estimated costs;
+recovery targets and the remaining release/recovery slices are proposals.
+CAP-072 implements the AI portion and is published to staging; see [AI governance](24-ai-usage-governance.md).
+Model upper-bound verification and installation acceptance remain external gates.
+General historical-client release checks and coordinated recovery are still planned.
+
+CAP-071 measured D1 identity/thread queries and mailbox cache freshness are
+implemented, validated and published to staging with schema 0042. The reader
+requires schema 0041 before publication to another installation. Local scan reduction does not establish a live latency win; see
+[query optimization](23-query-cache-optimization.md) and
+[handoff](../../work/handoffs/query-cache-2026-10-16.md).
+
+CAP-070 shared mail mutation use cases are locally implemented and validated:
+HTTP and MCP draft/send entrypoints call common operations, while message state
+mutations retain their transactional policies. See
+[architecture](05-target-architecture/module-boundaries.md#shared-mail-mutation-use-cases)
+and [handoff](../../work/handoffs/mail-use-cases-2026-10-16.md).
+
+The selected two-section resource dashboard and inbound/outbound reliability slices are locally implemented. Resource analytics installation configuration and live dataset acceptance remain open; see [resource dashboard](22-resource-usage-dashboard.md).
+Schemas 0038–0042 are applied in staging; [release QA](../qa/ai-governance-staging-2026-10-16.md) records authenticated API/operations acceptance. Production deployment, real-mail/provider recovery and model-bound enforcement acceptance remain open. See [inbound recovery](20-inbound-recovery.md),
+[outbound outcomes](21-outbound-submission-outcomes.md) and the
+[outbound handoff](../../work/handoffs/outbound-outcomes-2026-10-16.md).
 
 ## Current ordering
 
@@ -12,9 +37,11 @@ capability is currently active.
 2. Close the remaining comprehensive acceptance gaps with recorded allowed,
    denied, failure and recovery scenarios. Focused staging success does not close
    every case in the [acceptance catalog](../qa/acceptance-test-cases.md).
-3. Extend provider/reliability work only when selected: provider-side duplicate
-   suppression proof, event-level webhook replay policy, synchronization contract
-   and an SMTP adapter. Brevo is the only registered provider today.
+3. Complete controlled installation acceptance for the prepared reliability
+   changes, including correlated callbacks/provider lookup and legacy unknown
+   work reconciliation. Further selected provider work includes provider-side
+   duplicate suppression proof, event-level webhook replay policy, synchronization
+   contract and an SMTP adapter. Brevo is the only registered provider today.
 4. Plan legacy data import and production cutover as separate work, with backup,
    migration mapping, isolation and rollback evidence. Existing legacy databases
    must not receive this application's migration chain directly.

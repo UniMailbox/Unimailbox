@@ -45,9 +45,17 @@ export {
   type FetchHandler,
 } from './stubs';
 export { migrationsDb } from './migrationsDb';
+export { seedInboundMailbox, INBOUND_RAW_FIXTURE } from './inbound';
+export { seedOutboundSubmission, outboundMessageFixture } from './outbound';
+export { ANALYTICS_CONFIG_FIXTURE, resourceUsageFixture } from './resource-usage';
 export {
   FIXED_TIMESTAMP,
   resetAndMigrate,
   seedInstallationState,
   type SeedInstallationStateOptions,
 } from './seed';
+
+export { seedResourceUsageActor } from './resource-usage-actor';
+export { seedMailProcessingMetrics } from './mail-processing';
+export { seedMailMutationContext } from './mail-mutations';
+export { seedQueryPerformanceFixture } from './query-performance';

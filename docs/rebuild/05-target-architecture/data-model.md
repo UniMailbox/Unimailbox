@@ -23,8 +23,8 @@ See `../E-proposed-domain-model.md` for full schemas. This document captures the
 | `identity` | `users`, `sessions`, `idempotency_records`, `oauth_accounts`, `user_preferences` |
 | `onboarding` | `installation_state`, `registration_keys` |
 | `tenancy` | `managed_domains`, `mailboxes`, `mailbox_members`, `domain_signatures` (Phase 3) |
-| `messages` | `messages`, `message_recipients`, `mailbox_messages`, `message_user_state`, `message_attachments`, `attachment_uploads` |
-| `outbound-mail` | `outbound_jobs`, `provider_connections`, `encrypted_credentials`, `webhook_deliveries`, `provider_message_state`, `webhook_events` |
+| `messages` | `messages`, `message_recipients`, `mailbox_messages`, `message_user_state`, `message_attachments`, `attachment_uploads`, `inbound_receipts` |
+| `outbound-mail` | `outbound_jobs`, `outbound_send_attempts`, `provider_connections`, `encrypted_credentials`, `webhook_deliveries`, `provider_message_state`, `webhook_events` |
 | `admin` | `roles`, `permissions`, `role_permissions`, `user_roles`, `system_settings`, `audit_events`, `maintenance_jobs` |
 
 ## Operational heartbeat snapshots
@@ -39,7 +39,18 @@ milliseconds, matching Cron logs and preserving run ordering. This is an
 operational exception to the human-readable business timestamp format above.
 There are no new JSON-in-text columns or unbounded alert history tables.
 
+## Mail analytics indexes
+
+Migration 0040 adds read indexes for bounded mail analytics, without introducing
+an analytics table or per-message telemetry writes. See
+[resource dashboards](../22-resource-usage-dashboard.md).
+
 ## Soft-delete rule
+
+Inbound receipt journal timestamps/leases also use normalized UTC ISO-8601 with
+milliseconds for retry ordering; visible message timestamps keep the existing
+business format. Migration 0038 owns the relational journal, partial dispatch/
+age indexes and state constraints. See [inbound recovery](../20-inbound-recovery.md).
 
 - Use `deleted_at TIMESTAMP NULL`.
 - Default reads exclude soft-deleted rows.
@@ -128,3 +139,8 @@ expired upload sets it; existing rows start null. A partial index covers pending
 cleanup in expiry/ID order, and each sweep handles at most 100 rows. Consumed
 uploads are excluded. See [maintenance operations](../../operations/deploy.md#monitoring-dlq-and-safe-redrive)
 for cadence, retry and storage compatibility details.
+
+Mailbox thread membership now has a derived `mailbox_messages.thread_root`
+column, a mailbox/root index and transactional header/association triggers from
+schema 0041. Existing header precedence is unchanged; see
+[query optimization](../23-query-cache-optimization.md#thread-root-persistence).
