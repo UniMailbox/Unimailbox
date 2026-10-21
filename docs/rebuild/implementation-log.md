@@ -10,6 +10,30 @@ that future agents depend on, or when a documentation source of truth is correct
 
 ---
 
+## 2026-10-21 — Stable 1.0.2 and production upgrade
+
+PR #51 merged as `c97bea8`; the annotated `v1.0.2` tag and production Worker
+retain that source. Staging uses tree-identical reviewed head `992cb54`.
+Release CI exposed governance replay reads using SQLite time while writes used
+the injected clock. The corrected common clock and exact 24-hour boundary
+regression passed before merge. Both final preparations passed complete
+`pnpm verify`: 2,582 tests, doctor 14/14, bindings/lint/types/builds. Main and tag
+gates passed; the reviewed GitHub Release was published as Latest.
+
+Fresh private D1/R2/key recovery validation preceded production's ordered
+0038–0042 upgrade. Existing outbound work was drained; Queue delivery was paused
+and then restored after the verified new Worker. All 42 remote SQL companions,
+source/assets smoke, authenticated version/governance/resource metadata,
+configuration preservation and a real post-release frequent tick passed.
+Personal MCP edits and untracked `docs/product/` were preserved and excluded.
+
+AI remains observe; platform Analytics remains unconfigured. GitHub's staging
+Operations probe currently receives a Cloudflare managed challenge, while
+direct checks and real Cron pass. No real inference/mail, coordinated restore,
+notification receipt or update-cache refresh is claimed. See
+[release QA](../qa/release-1.0.2-2026-10-21.md) for exact identities, review
+scope, recovery/rollback constraints and remaining acceptance boundaries.
+
 ## 2026-10-16 — PR #51 rejection and cache recovery repairs
 
 Self-review reproduced terminal AI errors retaining remote concurrency and late
